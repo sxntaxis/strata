@@ -13,11 +13,35 @@ use crossterm::{
 
 use rand::Rng;
 
+use ratatui::prelude::{Line, Span};
+use ratatui::style::Stylize;
 use ratatui::{
     backend::CrosstermBackend,
-    widgets::{Block, BorderType, Borders, Paragraph},
-    Terminal,
+    layout::Rect,
+    style::Color,
+    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
+    Frame, Terminal,
 };
+
+const COLORS: [Color; 12] = [
+    Color::Rgb(0, 176, 80),
+    Color::Rgb(128, 255, 0),
+    Color::Rgb(255, 255, 0),
+    Color::Rgb(255, 204, 0),
+    Color::Rgb(255, 153, 0),
+    Color::Rgb(255, 51, 0),
+    Color::Rgb(255, 0, 0),
+    Color::Rgb(153, 0, 255),
+    Color::Rgb(102, 51, 255),
+    Color::Rgb(0, 0, 255),
+    Color::Rgb(0, 153, 255),
+    Color::Rgb(0, 255, 255),
+];
+
+struct Category {
+    name: String,
+    color: Color,
+}
 
 struct App {
     grid: Vec<Vec<bool>>,
@@ -25,6 +49,12 @@ struct App {
     height: u16,
     total_mass: usize,
     overflow: usize,
+    categories: Vec<Category>,
+    active_category_index: Option<usize>,
+    modal_open: bool,
+    selected_index: usize,
+    new_category_name: String,
+    color_index: usize,
 }
 
 impl App {
@@ -35,11 +65,19 @@ impl App {
             height,
             total_mass: 0,
             overflow: 0,
+            categories: vec![Category {
+                name: "none".to_string(),
+                color: Color::White,
+            }],
+            active_category_index: None,
+            modal_open: false,
+            selected_index: 0,
+            new_category_name: String::new(),
+            color_index: 0,
         };
 
         app.resize(width, height);
 
-        // Build historical sediment
         app.total_mass = Self::seconds_since_6am();
         app.rebuild_from_mass();
 
@@ -196,6 +234,163 @@ impl App {
 
         output
     }
+
+    fn open_modal(&mut self) {
+        self.modal_open = true;
+        self.selected_index = self.active_category_index.unwrap_or(0);
+        self.new_category_name = String::new();
+        self.color_index = 0;
+    }
+
+    fn close_modal(&mut self) {
+        self.modal_open = false;
+    }
+
+    fn is_on_insert_space(&self) -> bool {
+        self.selected_index == self.categories.len()
+    }
+
+    fn add_category(&mut self) {
+        if !self.new_category_name.is_empty() {
+            let color = COLORS[self.color_index];
+            let index = self.categories.len();
+            self.categories.push(Category {
+                name: self.new_category_name.clone(),
+                color,
+            });
+            self.active_category_index = Some(index);
+        }
+    }
+
+    fn delete_category(&mut self) {
+        if !self.is_on_insert_space()
+            && self.selected_index < self.categories.len()
+            && self.selected_index > 0
+        {
+            self.categories.remove(self.selected_index);
+            if self.selected_index > 0 && self.selected_index >= self.categories.len() {
+                self.selected_index = self.categories.len();
+            }
+        }
+    }
+
+    fn get_selected_color(&self) -> Color {
+        if self.is_on_insert_space() {
+            COLORS[self.color_index]
+        } else if self.selected_index < self.categories.len() {
+            self.categories[self.selected_index].color
+        } else {
+            Color::White
+        }
+    }
+
+    fn get_active_color(&self) -> Color {
+        if let Some(idx) = self.active_category_index {
+            if idx < self.categories.len() {
+                return self.categories[idx].color;
+            }
+        }
+        Color::White
+    }
+
+    fn text_color_for_bg(bg_color: Color) -> Color {
+        if let Color::Rgb(r, g, b) = bg_color {
+            let brightness = (299 * r as u32 + 587 * g as u32 + 114 * b as u32) / 1000;
+            if brightness > 128 {
+                Color::Black
+            } else {
+                Color::White
+            }
+        } else {
+            Color::White
+        }
+    }
+
+    fn render_modal(&self, f: &mut Frame, terminal_size: Rect) {
+        let modal_width = terminal_size.width / 3;
+        let modal_height = (terminal_size.height / 3).max(10);
+
+        let modal_x = (terminal_size.width - modal_width) / 2;
+        let modal_y = (terminal_size.height - modal_height) / 2;
+
+        let modal_rect = Rect::new(modal_x, modal_y, modal_width, modal_height);
+
+        let border_color = self.get_selected_color();
+
+        let items: Vec<ListItem> = self
+            .categories
+            .iter()
+            .enumerate()
+            .map(|(i, cat)| {
+                let is_selected = i == self.selected_index;
+
+                if is_selected {
+                    let text_color = Self::text_color_for_bg(cat.color);
+                    ListItem::new(Line::from(vec![
+                        Span::raw("● ").fg(cat.color),
+                        Span::raw(&cat.name).fg(text_color),
+                    ]))
+                    .style(
+                        ratatui::style::Style::default()
+                            .fg(text_color)
+                            .bg(cat.color),
+                    )
+                } else {
+                    ListItem::new(Line::from(vec![
+                        Span::raw("● ").fg(cat.color),
+                        Span::raw(&cat.name).fg(Color::White),
+                    ]))
+                }
+            })
+            .chain(std::iter::once({
+                let is_selected = self.is_on_insert_space();
+                let cycling_color = COLORS[self.color_index];
+
+                if is_selected {
+                    ListItem::new(Line::from(vec![
+                        Span::raw("● ").fg(cycling_color),
+                        Span::raw(if self.new_category_name.is_empty() {
+                            "+ Add new..."
+                        } else {
+                            &self.new_category_name
+                        }),
+                    ]))
+                    .style(
+                        ratatui::style::Style::default()
+                            .fg(Color::Black)
+                            .bg(Color::White),
+                    )
+                } else {
+                    ListItem::new(Line::from(vec![
+                        Span::raw("● ").fg(cycling_color),
+                        Span::raw(if self.new_category_name.is_empty() {
+                            "+ Add new..."
+                        } else {
+                            &self.new_category_name
+                        })
+                        .fg(Color::White),
+                    ]))
+                }
+            }))
+            .collect();
+
+        let mut list_state = ListState::default();
+        list_state.select(Some(self.selected_index));
+
+        let list = List::new(items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title("strata")
+                    .title_alignment(ratatui::layout::Alignment::Center)
+                    .border_style(ratatui::style::Style::default().fg(border_color)),
+            )
+            .highlight_style(ratatui::style::Style::default());
+
+        f.render_widget(ratatui::widgets::Clear, modal_rect);
+        f.render_stateful_widget(list, modal_rect, &mut list_state);
+    }
 }
 
 fn main() -> Result<(), io::Error> {
@@ -209,21 +404,19 @@ fn main() -> Result<(), io::Error> {
     let size = terminal.size()?;
     let mut app = App::new(size.width, size.height);
 
-    let physics_rate = Duration::from_millis(16); // ~60 FPS
+    let physics_rate = Duration::from_millis(16);
     let mut last_physics = Instant::now();
 
     loop {
-        // Authoritative time-based spawning
         let expected = App::seconds_since_6am();
         while app.total_mass < expected {
             app.total_mass += 1;
             app.spawn_one();
         }
 
-        // 60 FPS physics, 2x gravity
         if last_physics.elapsed() >= physics_rate {
             app.apply_gravity();
-            app.apply_gravity(); // 2x fall speed
+            app.apply_gravity();
             last_physics = Instant::now();
         }
 
@@ -239,19 +432,91 @@ fn main() -> Result<(), io::Error> {
 
             let sand = app.render();
             let time = Local::now().format("%H:%M:%S").to_string();
+            let border_color = app.get_active_color();
             let block = Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .title(time)
-                .title_alignment(ratatui::layout::Alignment::Center);
+                .title_alignment(ratatui::layout::Alignment::Center)
+                .border_style(ratatui::style::Style::default().fg(border_color));
             let paragraph = Paragraph::new(sand).block(block);
             f.render_widget(paragraph, size);
+
+            if app.modal_open {
+                app.render_modal(f, size);
+            }
         })?;
 
         if event::poll(Duration::from_millis(1))? {
             if let Event::Key(key) = event::read()? {
-                if key.code == KeyCode::Char('q') {
-                    break;
+                if app.modal_open {
+                    match key.code {
+                        KeyCode::Esc => {
+                            app.close_modal();
+                        }
+                        KeyCode::Up => {
+                            if app.selected_index > 0 {
+                                app.selected_index -= 1;
+                            }
+                        }
+                        KeyCode::Down => {
+                            let max_index = app.categories.len();
+                            if app.selected_index < max_index {
+                                app.selected_index += 1;
+                            }
+                        }
+                        KeyCode::Left => {
+                            if app.is_on_insert_space() {
+                                app.color_index =
+                                    (app.color_index + COLORS.len() - 1) % COLORS.len();
+                            }
+                        }
+                        KeyCode::Right => {
+                            if app.is_on_insert_space() {
+                                app.color_index = (app.color_index + 1) % COLORS.len();
+                            }
+                        }
+                        KeyCode::Enter => {
+                            if app.is_on_insert_space() {
+                                if !app.new_category_name.is_empty() {
+                                    app.add_category();
+                                    app.close_modal();
+                                }
+                            } else {
+                                app.active_category_index = Some(app.selected_index);
+                                app.close_modal();
+                            }
+                        }
+                        KeyCode::Char('x') => {
+                            if !app.is_on_insert_space() {
+                                app.delete_category();
+                            }
+                        }
+                        KeyCode::Char(c) => {
+                            if app.is_on_insert_space() {
+                                app.new_category_name.push(c);
+                            }
+                        }
+                        KeyCode::Backspace => {
+                            if app.is_on_insert_space() {
+                                app.new_category_name.pop();
+                            }
+                        }
+                        _ => {}
+                    }
+                } else {
+                    match key.code {
+                        KeyCode::Char('q') => {
+                            break;
+                        }
+                        KeyCode::Enter => {
+                            app.open_modal();
+                        }
+                        KeyCode::Esc => {
+                            app.active_category_index = None;
+                        }
+                        _ => {}
+                    }
                 }
             }
         }
