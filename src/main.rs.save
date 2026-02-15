@@ -1,0 +1,284 @@
+use std::{
+    io,
+    time::{Duration, Instant},
+};
+
+use chrono::{Local, Timelike, Duration as ChronoDuration, TimeZone};
+
+use crossterm::{
+    event::{
+        self, Event, KeyCode, MouseEventKind,
+        EnableMouseCapture, DisableMouseCapture,
+    },
+    execute,
+    terminal::{
+        disable_raw_mode, enable_raw_mode,
+        EnterAlternateScreen, LeaveAlternateScreen,
+    },
+};
+
+use ratatui::{
+    backend::CrosstermBackend,
+    layout::{Alignment, Rect},
+    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    Terminal,
+};
+
+const FPS: u64 = 60;
+const FALL_SPEED: f32 = 1.5;
+
+struct Grain {
+    x: usize,
+    y: f32,
+}
+
+struct App {
+    width: usize,
+    viewport_height: usize,
+
+    world: Vec<Vec<bool>>,   // true 2D world
+    falling: Vec<Grain>,
+
+    total_spawned: u64,
+    last_second: u64,
+
+    scroll: usize,
+}
+
+impl App {
+    fn new(width: u16, height: u16) -> Self {
+        let mut app = Self {
+            width: width as usize,
+            viewport_height: height as usize,
+            world: vec![vec![false; width as usize]; 1],
+            falling: vec![],
+            total_spawned: 0,
+            last_second: 0,
+            scroll: 0,
+        };
+
+        app.initialize_from_time();
+        app
+    }
+
+    fn seconds_since_6am() -> u64 {
+        let now = Local::now();
+        let today_6am = now.date_naive().and_hms_opt(6, 0, 0).unwrap();
+
+        let anchor = if now.hour() < 6 {
+            today_6am - ChronoDuration::days(1)
+        } else {
+            today_6am
+        };
+
+        let anchor_dt = Local.from_local_datetime(&anchor).unwrap();
+        (now - anchor_dt).num_seconds() as u64
+    }
+
+    fn initialize_from_time(&mut self) {
+        let seconds = Self::seconds_since_6am();
+        self.total_spawned = seconds;
+        self.last_second = seconds;
+
+        for _ in 0..seconds {
+            self.spawn_and_settle_immediately();
+        }
+    }
+
+    fn spawn_and_settle_immediately(&mut self) {
+        let x = rand::random::<usize>() % self.width;
+
+        let mut y = 0;
+
+        loop {
+            if y + 1 >= self.world.len() {
+                self.world.push(vec![false; self.width]);
+            }
+
+            if !self.world[y + 1][x] {
+                y += 1;
+            } else {
+                break;
+            }
+        }
+
+        self.world[y][x] = true;
+    }
+
+    fn spawn_grain(&mut self) {
+        let x = rand::random::<usize>() % self.width;
+        self.falling.push(Grain { x, y: 0.0 });
+    }
+
+    fn update_time(&mut self) {
+        let seconds = Self::seconds_since_6am();
+
+        if seconds > self.last_second {
+            for _ in 0..(seconds - self.last_second) {
+                self.spawn_grain();
+                self.total_spawned += 1;
+            }
+            self.last_second = seconds;
+        }
+    }
+
+    fn update_physics(&mut self) {
+        let mut next = Vec::new();
+
+        for mut grain in self.falling.drain(..) {
+            grain.y += FALL_SPEED;
+            let y = grain.y as usize;
+
+            if y + 1 >= self.world.len() {
+                self.world.push(vec![false; self.width]);
+            }
+
+            if self.world[y + 1][grain.x] {
+                self.world[y][grain.x] = true;
+            } else {
+                next.push(grain);
+            }
+        }
+
+        self.falling = next;
+    }
+
+    fn resize(&mut self, width: u16, height: u16) {
+        self.width = width as usize;
+        self.viewport_height = height as usize;
+
+        for row in &mut self.world {
+            row.resize(self.width, false);
+        }
+    }
+
+    fn content_height(&self) -> usize {
+        self.world.len()
+    }
+
+    fn clamp_scroll(&mut self) {
+        let max_scroll = self
+            .content_height()
+            .saturating_sub(self.viewport_height);
+
+        if self.scroll > max_scroll {
+            self.scroll = max_scroll;
+        }
+    }
+
+    fn render(&self) -> String {
+        let mut lines = Vec::new();
+
+        let start = self.scroll;
+        let end = (start + self.viewport_height)
+            .min(self.world.len());
+
+        for y in start..end {
+            let mut row = String::new();
+            for x in 0..self.width {
+                if self.world[y][x] {
+                    row.push('⣿');
+                } else {
+                    row.push(' ');
+                }
+            }
+            lines.push(row);
+        }
+
+        lines.join("\n")
+    }
+}
+
+fn main() -> Result<(), io::Error> {
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        EnableMouseCapture
+    )?;
+
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    let size = terminal.size()?;
+    let mut app = App::new(size.width - 2, size.height - 2);
+
+    let frame = Duration::from_millis(1000 / FPS);
+    let mut last_frame = Instant::now();
+
+    loop {
+        terminal.draw(|f| {
+            let size = f.size();
+
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .title(Local::now().format("%H:%M:%S").to_string())
+                .title_alignment(Alignment::Center);
+
+            let inner = block.inner(size);
+            app.resize(inner.width, inner.height);
+            app.clamp_scroll();
+
+            let content = app.render();
+
+            let paragraph = Paragraph::new(content)
+                .block(block)
+                .scroll((0, 0));
+
+            f.render_widget(paragraph, size);
+
+            if app.content_height() > inner.height as usize {
+                let mut scrollbar_state =
+                    ScrollbarState::new(app.content_height())
+                        .position(app.scroll);
+
+                let scrollbar = Scrollbar::default()
+                    .orientation(ScrollbarOrientation::VerticalRight);
+
+                f.render_stateful_widget(
+                    scrollbar,
+                    size,
+                    &mut scrollbar_state,
+                );
+            }
+        })?;
+
+        if event::poll(Duration::from_millis(1))? {
+            match event::read()? {
+                Event::Key(key) => {
+                    if key.code == KeyCode::Char('q') {
+                        break;
+                    }
+                }
+                Event::Mouse(mouse) => match mouse.kind {
+                    MouseEventKind::ScrollUp => {
+                        app.scroll = app.scroll.saturating_sub(1);
+                    }
+                    MouseEventKind::ScrollDown => {
+                        app.scroll += 1;
+                        app.clamp_scroll();
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+
+        if last_frame.elapsed() >= frame {
+            app.update_time();
+            app.update_physics();
+            last_frame = Instant::now();
+        }
+    }
+
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
+
+    Ok(())
+}

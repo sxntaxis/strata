@@ -3,23 +3,19 @@ use std::{
     time::{Duration, Instant},
 };
 
-use chrono::{Local, Timelike, Duration as ChronoDuration, TimeZone};
+use chrono::{Duration as ChronoDuration, Local, TimeZone, Timelike};
 
 use crossterm::{
     event::{self, Event, KeyCode},
     execute,
-    terminal::{
-        disable_raw_mode, enable_raw_mode,
-        EnterAlternateScreen, LeaveAlternateScreen,
-    },
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 
 use rand::Rng;
 
 use ratatui::{
     backend::CrosstermBackend,
-    layout::Rect,
-    widgets::Paragraph,
+    widgets::{Block, BorderType, Borders, Paragraph},
     Terminal,
 };
 
@@ -67,9 +63,7 @@ impl App {
 
         let anchor_dt = Local.from_local_datetime(&anchor).unwrap();
 
-        now.signed_duration_since(anchor_dt)
-            .num_seconds()
-            .max(0) as usize
+        now.signed_duration_since(anchor_dt).num_seconds().max(0) as usize
     }
 
     fn resize(&mut self, width: u16, height: u16) {
@@ -144,10 +138,7 @@ impl App {
                         let dir = if rand::random() { 1 } else { -1 };
                         let nx = x as isize + dir;
 
-                        if nx >= 0
-                            && nx < w as isize
-                            && !self.grid[y + 1][nx as usize]
-                        {
+                        if nx >= 0 && nx < w as isize && !self.grid[y + 1][nx as usize] {
                             self.grid[y][x] = false;
                             self.grid[y + 1][nx as usize] = true;
                         }
@@ -239,13 +230,22 @@ fn main() -> Result<(), io::Error> {
         terminal.draw(|f| {
             let size = f.size();
 
-            if size.width != app.width || size.height != app.height / 4 {
-                app.resize(size.width, size.height);
+            let inner_width = size.width.saturating_sub(2);
+            let inner_height = size.height.saturating_sub(2);
+
+            if app.width != inner_width || app.height / 4 != inner_height {
+                app.resize(inner_width, inner_height);
             }
 
             let sand = app.render();
-            let paragraph = Paragraph::new(sand);
-            f.render_widget(paragraph, Rect::new(0, 0, size.width, size.height));
+            let time = Local::now().format("%H:%M:%S").to_string();
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(time)
+                .title_alignment(ratatui::layout::Alignment::Center);
+            let paragraph = Paragraph::new(sand).block(block);
+            f.render_widget(paragraph, size);
         })?;
 
         if event::poll(Duration::from_millis(1))? {
