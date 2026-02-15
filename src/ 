@@ -28,7 +28,8 @@ struct App {
     width: u16,
     height: u16,
 
-    total_mass: usize, // authoritative sand count (time-based)
+    total_expected: usize,  // time-based
+    total_spawned: usize,   // physically inserted
     overflow: usize,
 }
 
@@ -38,15 +39,15 @@ impl App {
             grid: vec![],
             width,
             height,
-            total_mass: 0,
+            total_expected: 0,
+            total_spawned: 0,
             overflow: 0,
         };
 
         app.resize(width, height);
 
-        // Build historical sediment
-        app.total_mass = Self::seconds_since_6am();
-        app.rebuild_from_mass();
+        // initialize time-based mass
+        app.total_expected = Self::seconds_since_6am();
 
         app
     }
@@ -67,7 +68,6 @@ impl App {
         };
 
         let anchor_dt = Local.from_local_datetime(&anchor).unwrap();
-
         now.signed_duration_since(anchor_dt)
             .num_seconds()
             .max(0) as usize
@@ -80,26 +80,28 @@ impl App {
         let new_w = width as usize * 2;
         let new_h = self.height as usize;
 
-        self.grid = vec![vec![false; new_w]; new_h];
-
-        self.rebuild_from_mass();
-    }
-
-    fn rebuild_from_mass(&mut self) {
-        let capacity = self.capacity();
-
-        let visible = self.total_mass.min(capacity);
-        self.overflow = self.total_mass.saturating_sub(capacity);
-
-        // clear
-        for row in &mut self.grid {
-            for cell in row {
-                *cell = false;
+        // count visible grains before resizing
+        let mut visible = 0;
+        for row in &self.grid {
+            for &cell in row {
+                if cell {
+                    visible += 1;
+                }
             }
         }
 
-        // bottom-up rebuild
-        let mut grains = visible;
+        self.grid = vec![vec![false; new_w]; new_h];
+
+        let cap = self.capacity();
+        let total_mass = visible + self.overflow;
+
+        let new_visible = total_mass.min(cap);
+        self.overflow = total_mass.saturating_sub(cap);
+
+        self.total_spawned = total_mass;
+
+        // rebuild bottom-up
+        let mut grains = new_visible;
         let h = self.grid.len();
         let w = self.grid[0].len();
 
@@ -118,28 +120,35 @@ impl App {
     fn update(&mut self) {
         let expected = Self::seconds_since_6am();
 
-        if expected > self.total_mass {
-            self.total_mass += 1; // exactly 1 grain per second
-            self.spawn_one();
+        if expected > self.total_expected {
+            self.total_expected = expected;
+        }
+
+        // spawn missing grains
+        let missing = self.total_expected.saturating_sub(self.total_spawned);
+
+        for _ in 0..missing {
+            self.spawn();
+            self.total_spawned += 1;
         }
 
         self.apply_gravity();
     }
 
-    fn spawn_one(&mut self) {
-        let capacity = self.capacity();
+    fn spawn(&mut self) {
+        let cap = self.capacity();
 
-        if self.total_mass > capacity {
-            self.overflow += 1;
-            return;
-        }
+        if self.total_spawned < cap {
+            let mut rng = rand::thread_rng();
+            let w = self.grid[0].len();
 
-        let mut rng = rand::thread_rng();
-        let w = self.grid[0].len();
-        let x = rng.gen_range(0..w);
+            let x = rng.gen_range(0..w);
 
-        if !self.grid[0][x] {
-            self.grid[0][x] = true;
+            if !self.grid[0][x] {
+                self.grid[0][x] = true;
+            } else {
+                self.overflow += 1;
+            }
         } else {
             self.overflow += 1;
         }
@@ -257,7 +266,7 @@ fn main() -> Result<(), io::Error> {
             }
         }
 
-        if last_tick.elapsed() >= Duration::from_secs(1) {
+        if last_tick.elapsed() >= tick_rate {
             app.update();
             last_tick = Instant::now();
         }
@@ -269,3 +278,5 @@ fn main() -> Result<(), io::Error> {
 
     Ok(())
 }
+
+O
