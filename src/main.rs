@@ -27,8 +27,7 @@ struct App {
     grid: Vec<Vec<bool>>,
     width: u16,
     height: u16,
-
-    total_mass: usize, // authoritative sand count (time-based)
+    total_mass: usize,
     overflow: usize,
 }
 
@@ -81,7 +80,6 @@ impl App {
         let new_h = self.height as usize;
 
         self.grid = vec![vec![false; new_w]; new_h];
-
         self.rebuild_from_mass();
     }
 
@@ -91,14 +89,12 @@ impl App {
         let visible = self.total_mass.min(capacity);
         self.overflow = self.total_mass.saturating_sub(capacity);
 
-        // clear
         for row in &mut self.grid {
             for cell in row {
                 *cell = false;
             }
         }
 
-        // bottom-up rebuild
         let mut grains = visible;
         let h = self.grid.len();
         let w = self.grid[0].len();
@@ -112,18 +108,7 @@ impl App {
             }
         }
 
-        self.settle(60);
-    }
-
-    fn update(&mut self) {
-        let expected = Self::seconds_since_6am();
-
-        if expected > self.total_mass {
-            self.total_mass += 1; // exactly 1 grain per second
-            self.spawn_one();
-        }
-
-        self.apply_gravity();
+        self.settle(80);
     }
 
     fn spawn_one(&mut self) {
@@ -233,10 +218,24 @@ fn main() -> Result<(), io::Error> {
     let size = terminal.size()?;
     let mut app = App::new(size.width, size.height);
 
-    let tick_rate = Duration::from_millis(200);
-    let mut last_tick = Instant::now();
+    let physics_rate = Duration::from_millis(16); // ~60 FPS
+    let mut last_physics = Instant::now();
 
     loop {
+        // Authoritative time-based spawning
+        let expected = App::seconds_since_6am();
+        while app.total_mass < expected {
+            app.total_mass += 1;
+            app.spawn_one();
+        }
+
+        // 60 FPS physics, 2x gravity
+        if last_physics.elapsed() >= physics_rate {
+            app.apply_gravity();
+            app.apply_gravity(); // 2x fall speed
+            last_physics = Instant::now();
+        }
+
         terminal.draw(|f| {
             let size = f.size();
 
@@ -255,11 +254,6 @@ fn main() -> Result<(), io::Error> {
                     break;
                 }
             }
-        }
-
-        if last_tick.elapsed() >= Duration::from_secs(1) {
-            app.update();
-            last_tick = Instant::now();
         }
     }
 
