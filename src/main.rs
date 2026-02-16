@@ -70,10 +70,13 @@ struct App {
     spawn_offset: f32,
     target_spawn_offset: f32,
     frame_count: usize,
+    blink_state: i32,
+    focused_until: Option<Instant>,
     modal_open: bool,
     selected_index: usize,
     new_category_name: String,
     color_index: usize,
+    modal_description: String,
     sessions: Vec<Session>,
     current_session_start: Option<Instant>,
     session_id_counter: usize,
@@ -99,16 +102,20 @@ impl App {
             spawn_offset: 0.5,
             target_spawn_offset: 0.5,
             frame_count: 0,
+            blink_state: 0,
+            focused_until: None,
             modal_open: false,
             selected_index: 0,
             new_category_name: String::new(),
             color_index: 0,
+            modal_description: String::new(),
             sessions: Vec::new(),
             current_session_start: None,
             session_id_counter: 0,
         };
 
         app.load_sessions();
+        app.load_categories();
         app.resize(width, height);
         app.calculate_todays_mass();
         app.recalculate_zones();
@@ -180,6 +187,59 @@ impl App {
         }
     }
 
+    fn save_categories(&self) {
+        let path = Path::new("./categories.csv");
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)
+            .ok();
+
+        if let Some(ref mut f) = file {
+            let _ = writeln!(f, "name,r,g,b");
+            for cat in &self.categories {
+                if let Color::Rgb(r, g, b) = cat.color {
+                    let _ = writeln!(f, "{},{},{},{}", cat.name, r, g, b);
+                }
+            }
+        }
+    }
+
+    fn load_categories(&mut self) {
+        let path = Path::new("./categories.csv");
+        if !path.exists() {
+            return;
+        }
+
+        if let Ok(file) = File::open(path) {
+            let reader = BufReader::new(file);
+
+            for line in reader.lines().skip(1) {
+                if let Ok(line) = line {
+                    let parts: Vec<&str> = line.split(',').collect();
+                    if parts.len() >= 4 {
+                        let name = parts[0].trim().to_string();
+                        if name != "none" {
+                            let r: u8 = parts[1].trim().parse().unwrap_or(0);
+                            let g: u8 = parts[2].trim().parse().unwrap_or(0);
+                            let b: u8 = parts[3].trim().parse().unwrap_or(0);
+                            self.categories.push(Category {
+                                name,
+                                color: Color::Rgb(r, g, b),
+                                zone_start: 0.0,
+                                zone_end: 0.0,
+                                description: String::new(),
+                            });
+                            self.lost_dots.push(0);
+                        }
+                    }
+                }
+            }
+            self.recalculate_zones();
+        }
+    }
+
     fn calculate_todays_mass(&mut self) {
         let today = Local::now().format("%Y-%m-%d").to_string();
 
@@ -198,6 +258,10 @@ impl App {
 
             self.current_session_start = Some(Instant::now());
             self.session_id_counter += 1;
+
+            if cat_idx == 0 {
+                self.blink_state = self.next_blink_interval();
+            }
         }
     }
 
@@ -211,17 +275,21 @@ impl App {
 
                 let start_time = now - ChronoDuration::seconds(elapsed as i64);
 
-                self.sessions.push(Session {
-                    id: self.session_id_counter,
-                    date: now.format("%Y-%m-%d").to_string(),
-                    category: cat.name.clone(),
-                    description: cat.description.clone(),
-                    start_time: start_time.format("%H:%M:%S").to_string(),
-                    end_time: now.format("%H:%M:%S").to_string(),
-                    elapsed_seconds: elapsed,
-                });
+                if cat.name != "none" {
+                    self.sessions.push(Session {
+                        id: self.session_id_counter,
+                        date: now.format("%Y-%m-%d").to_string(),
+                        category: cat.name.clone(),
+                        description: cat.description.clone(),
+                        start_time: start_time.format("%H:%M:%S").to_string(),
+                        end_time: now.format("%H:%M:%S").to_string(),
+                        elapsed_seconds: elapsed,
+                    });
+                }
 
+                self.categories[cat_idx].description.clear();
                 self.calculate_todays_mass();
+                self.set_focused_if_long_session(elapsed);
             }
 
             self.current_session_start = None;
@@ -236,23 +304,25 @@ impl App {
                 let elapsed = start_instant.elapsed().as_secs() as usize;
                 let start_time = now - ChronoDuration::seconds(elapsed as i64);
 
-                if let Some(session) = self
-                    .sessions
-                    .iter_mut()
-                    .find(|s| s.id == self.session_id_counter)
-                {
-                    session.end_time = now.format("%H:%M:%S").to_string();
-                    session.elapsed_seconds = elapsed;
-                } else {
-                    self.sessions.push(Session {
-                        id: self.session_id_counter,
-                        date: now.format("%Y-%m-%d").to_string(),
-                        category: cat.name.clone(),
-                        description: cat.description.clone(),
-                        start_time: start_time.format("%H:%M:%S").to_string(),
-                        end_time: now.format("%H:%M:%S").to_string(),
-                        elapsed_seconds: elapsed,
-                    });
+                if cat.name != "none" {
+                    if let Some(session) = self
+                        .sessions
+                        .iter_mut()
+                        .find(|s| s.id == self.session_id_counter)
+                    {
+                        session.end_time = now.format("%H:%M:%S").to_string();
+                        session.elapsed_seconds = elapsed;
+                    } else {
+                        self.sessions.push(Session {
+                            id: self.session_id_counter,
+                            date: now.format("%Y-%m-%d").to_string(),
+                            category: cat.name.clone(),
+                            description: cat.description.clone(),
+                            start_time: start_time.format("%H:%M:%S").to_string(),
+                            end_time: now.format("%H:%M:%S").to_string(),
+                            elapsed_seconds: elapsed,
+                        });
+                    }
                 }
             }
         }
@@ -502,10 +572,16 @@ impl App {
         self.selected_index = self.active_category_index.unwrap_or(0);
         self.new_category_name = String::new();
         self.color_index = 0;
+        self.modal_description = if let Some(idx) = self.active_category_index {
+            self.categories[idx].description.clone()
+        } else {
+            String::new()
+        };
     }
 
     fn close_modal(&mut self) {
         self.modal_open = false;
+        self.modal_description = String::new();
     }
 
     fn is_on_insert_space(&self) -> bool {
@@ -525,6 +601,7 @@ impl App {
             });
             self.lost_dots.push(0);
             self.recalculate_zones();
+            self.save_categories();
             self.active_category_index = Some(index);
             self.start_session();
         }
@@ -537,6 +614,7 @@ impl App {
         {
             self.categories.remove(self.selected_index);
             self.recalculate_zones();
+            self.save_categories();
             if self.selected_index > 0 && self.selected_index >= self.categories.len() {
                 self.selected_index = self.categories.len();
             }
@@ -597,6 +675,72 @@ impl App {
         }
     }
 
+    fn get_idle_face(&self) -> String {
+        let idle_seconds = self
+            .current_session_start
+            .map_or(0, |s| s.elapsed().as_secs() as usize);
+
+        let _is_focused = self.focused_until.map_or(false, |t| t > Instant::now());
+
+        if self.blink_state < 0 {
+            "(-_-)".to_string()
+        } else if self.blink_state > 0 {
+            "(o_o)".to_string()
+        } else {
+            let face = if idle_seconds < 120 {
+                "(o_o)"
+            } else if idle_seconds < 300 {
+                "(¬_¬)"
+            } else if idle_seconds < 600 {
+                "(O_O)"
+            } else if idle_seconds < 1200 {
+                "(⊙_⊙)"
+            } else if idle_seconds < 2400 {
+                "(ಠ_ಠ)"
+            } else if idle_seconds < 3600 {
+                "(ಥ_ಥ)"
+            } else if idle_seconds < 5400 {
+                "(T_T)"
+            } else {
+                "(x_x)"
+            };
+            face.to_string()
+        }
+    }
+
+    fn update_blink(&mut self) {
+        if self.blink_state < 0 {
+            self.blink_state -= 1;
+            let blink_duration = 10 + (rand::random::<i32>() % 8);
+            if self.blink_state < -blink_duration {
+                self.blink_state = self.next_blink_interval();
+            }
+        } else if self.blink_state > 0 {
+            self.blink_state -= 1;
+            if self.blink_state == 0 {
+                self.blink_state = -1;
+            }
+        }
+    }
+
+    fn next_blink_interval(&self) -> i32 {
+        let is_focused = self.focused_until.map_or(false, |t| t > Instant::now());
+
+        let base = if is_focused {
+            450 + (rand::random::<i32>() % 270)
+        } else {
+            150 + (rand::random::<i32>() % 150)
+        };
+
+        base
+    }
+
+    fn set_focused_if_long_session(&mut self, session_seconds: usize) {
+        if session_seconds >= 2400 {
+            self.focused_until = Some(Instant::now() + Duration::from_secs(180));
+        }
+    }
+
     fn text_color_for_bg(bg_color: Color) -> Color {
         if let Color::Rgb(r, g, b) = bg_color {
             let brightness = (299 * r as u32 + 587 * g as u32 + 114 * b as u32) / 1000;
@@ -630,9 +774,18 @@ impl App {
 
                 if is_selected {
                     let text_color = Self::text_color_for_bg(cat.color);
+                    let description_text = if self.modal_description.is_empty() {
+                        Span::raw("")
+                    } else {
+                        Span::styled(
+                            format!(" {}", self.modal_description),
+                            Style::default().add_modifier(Modifier::ITALIC),
+                        )
+                    };
                     ListItem::new(Line::from(vec![
                         Span::raw("● ").fg(cat.color),
                         Span::raw(&cat.name).fg(text_color),
+                        description_text,
                     ]))
                     .style(
                         ratatui::style::Style::default()
@@ -747,6 +900,10 @@ fn main() -> Result<(), io::Error> {
         if last_physics.elapsed() >= physics_rate {
             app.apply_gravity();
             app.apply_gravity();
+            app.frame_count += 1;
+            if app.active_category_index == Some(0) {
+                app.update_blink();
+            }
             last_physics = Instant::now();
         }
 
@@ -762,13 +919,15 @@ fn main() -> Result<(), io::Error> {
 
             let sand = app.render();
 
-            let category_name = if let Some(idx) = app.active_category_index {
+            let category_name = if app.active_category_index == Some(0) {
+                app.get_idle_face()
+            } else if let Some(idx) = app.active_category_index {
                 app.categories
                     .get(idx)
                     .map(|c| c.name.clone())
                     .unwrap_or_default()
             } else {
-                "none".to_string()
+                app.get_idle_face()
             };
 
             let description = if let Some(idx) = app.active_category_index {
@@ -871,6 +1030,10 @@ fn main() -> Result<(), io::Error> {
                                     app.close_modal();
                                 }
                             } else {
+                                if app.selected_index < app.categories.len() {
+                                    app.categories[app.selected_index].description =
+                                        app.modal_description.clone();
+                                }
                                 if app.active_category_index != Some(app.selected_index) {
                                     app.end_session();
                                     app.active_category_index = Some(app.selected_index);
@@ -887,19 +1050,15 @@ fn main() -> Result<(), io::Error> {
                         KeyCode::Char(c) => {
                             if app.is_on_insert_space() {
                                 app.new_category_name.push(c);
-                            } else if let Some(idx) = app.active_category_index {
-                                if idx == app.selected_index {
-                                    app.categories[idx].description.push(c);
-                                }
+                            } else if app.selected_index < app.categories.len() {
+                                app.modal_description.push(c);
                             }
                         }
                         KeyCode::Backspace => {
                             if app.is_on_insert_space() {
                                 app.new_category_name.pop();
-                            } else if let Some(idx) = app.active_category_index {
-                                if idx == app.selected_index {
-                                    app.categories[idx].description.pop();
-                                }
+                            } else if app.selected_index < app.categories.len() {
+                                app.modal_description.pop();
                             }
                         }
                         _ => {}
