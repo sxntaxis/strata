@@ -95,7 +95,7 @@ impl App {
                 description: String::new(),
             }],
             lost_dots: vec![0],
-            active_category_index: None,
+            active_category_index: Some(0),
             spawn_offset: 0.5,
             target_spawn_offset: 0.5,
             frame_count: 0,
@@ -112,6 +112,7 @@ impl App {
         app.resize(width, height);
         app.calculate_todays_mass();
         app.recalculate_zones();
+        app.start_session();
 
         app
     }
@@ -185,7 +186,7 @@ impl App {
         self.total_mass = self
             .sessions
             .iter()
-            .filter(|s| s.date == today)
+            .filter(|s| s.date == today && s.category != "none")
             .map(|s| s.elapsed_seconds)
             .sum();
     }
@@ -230,30 +231,28 @@ impl App {
     fn update_current_session(&mut self) {
         if let Some(start_instant) = self.current_session_start {
             if let Some(cat_idx) = self.active_category_index {
-                if cat_idx > 0 {
-                    let cat = &self.categories[cat_idx];
-                    let now = Local::now();
-                    let elapsed = start_instant.elapsed().as_secs() as usize;
-                    let start_time = now - ChronoDuration::seconds(elapsed as i64);
+                let cat = &self.categories[cat_idx];
+                let now = Local::now();
+                let elapsed = start_instant.elapsed().as_secs() as usize;
+                let start_time = now - ChronoDuration::seconds(elapsed as i64);
 
-                    if let Some(session) = self
-                        .sessions
-                        .iter_mut()
-                        .find(|s| s.id == self.session_id_counter)
-                    {
-                        session.end_time = now.format("%H:%M:%S").to_string();
-                        session.elapsed_seconds = elapsed;
-                    } else {
-                        self.sessions.push(Session {
-                            id: self.session_id_counter,
-                            date: now.format("%Y-%m-%d").to_string(),
-                            category: cat.name.clone(),
-                            description: cat.description.clone(),
-                            start_time: start_time.format("%H:%M:%S").to_string(),
-                            end_time: now.format("%H:%M:%S").to_string(),
-                            elapsed_seconds: elapsed,
-                        });
-                    }
+                if let Some(session) = self
+                    .sessions
+                    .iter_mut()
+                    .find(|s| s.id == self.session_id_counter)
+                {
+                    session.end_time = now.format("%H:%M:%S").to_string();
+                    session.elapsed_seconds = elapsed;
+                } else {
+                    self.sessions.push(Session {
+                        id: self.session_id_counter,
+                        date: now.format("%Y-%m-%d").to_string(),
+                        category: cat.name.clone(),
+                        description: cat.description.clone(),
+                        start_time: start_time.format("%H:%M:%S").to_string(),
+                        end_time: now.format("%H:%M:%S").to_string(),
+                        elapsed_seconds: elapsed,
+                    });
                 }
             }
         }
@@ -781,14 +780,18 @@ fn main() -> Result<(), io::Error> {
                 String::new()
             };
 
-            let session_timer = if let Some(start) = app.current_session_start {
+            let session_timer = if app.active_category_index == Some(0) {
+                Local::now().format("%H:%M:%S").to_string()
+            } else if let Some(start) = app.current_session_start {
                 let elapsed = start.elapsed();
                 app.format_time(elapsed.as_secs() as usize)
             } else {
                 Local::now().format("%H:%M:%S").to_string()
             };
 
-            let effective_time = if let Some(idx) = app.active_category_index {
+            let effective_time = if app.active_category_index == Some(0) {
+                app.get_effective_time_today()
+            } else if let Some(idx) = app.active_category_index {
                 let cat_name = app
                     .categories
                     .get(idx)
@@ -911,7 +914,8 @@ fn main() -> Result<(), io::Error> {
                         }
                         KeyCode::Esc => {
                             app.end_session();
-                            app.active_category_index = None;
+                            app.active_category_index = Some(0);
+                            app.start_session();
                         }
                         _ => {}
                     }
