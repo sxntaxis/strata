@@ -344,6 +344,7 @@ struct SandEngine {
     width: u16,
     height: u16,
     frame_count: usize,
+    grain_count: usize,
 }
 
 impl SandEngine {
@@ -353,6 +354,7 @@ impl SandEngine {
             width,
             height,
             frame_count: 0,
+            grain_count: 0,
         };
         se.resize(width, height);
         se
@@ -361,7 +363,242 @@ impl SandEngine {
     fn resize(&mut self, width: u16, height: u16) {
         self.width = width * SAND_ENGINE.dot_width as u16;
         self.height = height * SAND_ENGINE.dot_height as u16;
-        self.grid = vec![vec![None; self.width as usize]; self.height as usize];
+
+        let old_w = if self.grid.is_empty() {
+            0
+        } else {
+            self.grid[0].len()
+        };
+        let old_h = self.grid.len();
+
+        if old_w == 0 || old_h == 0 {
+            self.grid = vec![vec![None; self.width as usize]; self.height as usize];
+            return;
+        }
+
+        let new_w = self.width as usize;
+        let new_h = self.height as usize;
+
+        if new_w == old_w && new_h == old_h {
+            return;
+        }
+
+        let mut new_grid = vec![vec![None; new_w]; new_h];
+
+        let mut lost_left: Vec<usize> = vec![0; 12];
+        let mut lost_right: Vec<usize> = vec![0; 12];
+        let mut lost_top: Vec<usize> = vec![0; 12];
+        let mut lost_bottom: Vec<usize> = vec![0; 12];
+        let mut kept_count = 0;
+
+        // Horizontal: shift dots toward center
+        let x_shift = if new_w > old_w {
+            (new_w - old_w) / 2
+        } else if new_w < old_w {
+            (old_w - new_w) / 2
+        } else {
+            0
+        };
+
+        // Vertical: shift dots toward center
+        let y_shift = if new_h > old_h {
+            (new_h - old_h) / 2
+        } else if new_h < old_h {
+            (old_h - new_h) / 2
+        } else {
+            0
+        };
+
+        // Copy dots with symmetric shift
+        for y in 0..old_h {
+            for x in 0..old_w {
+                let dest_x = if new_w >= old_w {
+                    x + x_shift
+                } else {
+                    x.saturating_sub(x_shift)
+                };
+                let dest_y = if new_h >= old_h {
+                    y + y_shift
+                } else {
+                    y.saturating_sub(y_shift)
+                };
+
+                if dest_x < new_w && dest_y < new_h {
+                    new_grid[dest_y][dest_x] = self.grid[y][x];
+                    if new_grid[dest_y][dest_x].is_some() {
+                        kept_count += 1;
+                    }
+                }
+            }
+        }
+
+        // Track lost dots from edges (both sides for symmetric squeeze)
+        for y in 0..old_h {
+            for x in 0..old_w {
+                let dest_x = if new_w >= old_w {
+                    x + x_shift
+                } else {
+                    x.saturating_sub(x_shift)
+                };
+                let dest_y = if new_h >= old_h {
+                    y + y_shift
+                } else {
+                    y.saturating_sub(y_shift)
+                };
+                let was_copied = dest_x < new_w && dest_y < new_h;
+
+                if !was_copied {
+                    if let Some(cat) = self.grid[y][x] {
+                        let idx = cat.min(11);
+                        // Left edge lost (when shrinking from left)
+                        if new_w < old_w && x < x_shift {
+                            lost_left[idx] += 1;
+                        }
+                        // Right edge lost (when shrinking from right)
+                        else if new_w < old_w && x >= new_w + x_shift {
+                            lost_right[idx] += 1;
+                        }
+                        // Top edge lost (when shrinking from top)
+                        if new_h < old_h && y < y_shift {
+                            lost_top[idx] += 1;
+                        }
+                        // Bottom edge lost (when shrinking from bottom)
+                        else if new_h < old_h && y >= new_h + y_shift {
+                            lost_bottom[idx] += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        self.grid = new_grid;
+
+        let lost_total = lost_left.iter().sum::<usize>()
+            + lost_right.iter().sum::<usize>()
+            + lost_top.iter().sum::<usize>()
+            + lost_bottom.iter().sum::<usize>();
+
+        if lost_total == 0 {
+            self.grain_count = kept_count;
+            return;
+        }
+
+        let new_capacity = new_w * new_h;
+        let available_space = new_capacity.saturating_sub(kept_count);
+        let to_redistribute = lost_total.min(available_space);
+
+        let mut redistributed = 0;
+
+        // Redistribute lost dots to nearest edges
+        for cat_idx in 0..12 {
+            if redistributed >= to_redistribute {
+                break;
+            }
+
+            // Lost from left edge -> redistribute to left edge
+            let cat_from_left = lost_left[cat_idx];
+            if cat_from_left > 0 {
+                let to_place = cat_from_left.min(to_redistribute.saturating_sub(redistributed));
+                let mut placed = 0;
+                for x in 0..new_w {
+                    if placed >= to_place || redistributed >= to_redistribute {
+                        break;
+                    }
+                    for y in 0..new_h {
+                        if placed >= to_place || redistributed >= to_redistribute {
+                            break;
+                        }
+                        if self.grid[y][x].is_none() {
+                            self.grid[y][x] = Some(cat_idx);
+                            placed += 1;
+                            redistributed += 1;
+                        }
+                    }
+                }
+            }
+
+            if redistributed >= to_redistribute {
+                break;
+            }
+
+            // Lost from right edge -> redistribute to right edge
+            let cat_from_right = lost_right[cat_idx];
+            if cat_from_right > 0 {
+                let to_place = cat_from_right.min(to_redistribute.saturating_sub(redistributed));
+                let mut placed = 0;
+                for offset in 0..new_w {
+                    if placed >= to_place || redistributed >= to_redistribute {
+                        break;
+                    }
+                    let x = new_w - 1 - offset;
+                    for y in 0..new_h {
+                        if placed >= to_place || redistributed >= to_redistribute {
+                            break;
+                        }
+                        if self.grid[y][x].is_none() {
+                            self.grid[y][x] = Some(cat_idx);
+                            placed += 1;
+                            redistributed += 1;
+                        }
+                    }
+                }
+            }
+
+            if redistributed >= to_redistribute {
+                break;
+            }
+
+            // Lost from top edge -> redistribute to top edge
+            let cat_from_top = lost_top[cat_idx];
+            if cat_from_top > 0 {
+                let to_place = cat_from_top.min(to_redistribute.saturating_sub(redistributed));
+                let mut placed = 0;
+                for y in 0..new_h {
+                    if placed >= to_place || redistributed >= to_redistribute {
+                        break;
+                    }
+                    for x in 0..new_w {
+                        if placed >= to_place || redistributed >= to_redistribute {
+                            break;
+                        }
+                        if self.grid[y][x].is_none() {
+                            self.grid[y][x] = Some(cat_idx);
+                            placed += 1;
+                            redistributed += 1;
+                        }
+                    }
+                }
+            }
+
+            if redistributed >= to_redistribute {
+                break;
+            }
+
+            // Lost from bottom edge -> redistribute to bottom edge
+            let cat_from_bottom = lost_bottom[cat_idx];
+            if cat_from_bottom > 0 {
+                let to_place = cat_from_bottom.min(to_redistribute.saturating_sub(redistributed));
+                let mut placed = 0;
+                for offset in 0..new_h {
+                    if placed >= to_place || redistributed >= to_redistribute {
+                        break;
+                    }
+                    let y = new_h - 1 - offset;
+                    for x in 0..new_w {
+                        if placed >= to_place || redistributed >= to_redistribute {
+                            break;
+                        }
+                        if self.grid[y][x].is_none() {
+                            self.grid[y][x] = Some(cat_idx);
+                            placed += 1;
+                            redistributed += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        self.grain_count = kept_count + redistributed;
     }
 
     fn capacity(&self) -> usize {
@@ -385,10 +622,12 @@ impl SandEngine {
 
         if self.grid[0][x].is_none() {
             self.grid[0][x] = Some(category_idx);
+            self.grain_count += 1;
         } else {
             let fallback_x = rng.gen_range(0..w);
             if self.grid[0][fallback_x].is_none() {
                 self.grid[0][fallback_x] = Some(category_idx);
+                self.grain_count += 1;
             }
         }
     }
@@ -499,6 +738,7 @@ impl SandEngine {
                 *cell = None;
             }
         }
+        self.grain_count = 0;
     }
 }
 
