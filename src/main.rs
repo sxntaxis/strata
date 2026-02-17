@@ -244,13 +244,8 @@ impl TimeTracker {
             let _ = writeln!(writer, "name,description,color_index");
             for (i, cat) in self.categories.iter().enumerate() {
                 if i > 0 {
-                    let _ = writeln!(
-                        writer,
-                        "{},{},{}",
-                        cat.name,
-                        cat.description,
-                        i % COLORS.len()
-                    );
+                    let color_pos = COLORS.iter().position(|&c| c == cat.color).unwrap_or(0);
+                    let _ = writeln!(writer, "{},{},{}", cat.name, cat.description, color_pos);
                 }
             }
         }
