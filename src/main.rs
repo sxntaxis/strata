@@ -111,6 +111,7 @@ struct Category {
     name: String,
     color: Color,
     description: String,
+    karma_effect: i8,
 }
 
 struct Session {
@@ -139,6 +140,7 @@ impl TimeTracker {
                 name: "none".to_string(),
                 color: Color::White,
                 description: String::new(),
+                karma_effect: 1,
             }],
             current_session_start: None,
             session_id_counter: 0,
@@ -222,10 +224,16 @@ impl TimeTracker {
                         let name = parts[0].to_string();
                         let description = parts[1].to_string();
                         let color_idx: usize = parts[2].parse().unwrap_or(0) % COLORS.len();
+                        let karma_effect: i8 = if parts.len() >= 4 {
+                            parts[3].parse().unwrap_or(1)
+                        } else {
+                            1
+                        };
                         self.categories.push(Category {
                             name,
                             color: COLORS[color_idx],
                             description,
+                            karma_effect,
                         });
                     }
                 }
@@ -241,11 +249,15 @@ impl TimeTracker {
             .open(FILE_PATHS.categories)
         {
             let mut writer = io::BufWriter::new(file);
-            let _ = writeln!(writer, "name,description,color_index");
+            let _ = writeln!(writer, "name,description,color_index,karma_effect");
             for (i, cat) in self.categories.iter().enumerate() {
                 if i > 0 {
                     let color_pos = COLORS.iter().position(|&c| c == cat.color).unwrap_or(0);
-                    let _ = writeln!(writer, "{},{},{}", cat.name, cat.description, color_pos);
+                    let _ = writeln!(
+                        writer,
+                        "{},{},{},{}",
+                        cat.name, cat.description, color_pos, cat.karma_effect
+                    );
                 }
             }
         }
@@ -324,6 +336,7 @@ impl TimeTracker {
             name,
             color: COLORS[color_idx],
             description,
+            karma_effect: 1,
         });
         self.save_categories();
     }
@@ -849,6 +862,37 @@ impl App {
         self.time_tracker.get_category_time(category_name)
     }
 
+    fn get_karma_adjusted_time(&self) -> isize {
+        let today = Local::now().format("%Y-%m-%d").to_string();
+        let mut total: isize = 0;
+        for cat in &self.time_tracker.categories {
+            if cat.name == "none" {
+                continue;
+            }
+            let cat_time: isize = self
+                .time_tracker
+                .sessions
+                .iter()
+                .filter(|s| s.date == today && s.category == cat.name)
+                .map(|s| s.elapsed_seconds as isize)
+                .sum();
+            total += cat_time * cat.karma_effect as isize;
+        }
+        total
+    }
+
+    fn format_signed_time(&self, seconds: isize) -> String {
+        let abs_secs = seconds.abs() as usize;
+        let sign = if seconds < 0 { "-" } else { "" };
+        format!(
+            "{}{:02}:{:02}:{:02}",
+            sign,
+            abs_secs / 3600,
+            (abs_secs % 3600) / 60,
+            abs_secs % 60
+        )
+    }
+
     fn format_time(&self, seconds: usize) -> String {
         format!(
             "{:02}:{:02}:{:02}",
@@ -936,6 +980,7 @@ impl App {
             .enumerate()
             .map(|(i, cat)| {
                 let is_selected = i == self.selected_index;
+                let dot = if cat.karma_effect < 0 { "◯ " } else { "● " };
 
                 if is_selected {
                     let text_color = Self::text_color_for_bg(cat.color);
@@ -948,7 +993,7 @@ impl App {
                         )
                     };
                     ListItem::new(Line::from(vec![
-                        Span::raw("● ").fg(cat.color),
+                        Span::raw(dot).fg(cat.color),
                         Span::raw(&cat.name).fg(text_color),
                         description_text,
                     ]))
@@ -959,7 +1004,7 @@ impl App {
                     )
                 } else {
                     ListItem::new(Line::from(vec![
-                        Span::raw("● ").fg(cat.color),
+                        Span::raw(dot).fg(cat.color),
                         Span::raw(&cat.name).fg(Color::White),
                     ]))
                 }
@@ -1004,7 +1049,10 @@ impl App {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
-                    .title("strata")
+                    .title(Line::from(Span::styled(
+                        "strata",
+                        Style::default().fg(Color::White),
+                    )))
                     .title_alignment(ratatui::layout::Alignment::Center)
                     .border_style(ratatui::style::Style::default().fg(border_color)),
             )
@@ -1107,6 +1155,24 @@ impl App {
             KeyCode::Char('x') => {
                 if !self.is_on_insert_space() && self.selected_index > 0 {
                     self.delete_category();
+                }
+            }
+            KeyCode::Char('+') | KeyCode::Char('=') => {
+                if !self.is_on_insert_space()
+                    && self.selected_index > 0
+                    && self.selected_index < self.time_tracker.categories.len()
+                {
+                    self.time_tracker.categories[self.selected_index].karma_effect = 1;
+                    self.time_tracker.save_categories();
+                }
+            }
+            KeyCode::Char('-') | KeyCode::Char('_') => {
+                if !self.is_on_insert_space()
+                    && self.selected_index > 0
+                    && self.selected_index < self.time_tracker.categories.len()
+                {
+                    self.time_tracker.categories[self.selected_index].karma_effect = -1;
+                    self.time_tracker.save_categories();
                 }
             }
             KeyCode::Char(c) => {
@@ -1249,8 +1315,9 @@ fn main() -> Result<(), io::Error> {
                     Local::now().format("%H:%M:%S").to_string()
                 };
 
-                let effective_time = if app.time_tracker.active_category_index == Some(0) {
-                    app.get_effective_time_today()
+                let effective_time_str = if app.time_tracker.active_category_index == Some(0) {
+                    let karma_time = app.get_karma_adjusted_time();
+                    app.format_signed_time(karma_time)
                 } else if let Some(idx) = app.time_tracker.active_category_index {
                     let cat_name = app
                         .time_tracker
@@ -1262,11 +1329,10 @@ fn main() -> Result<(), io::Error> {
                     if let Some(start) = app.time_tracker.current_session_start {
                         total += start.elapsed().as_secs() as usize;
                     }
-                    total
+                    app.format_time(total)
                 } else {
-                    app.get_effective_time_today()
+                    app.format_time(app.get_effective_time_today())
                 };
-                let effective_time_str = app.format_time(effective_time);
 
                 let border_color = app.get_active_color();
                 let block = Block::default()
@@ -1276,21 +1342,37 @@ fn main() -> Result<(), io::Error> {
                         Line::from(vec![
                             Span::styled(
                                 &category_name,
-                                Style::default().add_modifier(Modifier::BOLD),
+                                Style::default()
+                                    .fg(Color::White)
+                                    .add_modifier(Modifier::BOLD),
                             ),
                             if description.is_empty() {
                                 Span::raw("")
                             } else {
                                 Span::styled(
                                     format!(" {}", description),
-                                    Style::default().add_modifier(Modifier::ITALIC),
+                                    Style::default()
+                                        .fg(Color::White)
+                                        .add_modifier(Modifier::ITALIC),
                                 )
                             },
                         ])
                         .alignment(Alignment::Left),
                     )
-                    .title(Line::from(session_timer.as_str()).alignment(Alignment::Center))
-                    .title(Line::from(effective_time_str.as_str()).alignment(Alignment::Right))
+                    .title(
+                        Line::from(Span::styled(
+                            session_timer.as_str(),
+                            Style::default().fg(Color::White),
+                        ))
+                        .alignment(Alignment::Center),
+                    )
+                    .title(
+                        Line::from(Span::styled(
+                            effective_time_str.as_str(),
+                            Style::default().fg(Color::White),
+                        ))
+                        .alignment(Alignment::Right),
+                    )
                     .border_style(Style::default().fg(border_color));
                 let paragraph = Paragraph::new(sand).block(block);
                 f.render_widget(paragraph, size);
