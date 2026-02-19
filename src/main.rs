@@ -881,6 +881,27 @@ impl App {
         total
     }
 
+    fn get_category_karma_adjusted_time(&self, category_name: &str) -> isize {
+        let today = Local::now().format("%Y-%m-%d").to_string();
+        let cat = self
+            .time_tracker
+            .categories
+            .iter()
+            .find(|c| c.name == category_name);
+        if let Some(cat) = cat {
+            let cat_time: isize = self
+                .time_tracker
+                .sessions
+                .iter()
+                .filter(|s| s.date == today && s.category == category_name)
+                .map(|s| s.elapsed_seconds as isize)
+                .sum();
+            cat_time * cat.karma_effect as isize
+        } else {
+            0
+        }
+    }
+
     fn format_signed_time(&self, seconds: isize) -> String {
         let abs_secs = seconds.abs() as usize;
         let sign = if seconds < 0 { "-" } else { "" };
@@ -1315,7 +1336,20 @@ fn main() -> Result<(), io::Error> {
                     Local::now().format("%H:%M:%S").to_string()
                 };
 
-                let effective_time_str = if app.time_tracker.active_category_index == Some(0) {
+                let effective_time_str = if app.modal_open {
+                    let cat_name = app
+                        .time_tracker
+                        .categories
+                        .get(app.selected_index)
+                        .map(|c| c.name.as_str())
+                        .unwrap_or("none");
+                    let karma_time = if cat_name == "none" {
+                        app.get_karma_adjusted_time()
+                    } else {
+                        app.get_category_karma_adjusted_time(cat_name)
+                    };
+                    app.format_signed_time(karma_time)
+                } else if app.time_tracker.active_category_index == Some(0) {
                     let karma_time = app.get_karma_adjusted_time();
                     app.format_signed_time(karma_time)
                 } else if let Some(idx) = app.time_tracker.active_category_index {
