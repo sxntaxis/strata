@@ -251,7 +251,8 @@ impl App {
                 _ => a
                     .karma_seconds
                     .cmp(&b.karma_seconds)
-                    .then(b.elapsed_seconds.cmp(&a.elapsed_seconds))
+                    .reverse()
+                    .then(a.elapsed_seconds.cmp(&b.elapsed_seconds))
                     .then(a.category_name.cmp(&b.category_name)),
             })
         });
