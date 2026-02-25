@@ -1,5 +1,5 @@
 use std::{
-    fs::{File, OpenOptions},
+    fs::{self, File, OpenOptions},
     io::{self, BufRead, BufReader, Write},
     path::Path,
     time::{Duration, Instant},
@@ -10,7 +10,7 @@ use chrono::{Duration as ChronoDuration, Local};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 
 use rand::Rng;
@@ -18,11 +18,11 @@ use rand::Rng;
 use ratatui::prelude::{Line, Span};
 use ratatui::style::Stylize;
 use ratatui::{
+    Frame, Terminal,
     backend::CrosstermBackend,
     layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
-    Frame, Terminal,
 };
 
 const COLORS: [Color; 12] = [
@@ -78,6 +78,619 @@ const FILE_PATHS: FilePaths = FilePaths {
     categories: "./categories.csv",
 };
 
+mod cli {
+    use super::*;
+    use chrono::{DateTime, Utc};
+    use clap::{CommandFactory, Parser, ValueEnum};
+    use directories::ProjectDirs;
+    use itertools::Itertools;
+    use serde::{Deserialize, Serialize};
+    use std::collections::HashMap;
+    use std::io::Write;
+    use std::path::PathBuf;
+    use std::sync::Mutex;
+
+    static ACTIVE_SESSION: Mutex<Option<ActiveSession>> = Mutex::new(None);
+
+    #[derive(Parser, Debug)]
+    #[command(name = "strata")]
+    #[command(about = "Time tracking with falling sand", long_about = None)]
+    pub enum Cli {
+        #[command(about = "Start a new tracking session")]
+        Start {
+            #[arg(help = "Project name")]
+            project: String,
+
+            #[arg(long, help = "Session description")]
+            desc: Option<String>,
+
+            #[arg(long, short, help = "Category name or ID")]
+            category: Option<String>,
+        },
+
+        #[command(about = "Stop the current tracking session")]
+        Stop,
+
+        #[command(about = "Show today's report")]
+        Report {
+            #[arg(long, help = "Show today's time")]
+            today: bool,
+        },
+
+        #[command(about = "Export sessions")]
+        Export {
+            #[arg(long, value_enum, help = "Export format")]
+            format: ExportFormat,
+
+            #[arg(long, short, help = "Output path")]
+            out: Option<PathBuf>,
+        },
+
+        #[command(about = "Generate shell completions")]
+        Completions {
+            #[arg(help = "Shell type (bash, zsh, fish)")]
+            shell: String,
+        },
+    }
+
+    #[derive(Debug, Clone, ValueEnum)]
+    pub enum ExportFormat {
+        Json,
+        Ics,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ActiveSession {
+        pub project: String,
+        pub description: String,
+        pub category_id: u64,
+        pub category_name: String,
+        pub start_time: DateTime<Utc>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct SessionExport {
+        pub id: usize,
+        pub date: String,
+        pub category_id: u64,
+        pub category_name: String,
+        pub project: Option<String>,
+        pub description: String,
+        pub start_time: String,
+        pub end_time: String,
+        pub elapsed_seconds: usize,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct CategoryExport {
+        pub id: u64,
+        pub name: String,
+        pub description: String,
+        pub color_index: usize,
+        pub karma_effect: i8,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct DataExport {
+        pub schema_version: u32,
+        pub exported_at: DateTime<Utc>,
+        pub categories: Vec<CategoryExport>,
+        pub sessions: Vec<SessionExport>,
+    }
+
+    fn get_data_dir() -> PathBuf {
+        if let Some(proj_dirs) = ProjectDirs::from("com", "strata", "strata") {
+            let data_dir = proj_dirs.data_dir().to_path_buf();
+            fs::create_dir_all(&data_dir).ok();
+            data_dir
+        } else {
+            PathBuf::from(".")
+        }
+    }
+
+    fn get_state_dir() -> PathBuf {
+        if let Some(proj_dirs) = ProjectDirs::from("com", "strata", "strata") {
+            if let Some(state_dir) = proj_dirs.state_dir() {
+                let dir = state_dir.to_path_buf();
+                fs::create_dir_all(&dir).ok();
+                return dir;
+            }
+        }
+        PathBuf::from(".")
+    }
+
+    fn get_active_session_path() -> PathBuf {
+        get_state_dir().join("active_session.json")
+    }
+
+    fn create_backup(path: &Path) -> Result<(), String> {
+        if !path.exists() {
+            return Ok(());
+        }
+        let backup_dir = path.parent().unwrap_or(Path::new(".")).join("backups");
+        fs::create_dir_all(&backup_dir).map_err(|e| e.to_string())?;
+
+        let timestamp = Local::now().format("%Y%m%d_%H%M%S");
+        let filename = format!(
+            "{}.{}",
+            path.file_name().unwrap_or_default().to_string_lossy(),
+            timestamp
+        );
+        let backup_path = backup_dir.join(&filename);
+        fs::copy(path, &backup_path).map_err(|e| e.to_string())?;
+
+        let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+        if let Ok(entries) = fs::read_dir(&backup_dir) {
+            let mut backups: Vec<_> = entries
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_name().to_string_lossy().starts_with(&*stem))
+                .collect();
+            backups.sort_by_key(|e| e.metadata().ok().and_then(|m| m.modified().ok()));
+
+            while backups.len() > 10 {
+                if let Some(oldest) = backups.first() {
+                    let _ = fs::remove_file(oldest.path());
+                    backups.remove(0);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
+        if path.exists() {
+            create_backup(path)?;
+        }
+        let tmp_path = path.with_extension("tmp");
+        let mut tmp_file = File::create(&tmp_path).map_err(|e| e.to_string())?;
+        tmp_file
+            .write_all(content.as_bytes())
+            .map_err(|e| e.to_string())?;
+        tmp_file.sync_all().map_err(|e| e.to_string())?;
+        fs::rename(&tmp_path, path).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn load_categories_from_csv(path: &Path) -> Vec<Category> {
+        let mut categories = vec![Category {
+            id: CategoryId::new(0),
+            name: "none".to_string(),
+            color: Color::White,
+            description: String::new(),
+            karma_effect: 1,
+        }];
+        let mut next_id = 1u64;
+
+        if let Ok(file) = File::open(path) {
+            let reader = BufReader::new(file);
+            for line in reader.lines().skip(1).flatten() {
+                let parts: Vec<&str> = line.split(',').collect();
+                if parts.len() >= 3 {
+                    let id = if parts.len() >= 5 {
+                        parts[0].parse().unwrap_or(next_id)
+                    } else {
+                        next_id
+                    };
+                    let name = parts[if parts.len() >= 5 { 1 } else { 0 }].to_string();
+                    let description = parts[if parts.len() >= 5 { 2 } else { 1 }].to_string();
+                    let color_idx: usize = parts[if parts.len() >= 5 { 3 } else { 2 }]
+                        .parse()
+                        .unwrap_or(0)
+                        % COLORS.len();
+                    let karma_effect: i8 = parts
+                        .get(if parts.len() >= 5 { 4 } else { 3 })
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(1);
+
+                    categories.push(Category {
+                        id: CategoryId::new(id),
+                        name,
+                        color: COLORS[color_idx],
+                        description,
+                        karma_effect,
+                    });
+                    next_id = next_id.max(id + 1);
+                }
+            }
+        }
+        categories
+    }
+
+    pub fn load_sessions_from_csv(path: &Path, categories: &[Category]) -> Vec<Session> {
+        let category_map: HashMap<String, CategoryId> =
+            categories.iter().map(|c| (c.name.clone(), c.id)).collect();
+
+        let mut sessions = Vec::new();
+        let mut max_id = 0usize;
+
+        if let Ok(file) = File::open(path) {
+            let reader = BufReader::new(file);
+            for line in reader.lines().skip(1).flatten() {
+                let parts: Vec<&str> = line.split(',').collect();
+                if parts.len() >= 8 {
+                    if let Ok(id) = parts[0].parse::<usize>() {
+                        max_id = max_id.max(id);
+                        let category_name = parts[3].to_string();
+                        let category_id = category_map
+                            .get(&category_name)
+                            .copied()
+                            .unwrap_or(CategoryId::new(0));
+                        sessions.push(Session {
+                            id,
+                            date: parts[1].to_string(),
+                            category_id,
+                            description: parts[4].to_string(),
+                            start_time: parts[5].to_string(),
+                            end_time: parts[6].to_string(),
+                            elapsed_seconds: parts[7].parse().unwrap_or(0),
+                        });
+                    }
+                }
+            }
+        }
+        sessions
+    }
+
+    pub fn start_session(
+        project: String,
+        description: Option<String>,
+        category_name: Option<String>,
+    ) -> Result<(), String> {
+        let data_dir = get_data_dir();
+        let categories_path = data_dir.join("categories.csv");
+        let categories = load_categories_from_csv(&categories_path);
+
+        let cat_name = category_name.unwrap_or_else(|| "none".to_string());
+        let category = categories
+            .iter()
+            .find(|c| c.name == cat_name || c.id.0.to_string() == cat_name)
+            .ok_or_else(|| format!("Category '{}' not found", cat_name))?;
+
+        let session = ActiveSession {
+            project: project.clone(),
+            description: description.unwrap_or_default(),
+            category_id: category.id.0,
+            category_name: category.name.clone(),
+            start_time: Utc::now(),
+        };
+
+        let session_path = get_active_session_path();
+        let json = serde_json::to_string_pretty(&session).map_err(|e| e.to_string())?;
+        let tmp_path = session_path.with_extension("tmp");
+        let mut tmp_file = File::create(&tmp_path).map_err(|e| e.to_string())?;
+        tmp_file
+            .write_all(json.as_bytes())
+            .map_err(|e| e.to_string())?;
+        fs::rename(&tmp_path, &session_path).map_err(|e| e.to_string())?;
+
+        println!(
+            "Started session for project '{}' in category '{}'",
+            project, category.name
+        );
+        Ok(())
+    }
+
+    pub fn stop_session() -> Result<usize, String> {
+        let session_path = get_active_session_path();
+        if !session_path.exists() {
+            return Err("No active session to stop".to_string());
+        }
+
+        let content = fs::read_to_string(&session_path).map_err(|e| e.to_string())?;
+        let active_session: ActiveSession =
+            serde_json::from_str(&content).map_err(|e| e.to_string())?;
+
+        let elapsed = (Utc::now() - active_session.start_time).num_seconds() as usize;
+
+        let data_dir = get_data_dir();
+        let sessions_path = data_dir.join("time_log.csv");
+        let categories_path = data_dir.join("categories.csv");
+
+        let categories = load_categories_from_csv(&categories_path);
+        let mut sessions = load_sessions_from_csv(&sessions_path, &categories);
+
+        let now = Local::now();
+        let today = now.format("%Y-%m-%d").to_string();
+        let start_time = now - ChronoDuration::seconds(elapsed as i64);
+
+        if let Some(existing) = sessions
+            .iter_mut()
+            .find(|s| s.date == today && s.category_id.0 == active_session.category_id)
+        {
+            existing.elapsed_seconds += elapsed;
+            existing.end_time = now.format("%H:%M:%S").to_string();
+        } else {
+            let new_id = sessions.iter().map(|s| s.id).max().unwrap_or(0) + 1;
+            sessions.push(Session {
+                id: new_id,
+                date: today,
+                category_id: CategoryId::new(active_session.category_id),
+                description: active_session.description.clone(),
+                start_time: start_time.format("%H:%M:%S").to_string(),
+                end_time: now.format("%H:%M:%S").to_string(),
+                elapsed_seconds: elapsed,
+            });
+        }
+
+        let mut content = String::new();
+        content.push_str(
+            "id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds\n",
+        );
+        for session in &sessions {
+            let cat_name = categories
+                .iter()
+                .find(|c| c.id == session.category_id)
+                .map(|c| c.name.as_str())
+                .unwrap_or("none");
+            content.push_str(&format!(
+                "{},{},{},{},{},{},{},{}\n",
+                session.id,
+                session.date,
+                session.category_id.0,
+                cat_name,
+                session.description,
+                session.start_time,
+                session.end_time,
+                session.elapsed_seconds
+            ));
+        }
+        atomic_write(&sessions_path, &content)?;
+
+        fs::remove_file(&session_path).ok();
+
+        println!(
+            "Stopped session. Elapsed time: {:02}:{:02}:{:02}",
+            elapsed / 3600,
+            (elapsed % 3600) / 60,
+            elapsed % 60
+        );
+        Ok(elapsed)
+    }
+
+    pub fn report_today() -> Result<(), String> {
+        let data_dir = get_data_dir();
+        let sessions_path = data_dir.join("time_log.csv");
+        let categories_path = data_dir.join("categories.csv");
+
+        let categories = load_categories_from_csv(&categories_path);
+        let sessions = load_sessions_from_csv(&sessions_path, &categories);
+
+        let today = Local::now().format("%Y-%m-%d").to_string();
+        let today_sessions: Vec<_> = sessions.iter().filter(|s| s.date == today).collect();
+
+        let mut by_category: HashMap<String, usize> = HashMap::new();
+        let mut total = 0usize;
+
+        for session in today_sessions {
+            let cat_name = categories
+                .iter()
+                .find(|c| c.id == session.category_id)
+                .map(|c| c.name.as_str())
+                .unwrap_or("none")
+                .to_string();
+            *by_category.entry(cat_name).or_insert(0) += session.elapsed_seconds;
+            total += session.elapsed_seconds;
+        }
+
+        println!("Today's Report ({})", today);
+        println!("{}", "-".repeat(40));
+        for (cat, secs) in by_category.iter().sorted_by_key(|(_, v)| *v).rev() {
+            if cat != "none" {
+                println!(
+                    "{:20} {:02}:{:02}:{:02}",
+                    cat,
+                    secs / 3600,
+                    (secs % 3600) / 60,
+                    secs % 60
+                );
+            }
+        }
+        println!("{}", "-".repeat(40));
+        println!(
+            "{:20} {:02}:{:02}:{:02}",
+            "TOTAL",
+            total / 3600,
+            (total % 3600) / 60,
+            total % 60
+        );
+
+        Ok(())
+    }
+
+    pub fn export_data(format: ExportFormat, out_path: Option<PathBuf>) -> Result<(), String> {
+        let data_dir = get_data_dir();
+        let sessions_path = data_dir.join("time_log.csv");
+        let categories_path = data_dir.join("categories.csv");
+
+        let categories = load_categories_from_csv(&categories_path);
+        let sessions = load_sessions_from_csv(&sessions_path, &categories);
+
+        let export = DataExport {
+            schema_version: 1,
+            exported_at: Utc::now(),
+            categories: categories
+                .iter()
+                .skip(1)
+                .map(|c| {
+                    let color_pos = COLORS.iter().position(|&col| col == c.color).unwrap_or(0);
+                    CategoryExport {
+                        id: c.id.0,
+                        name: c.name.clone(),
+                        description: c.description.clone(),
+                        color_index: color_pos,
+                        karma_effect: c.karma_effect,
+                    }
+                })
+                .collect(),
+            sessions: sessions
+                .iter()
+                .map(|s| {
+                    let cat_name = categories
+                        .iter()
+                        .find(|c| c.id == s.category_id)
+                        .map(|c| c.name.as_str())
+                        .unwrap_or("none")
+                        .to_string();
+                    SessionExport {
+                        id: s.id,
+                        date: s.date.clone(),
+                        category_id: s.category_id.0,
+                        category_name: cat_name,
+                        project: None,
+                        description: s.description.clone(),
+                        start_time: s.start_time.clone(),
+                        end_time: s.end_time.clone(),
+                        elapsed_seconds: s.elapsed_seconds,
+                    }
+                })
+                .collect(),
+        };
+
+        match format {
+            ExportFormat::Json => {
+                let json = serde_json::to_string_pretty(&export).map_err(|e| e.to_string())?;
+                if let Some(path) = out_path {
+                    let mut file = File::create(&path).map_err(|e| e.to_string())?;
+                    file.write_all(json.as_bytes()).map_err(|e| e.to_string())?;
+                    println!("Exported to {}", path.display());
+                } else {
+                    println!("{}", json);
+                }
+            }
+            ExportFormat::Ics => {
+                let mut ics = String::new();
+                ics.push_str("BEGIN:VCALENDAR\r\n");
+                ics.push_str("VERSION:2.0\r\n");
+                ics.push_str("PRODID:-//strata//time tracking//EN\r\n");
+
+                for session in &export.sessions {
+                    if session.category_name == "none" || session.elapsed_seconds == 0 {
+                        continue;
+                    }
+                    let dt_start = format_ics_datetime(&session.date, &session.start_time);
+                    let dt_end = format_ics_datetime(&session.date, &session.end_time);
+                    let uid = format!("strata-session-{}", session.id);
+
+                    ics.push_str("BEGIN:VEVENT\r\n");
+                    ics.push_str(&format!("UID:{}\r\n", uid));
+                    ics.push_str(&format!("DTSTAMP:{}\r\n", format_ics_timestamp(Utc::now())));
+                    ics.push_str(&format!("DTSTART:{}\r\n", dt_start));
+                    ics.push_str(&format!("DTEND:{}\r\n", dt_end));
+                    ics.push_str(&format!(
+                        "SUMMARY:{} - {}\r\n",
+                        session.project.as_deref().unwrap_or("Project"),
+                        session.category_name
+                    ));
+                    if !session.description.is_empty() {
+                        ics.push_str(&format!("DESCRIPTION:{}\r\n", session.description));
+                    }
+                    ics.push_str(&format!("CATEGORIES:{}\r\n", session.category_name));
+                    ics.push_str("END:VEVENT\r\n");
+                }
+
+                ics.push_str("END:VCALENDAR\r\n");
+
+                if let Some(path) = out_path {
+                    let mut file = File::create(&path).map_err(|e| e.to_string())?;
+                    file.write_all(ics.as_bytes()).map_err(|e| e.to_string())?;
+                    println!("Exported to {}", path.display());
+                } else {
+                    println!("{}", ics);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn format_ics_datetime(date: &str, time: &str) -> String {
+        let dt = format!("{}T{}00", date.replace('-', ""), time.replace(':', ""));
+        dt
+    }
+
+    fn format_ics_timestamp(dt: DateTime<Utc>) -> String {
+        dt.format("%Y%m%dT%H%M%SZ").to_string()
+    }
+
+    pub fn print_completions(shell: &str) -> Result<(), String> {
+        use clap_complete::Shell;
+        match shell {
+            "bash" => {
+                clap_complete::generate(
+                    Shell::Bash,
+                    &mut Cli::command(),
+                    "strata",
+                    &mut io::stdout(),
+                );
+            }
+            "zsh" => {
+                clap_complete::generate(
+                    Shell::Zsh,
+                    &mut Cli::command(),
+                    "strata",
+                    &mut io::stdout(),
+                );
+            }
+            "fish" => {
+                clap_complete::generate(
+                    Shell::Fish,
+                    &mut Cli::command(),
+                    "strata",
+                    &mut io::stdout(),
+                );
+            }
+            _ => {
+                return Err(format!(
+                    "Unsupported shell: {}. Use bash, zsh, or fish.",
+                    shell
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn run_cli() {
+        let cli = Cli::parse();
+        match cli {
+            Cli::Start {
+                project,
+                desc,
+                category,
+            } => {
+                if let Err(e) = start_session(project, desc, category) {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            Cli::Stop => {
+                if let Err(e) = stop_session() {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            Cli::Report { today: _ } => {
+                if let Err(e) = report_today() {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            Cli::Export { format, out } => {
+                if let Err(e) = export_data(format, out) {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            Cli::Completions { shell } => {
+                if let Err(e) = print_completions(&shell) {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+}
+
 struct TimeSettings {
     tick_ms: u64,
     physics_ms: u64,
@@ -107,17 +720,29 @@ struct FilePaths {
     categories: &'static str,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+struct CategoryId(u64);
+
+impl CategoryId {
+    fn new(id: u64) -> Self {
+        CategoryId(id)
+    }
+}
+
+#[derive(Clone, Debug)]
 struct Category {
+    id: CategoryId,
     name: String,
     color: Color,
     description: String,
     karma_effect: i8,
 }
 
+#[derive(Clone, Debug)]
 struct Session {
     id: usize,
     date: String,
-    category: String,
+    category_id: CategoryId,
     description: String,
     start_time: String,
     end_time: String,
@@ -127,6 +752,7 @@ struct Session {
 struct TimeTracker {
     sessions: Vec<Session>,
     categories: Vec<Category>,
+    next_category_id: u64,
     current_session_start: Option<Instant>,
     session_id_counter: usize,
     active_category_index: Option<usize>,
@@ -137,11 +763,13 @@ impl TimeTracker {
         let mut tt = Self {
             sessions: Vec::new(),
             categories: vec![Category {
+                id: CategoryId::new(0),
                 name: "none".to_string(),
                 color: Color::White,
                 description: String::new(),
                 karma_effect: 1,
             }],
+            next_category_id: 1,
             current_session_start: None,
             session_id_counter: 0,
             active_category_index: Some(0),
@@ -151,7 +779,16 @@ impl TimeTracker {
         tt
     }
 
+    fn category_id_by_name(&self, name: &str) -> Option<CategoryId> {
+        self.categories
+            .iter()
+            .find(|c| c.name == name)
+            .map(|c| c.id)
+    }
+
     fn load_sessions(&mut self) {
+        self.load_categories();
+
         let path = Path::new(FILE_PATHS.time_log);
         if !path.exists() {
             return;
@@ -159,23 +796,25 @@ impl TimeTracker {
         if let Ok(file) = File::open(path) {
             let reader = BufReader::new(file);
             let mut max_id = 0;
-            for line in reader.lines().skip(1) {
-                if let Ok(line) = line {
-                    let parts: Vec<&str> = line.split(',').collect();
-                    if parts.len() >= 7 {
-                        if let Ok(id) = parts[0].parse::<usize>() {
-                            max_id = max_id.max(id);
-                            self.sessions.push(Session {
-                                id,
-                                date: parts[1].to_string(),
-                                category: parts[2].to_string(),
-                                description: parts[3].to_string(),
-                                start_time: parts[4].to_string(),
-                                end_time: parts[5].to_string(),
-                                elapsed_seconds: parts[6].parse().unwrap_or(0),
-                            });
-                        }
-                    }
+            for line in reader.lines().skip(1).flatten() {
+                let parts: Vec<&str> = line.split(',').collect();
+                if parts.len() >= 7
+                    && let Ok(id) = parts[0].parse::<usize>()
+                {
+                    max_id = max_id.max(id);
+                    let category_name = parts[2];
+                    let category_id = self
+                        .category_id_by_name(category_name)
+                        .unwrap_or(CategoryId::new(0));
+                    self.sessions.push(Session {
+                        id,
+                        date: parts[1].to_string(),
+                        category_id,
+                        description: parts[3].to_string(),
+                        start_time: parts[4].to_string(),
+                        end_time: parts[5].to_string(),
+                        elapsed_seconds: parts[6].parse().unwrap_or(0),
+                    });
                 }
             }
             self.session_id_counter = max_id + 1;
@@ -192,15 +831,22 @@ impl TimeTracker {
             let mut writer = io::BufWriter::new(file);
             let _ = writeln!(
                 writer,
-                "id,date,category,description,start_time,end_time,elapsed_seconds"
+                "id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds"
             );
             for session in &self.sessions {
+                let category_name = self
+                    .categories
+                    .iter()
+                    .find(|c| c.id == session.category_id)
+                    .map(|c| c.name.as_str())
+                    .unwrap_or("none");
                 let _ = writeln!(
                     writer,
-                    "{},{},{},{},{},{},{}",
+                    "{},{},{},{},{},{},{},{}",
                     session.id,
                     session.date,
-                    session.category,
+                    session.category_id.0,
+                    category_name,
                     session.description,
                     session.start_time,
                     session.end_time,
@@ -217,25 +863,26 @@ impl TimeTracker {
         }
         if let Ok(file) = File::open(path) {
             let reader = BufReader::new(file);
-            for line in reader.lines().skip(1) {
-                if let Ok(line) = line {
-                    let parts: Vec<&str> = line.split(',').collect();
-                    if parts.len() >= 3 {
-                        let name = parts[0].to_string();
-                        let description = parts[1].to_string();
-                        let color_idx: usize = parts[2].parse().unwrap_or(0) % COLORS.len();
-                        let karma_effect: i8 = if parts.len() >= 4 {
-                            parts[3].parse().unwrap_or(1)
-                        } else {
-                            1
-                        };
-                        self.categories.push(Category {
-                            name,
-                            color: COLORS[color_idx],
-                            description,
-                            karma_effect,
-                        });
-                    }
+            for line in reader.lines().skip(1).flatten() {
+                let parts: Vec<&str> = line.split(',').collect();
+                if parts.len() >= 3 {
+                    let name = parts[0].to_string();
+                    let description = parts[1].to_string();
+                    let color_idx: usize = parts[2].parse().unwrap_or(0) % COLORS.len();
+                    let karma_effect: i8 = if parts.len() >= 4 {
+                        parts[3].parse().unwrap_or(1)
+                    } else {
+                        1
+                    };
+                    let id = CategoryId::new(self.next_category_id);
+                    self.next_category_id += 1;
+                    self.categories.push(Category {
+                        id,
+                        name,
+                        color: COLORS[color_idx],
+                        description,
+                        karma_effect,
+                    });
                 }
             }
         }
@@ -249,14 +896,14 @@ impl TimeTracker {
             .open(FILE_PATHS.categories)
         {
             let mut writer = io::BufWriter::new(file);
-            let _ = writeln!(writer, "name,description,color_index,karma_effect");
+            let _ = writeln!(writer, "id,name,description,color_index,karma_effect");
             for (i, cat) in self.categories.iter().enumerate() {
                 if i > 0 {
                     let color_pos = COLORS.iter().position(|&c| c == cat.color).unwrap_or(0);
                     let _ = writeln!(
                         writer,
-                        "{},{},{},{}",
-                        cat.name, cat.description, color_pos, cat.karma_effect
+                        "{},{},{},{},{}",
+                        cat.id.0, cat.name, cat.description, color_pos, cat.karma_effect
                     );
                 }
             }
@@ -274,9 +921,9 @@ impl TimeTracker {
         if let Some(start_instant) = self.current_session_start {
             let elapsed = start_instant.elapsed().as_secs() as usize;
             if let Some(cat_idx) = self.active_category_index {
-                let cat_name = self.categories[cat_idx].name.clone();
+                let cat_id = self.categories[cat_idx].id;
                 let cat_description = self.categories[cat_idx].description.clone();
-                self.record_session(&cat_name, &cat_description, elapsed);
+                self.record_session(cat_id, &cat_description, elapsed);
                 self.categories[cat_idx].description.clear();
             }
             self.current_session_start = None;
@@ -286,7 +933,13 @@ impl TimeTracker {
         None
     }
 
-    fn record_session(&mut self, cat_name: &str, cat_description: &str, elapsed: usize) {
+    fn record_session(&mut self, cat_id: CategoryId, cat_description: &str, elapsed: usize) {
+        let cat_name = self
+            .categories
+            .iter()
+            .find(|c| c.id == cat_id)
+            .map(|c| c.name.as_str())
+            .unwrap_or("none");
         if cat_name == "none" {
             return;
         }
@@ -295,7 +948,7 @@ impl TimeTracker {
         if let Some(session) = self
             .sessions
             .iter_mut()
-            .find(|s| s.category == cat_name && s.date == now.format("%Y-%m-%d").to_string())
+            .find(|s| s.category_id == cat_id && s.date == now.format("%Y-%m-%d").to_string())
         {
             session.elapsed_seconds += elapsed;
             session.end_time = now.format("%H:%M:%S").to_string();
@@ -303,7 +956,7 @@ impl TimeTracker {
             self.sessions.push(Session {
                 id: self.session_id_counter,
                 date: now.format("%Y-%m-%d").to_string(),
-                category: cat_name.to_string(),
+                category_id: cat_id,
                 description: cat_description.to_string(),
                 start_time: start_time.format("%H:%M:%S").to_string(),
                 end_time: now.format("%H:%M:%S").to_string(),
@@ -314,25 +967,32 @@ impl TimeTracker {
 
     fn get_todays_time(&self) -> usize {
         let today = Local::now().format("%Y-%m-%d").to_string();
+        let none_id = CategoryId::new(0);
         self.sessions
             .iter()
-            .filter(|s| s.date == today && s.category != "none")
+            .filter(|s| s.date == today && s.category_id != none_id)
             .map(|s| s.elapsed_seconds)
             .sum()
     }
 
     fn get_category_time(&self, category_name: &str) -> usize {
+        let cat_id = self
+            .category_id_by_name(category_name)
+            .unwrap_or(CategoryId::new(0));
         let today = Local::now().format("%Y-%m-%d").to_string();
         self.sessions
             .iter()
-            .filter(|s| s.date == today && s.category == category_name)
+            .filter(|s| s.date == today && s.category_id == cat_id)
             .map(|s| s.elapsed_seconds)
             .sum()
     }
 
     fn add_category(&mut self, name: String, description: String) {
         let color_idx = (self.categories.len()) % COLORS.len();
+        let id = CategoryId::new(self.next_category_id);
+        self.next_category_id += 1;
         self.categories.push(Category {
+            id,
             name,
             color: COLORS[color_idx],
             description,
@@ -353,14 +1013,19 @@ impl TimeTracker {
 }
 
 struct SandEngine {
-    grid: Vec<Vec<Option<usize>>>,
+    grid: Vec<Vec<Option<CategoryId>>>,
     width: u16,
     height: u16,
     frame_count: usize,
     grain_count: usize,
+    categories: Vec<Category>,
 }
 
 impl SandEngine {
+    fn set_categories(&mut self, categories: &[Category]) {
+        self.categories = categories.to_vec();
+    }
+
     fn new(width: u16, height: u16) -> Self {
         let mut se = Self {
             grid: vec![],
@@ -368,6 +1033,7 @@ impl SandEngine {
             height,
             frame_count: 0,
             grain_count: 0,
+            categories: vec![],
         };
         se.resize(width, height);
         se
@@ -398,13 +1064,9 @@ impl SandEngine {
 
         let mut new_grid = vec![vec![None; new_w]; new_h];
 
-        let mut lost_left: Vec<usize> = vec![0; 12];
-        let mut lost_right: Vec<usize> = vec![0; 12];
-        let mut lost_top: Vec<usize> = vec![0; 12];
-        let mut lost_bottom: Vec<usize> = vec![0; 12];
+        let mut lost_count = 0;
         let mut kept_count = 0;
 
-        // Horizontal: shift dots toward center
         let x_shift = if new_w > old_w {
             (new_w - old_w) / 2
         } else if new_w < old_w {
@@ -413,7 +1075,6 @@ impl SandEngine {
             0
         };
 
-        // Vertical: shift dots toward center
         let y_shift = if new_h > old_h {
             (new_h - old_h) / 2
         } else if new_h < old_h {
@@ -422,7 +1083,6 @@ impl SandEngine {
             0
         };
 
-        // Copy dots with symmetric shift
         for y in 0..old_h {
             for x in 0..old_w {
                 let dest_x = if new_w >= old_w {
@@ -441,173 +1101,41 @@ impl SandEngine {
                     if new_grid[dest_y][dest_x].is_some() {
                         kept_count += 1;
                     }
-                }
-            }
-        }
-
-        // Track lost dots from edges (both sides for symmetric squeeze)
-        for y in 0..old_h {
-            for x in 0..old_w {
-                let dest_x = if new_w >= old_w {
-                    x + x_shift
-                } else {
-                    x.saturating_sub(x_shift)
-                };
-                let dest_y = if new_h >= old_h {
-                    y + y_shift
-                } else {
-                    y.saturating_sub(y_shift)
-                };
-                let was_copied = dest_x < new_w && dest_y < new_h;
-
-                if !was_copied {
-                    if let Some(cat) = self.grid[y][x] {
-                        let idx = cat.min(11);
-                        // Left edge lost (when shrinking from left)
-                        if new_w < old_w && x < x_shift {
-                            lost_left[idx] += 1;
-                        }
-                        // Right edge lost (when shrinking from right)
-                        else if new_w < old_w && x >= new_w + x_shift {
-                            lost_right[idx] += 1;
-                        }
-                        // Top edge lost (when shrinking from top)
-                        if new_h < old_h && y < y_shift {
-                            lost_top[idx] += 1;
-                        }
-                        // Bottom edge lost (when shrinking from bottom)
-                        else if new_h < old_h && y >= new_h + y_shift {
-                            lost_bottom[idx] += 1;
-                        }
-                    }
+                } else if self.grid[y][x].is_some() {
+                    lost_count += 1;
                 }
             }
         }
 
         self.grid = new_grid;
 
-        let lost_total = lost_left.iter().sum::<usize>()
-            + lost_right.iter().sum::<usize>()
-            + lost_top.iter().sum::<usize>()
-            + lost_bottom.iter().sum::<usize>();
-
-        if lost_total == 0 {
+        if lost_count == 0 {
             self.grain_count = kept_count;
             return;
         }
 
         let new_capacity = new_w * new_h;
         let available_space = new_capacity.saturating_sub(kept_count);
-        let to_redistribute = lost_total.min(available_space);
+        let to_redistribute = lost_count.min(available_space);
 
+        let mut rng = rand::thread_rng();
         let mut redistributed = 0;
+        let mut attempts = 0;
+        let max_attempts = to_redistribute * 10;
 
-        // Redistribute lost dots to nearest edges
-        for cat_idx in 0..12 {
-            if redistributed >= to_redistribute {
-                break;
-            }
-
-            // Lost from left edge -> redistribute to left edge
-            let cat_from_left = lost_left[cat_idx];
-            if cat_from_left > 0 {
-                let to_place = cat_from_left.min(to_redistribute.saturating_sub(redistributed));
-                let mut placed = 0;
-                for x in 0..new_w {
-                    if placed >= to_place || redistributed >= to_redistribute {
-                        break;
-                    }
-                    for y in 0..new_h {
-                        if placed >= to_place || redistributed >= to_redistribute {
-                            break;
-                        }
-                        if self.grid[y][x].is_none() {
-                            self.grid[y][x] = Some(cat_idx);
-                            placed += 1;
-                            redistributed += 1;
-                        }
-                    }
-                }
-            }
-
-            if redistributed >= to_redistribute {
-                break;
-            }
-
-            // Lost from right edge -> redistribute to right edge
-            let cat_from_right = lost_right[cat_idx];
-            if cat_from_right > 0 {
-                let to_place = cat_from_right.min(to_redistribute.saturating_sub(redistributed));
-                let mut placed = 0;
-                for offset in 0..new_w {
-                    if placed >= to_place || redistributed >= to_redistribute {
-                        break;
-                    }
-                    let x = new_w - 1 - offset;
-                    for y in 0..new_h {
-                        if placed >= to_place || redistributed >= to_redistribute {
-                            break;
-                        }
-                        if self.grid[y][x].is_none() {
-                            self.grid[y][x] = Some(cat_idx);
-                            placed += 1;
-                            redistributed += 1;
-                        }
-                    }
-                }
-            }
-
-            if redistributed >= to_redistribute {
-                break;
-            }
-
-            // Lost from top edge -> redistribute to top edge
-            let cat_from_top = lost_top[cat_idx];
-            if cat_from_top > 0 {
-                let to_place = cat_from_top.min(to_redistribute.saturating_sub(redistributed));
-                let mut placed = 0;
-                for y in 0..new_h {
-                    if placed >= to_place || redistributed >= to_redistribute {
-                        break;
-                    }
-                    for x in 0..new_w {
-                        if placed >= to_place || redistributed >= to_redistribute {
-                            break;
-                        }
-                        if self.grid[y][x].is_none() {
-                            self.grid[y][x] = Some(cat_idx);
-                            placed += 1;
-                            redistributed += 1;
-                        }
-                    }
-                }
-            }
-
-            if redistributed >= to_redistribute {
-                break;
-            }
-
-            // Lost from bottom edge -> redistribute to bottom edge
-            let cat_from_bottom = lost_bottom[cat_idx];
-            if cat_from_bottom > 0 {
-                let to_place = cat_from_bottom.min(to_redistribute.saturating_sub(redistributed));
-                let mut placed = 0;
-                for offset in 0..new_h {
-                    if placed >= to_place || redistributed >= to_redistribute {
-                        break;
-                    }
-                    let y = new_h - 1 - offset;
-                    for x in 0..new_w {
-                        if placed >= to_place || redistributed >= to_redistribute {
-                            break;
-                        }
-                        if self.grid[y][x].is_none() {
-                            self.grid[y][x] = Some(cat_idx);
-                            placed += 1;
-                            redistributed += 1;
-                        }
-                    }
-                }
+        while redistributed < to_redistribute && attempts < max_attempts {
+            attempts += 1;
+            let x = rng.gen_range(0..new_w);
+            let y = rng.gen_range(0..new_h);
+            if self.grid[y][x].is_none() {
+                let sample_cat = self
+                    .categories
+                    .iter()
+                    .find(|c| c.id != CategoryId::new(0))
+                    .map(|c| c.id)
+                    .unwrap_or(CategoryId::new(0));
+                self.grid[y][x] = Some(sample_cat);
+                redistributed += 1;
             }
         }
 
@@ -622,7 +1150,7 @@ impl SandEngine {
         }
     }
 
-    fn spawn(&mut self, category_idx: usize) {
+    fn spawn(&mut self, category_id: CategoryId) {
         let capacity = self.capacity();
         if capacity == 0 {
             return;
@@ -634,12 +1162,12 @@ impl SandEngine {
         let x = rng.gen_range(0..w);
 
         if self.grid[0][x].is_none() {
-            self.grid[0][x] = Some(category_idx);
+            self.grid[0][x] = Some(category_id);
             self.grain_count += 1;
         } else {
             let fallback_x = rng.gen_range(0..w);
             if self.grid[0][fallback_x].is_none() {
-                self.grid[0][fallback_x] = Some(category_idx);
+                self.grid[0][fallback_x] = Some(category_id);
                 self.grain_count += 1;
             }
         }
@@ -676,21 +1204,26 @@ impl SandEngine {
         }
     }
 
-    fn render(&self, category_colors: &[Color]) -> Vec<Line<'static>> {
+    fn render(&self, categories: &[Category]) -> Vec<Line<'static>> {
         let cell_w = self.width as usize;
         let cell_h = (self.height / SAND_ENGINE.dot_height as u16) as usize;
         let grid_h = self.grid.len();
         let grid_w = self.grid.first().map_or(0, |row| row.len());
         let mut lines: Vec<Line<'static>> = Vec::with_capacity(cell_h);
 
+        let category_map: std::collections::HashMap<CategoryId, usize> = categories
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.id, i))
+            .collect();
+
         for cy in 0..cell_h {
             let mut spans: Vec<Span<'static>> = Vec::with_capacity(cell_w);
 
             for cx in 0..cell_w {
                 let mut dots = 0u8;
-                let mut best_cat = 0;
-                let mut best_count = 0;
-                let mut counts: Vec<usize> = vec![0; 12];
+                let num_categories = categories.len();
+                let mut counts: Vec<usize> = vec![0; num_categories.max(1)];
 
                 for dy in 0..SAND_ENGINE.dot_height {
                     for dx in 0..SAND_ENGINE.dot_width {
@@ -698,7 +1231,7 @@ impl SandEngine {
                         let gy = cy * SAND_ENGINE.dot_height + dy;
 
                         if gy < grid_h && gx < grid_w {
-                            if let Some(cat_idx) = self.grid[gy][gx] {
+                            if let Some(cat_id) = self.grid[gy][gx] {
                                 let dot_index = match (dx, dy) {
                                     (0, 0) => 0,
                                     (0, 1) => 1,
@@ -712,25 +1245,43 @@ impl SandEngine {
                                 };
                                 dots |= 1 << dot_index;
 
-                                let cat_count = cat_idx.min(11);
+                                let cat_pos = category_map.get(&cat_id).copied().unwrap_or(0);
+                                let cat_count = cat_pos.min(num_categories.saturating_sub(1));
                                 counts[cat_count] += 1;
-                                if counts[cat_count] > best_count {
-                                    best_count = counts[cat_count];
-                                    best_cat = cat_count;
-                                }
                             }
                         }
                     }
                 }
 
-                let color = if best_count > 0 {
-                    if best_cat == 0 {
-                        Color::White
-                    } else if best_cat < category_colors.len() {
-                        category_colors[best_cat]
-                    } else {
-                        COLORS[best_cat % COLORS.len()]
+                let total_colored_dots: usize = counts.iter().sum();
+                let color = if total_colored_dots > 0 {
+                    let mut blended_r = 0f32;
+                    let mut blended_g = 0f32;
+                    let mut blended_b = 0f32;
+
+                    for (cat_idx, &count) in counts.iter().enumerate() {
+                        if count > 0 {
+                            let (r, g, b) = if cat_idx == 0 {
+                                (255u8, 255u8, 255u8)
+                            } else if cat_idx < categories.len() {
+                                match categories[cat_idx].color {
+                                    Color::Rgb(r, g, b) => (r, g, b),
+                                    _ => (255, 255, 255),
+                                }
+                            } else {
+                                match COLORS[cat_idx % COLORS.len()] {
+                                    Color::Rgb(r, g, b) => (r, g, b),
+                                    _ => (255, 255, 255),
+                                }
+                            };
+                            let weight = count as f32 / total_colored_dots as f32;
+                            blended_r += r as f32 * weight;
+                            blended_g += g as f32 * weight;
+                            blended_b += b as f32 * weight;
+                        }
                     }
+
+                    Color::Rgb(blended_r as u8, blended_g as u8, blended_b as u8)
                 } else {
                     Color::White
                 };
@@ -873,7 +1424,7 @@ impl App {
                 .time_tracker
                 .sessions
                 .iter()
-                .filter(|s| s.date == today && s.category == cat.name)
+                .filter(|s| s.date == today && s.category_id == cat.id)
                 .map(|s| s.elapsed_seconds as isize)
                 .sum();
             total += cat_time * cat.karma_effect as isize;
@@ -893,7 +1444,7 @@ impl App {
                 .time_tracker
                 .sessions
                 .iter()
-                .filter(|s| s.date == today && s.category == category_name)
+                .filter(|s| s.date == today && s.category_id == cat.id)
                 .map(|s| s.elapsed_seconds as isize)
                 .sum();
             cat_time * cat.karma_effect as isize
@@ -1237,6 +1788,12 @@ impl App {
 }
 
 fn main() -> Result<(), io::Error> {
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() > 1 {
+        cli::run_cli();
+        return Ok(());
+    }
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -1263,7 +1820,8 @@ fn main() -> Result<(), io::Error> {
 
             if should_spawn {
                 let cat_idx = app.time_tracker.active_category_index.unwrap_or(0);
-                app.sand_engine.spawn(cat_idx);
+                let cat_id = app.time_tracker.categories[cat_idx].id;
+                app.sand_engine.spawn(cat_id);
                 app.render_needed = true;
             }
 
@@ -1297,13 +1855,7 @@ fn main() -> Result<(), io::Error> {
                     app.sand_engine.resize(inner_width, inner_height);
                 }
 
-                let category_colors: Vec<Color> = app
-                    .time_tracker
-                    .categories
-                    .iter()
-                    .map(|c| c.color)
-                    .collect();
-                let sand = app.sand_engine.render(&category_colors);
+                let sand = app.sand_engine.render(&app.time_tracker.categories);
 
                 let category_name = if app.time_tracker.active_category_index == Some(0) {
                     app.get_idle_face()
@@ -1436,4 +1988,81 @@ fn main() -> Result<(), io::Error> {
     terminal.show_cursor()?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_category_id_stability_on_reorder() {
+        let mut tt = TimeTracker::new();
+
+        let initial_session_count = tt.sessions.len();
+
+        tt.add_category("Work".to_string(), "Work category".to_string());
+        tt.add_category("Personal".to_string(), "Personal category".to_string());
+
+        let work_id = tt.categories[1].id;
+        let personal_id = tt.categories[2].id;
+
+        tt.record_session(work_id, "work session", 100);
+        tt.record_session(personal_id, "personal session", 200);
+
+        let work_sessions_before: Vec<_> = tt
+            .sessions
+            .iter()
+            .filter(|s| s.category_id == work_id)
+            .collect();
+        let personal_sessions_before: Vec<_> = tt
+            .sessions
+            .iter()
+            .filter(|s| s.category_id == personal_id)
+            .collect();
+
+        assert_eq!(work_sessions_before.len(), 1, "Should have 1 work session");
+        assert_eq!(
+            personal_sessions_before.len(),
+            1,
+            "Should have 1 personal session"
+        );
+
+        tt.categories.swap(1, 2);
+
+        let work_sessions_after: Vec<_> = tt
+            .sessions
+            .iter()
+            .filter(|s| s.category_id == work_id)
+            .collect();
+        let personal_sessions_after: Vec<_> = tt
+            .sessions
+            .iter()
+            .filter(|s| s.category_id == personal_id)
+            .collect();
+
+        assert_eq!(
+            work_sessions_after.len(),
+            1,
+            "Work sessions should be preserved after reorder"
+        );
+        assert_eq!(
+            personal_sessions_after.len(),
+            1,
+            "Personal sessions should be preserved after reorder"
+        );
+
+        assert_eq!(
+            tt.sessions.len(),
+            initial_session_count + 2,
+            "Should have added 2 new sessions"
+        );
+    }
+
+    #[test]
+    fn test_category_id_new() {
+        let id1 = CategoryId::new(1);
+        let id2 = CategoryId::new(2);
+        assert_ne!(id1, id2);
+        assert_eq!(id1, CategoryId::new(1));
+    }
 }
