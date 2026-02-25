@@ -1,9 +1,4 @@
-use std::{
-    collections::HashMap,
-    fs,
-    io::{self, Write},
-    path::PathBuf,
-};
+use std::{collections::HashMap, io, path::PathBuf};
 
 use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
 use clap::{CommandFactory, Parser, ValueEnum};
@@ -129,8 +124,7 @@ pub fn start_session(
     };
 
     let session_path = storage::get_active_session_path();
-    let json = serde_json::to_string_pretty(&session).map_err(|e| e.to_string())?;
-    storage::atomic_write(&session_path, &json)?;
+    storage::write_json_atomic(&session_path, &session)?;
 
     println!(
         "Started session for project '{}' in category '{}'",
@@ -141,13 +135,11 @@ pub fn start_session(
 
 pub fn stop_session() -> Result<usize, String> {
     let session_path = storage::get_active_session_path();
-    if !session_path.exists() {
+    if !storage::file_exists(&session_path) {
         return Err("No active session to stop".to_string());
     }
 
-    let content = fs::read_to_string(&session_path).map_err(|e| e.to_string())?;
-    let active_session: ActiveSession =
-        serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    let active_session: ActiveSession = storage::read_json(&session_path)?;
 
     let elapsed = (Utc::now() - active_session.start_time).num_seconds() as usize;
 
@@ -181,10 +173,9 @@ pub fn stop_session() -> Result<usize, String> {
         });
     }
 
-    storage::save_sessions_to_csv(&sessions_path, &sessions, &categories)
-        .map_err(|e| e.to_string())?;
+    storage::save_sessions_to_csv(&sessions_path, &sessions, &categories)?;
 
-    fs::remove_file(&session_path).ok();
+    storage::delete_file_if_exists(&session_path)?;
 
     println!(
         "Stopped session. Elapsed time: {:02}:{:02}:{:02}",
@@ -298,8 +289,7 @@ pub fn export_data(format: ExportFormat, out_path: Option<PathBuf>) -> Result<()
         ExportFormat::Json => {
             let json = serde_json::to_string_pretty(&export).map_err(|e| e.to_string())?;
             if let Some(path) = out_path {
-                let mut file = fs::File::create(&path).map_err(|e| e.to_string())?;
-                file.write_all(json.as_bytes()).map_err(|e| e.to_string())?;
+                storage::write_text_file(&path, &json)?;
                 println!("Exported to {}", path.display());
             } else {
                 println!("{}", json);
@@ -339,8 +329,7 @@ pub fn export_data(format: ExportFormat, out_path: Option<PathBuf>) -> Result<()
             ics.push_str("END:VCALENDAR\r\n");
 
             if let Some(path) = out_path {
-                let mut file = fs::File::create(&path).map_err(|e| e.to_string())?;
-                file.write_all(ics.as_bytes()).map_err(|e| e.to_string())?;
+                storage::write_text_file(&path, &ics)?;
                 println!("Exported to {}", path.display());
             } else {
                 println!("{}", ics);

@@ -1,13 +1,14 @@
 use std::{
     collections::HashMap,
-    fs::{self, File, OpenOptions},
-    io::{self, Write},
+    fs::{self, File},
+    io::Write,
     path::{Path, PathBuf},
 };
 
 use chrono::Local;
 use directories::ProjectDirs;
 use ratatui::style::Color;
+use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
     constants::COLORS,
@@ -183,59 +184,47 @@ pub fn load_sessions_from_csv(path: &Path, categories: &[Category]) -> LoadedSes
     }
 }
 
-pub fn save_categories_to_csv(path: &Path, categories: &[Category]) -> io::Result<()> {
-    let file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(path)?;
+pub fn save_categories_to_csv(path: &Path, categories: &[Category]) -> Result<(), String> {
+    let mut content = String::new();
+    content.push_str("id,name,description,color_index,karma_effect\n");
 
-    let mut writer = io::BufWriter::new(file);
-    writeln!(writer, "id,name,description,color_index,karma_effect")?;
-
-    for cat in categories {
-        if cat.id.0 == 0 {
+    for category in categories {
+        if category.id.0 == 0 {
             continue;
         }
 
-        let color_pos = COLORS.iter().position(|&c| c == cat.color).unwrap_or(0);
-        writeln!(
-            writer,
-            "{},{},{},{},{}",
-            cat.id.0, cat.name, cat.description, color_pos, cat.karma_effect
-        )?;
+        let color_pos = COLORS
+            .iter()
+            .position(|&color| color == category.color)
+            .unwrap_or(0);
+        content.push_str(&format!(
+            "{},{},{},{},{}\n",
+            category.id.0, category.name, category.description, color_pos, category.karma_effect
+        ));
     }
 
-    Ok(())
+    atomic_write(path, &content)
 }
 
 pub fn save_sessions_to_csv(
     path: &Path,
     sessions: &[Session],
     categories: &[Category],
-) -> io::Result<()> {
-    let file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(path)?;
-
-    let mut writer = io::BufWriter::new(file);
-    writeln!(
-        writer,
-        "id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds"
-    )?;
+) -> Result<(), String> {
+    let mut content = String::new();
+    content.push_str(
+        "id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds\n",
+    );
 
     for session in sessions {
         let category_name = categories
             .iter()
-            .find(|c| c.id == session.category_id)
-            .map(|c| c.name.as_str())
+            .find(|category| category.id == session.category_id)
+            .map(|category| category.name.as_str())
             .unwrap_or("none");
 
-        writeln!(
-            writer,
-            "{},{},{},{},{},{},{},{}",
+        content.push_str(&format!(
+            "{},{},{},{},{},{},{},{}\n",
             session.id,
             session.date,
             session.category_id.0,
@@ -244,10 +233,10 @@ pub fn save_sessions_to_csv(
             session.start_time,
             session.end_time,
             session.elapsed_seconds
-        )?;
+        ));
     }
 
-    Ok(())
+    atomic_write(path, &content)
 }
 
 pub fn get_data_dir() -> PathBuf {
@@ -279,6 +268,31 @@ pub fn get_state_dir() -> PathBuf {
 
 pub fn get_active_session_path() -> PathBuf {
     get_state_dir().join("active_session.json")
+}
+
+pub fn file_exists(path: &Path) -> bool {
+    path.exists()
+}
+
+pub fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T, String> {
+    let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&content).map_err(|e| e.to_string())
+}
+
+pub fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
+    atomic_write(path, &json)
+}
+
+pub fn delete_file_if_exists(path: &Path) -> Result<(), String> {
+    if path.exists() {
+        fs::remove_file(path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+pub fn write_text_file(path: &Path, content: &str) -> Result<(), String> {
+    atomic_write(path, content)
 }
 
 pub fn create_backup(path: &Path) -> Result<(), String> {
@@ -434,4 +448,114 @@ pub fn migrate_csv() -> Result<(), String> {
 
     println!("Migration complete!");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, path::PathBuf, time::SystemTime};
+
+    use serde::{Deserialize, Serialize};
+
+    use super::*;
+
+    fn unique_path(prefix: &str, extension: &str) -> PathBuf {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        PathBuf::from(format!("/tmp/{}_{}.{}", prefix, now, extension))
+    }
+
+    #[test]
+    fn test_categories_round_trip() {
+        let path = unique_path("strata_categories_roundtrip", "csv");
+        let categories = vec![
+            Category {
+                id: CategoryId::new(0),
+                name: "none".to_string(),
+                color: Color::White,
+                description: String::new(),
+                karma_effect: 1,
+            },
+            Category {
+                id: CategoryId::new(1),
+                name: "Work".to_string(),
+                color: COLORS[0],
+                description: "focus".to_string(),
+                karma_effect: 1,
+            },
+        ];
+
+        save_categories_to_csv(&path, &categories).unwrap();
+        let loaded = load_categories_from_csv(&path);
+
+        assert_eq!(loaded.categories.len(), 2);
+        assert_eq!(loaded.categories[1].id, CategoryId::new(1));
+        assert_eq!(loaded.categories[1].name, "Work");
+        assert_eq!(loaded.categories[1].description, "focus");
+
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn test_sessions_round_trip() {
+        let path = unique_path("strata_sessions_roundtrip", "csv");
+        let categories = vec![
+            Category {
+                id: CategoryId::new(0),
+                name: "none".to_string(),
+                color: Color::White,
+                description: String::new(),
+                karma_effect: 1,
+            },
+            Category {
+                id: CategoryId::new(2),
+                name: "DeepWork".to_string(),
+                color: COLORS[1],
+                description: String::new(),
+                karma_effect: 1,
+            },
+        ];
+        let sessions = vec![Session {
+            id: 7,
+            date: "2026-02-25".to_string(),
+            category_id: CategoryId::new(2),
+            description: "plan".to_string(),
+            start_time: "10:00:00".to_string(),
+            end_time: "11:00:00".to_string(),
+            elapsed_seconds: 3600,
+        }];
+
+        save_sessions_to_csv(&path, &sessions, &categories).unwrap();
+        let loaded = load_sessions_from_csv(&path, &categories);
+
+        assert_eq!(loaded.sessions.len(), 1);
+        assert_eq!(loaded.sessions[0].id, 7);
+        assert_eq!(loaded.sessions[0].category_id, CategoryId::new(2));
+        assert_eq!(loaded.sessions[0].elapsed_seconds, 3600);
+
+        fs::remove_file(path).ok();
+    }
+
+    #[derive(Debug, Serialize, Deserialize, PartialEq)]
+    struct TestJsonValue {
+        name: String,
+        count: usize,
+    }
+
+    #[test]
+    fn test_json_helper_round_trip() {
+        let path = unique_path("strata_json_roundtrip", "json");
+        let value = TestJsonValue {
+            name: "sample".to_string(),
+            count: 3,
+        };
+
+        write_json_atomic(&path, &value).unwrap();
+        let loaded: TestJsonValue = read_json(&path).unwrap();
+        assert_eq!(loaded, value);
+
+        delete_file_if_exists(&path).unwrap();
+        assert!(!path.exists());
+    }
 }

@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::{
-    constants::{COLORS, SAND_ENGINE},
+    constants::SAND_ENGINE,
     domain::{Category, CategoryId},
 };
 
@@ -145,19 +145,18 @@ impl SandEngine {
         let grid_w = self.grid.first().map_or(0, |row| row.len());
         let mut lines: Vec<Line<'static>> = Vec::with_capacity(cell_h);
 
-        let category_map: HashMap<CategoryId, usize> = categories
+        let category_colors: HashMap<CategoryId, Color> = categories
             .iter()
-            .enumerate()
-            .map(|(i, c)| (c.id, i))
+            .map(|category| (category.id, category.color))
             .collect();
+        let none_id = CategoryId::new(0);
 
         for cy in 0..cell_h {
             let mut spans: Vec<Span<'static>> = Vec::with_capacity(cell_w);
 
             for cx in 0..cell_w {
                 let mut dots = 0u8;
-                let num_categories = categories.len();
-                let mut counts: Vec<usize> = vec![0; num_categories.max(1)];
+                let mut counts: HashMap<CategoryId, usize> = HashMap::new();
 
                 for dy in 0..SAND_ENGINE.dot_height {
                     for dx in 0..SAND_ENGINE.dot_width {
@@ -179,40 +178,33 @@ impl SandEngine {
                                 };
                                 dots |= 1 << dot_index;
 
-                                let cat_pos = category_map.get(&cat_id).copied().unwrap_or(0);
-                                let cat_count = cat_pos.min(num_categories.saturating_sub(1));
-                                counts[cat_count] += 1;
+                                *counts.entry(cat_id).or_insert(0) += 1;
                             }
                         }
                     }
                 }
 
-                let total_colored_dots: usize = counts.iter().sum();
+                let total_colored_dots: usize = counts.values().sum();
                 let color = if total_colored_dots > 0 {
                     let mut blended_r = 0f32;
                     let mut blended_g = 0f32;
                     let mut blended_b = 0f32;
 
-                    for (cat_idx, &count) in counts.iter().enumerate() {
-                        if count == 0 {
-                            continue;
-                        }
-
-                        let (r, g, b) = if cat_idx == 0 {
+                    for (category_id, count) in &counts {
+                        let (r, g, b) = if *category_id == none_id {
                             (255u8, 255u8, 255u8)
-                        } else if cat_idx < categories.len() {
-                            match categories[cat_idx].color {
-                                Color::Rgb(r, g, b) => (r, g, b),
-                                _ => (255, 255, 255),
-                            }
                         } else {
-                            match COLORS[cat_idx % COLORS.len()] {
+                            match category_colors
+                                .get(category_id)
+                                .copied()
+                                .unwrap_or(Color::White)
+                            {
                                 Color::Rgb(r, g, b) => (r, g, b),
                                 _ => (255, 255, 255),
                             }
                         };
 
-                        let weight = count as f32 / total_colored_dots as f32;
+                        let weight = *count as f32 / total_colored_dots as f32;
                         blended_r += r as f32 * weight;
                         blended_g += g as f32 * weight;
                         blended_b += b as f32 * weight;
