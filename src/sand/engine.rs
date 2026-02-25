@@ -1,10 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rand::Rng;
 use ratatui::{
     prelude::{Line, Span},
     style::{Color, Stylize},
 };
+use serde::{Deserialize, Serialize};
 
 use crate::{
     constants::SAND_ENGINE,
@@ -12,6 +13,25 @@ use crate::{
 };
 
 use super::resize::resize_grid;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SandStateGrain {
+    pub x: usize,
+    pub y: usize,
+    pub category_id: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SandState {
+    pub version: u8,
+    pub grid_width: usize,
+    pub grid_height: usize,
+    pub grains: Vec<SandStateGrain>,
+}
+
+impl SandState {
+    pub const VERSION: u8 = 1;
+}
 
 pub struct SandEngine {
     pub(crate) grid: Vec<Vec<Option<CategoryId>>>,
@@ -233,10 +253,90 @@ impl SandEngine {
         }
         self.grain_count = 0;
     }
+
+    pub fn snapshot_state(&self) -> SandState {
+        let grid_height = self.grid.len();
+        let grid_width = self.grid.first().map_or(0, |row| row.len());
+        let mut grains = Vec::with_capacity(self.grain_count);
+
+        for (y, row) in self.grid.iter().enumerate() {
+            for (x, cell) in row.iter().enumerate() {
+                if let Some(category_id) = cell {
+                    grains.push(SandStateGrain {
+                        x,
+                        y,
+                        category_id: category_id.0,
+                    });
+                }
+            }
+        }
+
+        SandState {
+            version: SandState::VERSION,
+            grid_width,
+            grid_height,
+            grains,
+        }
+    }
+
+    pub fn restore_state(&mut self, state: &SandState, valid_category_ids: &HashSet<CategoryId>) {
+        if state.version != SandState::VERSION {
+            return;
+        }
+
+        if state.grid_width == 0 || state.grid_height == 0 {
+            self.clear();
+            return;
+        }
+
+        let mut restored = vec![vec![None; state.grid_width]; state.grid_height];
+        let none_id = CategoryId::new(0);
+
+        for grain in &state.grains {
+            if grain.x >= state.grid_width || grain.y >= state.grid_height {
+                continue;
+            }
+
+            let category_id = CategoryId::new(grain.category_id);
+            let normalized_id = if valid_category_ids.contains(&category_id) {
+                category_id
+            } else {
+                none_id
+            };
+
+            restored[grain.y][grain.x] = Some(normalized_id);
+        }
+
+        let target_height = self.grid.len();
+        let target_width = self.grid.first().map_or(0, |row| row.len());
+
+        self.grid = if target_width == 0 || target_height == 0 {
+            restored
+        } else if target_width == state.grid_width && target_height == state.grid_height {
+            restored
+        } else {
+            resize_grid(
+                &restored,
+                target_width,
+                target_height,
+                SAND_ENGINE.dot_width,
+                SAND_ENGINE.dot_height,
+            )
+        };
+
+        self.grain_count = self
+            .grid
+            .iter()
+            .flat_map(|row| row.iter())
+            .filter(|cell| cell.is_some())
+            .count();
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use crate::{constants::SAND_ENGINE, domain::CategoryId, sand::SandEngine};
 
     #[test]
@@ -435,5 +535,58 @@ mod tests {
             .count();
 
         assert!(work_count > 0);
+    }
+
+    #[test]
+    fn test_sand_state_snapshot_restore_round_trip() {
+        let mut se = SandEngine::new(20, 20);
+        se.clear();
+        se.grid[3][2] = Some(CategoryId::new(1));
+        se.grid[10][7] = Some(CategoryId::new(2));
+        se.grain_count = 2;
+
+        let state = se.snapshot_state();
+
+        let mut restored = SandEngine::new(20, 20);
+        let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1), CategoryId::new(2)]);
+        restored.restore_state(&state, &valid);
+
+        assert_eq!(restored.grid[3][2], Some(CategoryId::new(1)));
+        assert_eq!(restored.grid[10][7], Some(CategoryId::new(2)));
+        assert_eq!(restored.grain_count, 2);
+    }
+
+    #[test]
+    fn test_sand_state_restore_maps_unknown_category_to_none() {
+        let mut se = SandEngine::new(20, 20);
+        se.clear();
+        se.grid[2][2] = Some(CategoryId::new(99));
+        se.grain_count = 1;
+
+        let state = se.snapshot_state();
+
+        let mut restored = SandEngine::new(20, 20);
+        let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
+        restored.restore_state(&state, &valid);
+
+        assert_eq!(restored.grid[2][2], Some(CategoryId::new(0)));
+        assert_eq!(restored.grain_count, 1);
+    }
+
+    #[test]
+    fn test_sand_state_restore_resizes_to_current_grid() {
+        let mut small = SandEngine::new(20, 20);
+        small.clear();
+        small.grid[2][2] = Some(CategoryId::new(1));
+        small.grid[20][20] = Some(CategoryId::new(2));
+        small.grain_count = 2;
+
+        let state = small.snapshot_state();
+
+        let mut large = SandEngine::new(40, 40);
+        let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1), CategoryId::new(2)]);
+        large.restore_state(&state, &valid);
+
+        assert_eq!(large.grain_count, 2);
     }
 }

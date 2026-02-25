@@ -13,6 +13,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use crate::{
     constants::COLORS,
     domain::{Category, CategoryId, Session},
+    sand::SandState,
 };
 
 pub struct LoadedCategories {
@@ -268,6 +269,32 @@ pub fn get_state_dir() -> PathBuf {
 
 pub fn get_active_session_path() -> PathBuf {
     get_state_dir().join("active_session.json")
+}
+
+pub fn get_sand_state_path() -> PathBuf {
+    get_state_dir().join("sand_state.json")
+}
+
+pub fn load_sand_state(path: &Path) -> Option<SandState> {
+    if !path.exists() {
+        return None;
+    }
+
+    match read_json::<SandState>(path) {
+        Ok(state) if state.version == SandState::VERSION => Some(state),
+        Ok(_) => {
+            eprintln!("Warning: Unsupported sand state version, ignoring saved layout");
+            None
+        }
+        Err(e) => {
+            eprintln!("Warning: Could not load sand state: {}", e);
+            None
+        }
+    }
+}
+
+pub fn save_sand_state(path: &Path, state: &SandState) -> Result<(), String> {
+    write_json_atomic(path, state)
 }
 
 pub fn file_exists(path: &Path) -> bool {
@@ -554,6 +581,35 @@ mod tests {
         write_json_atomic(&path, &value).unwrap();
         let loaded: TestJsonValue = read_json(&path).unwrap();
         assert_eq!(loaded, value);
+
+        delete_file_if_exists(&path).unwrap();
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn test_sand_state_round_trip() {
+        let path = unique_path("strata_sand_state_roundtrip", "json");
+        let state = SandState {
+            version: SandState::VERSION,
+            grid_width: 8,
+            grid_height: 6,
+            grains: vec![
+                crate::sand::SandStateGrain {
+                    x: 1,
+                    y: 2,
+                    category_id: 3,
+                },
+                crate::sand::SandStateGrain {
+                    x: 4,
+                    y: 5,
+                    category_id: 0,
+                },
+            ],
+        };
+
+        save_sand_state(&path, &state).unwrap();
+        let loaded = load_sand_state(&path).expect("sand state should load");
+        assert_eq!(loaded, state);
 
         delete_file_if_exists(&path).unwrap();
         assert!(!path.exists());

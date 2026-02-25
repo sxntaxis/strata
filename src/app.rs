@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     io,
     path::Path,
     time::{Duration, Instant},
@@ -285,6 +286,28 @@ impl App {
             &self.time_tracker.sessions,
             &categories,
         );
+    }
+
+    fn persist_sand_state(&self) {
+        let state = self.sand_engine.snapshot_state();
+        let path = storage::get_sand_state_path();
+        let _ = storage::save_sand_state(&path, &state);
+    }
+
+    fn restore_sand_state(&mut self) {
+        let path = storage::get_sand_state_path();
+        let Some(state) = storage::load_sand_state(&path) else {
+            return;
+        };
+
+        let valid_category_ids: HashSet<CategoryId> = self
+            .time_tracker
+            .categories_for_storage()
+            .into_iter()
+            .map(|category| category.id)
+            .collect();
+
+        self.sand_engine.restore_state(&state, &valid_category_ids);
     }
 
     fn is_on_insert_space(&self) -> bool {
@@ -947,6 +970,7 @@ impl App {
                 self.sand_engine.clear();
                 self.time_tracker.reset_none_counter_today();
                 self.persist_sessions();
+                self.persist_sand_state();
                 false
             }
             KeyCode::Char('k') | KeyCode::Char('K') => {
@@ -979,6 +1003,7 @@ pub fn run_ui() -> Result<(), io::Error> {
 
     let size = terminal.size()?;
     let mut app = App::new(size.width, size.height);
+    app.restore_sand_state();
 
     let physics_rate = Duration::from_millis(TIME_SETTINGS.physics_ms);
     let tick_rate = Duration::from_millis(TIME_SETTINGS.tick_ms);
@@ -1154,6 +1179,7 @@ pub fn run_ui() -> Result<(), io::Error> {
 
     app.time_tracker.end_session();
     app.persist_sessions();
+    app.persist_sand_state();
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
