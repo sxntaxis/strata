@@ -37,6 +37,37 @@ pub struct Session {
     pub elapsed_seconds: usize,
 }
 
+#[derive(Debug, Clone)]
+pub struct ReportEntry {
+    pub category_name: String,
+    pub elapsed_seconds: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReportSummary {
+    pub date: String,
+    pub entries: Vec<ReportEntry>,
+    pub total_seconds: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct KarmaReportEntry {
+    pub category_id: CategoryId,
+    pub category_name: String,
+    pub color: Color,
+    pub elapsed_seconds: usize,
+    pub karma_effect: i8,
+    pub karma_seconds: isize,
+}
+
+#[derive(Debug, Clone)]
+pub struct KarmaReportSummary {
+    pub date: String,
+    pub entries: Vec<KarmaReportEntry>,
+    pub total_seconds: usize,
+    pub total_karma_seconds: isize,
+}
+
 #[derive(Clone, Debug)]
 pub struct CategoryStore {
     by_id: HashMap<CategoryId, Category>,
@@ -453,6 +484,88 @@ impl TimeTracker {
     }
 }
 
+pub fn build_today_report(sessions: &[Session], categories: &[Category]) -> ReportSummary {
+    let today = Local::now().format("%Y-%m-%d").to_string();
+    build_report_for_date(sessions, categories, &today)
+}
+
+pub fn build_today_karma_report(
+    sessions: &[Session],
+    categories: &[Category],
+) -> KarmaReportSummary {
+    let today = Local::now().format("%Y-%m-%d").to_string();
+    build_karma_report_for_date(sessions, categories, &today)
+}
+
+pub fn build_karma_report_for_date(
+    sessions: &[Session],
+    categories: &[Category],
+    date: &str,
+) -> KarmaReportSummary {
+    let mut entries: Vec<KarmaReportEntry> = categories
+        .iter()
+        .filter(|category| category.id != CategoryId::new(0) && category.name != "none")
+        .map(|category| KarmaReportEntry {
+            category_id: category.id,
+            category_name: category.name.clone(),
+            color: category.color,
+            elapsed_seconds: 0,
+            karma_effect: category.karma_effect,
+            karma_seconds: 0,
+        })
+        .collect();
+
+    let mut by_id: HashMap<CategoryId, usize> = HashMap::new();
+    for (idx, entry) in entries.iter().enumerate() {
+        by_id.insert(entry.category_id, idx);
+    }
+
+    for session in sessions.iter().filter(|session| session.date == date) {
+        if let Some(idx) = by_id.get(&session.category_id).copied() {
+            entries[idx].elapsed_seconds += session.elapsed_seconds;
+        }
+    }
+
+    for entry in &mut entries {
+        entry.karma_seconds = entry.elapsed_seconds as isize * entry.karma_effect as isize;
+    }
+
+    let total_seconds = entries.iter().map(|entry| entry.elapsed_seconds).sum();
+    let total_karma_seconds = entries.iter().map(|entry| entry.karma_seconds).sum();
+
+    KarmaReportSummary {
+        date: date.to_string(),
+        entries,
+        total_seconds,
+        total_karma_seconds,
+    }
+}
+
+pub fn build_report_for_date(
+    sessions: &[Session],
+    categories: &[Category],
+    date: &str,
+) -> ReportSummary {
+    let detailed = build_karma_report_for_date(sessions, categories, date);
+
+    let mut entries: Vec<ReportEntry> = detailed
+        .entries
+        .into_iter()
+        .filter(|entry| entry.elapsed_seconds > 0)
+        .map(|entry| ReportEntry {
+            category_name: entry.category_name,
+            elapsed_seconds: entry.elapsed_seconds,
+        })
+        .collect();
+    entries.sort_by(|a, b| b.elapsed_seconds.cmp(&a.elapsed_seconds));
+
+    ReportSummary {
+        date: date.to_string(),
+        entries,
+        total_seconds: detailed.total_seconds,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -548,5 +661,170 @@ mod tests {
 
         assert_eq!(work_count_before, work_count_after);
         assert_eq!(personal_count_before, personal_count_after);
+    }
+
+    #[test]
+    fn test_build_report_for_date_excludes_none_and_sorts() {
+        let categories = vec![
+            Category {
+                id: CategoryId::new(0),
+                name: "none".to_string(),
+                color: Color::White,
+                description: String::new(),
+                karma_effect: 1,
+            },
+            Category {
+                id: CategoryId::new(1),
+                name: "Work".to_string(),
+                color: COLORS[0],
+                description: String::new(),
+                karma_effect: 1,
+            },
+            Category {
+                id: CategoryId::new(2),
+                name: "Personal".to_string(),
+                color: COLORS[1],
+                description: String::new(),
+                karma_effect: 1,
+            },
+        ];
+
+        let sessions = vec![
+            Session {
+                id: 1,
+                date: "2026-02-25".to_string(),
+                category_id: CategoryId::new(1),
+                description: String::new(),
+                start_time: "09:00:00".to_string(),
+                end_time: "10:00:00".to_string(),
+                elapsed_seconds: 3600,
+            },
+            Session {
+                id: 2,
+                date: "2026-02-25".to_string(),
+                category_id: CategoryId::new(2),
+                description: String::new(),
+                start_time: "10:00:00".to_string(),
+                end_time: "10:30:00".to_string(),
+                elapsed_seconds: 1800,
+            },
+            Session {
+                id: 3,
+                date: "2026-02-25".to_string(),
+                category_id: CategoryId::new(0),
+                description: String::new(),
+                start_time: "11:00:00".to_string(),
+                end_time: "12:00:00".to_string(),
+                elapsed_seconds: 3600,
+            },
+            Session {
+                id: 4,
+                date: "2026-02-24".to_string(),
+                category_id: CategoryId::new(1),
+                description: String::new(),
+                start_time: "09:00:00".to_string(),
+                end_time: "10:00:00".to_string(),
+                elapsed_seconds: 3600,
+            },
+        ];
+
+        let summary = build_report_for_date(&sessions, &categories, "2026-02-25");
+        assert_eq!(summary.total_seconds, 5400);
+        assert_eq!(summary.entries.len(), 2);
+        assert_eq!(summary.entries[0].category_name, "Work");
+        assert_eq!(summary.entries[0].elapsed_seconds, 3600);
+        assert_eq!(summary.entries[1].category_name, "Personal");
+        assert_eq!(summary.entries[1].elapsed_seconds, 1800);
+    }
+
+    #[test]
+    fn test_build_karma_report_for_date_tracks_totals_and_zero_entries() {
+        let categories = vec![
+            Category {
+                id: CategoryId::new(0),
+                name: "none".to_string(),
+                color: Color::White,
+                description: String::new(),
+                karma_effect: 1,
+            },
+            Category {
+                id: CategoryId::new(1),
+                name: "Work".to_string(),
+                color: COLORS[0],
+                description: String::new(),
+                karma_effect: 1,
+            },
+            Category {
+                id: CategoryId::new(2),
+                name: "Gaming".to_string(),
+                color: COLORS[5],
+                description: String::new(),
+                karma_effect: -1,
+            },
+            Category {
+                id: CategoryId::new(3),
+                name: "Reading".to_string(),
+                color: COLORS[2],
+                description: String::new(),
+                karma_effect: 1,
+            },
+        ];
+
+        let sessions = vec![
+            Session {
+                id: 1,
+                date: "2026-02-25".to_string(),
+                category_id: CategoryId::new(1),
+                description: String::new(),
+                start_time: "08:00:00".to_string(),
+                end_time: "09:00:00".to_string(),
+                elapsed_seconds: 3600,
+            },
+            Session {
+                id: 2,
+                date: "2026-02-25".to_string(),
+                category_id: CategoryId::new(2),
+                description: String::new(),
+                start_time: "10:00:00".to_string(),
+                end_time: "10:30:00".to_string(),
+                elapsed_seconds: 1800,
+            },
+        ];
+
+        let summary = build_karma_report_for_date(&sessions, &categories, "2026-02-25");
+        assert_eq!(
+            summary.entries.len(),
+            3,
+            "all non-none categories are listed"
+        );
+        assert_eq!(summary.total_seconds, 5400);
+
+        let work = summary
+            .entries
+            .iter()
+            .find(|entry| entry.category_name == "Work")
+            .expect("work entry");
+        assert_eq!(work.elapsed_seconds, 3600);
+        assert_eq!(work.karma_seconds, 3600);
+
+        let gaming = summary
+            .entries
+            .iter()
+            .find(|entry| entry.category_name == "Gaming")
+            .expect("gaming entry");
+        assert_eq!(gaming.elapsed_seconds, 1800);
+        assert_eq!(gaming.karma_seconds, -1800);
+
+        let reading = summary
+            .entries
+            .iter()
+            .find(|entry| entry.category_name == "Reading")
+            .expect("reading entry");
+        assert_eq!(
+            reading.elapsed_seconds, 0,
+            "zero-time categories are included"
+        );
+
+        assert_eq!(summary.total_karma_seconds, 1800);
     }
 }

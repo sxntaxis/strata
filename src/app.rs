@@ -14,27 +14,36 @@ use ratatui::prelude::{Line, Span};
 use ratatui::{
     Frame, Terminal,
     backend::CrosstermBackend,
-    layout::{Alignment, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
     widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
 };
 
 use crate::{
     constants::{BLINK_SETTINGS, COLORS, FACE_SETTINGS, FILE_PATHS, SAND_ENGINE, TIME_SETTINGS},
-    domain::TimeTracker,
+    domain::{KarmaReportEntry, KarmaReportSummary, TimeTracker, build_today_karma_report},
     sand::SandEngine,
     storage,
 };
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReportSortMode {
+    Time,
+    Karma,
+}
 
 struct App {
     time_tracker: TimeTracker,
     sand_engine: SandEngine,
     blink_state: i32,
     modal_open: bool,
+    report_modal_open: bool,
     selected_index: usize,
     new_category_name: String,
     color_index: usize,
     modal_description: String,
+    report_selected_index: usize,
+    report_sort_mode: ReportSortMode,
     render_needed: bool,
 }
 
@@ -58,10 +67,13 @@ impl App {
             sand_engine: SandEngine::new(width, height),
             blink_state: 0,
             modal_open: false,
+            report_modal_open: false,
             selected_index: 0,
             new_category_name: String::new(),
             color_index: 0,
             modal_description: String::new(),
+            report_selected_index: 0,
+            report_sort_mode: ReportSortMode::Time,
             render_needed: true,
         };
 
@@ -75,6 +87,7 @@ impl App {
 
     fn open_modal(&mut self) {
         self.modal_open = true;
+        self.report_modal_open = false;
         self.selected_index = self.time_tracker.active_category_index().unwrap_or(0);
         self.new_category_name = String::new();
         self.color_index = 0;
@@ -89,6 +102,62 @@ impl App {
         self.modal_open = false;
         self.modal_description = String::new();
         self.render_needed = true;
+    }
+
+    fn open_report_modal(&mut self) {
+        self.report_modal_open = true;
+        self.modal_open = false;
+        self.report_selected_index = 0;
+        self.report_sort_mode = ReportSortMode::Time;
+        self.render_needed = true;
+    }
+
+    fn close_report_modal(&mut self) {
+        self.report_modal_open = false;
+        self.render_needed = true;
+    }
+
+    fn report_sort_label(&self) -> &'static str {
+        match self.report_sort_mode {
+            ReportSortMode::Time => "time",
+            ReportSortMode::Karma => "karma",
+        }
+    }
+
+    fn sort_report_entries(&self, entries: &mut [KarmaReportEntry]) {
+        match self.report_sort_mode {
+            ReportSortMode::Time => {
+                entries.sort_by(|a, b| {
+                    b.elapsed_seconds
+                        .cmp(&a.elapsed_seconds)
+                        .then(b.karma_seconds.cmp(&a.karma_seconds))
+                        .then(a.category_name.cmp(&b.category_name))
+                });
+            }
+            ReportSortMode::Karma => {
+                entries.sort_by(|a, b| {
+                    b.karma_seconds
+                        .cmp(&a.karma_seconds)
+                        .then(b.elapsed_seconds.cmp(&a.elapsed_seconds))
+                        .then(a.category_name.cmp(&b.category_name))
+                });
+            }
+        }
+    }
+
+    fn report_rows(&self) -> KarmaReportSummary {
+        let categories = self.time_tracker.categories_for_storage();
+        let mut summary = build_today_karma_report(&self.time_tracker.sessions, &categories);
+        self.sort_report_entries(&mut summary.entries);
+        summary
+    }
+
+    fn clamp_report_selection(&mut self, row_count: usize) {
+        if row_count == 0 {
+            self.report_selected_index = 0;
+        } else if self.report_selected_index >= row_count {
+            self.report_selected_index = row_count - 1;
+        }
     }
 
     fn persist_categories(&self) {
@@ -226,6 +295,20 @@ impl App {
         )
     }
 
+    fn truncate_label(&self, value: &str, max_chars: usize) -> String {
+        let count = value.chars().count();
+        if count <= max_chars {
+            return value.to_string();
+        }
+
+        if max_chars <= 3 {
+            return value.chars().take(max_chars).collect();
+        }
+
+        let prefix: String = value.chars().take(max_chars - 3).collect();
+        format!("{}...", prefix)
+    }
+
     fn get_idle_face(&self) -> String {
         let idle_seconds = self
             .time_tracker
@@ -283,6 +366,16 @@ impl App {
             }
         } else {
             Color::White
+        }
+    }
+
+    fn karma_color(seconds: isize) -> Color {
+        if seconds < 0 {
+            Color::Red
+        } else if seconds > 0 {
+            Color::Green
+        } else {
+            Color::Gray
         }
     }
 
@@ -377,9 +470,245 @@ impl App {
         f.render_stateful_widget(list, modal_rect, &mut list_state);
     }
 
+    fn render_report_modal(&self, f: &mut Frame, terminal_size: Rect) {
+        let modal_width = terminal_size.width.saturating_mul(5) / 6;
+        let modal_height = terminal_size.height.saturating_mul(4) / 5;
+
+        let modal_width = modal_width
+            .max(48)
+            .min(terminal_size.width.saturating_sub(2).max(1));
+        let modal_height = modal_height
+            .max(14)
+            .min(terminal_size.height.saturating_sub(2).max(1));
+
+        let modal_x = (terminal_size.width.saturating_sub(modal_width)) / 2;
+        let modal_y = (terminal_size.height.saturating_sub(modal_height)) / 2;
+        let modal_rect = Rect::new(modal_x, modal_y, modal_width, modal_height);
+
+        let summary = self.report_rows();
+        let selected_index = if summary.entries.is_empty() {
+            None
+        } else {
+            Some(self.report_selected_index.min(summary.entries.len() - 1))
+        };
+
+        let border_color = match self.report_sort_mode {
+            ReportSortMode::Time => Color::Cyan,
+            ReportSortMode::Karma => Color::Yellow,
+        };
+
+        let frame_block = Block::default()
+            .title(Line::from(Span::styled(
+                "daily report",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            )))
+            .title_alignment(Alignment::Center)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(border_color));
+
+        f.render_widget(ratatui::widgets::Clear, modal_rect);
+        f.render_widget(frame_block.clone(), modal_rect);
+
+        let inner = frame_block.inner(modal_rect);
+        let vertical = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(2),
+                Constraint::Min(5),
+                Constraint::Length(4),
+            ])
+            .split(inner);
+
+        let header = Paragraph::new(Line::from(vec![
+            Span::styled(
+                format!("daily {}", summary.date),
+                Style::default().fg(Color::Cyan),
+            ),
+            Span::raw("  |  "),
+            Span::styled(
+                format!("sort: {}", self.report_sort_label()),
+                Style::default().fg(Color::Yellow),
+            ),
+            Span::raw("  |  "),
+            Span::styled("k toggle", Style::default().fg(Color::Green)),
+            Span::raw("  |  "),
+            Span::styled("esc close", Style::default().fg(Color::Gray)),
+        ]));
+        f.render_widget(header, vertical[0]);
+
+        let body = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
+            .split(vertical[1]);
+
+        let max_elapsed = summary
+            .entries
+            .iter()
+            .map(|entry| entry.elapsed_seconds)
+            .max()
+            .unwrap_or(0);
+
+        let items: Vec<ListItem> = summary
+            .entries
+            .iter()
+            .map(|entry| {
+                let name = self.truncate_label(&entry.category_name, 14);
+                let time_str = self.format_time(entry.elapsed_seconds);
+                let karma_str = self.format_signed_time(entry.karma_seconds);
+                let effect_str = format!("k:{:+}", entry.karma_effect);
+                let pct = if summary.total_seconds == 0 {
+                    0.0
+                } else {
+                    (entry.elapsed_seconds as f64 * 100.0) / summary.total_seconds as f64
+                };
+
+                let bar_len = if max_elapsed == 0 || entry.elapsed_seconds == 0 {
+                    0
+                } else {
+                    ((entry.elapsed_seconds * 12) / max_elapsed).max(1)
+                };
+                let bar = format!(
+                    "{}{}",
+                    "#".repeat(bar_len.min(12)),
+                    "-".repeat(12usize.saturating_sub(bar_len.min(12)))
+                );
+
+                let karma_color = Self::karma_color(entry.karma_seconds);
+
+                ListItem::new(Line::from(vec![
+                    Span::raw("● ").fg(entry.color),
+                    Span::raw(format!("{:<14}", name)).fg(Color::White),
+                    Span::raw(format!(" {}", time_str)).fg(Color::Cyan),
+                    Span::raw(format!(" {:>5.1}%", pct)).fg(Color::Gray),
+                    Span::raw(format!(" {}", karma_str)).fg(karma_color),
+                    Span::raw(format!(" {}", effect_str)).fg(Color::Yellow),
+                    Span::raw("  "),
+                    Span::raw(bar).fg(entry.color),
+                ]))
+            })
+            .collect();
+
+        let mut list_state = ListState::default();
+        list_state.select(selected_index);
+
+        let list = if summary.entries.is_empty() {
+            List::new(vec![ListItem::new(Line::from(vec![Span::styled(
+                "No tracked sessions for today yet.",
+                Style::default().fg(Color::Gray),
+            )]))])
+        } else {
+            List::new(items)
+        }
+        .highlight_style(Style::default().bg(Color::Rgb(40, 40, 40)))
+        .highlight_symbol("-> ");
+
+        f.render_stateful_widget(list, body[0], &mut list_state);
+
+        let top_time = summary
+            .entries
+            .iter()
+            .max_by_key(|entry| entry.elapsed_seconds);
+        let best_karma = summary
+            .entries
+            .iter()
+            .max_by_key(|entry| entry.karma_seconds);
+        let worst_karma = summary
+            .entries
+            .iter()
+            .min_by_key(|entry| entry.karma_seconds);
+
+        let side_lines = vec![
+            Line::from(Span::styled(
+                "insights",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(Span::styled("top time", Style::default().fg(Color::Cyan))),
+            Line::from(Span::raw(
+                top_time
+                    .map(|entry| self.truncate_label(&entry.category_name, 14))
+                    .unwrap_or_else(|| "-".to_string()),
+            )),
+            Line::from(Span::raw(
+                top_time
+                    .map(|entry| self.format_time(entry.elapsed_seconds))
+                    .unwrap_or_else(|| "00:00:00".to_string()),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "best karma",
+                Style::default().fg(Color::Green),
+            )),
+            Line::from(Span::raw(
+                best_karma
+                    .map(|entry| self.truncate_label(&entry.category_name, 14))
+                    .unwrap_or_else(|| "-".to_string()),
+            )),
+            Line::from(Span::raw(
+                best_karma
+                    .map(|entry| self.format_signed_time(entry.karma_seconds))
+                    .unwrap_or_else(|| "00:00:00".to_string()),
+            )),
+            Line::from(""),
+            Line::from(Span::styled("worst karma", Style::default().fg(Color::Red))),
+            Line::from(Span::raw(
+                worst_karma
+                    .map(|entry| self.truncate_label(&entry.category_name, 14))
+                    .unwrap_or_else(|| "-".to_string()),
+            )),
+            Line::from(Span::raw(
+                worst_karma
+                    .map(|entry| self.format_signed_time(entry.karma_seconds))
+                    .unwrap_or_else(|| "00:00:00".to_string()),
+            )),
+        ];
+        let side = Paragraph::new(side_lines).block(
+            Block::default()
+                .borders(Borders::LEFT)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        );
+        f.render_widget(side, body[1]);
+
+        let selected_line = selected_index
+            .and_then(|idx| summary.entries.get(idx))
+            .map(|entry| {
+                format!(
+                    "selected: {} | time {} | karma {}",
+                    entry.category_name,
+                    self.format_time(entry.elapsed_seconds),
+                    self.format_signed_time(entry.karma_seconds)
+                )
+            })
+            .unwrap_or_else(|| "selected: none".to_string());
+
+        let footer = Paragraph::new(vec![
+            Line::from(vec![
+                Span::styled("total", Style::default().fg(Color::White)),
+                Span::raw(format!(" {}", self.format_time(summary.total_seconds))).fg(Color::Cyan),
+                Span::raw("  |  "),
+                Span::styled("karma", Style::default().fg(Color::White)),
+                Span::raw(format!(
+                    " {}",
+                    self.format_signed_time(summary.total_karma_seconds)
+                ))
+                .fg(Self::karma_color(summary.total_karma_seconds)),
+            ]),
+            Line::from(Span::raw(selected_line).fg(Color::Gray)),
+        ]);
+        f.render_widget(footer, vertical[2]);
+    }
+
     fn handle_key(&mut self, key: KeyEvent) -> bool {
         if self.modal_open {
             self.handle_modal_key(key);
+            false
+        } else if self.report_modal_open {
+            self.handle_report_modal_key(key);
             false
         } else {
             self.handle_normal_key(key.code)
@@ -537,11 +866,44 @@ impl App {
         }
     }
 
+    fn handle_report_modal_key(&mut self, key: KeyEvent) {
+        let summary = self.report_rows();
+        self.clamp_report_selection(summary.entries.len());
+
+        match key.code {
+            KeyCode::Esc | KeyCode::Enter => self.close_report_modal(),
+            KeyCode::Up => {
+                if self.report_selected_index > 0 {
+                    self.report_selected_index -= 1;
+                }
+            }
+            KeyCode::Down => {
+                if self.report_selected_index + 1 < summary.entries.len() {
+                    self.report_selected_index += 1;
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Char('K') => {
+                self.report_sort_mode = match self.report_sort_mode {
+                    ReportSortMode::Time => ReportSortMode::Karma,
+                    ReportSortMode::Karma => ReportSortMode::Time,
+                };
+                self.report_selected_index = 0;
+            }
+            _ => {}
+        }
+
+        self.render_needed = true;
+    }
+
     fn handle_normal_key(&mut self, key: KeyCode) -> bool {
         match key {
             KeyCode::Char('q') => true,
             KeyCode::Char('c') => {
                 self.sand_engine.clear();
+                false
+            }
+            KeyCode::Char('k') | KeyCode::Char('K') => {
+                self.open_report_modal();
                 false
             }
             KeyCode::Enter => {
@@ -726,6 +1088,8 @@ pub fn run_ui() -> Result<(), io::Error> {
 
                 if app.modal_open {
                     app.render_modal(f, size);
+                } else if app.report_modal_open {
+                    app.render_report_modal(f, size);
                 }
             })?;
             app.render_needed = false;

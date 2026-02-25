@@ -1,13 +1,12 @@
-use std::{collections::HashMap, io, path::PathBuf};
+use std::{io, path::PathBuf};
 
 use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
 use clap::{CommandFactory, Parser, ValueEnum};
-use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     constants::COLORS,
-    domain::{CategoryId, Session},
+    domain::{CategoryId, Session, build_today_report},
     storage,
 };
 
@@ -194,43 +193,26 @@ pub fn report_today() -> Result<(), String> {
     let categories = storage::load_categories_from_csv(&categories_path).categories;
     let sessions = storage::load_sessions_from_csv(&sessions_path, &categories).sessions;
 
-    let today = Local::now().format("%Y-%m-%d").to_string();
-    let today_sessions: Vec<_> = sessions.iter().filter(|s| s.date == today).collect();
+    let summary = build_today_report(&sessions, &categories);
 
-    let mut by_category: HashMap<String, usize> = HashMap::new();
-    let mut total = 0usize;
-
-    for session in today_sessions {
-        let cat_name = categories
-            .iter()
-            .find(|c| c.id == session.category_id)
-            .map(|c| c.name.as_str())
-            .unwrap_or("none")
-            .to_string();
-        *by_category.entry(cat_name).or_insert(0) += session.elapsed_seconds;
-        total += session.elapsed_seconds;
-    }
-
-    println!("Today's Report ({})", today);
+    println!("Today's Report ({})", summary.date);
     println!("{}", "-".repeat(40));
-    for (cat, secs) in by_category.iter().sorted_by_key(|(_, v)| *v).rev() {
-        if cat != "none" {
-            println!(
-                "{:20} {:02}:{:02}:{:02}",
-                cat,
-                secs / 3600,
-                (secs % 3600) / 60,
-                secs % 60
-            );
-        }
+    for entry in &summary.entries {
+        println!(
+            "{:20} {:02}:{:02}:{:02}",
+            entry.category_name,
+            entry.elapsed_seconds / 3600,
+            (entry.elapsed_seconds % 3600) / 60,
+            entry.elapsed_seconds % 60
+        );
     }
     println!("{}", "-".repeat(40));
     println!(
         "{:20} {:02}:{:02}:{:02}",
         "TOTAL",
-        total / 3600,
-        (total % 3600) / 60,
-        total % 60
+        summary.total_seconds / 3600,
+        (summary.total_seconds % 3600) / 60,
+        summary.total_seconds % 60
     );
 
     Ok(())
