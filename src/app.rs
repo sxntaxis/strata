@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use chrono::Local;
+use chrono::{Datelike, Local, NaiveDate};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
@@ -21,16 +21,12 @@ use ratatui::{
 
 use crate::{
     constants::{BLINK_SETTINGS, COLORS, FACE_SETTINGS, FILE_PATHS, SAND_ENGINE, TIME_SETTINGS},
-    domain::{KarmaReportEntry, KarmaReportSummary, TimeTracker, build_today_karma_report},
+    domain::{
+        CategoryId, KarmaReportSummary, ReportPeriod, TimeTracker, build_period_karma_report,
+    },
     sand::SandEngine,
     storage,
 };
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ReportSortMode {
-    Time,
-    Karma,
-}
 
 struct App {
     time_tracker: TimeTracker,
@@ -43,7 +39,8 @@ struct App {
     color_index: usize,
     modal_description: String,
     report_selected_index: usize,
-    report_sort_mode: ReportSortMode,
+    report_period: ReportPeriod,
+    report_show_help: bool,
     render_needed: bool,
 }
 
@@ -73,7 +70,8 @@ impl App {
             color_index: 0,
             modal_description: String::new(),
             report_selected_index: 0,
-            report_sort_mode: ReportSortMode::Time,
+            report_period: ReportPeriod::Today,
+            report_show_help: false,
             render_needed: true,
         };
 
@@ -108,48 +106,162 @@ impl App {
         self.report_modal_open = true;
         self.modal_open = false;
         self.report_selected_index = 0;
-        self.report_sort_mode = ReportSortMode::Time;
+        self.report_period = ReportPeriod::Today;
+        self.report_show_help = false;
         self.render_needed = true;
     }
 
     fn close_report_modal(&mut self) {
         self.report_modal_open = false;
+        self.report_show_help = false;
         self.render_needed = true;
     }
 
-    fn report_sort_label(&self) -> &'static str {
-        match self.report_sort_mode {
-            ReportSortMode::Time => "time",
-            ReportSortMode::Karma => "karma",
+    fn modal_rect(&self, terminal_size: Rect) -> Rect {
+        self.modal_rect_ratio(terminal_size, 1, 3)
+    }
+
+    fn modal_rect_ratio(&self, terminal_size: Rect, numerator: u16, denominator: u16) -> Rect {
+        let target_width = terminal_size.width.saturating_mul(numerator) / denominator;
+        let target_height = (terminal_size.height.saturating_mul(numerator) / denominator).max(10);
+
+        let max_width = terminal_size.width.saturating_sub(2).max(1);
+        let max_height = terminal_size.height.saturating_sub(2).max(1);
+
+        let modal_width = target_width.clamp(1, max_width);
+        let modal_height = target_height.clamp(1, max_height);
+
+        let modal_x = (terminal_size.width.saturating_sub(modal_width)) / 2;
+        let modal_y = (terminal_size.height.saturating_sub(modal_height)) / 2;
+
+        Rect::new(modal_x, modal_y, modal_width, modal_height)
+    }
+
+    fn report_modal_rect(&self, terminal_size: Rect, row_count: usize) -> Rect {
+        let compact = self.modal_rect(terminal_size);
+        let inner_width = compact.width.saturating_sub(2);
+        let inner_height = compact.height.saturating_sub(2);
+        let footer_height = if self.report_show_help { 1 } else { 0 };
+        let visible_rows = inner_height.saturating_sub(footer_height) as usize;
+
+        let content_is_cramped = inner_width < 28 || row_count > visible_rows;
+        if content_is_cramped {
+            self.modal_rect_ratio(terminal_size, 2, 3)
+        } else {
+            compact
         }
     }
 
-    fn sort_report_entries(&self, entries: &mut [KarmaReportEntry]) {
-        match self.report_sort_mode {
-            ReportSortMode::Time => {
-                entries.sort_by(|a, b| {
-                    b.elapsed_seconds
-                        .cmp(&a.elapsed_seconds)
-                        .then(b.karma_seconds.cmp(&a.karma_seconds))
-                        .then(a.category_name.cmp(&b.category_name))
-                });
-            }
-            ReportSortMode::Karma => {
-                entries.sort_by(|a, b| {
-                    b.karma_seconds
-                        .cmp(&a.karma_seconds)
-                        .then(b.elapsed_seconds.cmp(&a.elapsed_seconds))
-                        .then(a.category_name.cmp(&b.category_name))
-                });
-            }
+    fn report_chip(label: &str, active: bool) -> Span<'static> {
+        let style = if active {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::White)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+
+        let text = if active {
+            format!("[{}]", label)
+        } else {
+            label.to_string()
+        };
+
+        Span::styled(text, style)
+    }
+
+    fn report_period_prev(period: ReportPeriod) -> ReportPeriod {
+        match period {
+            ReportPeriod::Today => ReportPeriod::Month,
+            ReportPeriod::Week => ReportPeriod::Today,
+            ReportPeriod::Month => ReportPeriod::Week,
         }
+    }
+
+    fn report_period_next(period: ReportPeriod) -> ReportPeriod {
+        match period {
+            ReportPeriod::Today => ReportPeriod::Week,
+            ReportPeriod::Week => ReportPeriod::Month,
+            ReportPeriod::Month => ReportPeriod::Today,
+        }
+    }
+
+    fn format_report_interval_label(&self, raw: &str) -> String {
+        let parse = |value: &str| NaiveDate::parse_from_str(value, "%Y-%m-%d").ok();
+
+        if let Some((start_raw, end_raw)) = raw.split_once("..") {
+            let (Some(start), Some(end)) = (parse(start_raw), parse(end_raw)) else {
+                return raw.to_string();
+            };
+
+            if start.year() == end.year() && start.month() == end.month() {
+                return format!("{}-{}", start.format("%b %-d"), end.format("%-d"));
+            }
+
+            if start.year() == end.year() {
+                return format!("{}-{}", start.format("%b %-d"), end.format("%b %-d"));
+            }
+
+            return format!(
+                "{}-{}",
+                start.format("%b %-d, %Y"),
+                end.format("%b %-d, %Y")
+            );
+        }
+
+        parse(raw)
+            .map(|date| date.format("%b %-d").to_string())
+            .unwrap_or_else(|| raw.to_string())
     }
 
     fn report_rows(&self) -> KarmaReportSummary {
         let categories = self.time_tracker.categories_for_storage();
-        let mut summary = build_today_karma_report(&self.time_tracker.sessions, &categories);
-        self.sort_report_entries(&mut summary.entries);
+        let mut summary =
+            build_period_karma_report(&self.time_tracker.sessions, &categories, self.report_period);
+        summary.entries.sort_by(|a, b| {
+            let none_id = CategoryId::new(0);
+            let group = |entry: &crate::domain::KarmaReportEntry| -> u8 {
+                if entry.category_id == none_id {
+                    1
+                } else if entry.karma_effect < 0 {
+                    2
+                } else {
+                    0
+                }
+            };
+
+            let ga = group(a);
+            let gb = group(b);
+
+            ga.cmp(&gb).then_with(|| match ga {
+                0 => b
+                    .karma_seconds
+                    .cmp(&a.karma_seconds)
+                    .then(b.elapsed_seconds.cmp(&a.elapsed_seconds))
+                    .then(a.category_name.cmp(&b.category_name)),
+                1 => {
+                    let a_is_none = a.category_id == none_id;
+                    let b_is_none = b.category_id == none_id;
+                    b_is_none
+                        .cmp(&a_is_none)
+                        .then(b.elapsed_seconds.cmp(&a.elapsed_seconds))
+                        .then(a.category_name.cmp(&b.category_name))
+                }
+                _ => a
+                    .karma_seconds
+                    .cmp(&b.karma_seconds)
+                    .then(b.elapsed_seconds.cmp(&a.elapsed_seconds))
+                    .then(a.category_name.cmp(&b.category_name)),
+            })
+        });
         summary
+    }
+
+    fn set_report_period(&mut self, period: ReportPeriod) {
+        self.report_period = period;
+        let row_count = self.report_rows().entries.len();
+        self.clamp_report_selection(row_count);
     }
 
     fn clamp_report_selection(&mut self, row_count: usize) {
@@ -286,6 +398,18 @@ impl App {
         )
     }
 
+    fn format_karma_time(&self, seconds: isize) -> String {
+        let abs_secs = seconds.abs() as usize;
+        let sign = if seconds < 0 { "-" } else { "+" };
+        format!(
+            "{}{:02}:{:02}:{:02}",
+            sign,
+            abs_secs / 3600,
+            (abs_secs % 3600) / 60,
+            abs_secs % 60
+        )
+    }
+
     fn format_time(&self, seconds: usize) -> String {
         format!(
             "{:02}:{:02}:{:02}",
@@ -380,13 +504,7 @@ impl App {
     }
 
     fn render_modal(&self, f: &mut Frame, terminal_size: Rect) {
-        let modal_width = terminal_size.width / 3;
-        let modal_height = (terminal_size.height / 3).max(10);
-
-        let modal_x = (terminal_size.width - modal_width) / 2;
-        let modal_y = (terminal_size.height - modal_height) / 2;
-
-        let modal_rect = Rect::new(modal_x, modal_y, modal_width, modal_height);
+        let modal_rect = self.modal_rect(terminal_size);
 
         let border_color = self.get_selected_color();
         let categories = self.time_tracker.categories_ordered();
@@ -471,40 +589,55 @@ impl App {
     }
 
     fn render_report_modal(&self, f: &mut Frame, terminal_size: Rect) {
-        let modal_width = terminal_size.width.saturating_mul(5) / 6;
-        let modal_height = terminal_size.height.saturating_mul(4) / 5;
-
-        let modal_width = modal_width
-            .max(48)
-            .min(terminal_size.width.saturating_sub(2).max(1));
-        let modal_height = modal_height
-            .max(14)
-            .min(terminal_size.height.saturating_sub(2).max(1));
-
-        let modal_x = (terminal_size.width.saturating_sub(modal_width)) / 2;
-        let modal_y = (terminal_size.height.saturating_sub(modal_height)) / 2;
-        let modal_rect = Rect::new(modal_x, modal_y, modal_width, modal_height);
-
         let summary = self.report_rows();
+        let modal_rect = self.report_modal_rect(terminal_size, summary.entries.len());
         let selected_index = if summary.entries.is_empty() {
             None
         } else {
             Some(self.report_selected_index.min(summary.entries.len() - 1))
         };
 
-        let border_color = match self.report_sort_mode {
-            ReportSortMode::Time => Color::Cyan,
-            ReportSortMode::Karma => Color::Yellow,
-        };
+        let interval_label = self.format_report_interval_label(&summary.date);
+
+        let border_color = selected_index
+            .and_then(|idx| summary.entries.get(idx))
+            .map(|entry| entry.color)
+            .unwrap_or(Color::White);
+
+        let interval_title = Line::from(Span::styled(
+            interval_label,
+            Style::default().fg(Color::White),
+        ))
+        .alignment(Alignment::Left);
+
+        let center_title = Line::from(Span::styled(
+            "karma",
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .alignment(Alignment::Center);
+
+        let total_title = Line::from(Span::styled(
+            self.format_karma_time(summary.total_karma_seconds),
+            Style::default().fg(Self::karma_color(summary.total_karma_seconds)),
+        ))
+        .alignment(Alignment::Right);
+
+        let period_bottom_title = Line::from(vec![
+            Self::report_chip("today", self.report_period == ReportPeriod::Today),
+            Span::raw(" "),
+            Self::report_chip("week", self.report_period == ReportPeriod::Week),
+            Span::raw(" "),
+            Self::report_chip("month", self.report_period == ReportPeriod::Month),
+        ])
+        .alignment(Alignment::Center);
 
         let frame_block = Block::default()
-            .title(Line::from(Span::styled(
-                "daily report",
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            )))
-            .title_alignment(Alignment::Center)
+            .title(interval_title)
+            .title(center_title)
+            .title(total_title)
+            .title_bottom(period_bottom_title)
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(border_color));
@@ -513,81 +646,70 @@ impl App {
         f.render_widget(frame_block.clone(), modal_rect);
 
         let inner = frame_block.inner(modal_rect);
+        let footer_height = if self.report_show_help { 1 } else { 0 };
         let vertical = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(2),
-                Constraint::Min(5),
-                Constraint::Length(4),
-            ])
+            .constraints([Constraint::Min(3), Constraint::Length(footer_height)])
             .split(inner);
 
-        let header = Paragraph::new(Line::from(vec![
-            Span::styled(
-                format!("daily {}", summary.date),
-                Style::default().fg(Color::Cyan),
-            ),
-            Span::raw("  |  "),
-            Span::styled(
-                format!("sort: {}", self.report_sort_label()),
-                Style::default().fg(Color::Yellow),
-            ),
-            Span::raw("  |  "),
-            Span::styled("k toggle", Style::default().fg(Color::Green)),
-            Span::raw("  |  "),
-            Span::styled("esc close", Style::default().fg(Color::Gray)),
-        ]));
-        f.render_widget(header, vertical[0]);
-
-        let body = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
-            .split(vertical[1]);
-
-        let max_elapsed = summary
-            .entries
-            .iter()
-            .map(|entry| entry.elapsed_seconds)
-            .max()
-            .unwrap_or(0);
+        let row_width = vertical[0].width as usize;
+        let metric_width = 9;
+        let name_width = row_width.saturating_sub(metric_width + 4).max(4);
 
         let items: Vec<ListItem> = summary
             .entries
             .iter()
-            .map(|entry| {
-                let name = self.truncate_label(&entry.category_name, 14);
-                let time_str = self.format_time(entry.elapsed_seconds);
-                let karma_str = self.format_signed_time(entry.karma_seconds);
-                let effect_str = format!("k:{:+}", entry.karma_effect);
-                let pct = if summary.total_seconds == 0 {
-                    0.0
+            .enumerate()
+            .map(|(idx, entry)| {
+                let is_selected = selected_index == Some(idx);
+                let dot = if entry.karma_effect < 0 {
+                    "◯ "
+                } else if entry.karma_effect == 0 {
+                    "· "
                 } else {
-                    (entry.elapsed_seconds as f64 * 100.0) / summary.total_seconds as f64
+                    "● "
+                };
+                let name = self.truncate_label(&entry.category_name, name_width);
+                let pad = name_width.saturating_sub(name.chars().count()) + 1;
+                let is_none_row = entry.category_id == CategoryId::new(0);
+                let metric_value = if is_none_row {
+                    self.format_time(entry.elapsed_seconds)
+                } else if entry.karma_seconds == 0 && entry.karma_effect < 0 {
+                    "-00:00:00".to_string()
+                } else {
+                    self.format_karma_time(entry.karma_seconds)
+                };
+                let metric_color = if is_none_row {
+                    Color::Gray
+                } else if entry.karma_seconds == 0 {
+                    if entry.karma_effect < 0 {
+                        Color::Red
+                    } else if entry.karma_effect > 0 {
+                        Color::Green
+                    } else {
+                        Color::Gray
+                    }
+                } else {
+                    Self::karma_color(entry.karma_seconds)
                 };
 
-                let bar_len = if max_elapsed == 0 || entry.elapsed_seconds == 0 {
-                    0
+                if is_selected {
+                    let text_color = Self::text_color_for_bg(entry.color);
+                    ListItem::new(Line::from(vec![
+                        Span::raw(dot).fg(text_color),
+                        Span::raw(name).fg(text_color),
+                        Span::raw(" ".repeat(pad)).fg(text_color),
+                        Span::raw(metric_value).fg(text_color),
+                    ]))
+                    .style(Style::default().fg(text_color).bg(entry.color))
                 } else {
-                    ((entry.elapsed_seconds * 12) / max_elapsed).max(1)
-                };
-                let bar = format!(
-                    "{}{}",
-                    "#".repeat(bar_len.min(12)),
-                    "-".repeat(12usize.saturating_sub(bar_len.min(12)))
-                );
-
-                let karma_color = Self::karma_color(entry.karma_seconds);
-
-                ListItem::new(Line::from(vec![
-                    Span::raw("● ").fg(entry.color),
-                    Span::raw(format!("{:<14}", name)).fg(Color::White),
-                    Span::raw(format!(" {}", time_str)).fg(Color::Cyan),
-                    Span::raw(format!(" {:>5.1}%", pct)).fg(Color::Gray),
-                    Span::raw(format!(" {}", karma_str)).fg(karma_color),
-                    Span::raw(format!(" {}", effect_str)).fg(Color::Yellow),
-                    Span::raw("  "),
-                    Span::raw(bar).fg(entry.color),
-                ]))
+                    ListItem::new(Line::from(vec![
+                        Span::raw(dot).fg(entry.color),
+                        Span::raw(name).fg(Color::White),
+                        Span::raw(" ".repeat(pad)).fg(Color::White),
+                        Span::raw(metric_value).fg(metric_color),
+                    ]))
+                }
             })
             .collect();
 
@@ -596,111 +718,21 @@ impl App {
 
         let list = if summary.entries.is_empty() {
             List::new(vec![ListItem::new(Line::from(vec![Span::styled(
-                "No tracked sessions for today yet.",
+                "No tracked sessions for this period.",
                 Style::default().fg(Color::Gray),
             )]))])
         } else {
             List::new(items)
+        };
+
+        f.render_stateful_widget(list, vertical[0], &mut list_state);
+
+        if self.report_show_help {
+            let footer = Paragraph::new(Line::from(
+                Span::raw("keys: up/down  shift+left/right  d/w/m  esc  ?").fg(Color::DarkGray),
+            ));
+            f.render_widget(footer, vertical[1]);
         }
-        .highlight_style(Style::default().bg(Color::Rgb(40, 40, 40)))
-        .highlight_symbol("-> ");
-
-        f.render_stateful_widget(list, body[0], &mut list_state);
-
-        let top_time = summary
-            .entries
-            .iter()
-            .max_by_key(|entry| entry.elapsed_seconds);
-        let best_karma = summary
-            .entries
-            .iter()
-            .max_by_key(|entry| entry.karma_seconds);
-        let worst_karma = summary
-            .entries
-            .iter()
-            .min_by_key(|entry| entry.karma_seconds);
-
-        let side_lines = vec![
-            Line::from(Span::styled(
-                "insights",
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-            Line::from(Span::styled("top time", Style::default().fg(Color::Cyan))),
-            Line::from(Span::raw(
-                top_time
-                    .map(|entry| self.truncate_label(&entry.category_name, 14))
-                    .unwrap_or_else(|| "-".to_string()),
-            )),
-            Line::from(Span::raw(
-                top_time
-                    .map(|entry| self.format_time(entry.elapsed_seconds))
-                    .unwrap_or_else(|| "00:00:00".to_string()),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "best karma",
-                Style::default().fg(Color::Green),
-            )),
-            Line::from(Span::raw(
-                best_karma
-                    .map(|entry| self.truncate_label(&entry.category_name, 14))
-                    .unwrap_or_else(|| "-".to_string()),
-            )),
-            Line::from(Span::raw(
-                best_karma
-                    .map(|entry| self.format_signed_time(entry.karma_seconds))
-                    .unwrap_or_else(|| "00:00:00".to_string()),
-            )),
-            Line::from(""),
-            Line::from(Span::styled("worst karma", Style::default().fg(Color::Red))),
-            Line::from(Span::raw(
-                worst_karma
-                    .map(|entry| self.truncate_label(&entry.category_name, 14))
-                    .unwrap_or_else(|| "-".to_string()),
-            )),
-            Line::from(Span::raw(
-                worst_karma
-                    .map(|entry| self.format_signed_time(entry.karma_seconds))
-                    .unwrap_or_else(|| "00:00:00".to_string()),
-            )),
-        ];
-        let side = Paragraph::new(side_lines).block(
-            Block::default()
-                .borders(Borders::LEFT)
-                .border_style(Style::default().fg(Color::DarkGray)),
-        );
-        f.render_widget(side, body[1]);
-
-        let selected_line = selected_index
-            .and_then(|idx| summary.entries.get(idx))
-            .map(|entry| {
-                format!(
-                    "selected: {} | time {} | karma {}",
-                    entry.category_name,
-                    self.format_time(entry.elapsed_seconds),
-                    self.format_signed_time(entry.karma_seconds)
-                )
-            })
-            .unwrap_or_else(|| "selected: none".to_string());
-
-        let footer = Paragraph::new(vec![
-            Line::from(vec![
-                Span::styled("total", Style::default().fg(Color::White)),
-                Span::raw(format!(" {}", self.format_time(summary.total_seconds))).fg(Color::Cyan),
-                Span::raw("  |  "),
-                Span::styled("karma", Style::default().fg(Color::White)),
-                Span::raw(format!(
-                    " {}",
-                    self.format_signed_time(summary.total_karma_seconds)
-                ))
-                .fg(Self::karma_color(summary.total_karma_seconds)),
-            ]),
-            Line::from(Span::raw(selected_line).fg(Color::Gray)),
-        ]);
-        f.render_widget(footer, vertical[2]);
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> bool {
@@ -869,6 +901,7 @@ impl App {
     fn handle_report_modal_key(&mut self, key: KeyEvent) {
         let summary = self.report_rows();
         self.clamp_report_selection(summary.entries.len());
+        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
 
         match key.code {
             KeyCode::Esc | KeyCode::Enter => self.close_report_modal(),
@@ -882,12 +915,23 @@ impl App {
                     self.report_selected_index += 1;
                 }
             }
-            KeyCode::Char('k') | KeyCode::Char('K') => {
-                self.report_sort_mode = match self.report_sort_mode {
-                    ReportSortMode::Time => ReportSortMode::Karma,
-                    ReportSortMode::Karma => ReportSortMode::Time,
-                };
-                self.report_selected_index = 0;
+            KeyCode::Left if shift => {
+                self.set_report_period(Self::report_period_prev(self.report_period));
+            }
+            KeyCode::Right if shift => {
+                self.set_report_period(Self::report_period_next(self.report_period));
+            }
+            KeyCode::Char('d') | KeyCode::Char('D') => {
+                self.set_report_period(ReportPeriod::Today);
+            }
+            KeyCode::Char('w') | KeyCode::Char('W') => {
+                self.set_report_period(ReportPeriod::Week);
+            }
+            KeyCode::Char('m') | KeyCode::Char('M') => {
+                self.set_report_period(ReportPeriod::Month);
+            }
+            KeyCode::Char('?') => {
+                self.report_show_help = !self.report_show_help;
             }
             _ => {}
         }
@@ -900,6 +944,8 @@ impl App {
             KeyCode::Char('q') => true,
             KeyCode::Char('c') => {
                 self.sand_engine.clear();
+                self.time_tracker.reset_none_counter_today();
+                self.persist_sessions();
                 false
             }
             KeyCode::Char('k') | KeyCode::Char('K') => {

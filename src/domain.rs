@@ -3,7 +3,7 @@ use std::{
     time::Instant,
 };
 
-use chrono::{Duration as ChronoDuration, Local};
+use chrono::{Duration as ChronoDuration, Local, NaiveDate};
 use ratatui::style::Color;
 
 use crate::constants::COLORS;
@@ -68,6 +68,13 @@ pub struct KarmaReportSummary {
     pub total_karma_seconds: isize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReportPeriod {
+    Today,
+    Week,
+    Month,
+}
+
 #[derive(Clone, Debug)]
 pub struct CategoryStore {
     by_id: HashMap<CategoryId, Category>,
@@ -83,7 +90,7 @@ impl CategoryStore {
             name: "none".to_string(),
             color: Color::White,
             description: String::new(),
-            karma_effect: 1,
+            karma_effect: 0,
         };
         by_id.insert(none.id, none);
 
@@ -429,15 +436,6 @@ impl TimeTracker {
     }
 
     pub fn record_session(&mut self, cat_id: CategoryId, cat_description: &str, elapsed: usize) {
-        let cat_name = self
-            .category_store
-            .get_by_id(cat_id)
-            .map(|category| category.name.as_str())
-            .unwrap_or("none");
-        if cat_name == "none" {
-            return;
-        }
-
         let now = Local::now();
         let start_time = now - ChronoDuration::seconds(elapsed as i64);
         let today = now.format("%Y-%m-%d").to_string();
@@ -482,11 +480,71 @@ impl TimeTracker {
             .map(|session| session.elapsed_seconds)
             .sum()
     }
+
+    pub fn reset_none_counter_today(&mut self) {
+        let today = Local::now().format("%Y-%m-%d").to_string();
+        self.sessions.retain(|session| {
+            !(session.category_id == CategoryId::new(0) && session.date == today)
+        });
+
+        if self.active_category_id == CategoryId::new(0) {
+            self.current_session_start = Some(Instant::now());
+        }
+    }
 }
 
 pub fn build_today_report(sessions: &[Session], categories: &[Category]) -> ReportSummary {
     let today = Local::now().format("%Y-%m-%d").to_string();
     build_report_for_date(sessions, categories, &today)
+}
+
+pub fn build_period_report(
+    sessions: &[Session],
+    categories: &[Category],
+    period: ReportPeriod,
+) -> ReportSummary {
+    if period == ReportPeriod::Today {
+        return build_today_report(sessions, categories);
+    }
+
+    let (start, end, label) = period_bounds(period);
+
+    build_report_for_date_range(sessions, categories, start, end, label)
+}
+
+pub fn build_period_karma_report(
+    sessions: &[Session],
+    categories: &[Category],
+    period: ReportPeriod,
+) -> KarmaReportSummary {
+    if period == ReportPeriod::Today {
+        return build_today_karma_report(sessions, categories);
+    }
+
+    let (start, end, label) = period_bounds(period);
+
+    build_karma_report_for_date_range(sessions, categories, start, end, label)
+}
+
+fn period_bounds(period: ReportPeriod) -> (NaiveDate, NaiveDate, String) {
+    let today = Local::now().date_naive();
+
+    match period {
+        ReportPeriod::Today => {
+            let label = today.format("%Y-%m-%d").to_string();
+            (today, today, label)
+        }
+        ReportPeriod::Week => {
+            let start = today - ChronoDuration::days(6);
+            let label = format!("{}..{}", start.format("%Y-%m-%d"), today.format("%Y-%m-%d"));
+            (start, today, label)
+        }
+        ReportPeriod::Month => {
+            let start = today - ChronoDuration::days(29);
+            let label = format!("{}..{}", start.format("%Y-%m-%d"), today.format("%Y-%m-%d"));
+            (start, today, label)
+        }
+    }
 }
 
 pub fn build_today_karma_report(
@@ -502,15 +560,43 @@ pub fn build_karma_report_for_date(
     categories: &[Category],
     date: &str,
 ) -> KarmaReportSummary {
+    let Some(date) = NaiveDate::parse_from_str(date, "%Y-%m-%d").ok() else {
+        return KarmaReportSummary {
+            date: String::new(),
+            entries: vec![],
+            total_seconds: 0,
+            total_karma_seconds: 0,
+        };
+    };
+
+    build_karma_report_for_date_range(
+        sessions,
+        categories,
+        date,
+        date,
+        date.format("%Y-%m-%d").to_string(),
+    )
+}
+
+fn build_karma_report_for_date_range(
+    sessions: &[Session],
+    categories: &[Category],
+    start: NaiveDate,
+    end: NaiveDate,
+    label: String,
+) -> KarmaReportSummary {
     let mut entries: Vec<KarmaReportEntry> = categories
         .iter()
-        .filter(|category| category.id != CategoryId::new(0) && category.name != "none")
         .map(|category| KarmaReportEntry {
             category_id: category.id,
             category_name: category.name.clone(),
             color: category.color,
             elapsed_seconds: 0,
-            karma_effect: category.karma_effect,
+            karma_effect: if category.id == CategoryId::new(0) || category.name == "none" {
+                0
+            } else {
+                category.karma_effect
+            },
             karma_seconds: 0,
         })
         .collect();
@@ -520,7 +606,15 @@ pub fn build_karma_report_for_date(
         by_id.insert(entry.category_id, idx);
     }
 
-    for session in sessions.iter().filter(|session| session.date == date) {
+    for session in sessions {
+        let Some(session_date) = NaiveDate::parse_from_str(&session.date, "%Y-%m-%d").ok() else {
+            continue;
+        };
+
+        if session_date < start || session_date > end {
+            continue;
+        }
+
         if let Some(idx) = by_id.get(&session.category_id).copied() {
             entries[idx].elapsed_seconds += session.elapsed_seconds;
         }
@@ -534,7 +628,7 @@ pub fn build_karma_report_for_date(
     let total_karma_seconds = entries.iter().map(|entry| entry.karma_seconds).sum();
 
     KarmaReportSummary {
-        date: date.to_string(),
+        date: label,
         entries,
         total_seconds,
         total_karma_seconds,
@@ -546,23 +640,68 @@ pub fn build_report_for_date(
     categories: &[Category],
     date: &str,
 ) -> ReportSummary {
-    let detailed = build_karma_report_for_date(sessions, categories, date);
+    let Some(date) = NaiveDate::parse_from_str(date, "%Y-%m-%d").ok() else {
+        return ReportSummary {
+            date: String::new(),
+            entries: vec![],
+            total_seconds: 0,
+        };
+    };
 
-    let mut entries: Vec<ReportEntry> = detailed
-        .entries
+    build_report_for_date_range(
+        sessions,
+        categories,
+        date,
+        date,
+        date.format("%Y-%m-%d").to_string(),
+    )
+}
+
+fn build_report_for_date_range(
+    sessions: &[Session],
+    categories: &[Category],
+    start: NaiveDate,
+    end: NaiveDate,
+    label: String,
+) -> ReportSummary {
+    let category_names: HashMap<CategoryId, String> = categories
+        .iter()
+        .filter(|category| category.id != CategoryId::new(0) && category.name != "none")
+        .map(|category| (category.id, category.name.clone()))
+        .collect();
+
+    let mut totals: HashMap<CategoryId, usize> = HashMap::new();
+    for session in sessions {
+        let Some(session_date) = NaiveDate::parse_from_str(&session.date, "%Y-%m-%d").ok() else {
+            continue;
+        };
+
+        if session_date < start || session_date > end {
+            continue;
+        }
+
+        if category_names.contains_key(&session.category_id) {
+            *totals.entry(session.category_id).or_insert(0) += session.elapsed_seconds;
+        }
+    }
+
+    let mut entries: Vec<ReportEntry> = totals
         .into_iter()
-        .filter(|entry| entry.elapsed_seconds > 0)
-        .map(|entry| ReportEntry {
-            category_name: entry.category_name,
-            elapsed_seconds: entry.elapsed_seconds,
+        .filter_map(|(category_id, elapsed_seconds)| {
+            category_names.get(&category_id).map(|name| ReportEntry {
+                category_name: name.clone(),
+                elapsed_seconds,
+            })
         })
         .collect();
     entries.sort_by(|a, b| b.elapsed_seconds.cmp(&a.elapsed_seconds));
 
+    let total_seconds = entries.iter().map(|entry| entry.elapsed_seconds).sum();
+
     ReportSummary {
-        date: date.to_string(),
+        date: label,
         entries,
-        total_seconds: detailed.total_seconds,
+        total_seconds,
     }
 }
 
@@ -792,11 +931,7 @@ mod tests {
         ];
 
         let summary = build_karma_report_for_date(&sessions, &categories, "2026-02-25");
-        assert_eq!(
-            summary.entries.len(),
-            3,
-            "all non-none categories are listed"
-        );
+        assert_eq!(summary.entries.len(), 4, "all categories are listed");
         assert_eq!(summary.total_seconds, 5400);
 
         let work = summary
@@ -825,6 +960,306 @@ mod tests {
             "zero-time categories are included"
         );
 
+        let none = summary
+            .entries
+            .iter()
+            .find(|entry| entry.category_name == "none")
+            .expect("none entry");
+        assert_eq!(none.elapsed_seconds, 0);
+        assert_eq!(none.karma_seconds, 0);
+        assert_eq!(none.karma_effect, 0);
+
         assert_eq!(summary.total_karma_seconds, 1800);
+    }
+
+    #[test]
+    fn test_build_karma_report_includes_none_as_neutral_counter() {
+        let categories = vec![
+            Category {
+                id: CategoryId::new(0),
+                name: "none".to_string(),
+                color: Color::White,
+                description: String::new(),
+                karma_effect: 1,
+            },
+            Category {
+                id: CategoryId::new(1),
+                name: "Work".to_string(),
+                color: COLORS[0],
+                description: String::new(),
+                karma_effect: 1,
+            },
+        ];
+
+        let sessions = vec![
+            Session {
+                id: 1,
+                date: "2026-02-25".to_string(),
+                category_id: CategoryId::new(0),
+                description: String::new(),
+                start_time: "08:00:00".to_string(),
+                end_time: "08:20:00".to_string(),
+                elapsed_seconds: 1200,
+            },
+            Session {
+                id: 2,
+                date: "2026-02-25".to_string(),
+                category_id: CategoryId::new(1),
+                description: String::new(),
+                start_time: "09:00:00".to_string(),
+                end_time: "09:30:00".to_string(),
+                elapsed_seconds: 1800,
+            },
+        ];
+
+        let summary = build_karma_report_for_date(&sessions, &categories, "2026-02-25");
+
+        assert_eq!(summary.total_seconds, 3000);
+        assert_eq!(summary.total_karma_seconds, 1800);
+
+        let none = summary
+            .entries
+            .iter()
+            .find(|entry| entry.category_name == "none")
+            .expect("none entry");
+        assert_eq!(none.elapsed_seconds, 1200);
+        assert_eq!(none.karma_effect, 0);
+        assert_eq!(none.karma_seconds, 0);
+    }
+
+    #[test]
+    fn test_build_period_report_week_includes_last_seven_days() {
+        let categories = vec![
+            Category {
+                id: CategoryId::new(0),
+                name: "none".to_string(),
+                color: Color::White,
+                description: String::new(),
+                karma_effect: 1,
+            },
+            Category {
+                id: CategoryId::new(1),
+                name: "Work".to_string(),
+                color: COLORS[0],
+                description: String::new(),
+                karma_effect: 1,
+            },
+        ];
+
+        let today = Local::now().date_naive();
+        let in_window = (today - ChronoDuration::days(6))
+            .format("%Y-%m-%d")
+            .to_string();
+        let out_window = (today - ChronoDuration::days(7))
+            .format("%Y-%m-%d")
+            .to_string();
+
+        let sessions = vec![
+            Session {
+                id: 1,
+                date: today.format("%Y-%m-%d").to_string(),
+                category_id: CategoryId::new(1),
+                description: String::new(),
+                start_time: "09:00:00".to_string(),
+                end_time: "10:00:00".to_string(),
+                elapsed_seconds: 3600,
+            },
+            Session {
+                id: 2,
+                date: in_window,
+                category_id: CategoryId::new(1),
+                description: String::new(),
+                start_time: "09:00:00".to_string(),
+                end_time: "09:30:00".to_string(),
+                elapsed_seconds: 1800,
+            },
+            Session {
+                id: 3,
+                date: out_window,
+                category_id: CategoryId::new(1),
+                description: String::new(),
+                start_time: "09:00:00".to_string(),
+                end_time: "11:00:00".to_string(),
+                elapsed_seconds: 7200,
+            },
+        ];
+
+        let summary = build_period_report(&sessions, &categories, ReportPeriod::Week);
+        assert_eq!(summary.total_seconds, 5400);
+        assert_eq!(summary.entries.len(), 1);
+        assert_eq!(summary.entries[0].category_name, "Work");
+        assert_eq!(summary.entries[0].elapsed_seconds, 5400);
+    }
+
+    #[test]
+    fn test_build_period_karma_report_month_aggregates_range() {
+        let categories = vec![
+            Category {
+                id: CategoryId::new(0),
+                name: "none".to_string(),
+                color: Color::White,
+                description: String::new(),
+                karma_effect: 1,
+            },
+            Category {
+                id: CategoryId::new(1),
+                name: "Work".to_string(),
+                color: COLORS[0],
+                description: String::new(),
+                karma_effect: 1,
+            },
+            Category {
+                id: CategoryId::new(2),
+                name: "Gaming".to_string(),
+                color: COLORS[5],
+                description: String::new(),
+                karma_effect: -1,
+            },
+        ];
+
+        let today = Local::now().date_naive();
+        let in_window = (today - ChronoDuration::days(29))
+            .format("%Y-%m-%d")
+            .to_string();
+        let out_window = (today - ChronoDuration::days(30))
+            .format("%Y-%m-%d")
+            .to_string();
+
+        let sessions = vec![
+            Session {
+                id: 1,
+                date: in_window,
+                category_id: CategoryId::new(1),
+                description: String::new(),
+                start_time: "08:00:00".to_string(),
+                end_time: "09:00:00".to_string(),
+                elapsed_seconds: 3600,
+            },
+            Session {
+                id: 2,
+                date: today.format("%Y-%m-%d").to_string(),
+                category_id: CategoryId::new(2),
+                description: String::new(),
+                start_time: "10:00:00".to_string(),
+                end_time: "10:30:00".to_string(),
+                elapsed_seconds: 1800,
+            },
+            Session {
+                id: 3,
+                date: out_window,
+                category_id: CategoryId::new(1),
+                description: String::new(),
+                start_time: "12:00:00".to_string(),
+                end_time: "13:00:00".to_string(),
+                elapsed_seconds: 3600,
+            },
+        ];
+
+        let summary = build_period_karma_report(&sessions, &categories, ReportPeriod::Month);
+        assert_eq!(summary.total_seconds, 5400);
+        assert_eq!(summary.total_karma_seconds, 1800);
+
+        let work = summary
+            .entries
+            .iter()
+            .find(|entry| entry.category_name == "Work")
+            .expect("work entry");
+        assert_eq!(work.elapsed_seconds, 3600);
+        assert_eq!(work.karma_seconds, 3600);
+
+        let gaming = summary
+            .entries
+            .iter()
+            .find(|entry| entry.category_name == "Gaming")
+            .expect("gaming entry");
+        assert_eq!(gaming.elapsed_seconds, 1800);
+        assert_eq!(gaming.karma_seconds, -1800);
+    }
+
+    #[test]
+    fn test_build_period_karma_report_today_path_is_non_recursive() {
+        let categories = vec![
+            Category {
+                id: CategoryId::new(0),
+                name: "none".to_string(),
+                color: Color::White,
+                description: String::new(),
+                karma_effect: 1,
+            },
+            Category {
+                id: CategoryId::new(1),
+                name: "Work".to_string(),
+                color: COLORS[0],
+                description: String::new(),
+                karma_effect: 1,
+            },
+        ];
+
+        let today = Local::now().format("%Y-%m-%d").to_string();
+        let sessions = vec![Session {
+            id: 1,
+            date: today.clone(),
+            category_id: CategoryId::new(1),
+            description: String::new(),
+            start_time: "09:00:00".to_string(),
+            end_time: "09:10:00".to_string(),
+            elapsed_seconds: 600,
+        }];
+
+        let summary = build_period_karma_report(&sessions, &categories, ReportPeriod::Today);
+        assert_eq!(summary.date, today);
+        assert_eq!(summary.total_seconds, 600);
+        assert_eq!(summary.total_karma_seconds, 600);
+    }
+
+    #[test]
+    fn test_reset_none_counter_today_clears_only_today_none() {
+        let mut tracker = TimeTracker::new();
+        let today = Local::now().format("%Y-%m-%d").to_string();
+        let yesterday = (Local::now().date_naive() - ChronoDuration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
+
+        tracker.sessions = vec![
+            Session {
+                id: 1,
+                date: today.clone(),
+                category_id: CategoryId::new(0),
+                description: String::new(),
+                start_time: "08:00:00".to_string(),
+                end_time: "08:10:00".to_string(),
+                elapsed_seconds: 600,
+            },
+            Session {
+                id: 2,
+                date: yesterday,
+                category_id: CategoryId::new(0),
+                description: String::new(),
+                start_time: "08:00:00".to_string(),
+                end_time: "08:10:00".to_string(),
+                elapsed_seconds: 600,
+            },
+            Session {
+                id: 3,
+                date: today,
+                category_id: CategoryId::new(1),
+                description: String::new(),
+                start_time: "09:00:00".to_string(),
+                end_time: "09:10:00".to_string(),
+                elapsed_seconds: 600,
+            },
+        ];
+
+        tracker.reset_none_counter_today();
+
+        assert_eq!(
+            tracker
+                .sessions
+                .iter()
+                .filter(|session| session.category_id == CategoryId::new(0))
+                .count(),
+            1
+        );
+        assert_eq!(tracker.sessions.len(), 2);
     }
 }

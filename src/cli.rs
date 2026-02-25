@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     constants::COLORS,
-    domain::{CategoryId, Session, build_today_report},
+    domain::{CategoryId, ReportPeriod, Session, build_period_report},
     storage,
 };
 
@@ -29,10 +29,28 @@ pub enum Cli {
     #[command(about = "Stop the current tracking session")]
     Stop,
 
-    #[command(about = "Show today's report")]
+    #[command(about = "Show a time report")]
     Report {
-        #[arg(long, help = "Show today's time")]
+        #[arg(
+            long,
+            help = "Show today's time",
+            conflicts_with_all = ["week", "month"]
+        )]
         today: bool,
+
+        #[arg(
+            long,
+            help = "Show last 7 days",
+            conflicts_with_all = ["today", "month"]
+        )]
+        week: bool,
+
+        #[arg(
+            long,
+            help = "Show last 30 days",
+            conflicts_with_all = ["today", "week"]
+        )]
+        month: bool,
     },
 
     #[command(about = "Export sessions")]
@@ -185,7 +203,7 @@ pub fn stop_session() -> Result<usize, String> {
     Ok(elapsed)
 }
 
-pub fn report_today() -> Result<(), String> {
+pub fn report(period: ReportPeriod) -> Result<(), String> {
     let data_dir = storage::get_data_dir();
     let sessions_path = data_dir.join("time_log.csv");
     let categories_path = data_dir.join("categories.csv");
@@ -193,9 +211,15 @@ pub fn report_today() -> Result<(), String> {
     let categories = storage::load_categories_from_csv(&categories_path).categories;
     let sessions = storage::load_sessions_from_csv(&sessions_path, &categories).sessions;
 
-    let summary = build_today_report(&sessions, &categories);
+    let summary = build_period_report(&sessions, &categories, period);
 
-    println!("Today's Report ({})", summary.date);
+    let title = match period {
+        ReportPeriod::Today => "Today's Report",
+        ReportPeriod::Week => "Weekly Report",
+        ReportPeriod::Month => "Monthly Report",
+    };
+
+    println!("{} ({})", title, summary.date);
     println!("{}", "-".repeat(40));
     for entry in &summary.entries {
         println!(
@@ -381,8 +405,18 @@ pub fn run_cli() {
                 std::process::exit(1);
             }
         }
-        Cli::Report { today: _ } => {
-            if let Err(e) = report_today() {
+        Cli::Report { today, week, month } => {
+            let period = if week {
+                ReportPeriod::Week
+            } else if month {
+                ReportPeriod::Month
+            } else if today {
+                ReportPeriod::Today
+            } else {
+                ReportPeriod::Today
+            };
+
+            if let Err(e) = report(period) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
