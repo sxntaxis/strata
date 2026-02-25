@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File, OpenOptions},
-    io::{self, BufRead, BufReader, Write},
+    io::{self, Write},
     path::Path,
     time::{Duration, Instant},
 };
@@ -131,6 +131,9 @@ mod cli {
             #[arg(help = "Shell type (bash, zsh, fish)")]
             shell: String,
         },
+
+        #[command(about = "Migrate CSV files to canonical schema")]
+        MigrateCsv,
     }
 
     #[derive(Debug, Clone, ValueEnum)]
@@ -268,96 +271,121 @@ mod cli {
             description: String::new(),
             karma_effect: 1,
         }];
+
+        if !path.exists() {
+            return categories;
+        }
+
+        let content = match fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Warning: Could not read categories file: {}", e);
+                return categories;
+            }
+        };
+
+        let lines: Vec<&str> = content.lines().collect();
+        if lines.is_empty() {
+            return categories;
+        }
+
+        // Strict validation: require canonical header
+        let header = lines[0].trim();
+        if !header.starts_with("id,name,") {
+            panic!("categories.csv is not in canonical format. Run 'strata migrate-csv' first.");
+        }
+
         let mut next_id = 1u64;
 
-        if let Ok(file) = File::open(path) {
-            let reader = BufReader::new(file);
-            for line in reader.lines().skip(1).flatten() {
-                let parts: Vec<&str> = line.split(',').collect();
-                if parts.len() >= 3 {
-                    let id = if parts.len() >= 5 {
-                        parts[0].parse().unwrap_or(next_id)
-                    } else {
-                        next_id
-                    };
-                    let name = parts[if parts.len() >= 5 { 1 } else { 0 }].to_string();
-                    let description = parts[if parts.len() >= 5 { 2 } else { 1 }].to_string();
-                    let color_idx: usize = parts[if parts.len() >= 5 { 3 } else { 2 }]
-                        .parse()
-                        .unwrap_or(0)
-                        % COLORS.len();
-                    let karma_effect: i8 = parts
-                        .get(if parts.len() >= 5 { 4 } else { 3 })
-                        .and_then(|s| s.parse().ok())
-                        .unwrap_or(1);
+        for line in lines.iter().skip(1) {
+            let parts: Vec<&str> = line.split(',').collect();
+            // Canonical: id,name,description,color_index,karma_effect
+            if parts.len() >= 5 {
+                let id: u64 = match parts[0].parse() {
+                    Ok(id) => id,
+                    Err(_) => {
+                        eprintln!("Warning: Invalid category ID '{}', skipping", parts[0]);
+                        continue;
+                    }
+                };
+                let name = parts[1].to_string();
+                let description = parts[2].to_string();
+                let color_idx: usize = parts[3].parse().unwrap_or(0) % COLORS.len();
+                let karma_effect: i8 = parts[4].parse().unwrap_or(1);
 
-                    categories.push(Category {
-                        id: CategoryId::new(id),
-                        name,
-                        color: COLORS[color_idx],
-                        description,
-                        karma_effect,
-                    });
-                    next_id = next_id.max(id + 1);
-                }
+                categories.push(Category {
+                    id: CategoryId::new(id),
+                    name,
+                    color: COLORS[color_idx],
+                    description,
+                    karma_effect,
+                });
+                next_id = next_id.max(id + 1);
             }
         }
+
         categories
     }
 
     pub fn load_sessions_from_csv(path: &Path, categories: &[Category]) -> Vec<Session> {
-        let category_map: HashMap<String, CategoryId> =
-            categories.iter().map(|c| (c.name.clone(), c.id)).collect();
         let category_by_id: HashMap<u64, CategoryId> =
             categories.iter().map(|c| (c.id.0, c.id)).collect();
 
         let mut sessions = Vec::new();
+
+        if !path.exists() {
+            return sessions;
+        }
+
+        let content = match fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Warning: Could not read sessions file: {}", e);
+                return sessions;
+            }
+        };
+
+        let lines: Vec<&str> = content.lines().collect();
+        if lines.is_empty() {
+            return sessions;
+        }
+
+        // Strict validation: require canonical header
+        let header = lines[0].trim();
+        if !header.starts_with("id,date,category_id,") {
+            panic!("time_log.csv is not in canonical format. Run 'strata migrate-csv' first.");
+        }
+
         let mut max_id = 0usize;
 
-        if let Ok(file) = File::open(path) {
-            let reader = BufReader::new(file);
-            for line in reader.lines().skip(1).flatten() {
-                let parts: Vec<&str> = line.split(',').collect();
-                if parts.len() >= 7
-                    && let Ok(id) = parts[0].parse::<usize>()
-                {
-                    max_id = max_id.max(id);
+        for line in lines.iter().skip(1) {
+            let parts: Vec<&str> = line.split(',').collect();
+            // Canonical: id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds
+            if parts.len() >= 8 {
+                let id: usize = match parts[0].parse() {
+                    Ok(id) => id,
+                    Err(_) => continue,
+                };
+                max_id = max_id.max(id);
 
-                    // New format: id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds (8 columns)
-                    // Old format: id,date,category,description,start_time,end_time,elapsed_seconds (7 columns)
-                    let (category_id, description_idx) = if parts.len() >= 8 {
-                        // Try column 2 as category_id (u64), then column 3 as category_name
-                        let cat_id = if let Ok(cat_id_u64) = parts[2].parse::<u64>() {
-                            category_by_id.get(&cat_id_u64).copied()
-                        } else {
-                            category_map.get(parts[3]).copied()
-                        }
-                        .unwrap_or(CategoryId::new(0));
-                        (cat_id, 4)
-                    } else {
-                        // Old format: column 2 is category name
-                        let cat_name = parts[2];
-                        (
-                            category_map
-                                .get(cat_name)
-                                .copied()
-                                .unwrap_or(CategoryId::new(0)),
-                            3,
-                        )
-                    };
+                let category_id: u64 = parts[2].parse().unwrap_or(0);
+                let category_id = category_by_id
+                    .get(&category_id)
+                    .copied()
+                    .unwrap_or(CategoryId::new(0));
 
-                    sessions.push(Session {
-                        id,
-                        date: parts[1].to_string(),
-                        category_id,
-                        description: parts[description_idx].to_string(),
-                        start_time: parts[description_idx + 1].to_string(),
-                        end_time: parts[description_idx + 2].to_string(),
-                        elapsed_seconds: parts[description_idx + 3].parse().unwrap_or(0),
-                    });
-                }
+                sessions.push(Session {
+                    id,
+                    date: parts[1].to_string(),
+                    category_id,
+                    description: parts[4].to_string(),
+                    start_time: parts[5].to_string(),
+                    end_time: parts[6].to_string(),
+                    elapsed_seconds: parts[7].parse().unwrap_or(0),
+                });
             }
         }
+
         sessions
     }
 
@@ -679,6 +707,114 @@ mod cli {
         Ok(())
     }
 
+    pub fn migrate_csv() -> Result<(), String> {
+        let data_dir = get_data_dir();
+        let categories_path = data_dir.join("categories.csv");
+        let sessions_path = data_dir.join("time_log.csv");
+
+        println!("Migrating CSV files in: {}", data_dir.display());
+
+        // Migrate categories
+        if categories_path.exists() {
+            let content = fs::read_to_string(&categories_path).map_err(|e| e.to_string())?;
+            let lines: Vec<&str> = content.lines().collect();
+
+            if !lines.is_empty() {
+                let header = lines[0];
+                let needs_migration = !header.starts_with("id,name,");
+
+                if needs_migration {
+                    println!("Migrating categories.csv...");
+                    // Create backup
+                    create_backup(&categories_path)?;
+
+                    // Convert: name,desc,color,karma -> id,name,desc,color,karma
+                    let mut new_lines =
+                        vec!["id,name,description,color_index,karma_effect".to_string()];
+                    let mut next_id = 1u64;
+
+                    for line in lines.iter().skip(1) {
+                        let parts: Vec<&str> = line.split(',').collect();
+                        if parts.len() >= 3 {
+                            let name = parts[0];
+                            let desc = parts.get(1).unwrap_or(&"").to_string();
+                            let color = parts.get(2).unwrap_or(&"0");
+                            let karma = parts.get(3).unwrap_or(&"1");
+
+                            new_lines
+                                .push(format!("{},{},{},{},{}", next_id, name, desc, color, karma));
+                            next_id += 1;
+                        }
+                    }
+
+                    let new_content = new_lines.join("\n");
+                    atomic_write(&categories_path, &new_content)?;
+                    println!("  Migrated {} categories", next_id - 1);
+                } else {
+                    println!("categories.csv already in canonical format");
+                }
+            }
+        }
+
+        // Migrate sessions
+        if sessions_path.exists() {
+            let content = fs::read_to_string(&sessions_path).map_err(|e| e.to_string())?;
+            let lines: Vec<&str> = content.lines().collect();
+
+            if !lines.is_empty() {
+                let header = lines[0];
+                let needs_migration = !header.starts_with("id,date,category_id,");
+
+                if needs_migration {
+                    println!("Migrating time_log.csv...");
+                    // Create backup
+                    create_backup(&sessions_path)?;
+
+                    // Convert: id,date,category,desc,start,end,elapsed -> id,date,category_id,category_name,desc,start,end,elapsed
+                    // First load categories to map names to IDs
+                    let categories = load_categories_from_csv(&categories_path);
+                    let category_map: HashMap<String, u64> = categories
+                        .iter()
+                        .map(|c| (c.name.clone(), c.id.0))
+                        .collect();
+
+                    let mut new_lines = vec!["id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds".to_string()];
+                    let mut session_count = 0;
+
+                    for line in lines.iter().skip(1) {
+                        let parts: Vec<&str> = line.split(',').collect();
+                        if parts.len() >= 7 {
+                            let id = parts[0];
+                            let date = parts[1];
+                            let cat_name = parts[2];
+                            let desc = parts.get(3).unwrap_or(&"").to_string();
+                            let start = parts.get(4).unwrap_or(&"");
+                            let end_time = parts.get(5).unwrap_or(&"");
+                            let elapsed = parts.get(6).unwrap_or(&"0");
+
+                            let cat_id = category_map.get(cat_name).copied().unwrap_or(0);
+
+                            new_lines.push(format!(
+                                "{},{},{},{},{},{},{},{}",
+                                id, date, cat_id, cat_name, desc, start, end_time, elapsed
+                            ));
+                            session_count += 1;
+                        }
+                    }
+
+                    let new_content = new_lines.join("\n");
+                    atomic_write(&sessions_path, &new_content)?;
+                    println!("  Migrated {} sessions", session_count);
+                } else {
+                    println!("time_log.csv already in canonical format");
+                }
+            }
+        }
+
+        println!("Migration complete!");
+        Ok(())
+    }
+
     pub fn run_cli() {
         let cli = Cli::parse();
         match cli {
@@ -712,6 +848,12 @@ mod cli {
             }
             Cli::Completions { shell } => {
                 if let Err(e) = print_completions(&shell) {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            Cli::MigrateCsv => {
+                if let Err(e) = migrate_csv() {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);
                 }
@@ -822,54 +964,59 @@ impl TimeTracker {
         if !path.exists() {
             return;
         }
-        if let Ok(file) = File::open(path) {
-            let reader = BufReader::new(file);
-            let mut max_id = 0;
-            for line in reader.lines().skip(1).flatten() {
-                let parts: Vec<&str> = line.split(',').collect();
-                if parts.len() >= 7
-                    && let Ok(id) = parts[0].parse::<usize>()
-                {
-                    max_id = max_id.max(id);
 
-                    // New format: id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds (8 columns)
-                    // Old format: id,date,category,description,start_time,end_time,elapsed_seconds (7 columns)
-                    let (category_id, description_idx) = if parts.len() >= 8 {
-                        // Try column 2 as category_id (u64)
-                        if let Ok(cat_id_u64) = parts[2].parse::<u64>() {
-                            (CategoryId::new(cat_id_u64), 4)
-                        } else {
-                            // Fall back to column 3 as category_name
-                            let cat_name = parts[3];
-                            (
-                                self.category_id_by_name(cat_name)
-                                    .unwrap_or(CategoryId::new(0)),
-                                4,
-                            )
-                        }
-                    } else {
-                        // Old format: column 2 is category name
-                        let cat_name = parts[2];
-                        (
-                            self.category_id_by_name(cat_name)
-                                .unwrap_or(CategoryId::new(0)),
-                            3,
-                        )
-                    };
-
-                    self.sessions.push(Session {
-                        id,
-                        date: parts[1].to_string(),
-                        category_id,
-                        description: parts[description_idx].to_string(),
-                        start_time: parts[description_idx + 1].to_string(),
-                        end_time: parts[description_idx + 2].to_string(),
-                        elapsed_seconds: parts[description_idx + 3].parse().unwrap_or(0),
-                    });
-                }
+        let content = match fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Warning: Could not read sessions file: {}", e);
+                return;
             }
-            self.session_id_counter = max_id + 1;
+        };
+
+        let lines: Vec<&str> = content.lines().collect();
+        if lines.is_empty() {
+            return;
         }
+
+        // Strict validation: require canonical header
+        let header = lines[0].trim();
+        if !header.starts_with("id,date,category_id,") {
+            panic!("time_log.csv is not in canonical format. Run 'strata migrate-csv' first.");
+        }
+
+        let category_by_id: std::collections::HashMap<u64, CategoryId> =
+            self.categories.iter().map(|c| (c.id.0, c.id)).collect();
+
+        let mut max_id = 0;
+
+        for line in lines.iter().skip(1) {
+            let parts: Vec<&str> = line.split(',').collect();
+            // Canonical: id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds
+            if parts.len() >= 8 {
+                let id: usize = match parts[0].parse() {
+                    Ok(id) => id,
+                    Err(_) => continue,
+                };
+                max_id = max_id.max(id);
+
+                let category_id: u64 = parts[2].parse().unwrap_or(0);
+                let category_id = category_by_id
+                    .get(&category_id)
+                    .copied()
+                    .unwrap_or(CategoryId::new(0));
+
+                self.sessions.push(Session {
+                    id,
+                    date: parts[1].to_string(),
+                    category_id,
+                    description: parts[4].to_string(),
+                    start_time: parts[5].to_string(),
+                    end_time: parts[6].to_string(),
+                    elapsed_seconds: parts[7].parse().unwrap_or(0),
+                });
+            }
+        }
+        self.session_id_counter = max_id + 1;
     }
 
     fn save_sessions(&self) {
@@ -912,38 +1059,50 @@ impl TimeTracker {
         if !path.exists() {
             return;
         }
-        if let Ok(file) = File::open(path) {
-            let reader = BufReader::new(file);
-            for line in reader.lines().skip(1).flatten() {
-                let parts: Vec<&str> = line.split(',').collect();
-                if parts.len() >= 3 {
-                    // New format: id,name,description,color_index,karma_effect (5+ columns)
-                    // Old format: name,description,color_index,karma_effect (3-4 columns)
-                    let (id, name, description, color_idx, karma_effect) = if parts.len() >= 5 {
-                        let id: u64 = parts[0].parse().unwrap_or(self.next_category_id);
-                        let name = parts[1].to_string();
-                        let description = parts[2].to_string();
-                        let color_idx: usize = parts[3].parse().unwrap_or(0) % COLORS.len();
-                        let karma_effect: i8 = parts[4].parse().unwrap_or(1);
-                        (id, name, description, color_idx, karma_effect)
-                    } else {
-                        let id = self.next_category_id;
-                        let name = parts[0].to_string();
-                        let description = parts[1].to_string();
-                        let color_idx: usize = parts[2].parse().unwrap_or(0) % COLORS.len();
-                        let karma_effect: i8 =
-                            parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(1);
-                        (id, name, description, color_idx, karma_effect)
-                    };
-                    self.categories.push(Category {
-                        id: CategoryId::new(id),
-                        name,
-                        color: COLORS[color_idx],
-                        description,
-                        karma_effect,
-                    });
-                    self.next_category_id = self.next_category_id.max(id + 1);
-                }
+
+        let content = match fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Warning: Could not read categories file: {}", e);
+                return;
+            }
+        };
+
+        let lines: Vec<&str> = content.lines().collect();
+        if lines.is_empty() {
+            return;
+        }
+
+        // Strict validation: require canonical header
+        let header = lines[0].trim();
+        if !header.starts_with("id,name,") {
+            panic!("categories.csv is not in canonical format. Run 'strata migrate-csv' first.");
+        }
+
+        for line in lines.iter().skip(1) {
+            let parts: Vec<&str> = line.split(',').collect();
+            // Canonical: id,name,description,color_index,karma_effect
+            if parts.len() >= 5 {
+                let id: u64 = match parts[0].parse() {
+                    Ok(id) => id,
+                    Err(_) => {
+                        eprintln!("Warning: Invalid category ID '{}', skipping", parts[0]);
+                        continue;
+                    }
+                };
+                let name = parts[1].to_string();
+                let description = parts[2].to_string();
+                let color_idx: usize = parts[3].parse().unwrap_or(0) % COLORS.len();
+                let karma_effect: i8 = parts[4].parse().unwrap_or(1);
+
+                self.categories.push(Category {
+                    id: CategoryId::new(id),
+                    name,
+                    color: COLORS[color_idx],
+                    description,
+                    karma_effect,
+                });
+                self.next_category_id = self.next_category_id.max(id + 1);
             }
         }
     }
@@ -1124,7 +1283,10 @@ impl SandEngine {
 
         let mut new_grid = vec![vec![None; new_w]; new_h];
 
-        let mut kept_count = 0;
+        let mut lost_left: Vec<CategoryId> = Vec::new();
+        let mut lost_right: Vec<CategoryId> = Vec::new();
+        let mut lost_top: Vec<CategoryId> = Vec::new();
+        let mut lost_bottom: Vec<CategoryId> = Vec::new();
 
         let x_shift = if new_w > old_w {
             (new_w - old_w) / 2
@@ -1157,15 +1319,93 @@ impl SandEngine {
 
                 if dest_x < new_w && dest_y < new_h {
                     new_grid[dest_y][dest_x] = self.grid[y][x];
-                    if new_grid[dest_y][dest_x].is_some() {
-                        kept_count += 1;
+                } else if let Some(cat_id) = self.grid[y][x] {
+                    if new_w < old_w {
+                        if x < x_shift {
+                            lost_left.push(cat_id);
+                        } else if x >= new_w + x_shift {
+                            lost_right.push(cat_id);
+                        }
+                    }
+                    if new_h < old_h {
+                        if y < y_shift {
+                            lost_top.push(cat_id);
+                        } else if y >= new_h + y_shift {
+                            lost_bottom.push(cat_id);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Calculate band sizes
+        let band_w = (new_w / 40).clamp(2, 6);
+        let band_h = (new_h / 40).clamp(1, 3);
+
+        // Respawn lost grains at their corresponding edges
+        // Place lost_left at left edge
+        for cat_id in lost_left.iter() {
+            for y in 0..new_h {
+                for x in 0..band_w {
+                    if new_grid[y][x].is_none() {
+                        new_grid[y][x] = Some(*cat_id);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Place lost_right at right edge
+        for cat_id in lost_right.iter() {
+            for y in 0..new_h {
+                for x in (new_w - band_w..new_w).rev() {
+                    if new_grid[y][x].is_none() {
+                        new_grid[y][x] = Some(*cat_id);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Place lost_top at top edge
+        for cat_id in lost_top.iter() {
+            for x in 0..new_w {
+                for y in 0..band_h {
+                    if new_grid[y][x].is_none() {
+                        new_grid[y][x] = Some(*cat_id);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Place lost_bottom at bottom edge
+        for cat_id in lost_bottom.iter() {
+            for x in 0..new_w {
+                for y in (new_h - band_h..new_h).rev() {
+                    if new_grid[y][x].is_none() {
+                        new_grid[y][x] = Some(*cat_id);
+                        break;
                     }
                 }
             }
         }
 
         self.grid = new_grid;
-        self.grain_count = kept_count;
+
+        // Run gravity to settle the grains
+        let settle_iterations = 3.min((old_w * old_h / 1000).max(1));
+        for _ in 0..settle_iterations {
+            self.apply_gravity();
+        }
+
+        // Recount grains after settling
+        self.grain_count = self
+            .grid
+            .iter()
+            .flat_map(|row| row.iter())
+            .filter(|c| c.is_some())
+            .count();
     }
 
     fn capacity(&self) -> usize {
@@ -2105,5 +2345,197 @@ mod tests {
         let id2 = CategoryId::new(2);
         assert_ne!(id1, id2);
         assert_eq!(id1, CategoryId::new(1));
+    }
+
+    #[test]
+    fn test_sand_resize_basic_copy() {
+        // Create with 20 cells (40x80 pixels)
+        let mut se = SandEngine::new(20, 20);
+        se.categories = vec![Category {
+            id: CategoryId::new(0),
+            name: "none".into(),
+            color: Color::White,
+            description: String::new(),
+            karma_effect: 1,
+        }];
+
+        // Put grains in the middle (in pixel coords)
+        se.grid[40][20] = Some(CategoryId::new(0));
+
+        let before = se
+            .grid
+            .iter()
+            .flat_map(|r| r.iter())
+            .filter(|c| c.is_some())
+            .count();
+
+        // Resize to same size - should preserve
+        se.resize(20, 20);
+
+        let after = se
+            .grid
+            .iter()
+            .flat_map(|r| r.iter())
+            .filter(|c| c.is_some())
+            .count();
+
+        assert_eq!(before, after, "Same-size resize should preserve grains");
+    }
+
+    #[test]
+    fn test_sand_resize_expand_preserves_grains() {
+        // Create with 20 cells (40x80 pixels)
+        let mut se = SandEngine::new(20, 20);
+        se.categories = vec![Category {
+            id: CategoryId::new(0),
+            name: "none".into(),
+            color: Color::White,
+            description: String::new(),
+            karma_effect: 1,
+        }];
+
+        se.grid[40][20] = Some(CategoryId::new(0));
+
+        let before = se
+            .grid
+            .iter()
+            .flat_map(|r| r.iter())
+            .filter(|c| c.is_some())
+            .count();
+
+        // Expand to 40 cells (80x160 pixels) - should preserve
+        se.resize(40, 40);
+
+        let after = se
+            .grid
+            .iter()
+            .flat_map(|r| r.iter())
+            .filter(|c| c.is_some())
+            .count();
+
+        assert_eq!(before, after, "Expand should preserve grains");
+    }
+
+    #[test]
+    fn test_sand_resize_shrink_center_preserves_grains() {
+        // Create with 40 cells (80x160 pixels)
+        let mut se = SandEngine::new(40, 40);
+        se.categories = vec![Category {
+            id: CategoryId::new(0),
+            name: "none".into(),
+            color: Color::White,
+            description: String::new(),
+            karma_effect: 1,
+        }];
+
+        // Put grains in center of 80x160 grid (at y=80, x=40 - the center)
+        se.grid[80][40] = Some(CategoryId::new(0));
+
+        let before = se
+            .grid
+            .iter()
+            .flat_map(|r| r.iter())
+            .filter(|c| c.is_some())
+            .count();
+
+        // Shrink to 20 cells (40x80 pixels) - center should still be visible
+        se.resize(20, 20);
+
+        let after = se
+            .grid
+            .iter()
+            .flat_map(|r| r.iter())
+            .filter(|c| c.is_some())
+            .count();
+
+        assert_eq!(before, after, "Center grains should be preserved on shrink");
+    }
+
+    #[test]
+    fn test_sand_resize_preserves_count_right_edge() {
+        let mut se = SandEngine::new(80, 50);
+        se.categories = vec![
+            Category {
+                id: CategoryId::new(0),
+                name: "none".into(),
+                color: Color::White,
+                description: String::new(),
+                karma_effect: 1,
+            },
+            Category {
+                id: CategoryId::new(1),
+                name: "work".into(),
+                color: Color::Green,
+                description: String::new(),
+                karma_effect: 1,
+            },
+        ];
+
+        let cell_w = se.width as usize / SAND_ENGINE.dot_width as usize;
+        let cell_h = se.height as usize / SAND_ENGINE.dot_height as usize;
+
+        // Fill right-most cell columns with grains
+        for cy in 0..cell_h {
+            for cx in (cell_w - 10..cell_w).rev() {
+                if cx < cell_w {
+                    se.grid[cy][cx] = Some(CategoryId::new(1));
+                }
+            }
+        }
+
+        se.grain_count = se
+            .grid
+            .iter()
+            .flat_map(|row| row.iter())
+            .filter(|c| c.is_some())
+            .count();
+
+        let original_count = se.grain_count;
+
+        // Shrink width - grains should redistribute to right band
+        se.resize(60, 50);
+
+        assert_eq!(
+            se.grain_count, original_count,
+            "Grain count should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_sand_resize_preserves_count_expand() {
+        let mut se = SandEngine::new(50, 50);
+        se.categories = vec![Category {
+            id: CategoryId::new(0),
+            name: "none".into(),
+            color: Color::White,
+            description: String::new(),
+            karma_effect: 1,
+        }];
+
+        let cell_w = se.width as usize / SAND_ENGINE.dot_width as usize;
+        let cell_h = se.height as usize / SAND_ENGINE.dot_height as usize;
+
+        // Add some grains in middle
+        if cell_h > 2 && cell_w > 2 {
+            se.grid[cell_h / 2][cell_w / 2] = Some(CategoryId::new(0));
+            se.grid[cell_h / 2 + 1][cell_w / 2] = Some(CategoryId::new(0));
+        }
+
+        se.grain_count = se
+            .grid
+            .iter()
+            .flat_map(|row| row.iter())
+            .filter(|c| c.is_some())
+            .count();
+
+        let original_count = se.grain_count;
+
+        // Expand - count should increase but not randomly
+        se.resize(80, 80);
+
+        assert!(
+            se.grain_count >= original_count,
+            "Grain count should be at least preserved"
+        );
     }
 }
