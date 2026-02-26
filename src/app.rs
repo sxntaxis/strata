@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use chrono::{Datelike, Local, NaiveDate};
+use chrono::{Datelike, Duration as ChronoDuration, Local, NaiveDate};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
@@ -29,6 +29,17 @@ use crate::{
     storage,
 };
 
+#[derive(Clone)]
+struct CategoryLogEntry {
+    date: String,
+    start_time: String,
+    end_time: String,
+    description: String,
+    elapsed_seconds: usize,
+    karma_effect: i8,
+    karma_seconds: isize,
+}
+
 struct App {
     time_tracker: TimeTracker,
     sand_engine: SandEngine,
@@ -39,8 +50,12 @@ struct App {
     new_category_name: String,
     color_index: usize,
     modal_description: String,
+    category_tags: storage::CategoryTagsState,
+    modal_tag_index: Option<usize>,
     report_selected_index: usize,
     report_period: ReportPeriod,
+    report_logs_category_id: Option<CategoryId>,
+    report_log_selected_index: usize,
     report_show_help: bool,
     render_needed: bool,
 }
@@ -60,6 +75,16 @@ impl App {
             loaded_sessions.next_session_id,
         );
 
+        let mut category_tags = storage::load_category_tags(&storage::get_category_tags_path());
+        let valid_category_ids: HashSet<u64> = tracker
+            .categories_for_storage()
+            .into_iter()
+            .map(|category| category.id.0)
+            .collect();
+        category_tags
+            .tags_by_category
+            .retain(|category_id, _| valid_category_ids.contains(category_id));
+
         let mut app = Self {
             time_tracker: tracker,
             sand_engine: SandEngine::new(width, height),
@@ -70,11 +95,17 @@ impl App {
             new_category_name: String::new(),
             color_index: 0,
             modal_description: String::new(),
+            category_tags,
+            modal_tag_index: None,
             report_selected_index: 0,
             report_period: ReportPeriod::Today,
+            report_logs_category_id: None,
+            report_log_selected_index: 0,
             report_show_help: false,
             render_needed: true,
         };
+
+        app.persist_category_tags();
 
         app.time_tracker.start_session();
         if app.time_tracker.active_category_index() == Some(0) {
@@ -90,16 +121,14 @@ impl App {
         self.selected_index = self.time_tracker.active_category_index().unwrap_or(0);
         self.new_category_name = String::new();
         self.color_index = 0;
-        self.modal_description = self
-            .time_tracker
-            .category_description_by_index(self.selected_index)
-            .unwrap_or_default();
+        self.sync_modal_description_from_selection();
         self.render_needed = true;
     }
 
     fn close_modal(&mut self) {
         self.modal_open = false;
         self.modal_description = String::new();
+        self.modal_tag_index = None;
         self.render_needed = true;
     }
 
@@ -108,12 +137,16 @@ impl App {
         self.modal_open = false;
         self.report_selected_index = 0;
         self.report_period = ReportPeriod::Today;
+        self.report_logs_category_id = None;
+        self.report_log_selected_index = 0;
         self.report_show_help = false;
         self.render_needed = true;
     }
 
     fn close_report_modal(&mut self) {
         self.report_modal_open = false;
+        self.report_logs_category_id = None;
+        self.report_log_selected_index = 0;
         self.report_show_help = false;
         self.render_needed = true;
     }
@@ -138,14 +171,23 @@ impl App {
         Rect::new(modal_x, modal_y, modal_width, modal_height)
     }
 
-    fn report_modal_rect(&self, terminal_size: Rect, row_count: usize) -> Rect {
+    fn report_modal_rect(
+        &self,
+        terminal_size: Rect,
+        row_count: usize,
+        min_inner_width: usize,
+    ) -> Rect {
         let compact = self.modal_rect(terminal_size);
-        let inner_width = compact.width.saturating_sub(2);
+        let inner_width = compact.width.saturating_sub(2) as usize;
         let inner_height = compact.height.saturating_sub(2);
         let footer_height = if self.report_show_help { 1 } else { 0 };
         let visible_rows = inner_height.saturating_sub(footer_height) as usize;
 
-        let content_is_cramped = inner_width < 28 || row_count > visible_rows;
+        let breathing_room = 2usize;
+        let width_is_cramped = inner_width < min_inner_width.saturating_add(breathing_room);
+        let rows_are_cramped = row_count > visible_rows;
+
+        let content_is_cramped = width_is_cramped || rows_are_cramped;
         if content_is_cramped {
             self.modal_rect_ratio(terminal_size, 2, 3)
         } else {
@@ -153,23 +195,16 @@ impl App {
         }
     }
 
-    fn report_chip(label: &str, active: bool) -> Span<'static> {
+    fn report_period_label_span(label: &str, active: bool) -> Span<'static> {
         let style = if active {
             Style::default()
-                .fg(Color::Black)
-                .bg(Color::White)
+                .fg(Color::White)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::Gray)
         };
 
-        let text = if active {
-            format!("[{}]", label)
-        } else {
-            label.to_string()
-        };
-
-        Span::styled(text, style)
+        Span::styled(label.to_string(), style)
     }
 
     fn report_period_prev(period: ReportPeriod) -> ReportPeriod {
@@ -186,6 +221,55 @@ impl App {
             ReportPeriod::Week => ReportPeriod::Month,
             ReportPeriod::Month => ReportPeriod::Today,
         }
+    }
+
+    fn report_period_bounds(period: ReportPeriod) -> (NaiveDate, NaiveDate) {
+        let today = Local::now().date_naive();
+
+        match period {
+            ReportPeriod::Today => (today, today),
+            ReportPeriod::Week => (today - ChronoDuration::days(6), today),
+            ReportPeriod::Month => (today - ChronoDuration::days(29), today),
+        }
+    }
+
+    fn report_period_includes_today(&self) -> bool {
+        let today = Local::now().date_naive();
+        let (start, end) = Self::report_period_bounds(self.report_period);
+        today >= start && today <= end
+    }
+
+    fn category_name_for_id(&self, category_id: CategoryId) -> String {
+        self.time_tracker
+            .categories_for_storage()
+            .into_iter()
+            .find(|category| category.id == category_id)
+            .map(|category| category.name)
+            .unwrap_or_else(|| "unknown".to_string())
+    }
+
+    fn category_color_for_id(&self, category_id: CategoryId) -> Color {
+        self.time_tracker
+            .categories_for_storage()
+            .into_iter()
+            .find(|category| category.id == category_id)
+            .map(|category| category.color)
+            .unwrap_or(Color::White)
+    }
+
+    fn category_karma_effect_for_id(&self, category_id: CategoryId) -> i8 {
+        self.time_tracker
+            .categories_for_storage()
+            .into_iter()
+            .find(|category| category.id == category_id)
+            .map(|category| {
+                if category.id == CategoryId::new(0) || category.name == "none" {
+                    0
+                } else {
+                    category.karma_effect
+                }
+            })
+            .unwrap_or(0)
     }
 
     fn format_report_interval_label(&self, raw: &str) -> String {
@@ -220,6 +304,27 @@ impl App {
         let categories = self.time_tracker.categories_for_storage();
         let mut summary =
             build_period_karma_report(&self.time_tracker.sessions, &categories, self.report_period);
+
+        if self.report_period_includes_today() {
+            if let Some(start) = self.time_tracker.current_session_start {
+                let live_elapsed = start.elapsed().as_secs() as usize;
+                if live_elapsed > 0 {
+                    let active_category_id = self.time_tracker.active_category_id();
+                    if let Some(entry) = summary
+                        .entries
+                        .iter_mut()
+                        .find(|entry| entry.category_id == active_category_id)
+                    {
+                        entry.elapsed_seconds += live_elapsed;
+                        entry.karma_seconds += live_elapsed as isize * entry.karma_effect as isize;
+                        summary.total_seconds += live_elapsed;
+                        summary.total_karma_seconds +=
+                            live_elapsed as isize * entry.karma_effect as isize;
+                    }
+                }
+            }
+        }
+
         summary.entries.sort_by(|a, b| {
             let none_id = CategoryId::new(0);
             let group = |entry: &crate::domain::KarmaReportEntry| -> u8 {
@@ -260,10 +365,95 @@ impl App {
         summary
     }
 
+    fn report_logs_for_category(&self, category_id: CategoryId) -> Vec<CategoryLogEntry> {
+        let (start, end) = Self::report_period_bounds(self.report_period);
+        let karma_effect = self.category_karma_effect_for_id(category_id);
+
+        let mut rows: Vec<CategoryLogEntry> = self
+            .time_tracker
+            .sessions
+            .iter()
+            .filter_map(|session| {
+                if session.category_id != category_id {
+                    return None;
+                }
+
+                let Some(session_date) = NaiveDate::parse_from_str(&session.date, "%Y-%m-%d").ok()
+                else {
+                    return None;
+                };
+
+                if session_date < start || session_date > end {
+                    return None;
+                }
+
+                Some(CategoryLogEntry {
+                    date: session.date.clone(),
+                    start_time: session.start_time.clone(),
+                    end_time: session.end_time.clone(),
+                    description: session.description.clone(),
+                    elapsed_seconds: session.elapsed_seconds,
+                    karma_effect,
+                    karma_seconds: session.elapsed_seconds as isize * karma_effect as isize,
+                })
+            })
+            .collect();
+
+        if self.report_period_includes_today()
+            && self.time_tracker.active_category_id() == category_id
+        {
+            if let Some(start_instant) = self.time_tracker.current_session_start {
+                let live_elapsed = start_instant.elapsed().as_secs() as usize;
+                if live_elapsed > 0 {
+                    let now = Local::now();
+                    let today_str = now.format("%Y-%m-%d").to_string();
+                    let end_time = now.format("%H:%M:%S").to_string();
+                    let start_time = (now - ChronoDuration::seconds(live_elapsed as i64))
+                        .format("%H:%M:%S")
+                        .to_string();
+
+                    let live_description = self
+                        .time_tracker
+                        .categories_for_storage()
+                        .into_iter()
+                        .find(|category| category.id == category_id)
+                        .map(|category| category.description)
+                        .unwrap_or_default();
+
+                    rows.push(CategoryLogEntry {
+                        date: today_str,
+                        start_time,
+                        end_time,
+                        description: live_description,
+                        elapsed_seconds: live_elapsed,
+                        karma_effect,
+                        karma_seconds: live_elapsed as isize * karma_effect as isize,
+                    });
+                }
+            }
+        }
+
+        rows.sort_by(|a, b| b.date.cmp(&a.date).then(b.end_time.cmp(&a.end_time)));
+        rows
+    }
+
+    fn report_current_logs(&self) -> Vec<CategoryLogEntry> {
+        let Some(category_id) = self.report_logs_category_id else {
+            return vec![];
+        };
+
+        self.report_logs_for_category(category_id)
+    }
+
     fn set_report_period(&mut self, period: ReportPeriod) {
         self.report_period = period;
-        let row_count = self.report_rows().entries.len();
-        self.clamp_report_selection(row_count);
+        if self.report_logs_category_id.is_some() {
+            let row_count = self.report_current_logs().len();
+            self.clamp_report_log_selection(row_count);
+        } else {
+            let row_count = self.report_rows().entries.len();
+            self.clamp_report_selection(row_count);
+        }
     }
 
     fn clamp_report_selection(&mut self, row_count: usize) {
@@ -271,6 +461,14 @@ impl App {
             self.report_selected_index = 0;
         } else if self.report_selected_index >= row_count {
             self.report_selected_index = row_count - 1;
+        }
+    }
+
+    fn clamp_report_log_selection(&mut self, row_count: usize) {
+        if row_count == 0 {
+            self.report_log_selected_index = 0;
+        } else if self.report_log_selected_index >= row_count {
+            self.report_log_selected_index = row_count - 1;
         }
     }
 
@@ -294,6 +492,11 @@ impl App {
         let _ = storage::save_sand_state(&path, &state);
     }
 
+    fn persist_category_tags(&self) {
+        let path = storage::get_category_tags_path();
+        let _ = storage::save_category_tags(&path, &self.category_tags);
+    }
+
     fn restore_sand_state(&mut self) {
         let path = storage::get_sand_state_path();
         let Some(state) = storage::load_sand_state(&path) else {
@@ -308,6 +511,97 @@ impl App {
             .collect();
 
         self.sand_engine.restore_state(&state, &valid_category_ids);
+    }
+
+    fn sync_modal_description_from_selection(&mut self) {
+        if self.is_on_insert_space() {
+            self.modal_description.clear();
+        } else {
+            self.modal_description = self
+                .time_tracker
+                .category_description_by_index(self.selected_index)
+                .unwrap_or_default();
+        }
+        self.modal_tag_index = None;
+    }
+
+    fn selected_category_id(&self) -> Option<CategoryId> {
+        if self.is_on_insert_space() {
+            None
+        } else {
+            self.time_tracker
+                .category_by_index(self.selected_index)
+                .map(|category| category.id)
+        }
+    }
+
+    fn remember_selected_tag(&mut self) {
+        let Some(category_id) = self.selected_category_id() else {
+            return;
+        };
+
+        let tag = self.modal_description.trim();
+        if tag.is_empty() {
+            return;
+        }
+
+        let tags = self
+            .category_tags
+            .tags_by_category
+            .entry(category_id.0)
+            .or_default();
+        tags.retain(|existing| existing != tag);
+        tags.insert(0, tag.to_string());
+        const MAX_TAGS_PER_CATEGORY: usize = 24;
+        tags.truncate(MAX_TAGS_PER_CATEGORY);
+
+        self.modal_tag_index = Some(0);
+        self.persist_category_tags();
+    }
+
+    fn cycle_selected_tag(&mut self, direction: isize) {
+        let Some(category_id) = self.selected_category_id() else {
+            return;
+        };
+
+        let Some(tags) = self.category_tags.tags_by_category.get(&category_id.0) else {
+            return;
+        };
+
+        if tags.is_empty() {
+            return;
+        }
+
+        let len = tags.len();
+        let next_index = if let Some(current_index) = self.modal_tag_index {
+            if direction < 0 {
+                (current_index + len - 1) % len
+            } else {
+                (current_index + 1) % len
+            }
+        } else if !self.modal_description.trim().is_empty() {
+            if let Some(existing_index) = tags
+                .iter()
+                .position(|tag| tag == self.modal_description.trim())
+            {
+                if direction < 0 {
+                    (existing_index + len - 1) % len
+                } else {
+                    (existing_index + 1) % len
+                }
+            } else if direction < 0 {
+                len - 1
+            } else {
+                0
+            }
+        } else if direction < 0 {
+            len - 1
+        } else {
+            0
+        };
+
+        self.modal_tag_index = Some(next_index);
+        self.modal_description = tags[next_index].clone();
     }
 
     fn is_on_insert_space(&self) -> bool {
@@ -326,6 +620,7 @@ impl App {
                 let _ = self.time_tracker.set_active_category_by_index(index);
                 self.time_tracker.start_session();
                 self.persist_categories();
+                self.sync_modal_description_from_selection();
             }
         }
     }
@@ -335,13 +630,24 @@ impl App {
             && self.selected_index < self.time_tracker.category_count()
             && self.selected_index > 0
         {
+            let removed_id = self
+                .time_tracker
+                .category_by_index(self.selected_index)
+                .map(|category| category.id);
+
             if self.time_tracker.delete_category(self.selected_index) {
+                if let Some(category_id) = removed_id {
+                    self.category_tags.tags_by_category.remove(&category_id.0);
+                    self.persist_category_tags();
+                }
+
                 if self.selected_index > 0
                     && self.selected_index >= self.time_tracker.category_count()
                 {
                     self.selected_index = self.time_tracker.category_count();
                 }
                 self.persist_categories();
+                self.sync_modal_description_from_selection();
             }
         }
     }
@@ -614,8 +920,48 @@ impl App {
 
     fn render_report_modal(&self, f: &mut Frame, terminal_size: Rect) {
         let summary = self.report_rows();
-        let modal_rect = self.report_modal_rect(terminal_size, summary.entries.len());
-        let selected_index = if summary.entries.is_empty() {
+        let logs_for_view = self
+            .report_logs_category_id
+            .map(|category_id| self.report_logs_for_category(category_id));
+
+        let body_row_count = logs_for_view
+            .as_ref()
+            .map_or(summary.entries.len(), |logs| logs.len());
+
+        let preferred_inner_width = if let Some(logs) = logs_for_view.as_ref() {
+            let max_detail = logs
+                .iter()
+                .map(|row| {
+                    if row.description.trim().is_empty() {
+                        format!("{}-{}", row.start_time, row.end_time)
+                    } else {
+                        format!("{} · {}-{}", row.description, row.start_time, row.end_time)
+                    }
+                })
+                .map(|text| text.chars().count())
+                .max()
+                .unwrap_or(16)
+                .min(40);
+
+            let is_none = self.report_logs_category_id == Some(CategoryId::new(0));
+            let metric_width = if is_none { 8 } else { 9 };
+            let date_width = 7usize;
+            date_width + 1 + max_detail + 1 + metric_width
+        } else {
+            let max_name = summary
+                .entries
+                .iter()
+                .map(|entry| entry.category_name.chars().count())
+                .max()
+                .unwrap_or(12)
+                .min(28);
+
+            2 + max_name + 1 + 9
+        };
+
+        let modal_rect =
+            self.report_modal_rect(terminal_size, body_row_count, preferred_inner_width);
+        let selected_summary_index = if summary.entries.is_empty() {
             None
         } else {
             Some(self.report_selected_index.min(summary.entries.len() - 1))
@@ -623,10 +969,14 @@ impl App {
 
         let interval_label = self.format_report_interval_label(&summary.date);
 
-        let border_color = selected_index
-            .and_then(|idx| summary.entries.get(idx))
-            .map(|entry| entry.color)
-            .unwrap_or(Color::White);
+        let border_color = if let Some(category_id) = self.report_logs_category_id {
+            self.category_color_for_id(category_id)
+        } else {
+            selected_summary_index
+                .and_then(|idx| summary.entries.get(idx))
+                .map(|entry| entry.color)
+                .unwrap_or(Color::White)
+        };
 
         let interval_title = Line::from(Span::styled(
             interval_label,
@@ -634,8 +984,14 @@ impl App {
         ))
         .alignment(Alignment::Left);
 
+        let center_label = if let Some(category_id) = self.report_logs_category_id {
+            format!("{} logs", self.category_name_for_id(category_id))
+        } else {
+            "karma".to_string()
+        };
+
         let center_title = Line::from(Span::styled(
-            "karma",
+            center_label,
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
@@ -649,11 +1005,11 @@ impl App {
         .alignment(Alignment::Right);
 
         let period_bottom_title = Line::from(vec![
-            Self::report_chip("today", self.report_period == ReportPeriod::Today),
-            Span::raw(" "),
-            Self::report_chip("week", self.report_period == ReportPeriod::Week),
-            Span::raw(" "),
-            Self::report_chip("month", self.report_period == ReportPeriod::Month),
+            Self::report_period_label_span("day", self.report_period == ReportPeriod::Today),
+            Span::styled(" · ", Style::default().fg(Color::Gray)),
+            Self::report_period_label_span("week", self.report_period == ReportPeriod::Week),
+            Span::styled(" · ", Style::default().fg(Color::Gray)),
+            Self::report_period_label_span("month", self.report_period == ReportPeriod::Month),
         ])
         .alignment(Alignment::Center);
 
@@ -676,85 +1032,180 @@ impl App {
             .constraints([Constraint::Min(3), Constraint::Length(footer_height)])
             .split(inner);
 
-        let row_width = vertical[0].width as usize;
-        let metric_width = 9;
-        let name_width = row_width.saturating_sub(metric_width + 4).max(4);
+        if let Some(category_id) = self.report_logs_category_id {
+            let logs = logs_for_view.as_ref().expect("logs computed for logs view");
+            let selected_log_index = if logs.is_empty() {
+                None
+            } else {
+                Some(self.report_log_selected_index.min(logs.len() - 1))
+            };
+            let is_none_category = category_id == CategoryId::new(0);
 
-        let items: Vec<ListItem> = summary
-            .entries
-            .iter()
-            .enumerate()
-            .map(|(idx, entry)| {
-                let is_selected = selected_index == Some(idx);
-                let dot = if entry.karma_effect < 0 {
-                    "◯ "
-                } else if entry.karma_effect == 0 {
-                    "· "
-                } else {
-                    "● "
-                };
-                let name = self.truncate_label(&entry.category_name, name_width);
-                let pad = name_width.saturating_sub(name.chars().count()) + 1;
-                let is_none_row = entry.category_id == CategoryId::new(0);
-                let metric_value = if is_none_row {
-                    self.format_time(entry.elapsed_seconds)
-                } else if entry.karma_seconds == 0 && entry.karma_effect < 0 {
-                    "-00:00:00".to_string()
-                } else {
-                    self.format_karma_time(entry.karma_seconds)
-                };
-                let metric_color = if is_none_row {
-                    Color::Gray
-                } else if entry.karma_seconds == 0 {
-                    if entry.karma_effect < 0 {
-                        Color::Red
-                    } else if entry.karma_effect > 0 {
-                        Color::Green
+            let row_width = vertical[0].width as usize;
+            let metric_width = if is_none_category { 8 } else { 9 };
+            let date_width = 7;
+            let detail_width = row_width
+                .saturating_sub(metric_width + date_width + 4)
+                .max(4);
+
+            let items: Vec<ListItem> = logs
+                .iter()
+                .enumerate()
+                .map(|(idx, row)| {
+                    let is_selected = selected_log_index == Some(idx);
+                    let date = self
+                        .truncate_label(&self.format_report_interval_label(&row.date), date_width);
+                    let date_pad = date_width.saturating_sub(date.chars().count()) + 1;
+
+                    let detail_source = if row.description.trim().is_empty() {
+                        format!("{}-{}", row.start_time, row.end_time)
                     } else {
+                        format!("{} · {}-{}", row.description, row.start_time, row.end_time)
+                    };
+                    let detail = self.truncate_label(&detail_source, detail_width);
+                    let detail_pad = detail_width.saturating_sub(detail.chars().count()) + 1;
+
+                    let metric_value = if is_none_category {
+                        self.format_time(row.elapsed_seconds)
+                    } else if row.karma_seconds == 0 && row.karma_effect < 0 {
+                        "-00:00:00".to_string()
+                    } else {
+                        self.format_karma_time(row.karma_seconds)
+                    };
+
+                    let metric_color = if is_none_category {
                         Color::Gray
+                    } else if row.karma_seconds == 0 {
+                        if row.karma_effect < 0 {
+                            Color::Red
+                        } else if row.karma_effect > 0 {
+                            Color::Green
+                        } else {
+                            Color::Gray
+                        }
+                    } else {
+                        Self::karma_color(row.karma_seconds)
+                    };
+
+                    if is_selected {
+                        let text_color = Self::text_color_for_bg(border_color);
+                        ListItem::new(Line::from(vec![
+                            Span::raw(date).fg(text_color),
+                            Span::raw(" ".repeat(date_pad)).fg(text_color),
+                            Span::raw(detail).fg(text_color),
+                            Span::raw(" ".repeat(detail_pad)).fg(text_color),
+                            Span::raw(metric_value).fg(text_color),
+                        ]))
+                        .style(Style::default().fg(text_color).bg(border_color))
+                    } else {
+                        ListItem::new(Line::from(vec![
+                            Span::raw(date).fg(Color::Gray),
+                            Span::raw(" ".repeat(date_pad)).fg(Color::Gray),
+                            Span::raw(detail).fg(Color::White),
+                            Span::raw(" ".repeat(detail_pad)).fg(Color::White),
+                            Span::raw(metric_value).fg(metric_color),
+                        ]))
                     }
-                } else {
-                    Self::karma_color(entry.karma_seconds)
-                };
+                })
+                .collect();
 
-                if is_selected {
-                    let text_color = Self::text_color_for_bg(entry.color);
-                    ListItem::new(Line::from(vec![
-                        Span::raw(dot).fg(text_color),
-                        Span::raw(name).fg(text_color),
-                        Span::raw(" ".repeat(pad)).fg(text_color),
-                        Span::raw(metric_value).fg(text_color),
-                    ]))
-                    .style(Style::default().fg(text_color).bg(entry.color))
-                } else {
-                    ListItem::new(Line::from(vec![
-                        Span::raw(dot).fg(entry.color),
-                        Span::raw(name).fg(Color::White),
-                        Span::raw(" ".repeat(pad)).fg(Color::White),
-                        Span::raw(metric_value).fg(metric_color),
-                    ]))
-                }
-            })
-            .collect();
+            let mut list_state = ListState::default();
+            list_state.select(selected_log_index);
 
-        let mut list_state = ListState::default();
-        list_state.select(selected_index);
+            let list = if logs.is_empty() {
+                List::new(vec![ListItem::new(Line::from(vec![Span::styled(
+                    "No logs for this category in this period.",
+                    Style::default().fg(Color::Gray),
+                )]))])
+            } else {
+                List::new(items)
+            };
 
-        let list = if summary.entries.is_empty() {
-            List::new(vec![ListItem::new(Line::from(vec![Span::styled(
-                "No tracked sessions for this period.",
-                Style::default().fg(Color::Gray),
-            )]))])
+            f.render_stateful_widget(list, vertical[0], &mut list_state);
         } else {
-            List::new(items)
-        };
+            let row_width = vertical[0].width as usize;
+            let metric_width = 9;
+            let name_width = row_width.saturating_sub(metric_width + 4).max(4);
 
-        f.render_stateful_widget(list, vertical[0], &mut list_state);
+            let items: Vec<ListItem> = summary
+                .entries
+                .iter()
+                .enumerate()
+                .map(|(idx, entry)| {
+                    let is_selected = selected_summary_index == Some(idx);
+                    let dot = if entry.karma_effect < 0 {
+                        "◯ "
+                    } else if entry.karma_effect == 0 {
+                        "· "
+                    } else {
+                        "● "
+                    };
+                    let name = self.truncate_label(&entry.category_name, name_width);
+                    let pad = name_width.saturating_sub(name.chars().count()) + 1;
+                    let is_none_row = entry.category_id == CategoryId::new(0);
+                    let metric_value = if is_none_row {
+                        self.format_time(entry.elapsed_seconds)
+                    } else if entry.karma_seconds == 0 && entry.karma_effect < 0 {
+                        "-00:00:00".to_string()
+                    } else {
+                        self.format_karma_time(entry.karma_seconds)
+                    };
+                    let metric_color = if is_none_row {
+                        Color::Gray
+                    } else if entry.karma_seconds == 0 {
+                        if entry.karma_effect < 0 {
+                            Color::Red
+                        } else if entry.karma_effect > 0 {
+                            Color::Green
+                        } else {
+                            Color::Gray
+                        }
+                    } else {
+                        Self::karma_color(entry.karma_seconds)
+                    };
+
+                    if is_selected {
+                        let text_color = Self::text_color_for_bg(entry.color);
+                        ListItem::new(Line::from(vec![
+                            Span::raw(dot).fg(text_color),
+                            Span::raw(name).fg(text_color),
+                            Span::raw(" ".repeat(pad)).fg(text_color),
+                            Span::raw(metric_value).fg(text_color),
+                        ]))
+                        .style(Style::default().fg(text_color).bg(entry.color))
+                    } else {
+                        ListItem::new(Line::from(vec![
+                            Span::raw(dot).fg(entry.color),
+                            Span::raw(name).fg(Color::White),
+                            Span::raw(" ".repeat(pad)).fg(Color::White),
+                            Span::raw(metric_value).fg(metric_color),
+                        ]))
+                    }
+                })
+                .collect();
+
+            let mut list_state = ListState::default();
+            list_state.select(selected_summary_index);
+
+            let list = if summary.entries.is_empty() {
+                List::new(vec![ListItem::new(Line::from(vec![Span::styled(
+                    "No tracked sessions for this period.",
+                    Style::default().fg(Color::Gray),
+                )]))])
+            } else {
+                List::new(items)
+            };
+
+            f.render_stateful_widget(list, vertical[0], &mut list_state);
+        }
 
         if self.report_show_help {
-            let footer = Paragraph::new(Line::from(
-                Span::raw("keys: up/down  shift+left/right  d/w/m  esc  ?").fg(Color::DarkGray),
-            ));
+            let help_text = if self.report_logs_category_id.is_some() {
+                "keys: up/down  shift+left/right  d/w/m  esc back  ?"
+            } else {
+                "keys: up/down  enter logs  shift+left/right  d/w/m  esc  ?"
+            };
+            let footer = Paragraph::new(Line::from(Span::raw(help_text).fg(Color::DarkGray)));
             f.render_widget(footer, vertical[1]);
         }
     }
@@ -782,8 +1233,16 @@ impl App {
                         self.selected_index -= 1;
                         self.persist_categories();
                     }
-                } else if self.selected_index > 0 {
-                    self.selected_index -= 1;
+                } else {
+                    let total_rows = self.time_tracker.category_count() + 1;
+                    if total_rows > 0 {
+                        self.selected_index = if self.selected_index == 0 {
+                            total_rows - 1
+                        } else {
+                            self.selected_index - 1
+                        };
+                        self.sync_modal_description_from_selection();
+                    }
                 }
             }
             KeyCode::Down => {
@@ -793,9 +1252,14 @@ impl App {
                         self.persist_categories();
                     }
                 } else {
-                    let max_index = self.time_tracker.category_count();
-                    if self.selected_index < max_index {
-                        self.selected_index += 1;
+                    let total_rows = self.time_tracker.category_count() + 1;
+                    if total_rows > 0 {
+                        self.selected_index = if self.selected_index + 1 >= total_rows {
+                            0
+                        } else {
+                            self.selected_index + 1
+                        };
+                        self.sync_modal_description_from_selection();
                     }
                 }
             }
@@ -821,6 +1285,8 @@ impl App {
                     }
                 } else if self.is_on_insert_space() {
                     self.color_index = (self.color_index + COLORS.len() - 1) % COLORS.len();
+                } else if !shift {
+                    self.cycle_selected_tag(-1);
                 }
             }
             KeyCode::Right => {
@@ -845,6 +1311,8 @@ impl App {
                     }
                 } else if self.is_on_insert_space() {
                     self.color_index = (self.color_index + 1) % COLORS.len();
+                } else if !shift {
+                    self.cycle_selected_tag(1);
                 }
             }
             KeyCode::Enter => {
@@ -861,6 +1329,7 @@ impl App {
                         ) {
                             self.persist_categories();
                         }
+                        self.remember_selected_tag();
                     }
                     if self.time_tracker.active_category_index() != Some(self.selected_index) {
                         self.time_tracker.end_session();
@@ -908,6 +1377,7 @@ impl App {
                 if self.is_on_insert_space() {
                     self.new_category_name.push(c);
                 } else if self.selected_index < self.time_tracker.category_count() {
+                    self.modal_tag_index = None;
                     self.modal_description.push(c);
                 }
             }
@@ -915,6 +1385,7 @@ impl App {
                 if self.is_on_insert_space() {
                     self.new_category_name.pop();
                 } else if self.selected_index < self.time_tracker.category_count() {
+                    self.modal_tag_index = None;
                     self.modal_description.pop();
                 }
             }
@@ -923,20 +1394,68 @@ impl App {
     }
 
     fn handle_report_modal_key(&mut self, key: KeyEvent) {
-        let summary = self.report_rows();
-        self.clamp_report_selection(summary.entries.len());
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
 
+        let summary = self.report_rows();
+        self.clamp_report_selection(summary.entries.len());
+        let logs = self.report_current_logs();
+        self.clamp_report_log_selection(logs.len());
+        let in_logs_view = self.report_logs_category_id.is_some();
+
         match key.code {
-            KeyCode::Esc | KeyCode::Enter => self.close_report_modal(),
+            KeyCode::Esc => {
+                if in_logs_view {
+                    self.report_logs_category_id = None;
+                    self.report_log_selected_index = 0;
+                } else {
+                    self.close_report_modal();
+                }
+            }
+            KeyCode::Enter => {
+                if in_logs_view {
+                    self.report_logs_category_id = None;
+                    self.report_log_selected_index = 0;
+                } else if let Some(entry) = summary.entries.get(self.report_selected_index) {
+                    if entry.category_id != CategoryId::new(0) {
+                        self.report_logs_category_id = Some(entry.category_id);
+                        self.report_log_selected_index = 0;
+                    }
+                }
+            }
             KeyCode::Up => {
-                if self.report_selected_index > 0 {
-                    self.report_selected_index -= 1;
+                if in_logs_view {
+                    if !logs.is_empty() {
+                        self.report_log_selected_index = if self.report_log_selected_index == 0 {
+                            logs.len() - 1
+                        } else {
+                            self.report_log_selected_index - 1
+                        };
+                    }
+                } else if !summary.entries.is_empty() {
+                    self.report_selected_index = if self.report_selected_index == 0 {
+                        summary.entries.len() - 1
+                    } else {
+                        self.report_selected_index - 1
+                    };
                 }
             }
             KeyCode::Down => {
-                if self.report_selected_index + 1 < summary.entries.len() {
-                    self.report_selected_index += 1;
+                if in_logs_view {
+                    if !logs.is_empty() {
+                        self.report_log_selected_index =
+                            if self.report_log_selected_index + 1 >= logs.len() {
+                                0
+                            } else {
+                                self.report_log_selected_index + 1
+                            };
+                    }
+                } else if !summary.entries.is_empty() {
+                    self.report_selected_index =
+                        if self.report_selected_index + 1 >= summary.entries.len() {
+                            0
+                        } else {
+                            self.report_selected_index + 1
+                        };
                 }
             }
             KeyCode::Left if shift => {

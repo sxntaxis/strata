@@ -171,24 +171,16 @@ pub fn stop_session() -> Result<usize, String> {
     let today = now.format("%Y-%m-%d").to_string();
     let start_time = now - ChronoDuration::seconds(elapsed as i64);
 
-    if let Some(existing) = sessions
-        .iter_mut()
-        .find(|s| s.date == today && s.category_id.0 == active_session.category_id)
-    {
-        existing.elapsed_seconds += elapsed;
-        existing.end_time = now.format("%H:%M:%S").to_string();
-    } else {
-        let new_id = sessions.iter().map(|s| s.id).max().unwrap_or(0) + 1;
-        sessions.push(Session {
-            id: new_id,
-            date: today,
-            category_id: CategoryId::new(active_session.category_id),
-            description: active_session.description.clone(),
-            start_time: start_time.format("%H:%M:%S").to_string(),
-            end_time: now.format("%H:%M:%S").to_string(),
-            elapsed_seconds: elapsed,
-        });
-    }
+    let new_id = sessions.iter().map(|s| s.id).max().unwrap_or(0) + 1;
+    sessions.push(Session {
+        id: new_id,
+        date: today,
+        category_id: CategoryId::new(active_session.category_id),
+        description: active_session.description.clone(),
+        start_time: start_time.format("%H:%M:%S").to_string(),
+        end_time: now.format("%H:%M:%S").to_string(),
+        elapsed_seconds: elapsed,
+    });
 
     storage::save_sessions_to_csv(&sessions_path, &sessions, &categories)?;
 

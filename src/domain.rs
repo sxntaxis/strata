@@ -299,7 +299,7 @@ impl TimeTracker {
             sessions: Vec::new(),
             category_store: CategoryStore::new(),
             current_session_start: None,
-            session_id_counter: 0,
+            session_id_counter: 1,
             active_category_id: CategoryId::new(0),
         }
     }
@@ -409,7 +409,6 @@ impl TimeTracker {
 
     pub fn start_session(&mut self) {
         self.current_session_start = Some(Instant::now());
-        self.session_id_counter += 1;
     }
 
     pub fn end_session(&mut self) -> Option<usize> {
@@ -440,24 +439,16 @@ impl TimeTracker {
         let start_time = now - ChronoDuration::seconds(elapsed as i64);
         let today = now.format("%Y-%m-%d").to_string();
 
-        if let Some(session) = self
-            .sessions
-            .iter_mut()
-            .find(|session| session.category_id == cat_id && session.date == today)
-        {
-            session.elapsed_seconds += elapsed;
-            session.end_time = now.format("%H:%M:%S").to_string();
-        } else {
-            self.sessions.push(Session {
-                id: self.session_id_counter,
-                date: today,
-                category_id: cat_id,
-                description: cat_description.to_string(),
-                start_time: start_time.format("%H:%M:%S").to_string(),
-                end_time: now.format("%H:%M:%S").to_string(),
-                elapsed_seconds: elapsed,
-            });
-        }
+        self.sessions.push(Session {
+            id: self.session_id_counter,
+            date: today,
+            category_id: cat_id,
+            description: cat_description.to_string(),
+            start_time: start_time.format("%H:%M:%S").to_string(),
+            end_time: now.format("%H:%M:%S").to_string(),
+            elapsed_seconds: elapsed,
+        });
+        self.session_id_counter += 1;
     }
 
     pub fn get_todays_time(&self) -> usize {
@@ -800,6 +791,18 @@ mod tests {
 
         assert_eq!(work_count_before, work_count_after);
         assert_eq!(personal_count_before, personal_count_after);
+    }
+
+    #[test]
+    fn test_record_session_creates_distinct_rows_per_session() {
+        let mut tracker = TimeTracker::new();
+        tracker.record_session(CategoryId::new(1), "focus", 120);
+        tracker.record_session(CategoryId::new(1), "review", 180);
+
+        assert_eq!(tracker.sessions.len(), 2);
+        assert_eq!(tracker.sessions[0].description, "focus");
+        assert_eq!(tracker.sessions[1].description, "review");
+        assert_eq!(tracker.sessions[0].id + 1, tracker.sessions[1].id);
     }
 
     #[test]

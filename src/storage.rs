@@ -8,7 +8,7 @@ use std::{
 use chrono::Local;
 use directories::ProjectDirs;
 use ratatui::style::Color;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{
     constants::COLORS,
@@ -24,6 +24,25 @@ pub struct LoadedCategories {
 pub struct LoadedSessions {
     pub sessions: Vec<Session>,
     pub next_session_id: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CategoryTagsState {
+    pub version: u8,
+    pub tags_by_category: HashMap<u64, Vec<String>>,
+}
+
+impl CategoryTagsState {
+    pub const VERSION: u8 = 1;
+}
+
+impl Default for CategoryTagsState {
+    fn default() -> Self {
+        Self {
+            version: Self::VERSION,
+            tags_by_category: HashMap::new(),
+        }
+    }
 }
 
 pub fn load_categories_from_csv(path: &Path) -> LoadedCategories {
@@ -275,6 +294,10 @@ pub fn get_sand_state_path() -> PathBuf {
     get_state_dir().join("sand_state.json")
 }
 
+pub fn get_category_tags_path() -> PathBuf {
+    get_state_dir().join("category_tags.json")
+}
+
 pub fn load_sand_state(path: &Path) -> Option<SandState> {
     if !path.exists() {
         return None;
@@ -295,6 +318,33 @@ pub fn load_sand_state(path: &Path) -> Option<SandState> {
 
 pub fn save_sand_state(path: &Path, state: &SandState) -> Result<(), String> {
     write_json_atomic(path, state)
+}
+
+pub fn load_category_tags(path: &Path) -> CategoryTagsState {
+    if !path.exists() {
+        return CategoryTagsState::default();
+    }
+
+    match read_json::<CategoryTagsState>(path) {
+        Ok(mut state) if state.version == CategoryTagsState::VERSION => {
+            for tags in state.tags_by_category.values_mut() {
+                tags.retain(|tag| !tag.trim().is_empty());
+            }
+            state
+        }
+        Ok(_) => {
+            eprintln!("Warning: Unsupported category tags version, ignoring saved tags");
+            CategoryTagsState::default()
+        }
+        Err(e) => {
+            eprintln!("Warning: Could not load category tags: {}", e);
+            CategoryTagsState::default()
+        }
+    }
+}
+
+pub fn save_category_tags(path: &Path, tags_state: &CategoryTagsState) -> Result<(), String> {
+    write_json_atomic(path, tags_state)
 }
 
 pub fn file_exists(path: &Path) -> bool {
@@ -609,6 +659,25 @@ mod tests {
 
         save_sand_state(&path, &state).unwrap();
         let loaded = load_sand_state(&path).expect("sand state should load");
+        assert_eq!(loaded, state);
+
+        delete_file_if_exists(&path).unwrap();
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn test_category_tags_round_trip() {
+        let path = unique_path("strata_category_tags_roundtrip", "json");
+        let mut state = CategoryTagsState::default();
+        state
+            .tags_by_category
+            .insert(2, vec!["focus".to_string(), "deep work".to_string()]);
+        state
+            .tags_by_category
+            .insert(0, vec!["idle".to_string(), "break".to_string()]);
+
+        save_category_tags(&path, &state).unwrap();
+        let loaded = load_category_tags(&path);
         assert_eq!(loaded, state);
 
         delete_file_if_exists(&path).unwrap();
