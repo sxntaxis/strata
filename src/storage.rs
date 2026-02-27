@@ -6,9 +6,11 @@ use std::{
 };
 
 use chrono::Local;
+use csv::{ReaderBuilder, StringRecord, WriterBuilder};
 use directories::ProjectDirs;
 use ratatui::style::Color;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use thiserror::Error;
 
 use crate::{
     constants::COLORS,
@@ -16,14 +18,42 @@ use crate::{
     sand::SandState,
 };
 
+#[derive(Debug)]
 pub struct LoadedCategories {
     pub categories: Vec<Category>,
     pub next_category_id: u64,
 }
 
+#[derive(Debug)]
 pub struct LoadedSessions {
     pub sessions: Vec<Session>,
     pub next_session_id: usize,
+}
+
+const CATEGORIES_HEADER: [&str; 5] = ["id", "name", "description", "color_index", "karma_effect"];
+const SESSIONS_HEADER: [&str; 8] = [
+    "id",
+    "date",
+    "category_id",
+    "category_name",
+    "description",
+    "start_time",
+    "end_time",
+    "elapsed_seconds",
+];
+
+#[derive(Debug, Error)]
+pub enum StorageError {
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("CSV error: {0}")]
+    Csv(#[from] csv::Error),
+    #[error("Invalid CSV schema for {file}: expected '{expected}', found '{found}'")]
+    InvalidCsvSchema {
+        file: &'static str,
+        expected: String,
+        found: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -45,58 +75,75 @@ impl Default for CategoryTagsState {
     }
 }
 
+fn default_categories_loaded() -> LoadedCategories {
+    LoadedCategories {
+        categories: vec![Category {
+            id: CategoryId::new(0),
+            name: "none".to_string(),
+            color: Color::White,
+            description: String::new(),
+            karma_effect: 0,
+        }],
+        next_category_id: 1,
+    }
+}
+
+fn default_sessions_loaded() -> LoadedSessions {
+    LoadedSessions {
+        sessions: vec![],
+        next_session_id: 1,
+    }
+}
+
+fn csv_header_matches(headers: &StringRecord, expected: &[&str]) -> bool {
+    headers.len() == expected.len()
+        && headers
+            .iter()
+            .zip(expected.iter())
+            .all(|(actual, expected)| actual == *expected)
+}
+
+fn csv_header_string(headers: &StringRecord) -> String {
+    headers.iter().collect::<Vec<_>>().join(",")
+}
+
 pub fn load_categories_from_csv(path: &Path) -> LoadedCategories {
-    let mut categories = vec![Category {
-        id: CategoryId::new(0),
-        name: "none".to_string(),
-        color: Color::White,
-        description: String::new(),
-        karma_effect: 1,
-    }];
-
-    if !path.exists() {
-        return LoadedCategories {
-            categories,
-            next_category_id: 1,
-        };
-    }
-
-    let content = match fs::read_to_string(path) {
-        Ok(c) => c,
+    match try_load_categories_from_csv(path) {
+        Ok(loaded) => loaded,
         Err(e) => {
-            eprintln!("Warning: Could not read categories file: {}", e);
-            return LoadedCategories {
-                categories,
-                next_category_id: 1,
-            };
+            eprintln!("Warning: Could not load categories file: {}", e);
+            default_categories_loaded()
         }
-    };
+    }
+}
 
-    let lines: Vec<&str> = content.lines().collect();
-    if lines.is_empty() {
-        return LoadedCategories {
-            categories,
-            next_category_id: 1,
-        };
+pub fn try_load_categories_from_csv(path: &Path) -> Result<LoadedCategories, StorageError> {
+    if !path.exists() {
+        return Ok(default_categories_loaded());
     }
 
-    let header = lines[0].trim();
-    if !header.starts_with("id,name,") {
-        panic!("categories.csv is not in canonical format. Run 'strata migrate-csv' first.");
+    let mut reader = ReaderBuilder::new().has_headers(true).from_path(path)?;
+    let headers = reader.headers()?.clone();
+    if !csv_header_matches(&headers, &CATEGORIES_HEADER) {
+        return Err(StorageError::InvalidCsvSchema {
+            file: "categories.csv",
+            expected: CATEGORIES_HEADER.join(","),
+            found: csv_header_string(&headers),
+        });
     }
 
-    let mut next_id = 1u64;
+    let mut loaded = default_categories_loaded();
 
-    for line in lines.iter().skip(1) {
-        let parts: Vec<&str> = line.split(',').collect();
-        if parts.len() < 5 {
+    for record in reader.records() {
+        let record = record?;
+
+        let Some(id_raw) = record.get(0) else {
             continue;
-        }
-
-        let id: u64 = match parts[0].parse() {
+        };
+        let id: u64 = match id_raw.parse() {
             Ok(id) => id,
             Err(_) => {
-                eprintln!("Warning: Invalid category ID '{}', skipping", parts[0]);
+                eprintln!("Warning: Invalid category ID '{}', skipping", id_raw);
                 continue;
             }
         };
@@ -105,108 +152,114 @@ pub fn load_categories_from_csv(path: &Path) -> LoadedCategories {
             continue;
         }
 
-        let name = parts[1].to_string();
-        if name == "none" {
+        let name = record.get(1).unwrap_or_default().trim().to_string();
+        if name.is_empty() || name.eq_ignore_ascii_case("none") {
             continue;
         }
 
-        let description = parts[2].to_string();
-        let color_idx: usize = parts[3].parse().unwrap_or(0) % COLORS.len();
-        let karma_effect: i8 = parts[4].parse().unwrap_or(1);
+        let description = record.get(2).unwrap_or_default().to_string();
+        let color_idx = record
+            .get(3)
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0)
+            % COLORS.len();
+        let karma_effect = record
+            .get(4)
+            .and_then(|value| value.parse::<i8>().ok())
+            .unwrap_or(1);
 
-        categories.push(Category {
+        loaded.categories.push(Category {
             id: CategoryId::new(id),
             name,
             color: COLORS[color_idx],
             description,
             karma_effect,
         });
-        next_id = next_id.max(id + 1);
+        loaded.next_category_id = loaded.next_category_id.max(id + 1);
     }
 
-    LoadedCategories {
-        categories,
-        next_category_id: next_id,
-    }
+    Ok(loaded)
 }
 
 pub fn load_sessions_from_csv(path: &Path, categories: &[Category]) -> LoadedSessions {
-    let category_by_id: HashMap<u64, CategoryId> =
-        categories.iter().map(|c| (c.id.0, c.id)).collect();
-    let mut sessions = Vec::new();
-
-    if !path.exists() {
-        return LoadedSessions {
-            sessions,
-            next_session_id: 1,
-        };
-    }
-
-    let content = match fs::read_to_string(path) {
-        Ok(c) => c,
+    match try_load_sessions_from_csv(path, categories) {
+        Ok(loaded) => loaded,
         Err(e) => {
-            eprintln!("Warning: Could not read sessions file: {}", e);
-            return LoadedSessions {
-                sessions,
-                next_session_id: 1,
-            };
+            eprintln!("Warning: Could not load sessions file: {}", e);
+            default_sessions_loaded()
         }
-    };
-
-    let lines: Vec<&str> = content.lines().collect();
-    if lines.is_empty() {
-        return LoadedSessions {
-            sessions,
-            next_session_id: 1,
-        };
-    }
-
-    let header = lines[0].trim();
-    if !header.starts_with("id,date,category_id,") {
-        panic!("time_log.csv is not in canonical format. Run 'strata migrate-csv' first.");
-    }
-
-    let mut max_id = 0usize;
-
-    for line in lines.iter().skip(1) {
-        let parts: Vec<&str> = line.split(',').collect();
-        if parts.len() < 8 {
-            continue;
-        }
-
-        let id: usize = match parts[0].parse() {
-            Ok(id) => id,
-            Err(_) => continue,
-        };
-
-        let category_id: u64 = parts[2].parse().unwrap_or(0);
-        let category_id = category_by_id
-            .get(&category_id)
-            .copied()
-            .unwrap_or(CategoryId::new(0));
-
-        sessions.push(Session {
-            id,
-            date: parts[1].to_string(),
-            category_id,
-            description: parts[4].to_string(),
-            start_time: parts[5].to_string(),
-            end_time: parts[6].to_string(),
-            elapsed_seconds: parts[7].parse().unwrap_or(0),
-        });
-
-        max_id = max_id.max(id);
-    }
-
-    LoadedSessions {
-        sessions,
-        next_session_id: max_id + 1,
     }
 }
 
+pub fn try_load_sessions_from_csv(
+    path: &Path,
+    categories: &[Category],
+) -> Result<LoadedSessions, StorageError> {
+    if !path.exists() {
+        return Ok(default_sessions_loaded());
+    }
+
+    let category_by_id: HashMap<u64, CategoryId> = categories
+        .iter()
+        .map(|category| (category.id.0, category.id))
+        .collect();
+
+    let mut reader = ReaderBuilder::new().has_headers(true).from_path(path)?;
+    let headers = reader.headers()?.clone();
+    if !csv_header_matches(&headers, &SESSIONS_HEADER) {
+        return Err(StorageError::InvalidCsvSchema {
+            file: "time_log.csv",
+            expected: SESSIONS_HEADER.join(","),
+            found: csv_header_string(&headers),
+        });
+    }
+
+    let mut loaded = default_sessions_loaded();
+
+    for record in reader.records() {
+        let record = record?;
+
+        let Some(id_raw) = record.get(0) else {
+            continue;
+        };
+        let id: usize = match id_raw.parse() {
+            Ok(id) => id,
+            Err(_) => {
+                eprintln!("Warning: Invalid session ID '{}', skipping", id_raw);
+                continue;
+            }
+        };
+
+        let category_id = record
+            .get(2)
+            .and_then(|value| value.parse::<u64>().ok())
+            .and_then(|raw| category_by_id.get(&raw).copied())
+            .unwrap_or(CategoryId::new(0));
+
+        loaded.sessions.push(Session {
+            id,
+            date: record.get(1).unwrap_or_default().to_string(),
+            category_id,
+            description: record.get(4).unwrap_or_default().to_string(),
+            start_time: record.get(5).unwrap_or_default().to_string(),
+            end_time: record.get(6).unwrap_or_default().to_string(),
+            elapsed_seconds: record
+                .get(7)
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(0),
+        });
+
+        loaded.next_session_id = loaded.next_session_id.max(id + 1);
+    }
+
+    Ok(loaded)
+}
+
 pub fn save_categories_to_csv(path: &Path, categories: &[Category]) -> Result<(), String> {
-    let mut content = String::new();
-    content.push_str("id,name,description,color_index,karma_effect\n");
+    let mut writer = WriterBuilder::new().has_headers(false).from_writer(vec![]);
+    writer
+        .write_record(CATEGORIES_HEADER)
+        .map_err(|e| e.to_string())?;
 
     for category in categories {
         if category.id.0 == 0 {
@@ -217,11 +270,20 @@ pub fn save_categories_to_csv(path: &Path, categories: &[Category]) -> Result<()
             .iter()
             .position(|&color| color == category.color)
             .unwrap_or(0);
-        content.push_str(&format!(
-            "{},{},{},{},{}\n",
-            category.id.0, category.name, category.description, color_pos, category.karma_effect
-        ));
+
+        writer
+            .write_record([
+                category.id.0.to_string(),
+                category.name.clone(),
+                category.description.clone(),
+                color_pos.to_string(),
+                category.karma_effect.to_string(),
+            ])
+            .map_err(|e| e.to_string())?;
     }
+
+    let bytes = writer.into_inner().map_err(|e| e.error().to_string())?;
+    let content = String::from_utf8_lossy(&bytes).to_string();
 
     atomic_write(path, &content)
 }
@@ -231,10 +293,10 @@ pub fn save_sessions_to_csv(
     sessions: &[Session],
     categories: &[Category],
 ) -> Result<(), String> {
-    let mut content = String::new();
-    content.push_str(
-        "id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds\n",
-    );
+    let mut writer = WriterBuilder::new().has_headers(false).from_writer(vec![]);
+    writer
+        .write_record(SESSIONS_HEADER)
+        .map_err(|e| e.to_string())?;
 
     for session in sessions {
         let category_name = categories
@@ -243,29 +305,27 @@ pub fn save_sessions_to_csv(
             .map(|category| category.name.as_str())
             .unwrap_or("none");
 
-        content.push_str(&format!(
-            "{},{},{},{},{},{},{},{}\n",
-            session.id,
-            session.date,
-            session.category_id.0,
-            category_name,
-            session.description,
-            session.start_time,
-            session.end_time,
-            session.elapsed_seconds
-        ));
+        writer
+            .write_record([
+                session.id.to_string(),
+                session.date.clone(),
+                session.category_id.0.to_string(),
+                category_name.to_string(),
+                session.description.clone(),
+                session.start_time.clone(),
+                session.end_time.clone(),
+                session.elapsed_seconds.to_string(),
+            ])
+            .map_err(|e| e.to_string())?;
     }
+
+    let bytes = writer.into_inner().map_err(|e| e.error().to_string())?;
+    let content = String::from_utf8_lossy(&bytes).to_string();
 
     atomic_write(path, &content)
 }
 
 pub fn get_data_dir() -> PathBuf {
-    let local_categories = Path::new("./categories.csv");
-    let local_timelog = Path::new("./time_log.csv");
-    if local_categories.exists() || local_timelog.exists() {
-        return PathBuf::from(".");
-    }
-
     if let Some(proj_dirs) = ProjectDirs::from("com", "strata", "strata") {
         let data_dir = proj_dirs.data_dir().to_path_buf();
         fs::create_dir_all(&data_dir).ok();
@@ -423,110 +483,6 @@ pub fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn migrate_csv() -> Result<(), String> {
-    let data_dir = get_data_dir();
-    let categories_path = data_dir.join("categories.csv");
-    let sessions_path = data_dir.join("time_log.csv");
-
-    println!("Migrating CSV files in: {}", data_dir.display());
-
-    if categories_path.exists() {
-        let content = fs::read_to_string(&categories_path).map_err(|e| e.to_string())?;
-        let lines: Vec<&str> = content.lines().collect();
-
-        if !lines.is_empty() {
-            let header = lines[0];
-            let needs_migration = !header.starts_with("id,name,");
-
-            if needs_migration {
-                println!("Migrating categories.csv...");
-                create_backup(&categories_path)?;
-
-                let mut new_lines =
-                    vec!["id,name,description,color_index,karma_effect".to_string()];
-                let mut next_id = 1u64;
-
-                for line in lines.iter().skip(1) {
-                    let parts: Vec<&str> = line.split(',').collect();
-                    if parts.len() >= 3 {
-                        let name = parts[0];
-                        let desc = parts.get(1).unwrap_or(&"").to_string();
-                        let color = parts.get(2).unwrap_or(&"0");
-                        let karma = parts.get(3).unwrap_or(&"1");
-
-                        new_lines
-                            .push(format!("{},{},{},{},{}", next_id, name, desc, color, karma));
-                        next_id += 1;
-                    }
-                }
-
-                let new_content = new_lines.join("\n");
-                atomic_write(&categories_path, &new_content)?;
-                println!("  Migrated {} categories", next_id - 1);
-            } else {
-                println!("categories.csv already in canonical format");
-            }
-        }
-    }
-
-    if sessions_path.exists() {
-        let content = fs::read_to_string(&sessions_path).map_err(|e| e.to_string())?;
-        let lines: Vec<&str> = content.lines().collect();
-
-        if !lines.is_empty() {
-            let header = lines[0];
-            let needs_migration = !header.starts_with("id,date,category_id,");
-
-            if needs_migration {
-                println!("Migrating time_log.csv...");
-                create_backup(&sessions_path)?;
-
-                let categories = load_categories_from_csv(&categories_path).categories;
-                let category_map: HashMap<String, u64> = categories
-                    .iter()
-                    .map(|c| (c.name.clone(), c.id.0))
-                    .collect();
-
-                let mut new_lines =
-                    vec!["id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds".to_string()];
-                let mut session_count = 0;
-
-                for line in lines.iter().skip(1) {
-                    let parts: Vec<&str> = line.split(',').collect();
-                    if parts.len() < 7 {
-                        continue;
-                    }
-
-                    let id = parts[0];
-                    let date = parts[1];
-                    let cat_name = parts[2];
-                    let desc = parts.get(3).unwrap_or(&"").to_string();
-                    let start = parts.get(4).unwrap_or(&"");
-                    let end_time = parts.get(5).unwrap_or(&"");
-                    let elapsed = parts.get(6).unwrap_or(&"0");
-
-                    let cat_id = category_map.get(cat_name).copied().unwrap_or(0);
-
-                    new_lines.push(format!(
-                        "{},{},{},{},{},{},{},{}",
-                        id, date, cat_id, cat_name, desc, start, end_time, elapsed
-                    ));
-                    session_count += 1;
-                }
-
-                let new_content = new_lines.join("\n");
-                atomic_write(&sessions_path, &new_content)?;
-                println!("  Migrated {} sessions", session_count);
-            } else {
-                println!("time_log.csv already in canonical format");
-            }
-        }
-    }
-
-    println!("Migration complete!");
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use std::{fs, path::PathBuf, time::SystemTime};
@@ -558,7 +514,7 @@ mod tests {
                 id: CategoryId::new(1),
                 name: "Work".to_string(),
                 color: COLORS[0],
-                description: "focus".to_string(),
+                description: "focus, deep work".to_string(),
                 karma_effect: 1,
             },
         ];
@@ -569,7 +525,7 @@ mod tests {
         assert_eq!(loaded.categories.len(), 2);
         assert_eq!(loaded.categories[1].id, CategoryId::new(1));
         assert_eq!(loaded.categories[1].name, "Work");
-        assert_eq!(loaded.categories[1].description, "focus");
+        assert_eq!(loaded.categories[1].description, "focus, deep work");
 
         fs::remove_file(path).ok();
     }
@@ -597,7 +553,7 @@ mod tests {
             id: 7,
             date: "2026-02-25".to_string(),
             category_id: CategoryId::new(2),
-            description: "plan".to_string(),
+            description: "plan, review".to_string(),
             start_time: "10:00:00".to_string(),
             end_time: "11:00:00".to_string(),
             elapsed_seconds: 3600,
@@ -610,6 +566,7 @@ mod tests {
         assert_eq!(loaded.sessions[0].id, 7);
         assert_eq!(loaded.sessions[0].category_id, CategoryId::new(2));
         assert_eq!(loaded.sessions[0].elapsed_seconds, 3600);
+        assert_eq!(loaded.sessions[0].description, "plan, review");
 
         fs::remove_file(path).ok();
     }
@@ -682,5 +639,29 @@ mod tests {
 
         delete_file_if_exists(&path).unwrap();
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn test_try_load_categories_invalid_schema_returns_error() {
+        let path = unique_path("strata_categories_invalid_schema", "csv");
+        fs::write(&path, "name,description\nwork,focus\n").unwrap();
+
+        let err = try_load_categories_from_csv(&path).expect_err("schema should be rejected");
+        assert!(matches!(err, StorageError::InvalidCsvSchema { .. }));
+
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn test_try_load_sessions_invalid_schema_returns_error() {
+        let path = unique_path("strata_sessions_invalid_schema", "csv");
+        fs::write(&path, "date,category,elapsed\n2026-02-25,work,120\n").unwrap();
+
+        let categories = default_categories_loaded().categories;
+        let err =
+            try_load_sessions_from_csv(&path, &categories).expect_err("schema should be rejected");
+        assert!(matches!(err, StorageError::InvalidCsvSchema { .. }));
+
+        fs::remove_file(path).ok();
     }
 }

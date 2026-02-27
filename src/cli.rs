@@ -69,9 +69,6 @@ pub enum Cli {
         #[arg(help = "Shell type (bash, zsh, fish)")]
         shell: String,
     },
-
-    #[command(about = "Migrate CSV files to canonical schema")]
-    MigrateCsv,
 }
 
 #[derive(Debug, Clone, ValueEnum)]
@@ -425,12 +422,6 @@ pub fn run_cli() {
         }
         Cli::Completions { shell } => {
             if let Err(e) = print_completions(&shell) {
-                eprintln!("Error: {}", e);
-                std::process::exit(1);
-            }
-        }
-        Cli::MigrateCsv => {
-            if let Err(e) = storage::migrate_csv() {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }

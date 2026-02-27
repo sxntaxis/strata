@@ -70,6 +70,25 @@ pub struct KarmaReportSummary {
     pub total_karma_seconds: isize,
 }
 
+#[derive(Debug, Clone)]
+pub struct CategoryLogEntry {
+    pub date: String,
+    pub start_time: String,
+    pub end_time: String,
+    pub description: String,
+    pub elapsed_seconds: usize,
+    pub karma_effect: i8,
+    pub karma_seconds: isize,
+}
+
+#[derive(Debug, Clone)]
+pub struct LiveSessionPreview {
+    pub category_id: CategoryId,
+    pub description: String,
+    pub elapsed_seconds: usize,
+    pub now_local: DateTime<Local>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReportPeriod {
     Today,
@@ -121,18 +140,22 @@ pub fn report_period_date_bounds(period: ReportPeriod) -> (NaiveDate, NaiveDate)
 }
 
 fn operational_day_key_from_utc(now_utc: DateTime<Utc>, config: &DayBoundaryConfig) -> NaiveDate {
-    let offset = FixedOffset::east_opt(config.utc_offset_seconds)
-        .unwrap_or_else(|| FixedOffset::west_opt(6 * 60 * 60).expect("valid UTC offset"));
+    let offset = if let Some(offset) = FixedOffset::east_opt(config.utc_offset_seconds) {
+        offset
+    } else if let Some(offset) = FixedOffset::west_opt(6 * 60 * 60) {
+        offset
+    } else if let Some(offset) = FixedOffset::east_opt(0) {
+        offset
+    } else {
+        return now_utc.date_naive();
+    };
     let local = now_utc.with_timezone(&offset);
 
     let cutoff = match config.mode {
-        DayBoundaryMode::FixedHour => {
+        DayBoundaryMode::FixedHour | DayBoundaryMode::Sunrise => {
             NaiveTime::from_hms_opt(config.fixed_hour, config.fixed_minute, 0)
-                .unwrap_or_else(|| NaiveTime::from_hms_opt(6, 0, 0).expect("valid fallback time"))
-        }
-        DayBoundaryMode::Sunrise => {
-            NaiveTime::from_hms_opt(config.fixed_hour, config.fixed_minute, 0)
-                .unwrap_or_else(|| NaiveTime::from_hms_opt(6, 0, 0).expect("valid fallback time"))
+                .or_else(|| NaiveTime::from_hms_opt(6, 0, 0))
+                .unwrap_or(NaiveTime::MIN)
         }
     };
 
@@ -408,6 +431,10 @@ impl TimeTracker {
         self.category_store.get_by_index(index)
     }
 
+    pub fn category_by_id(&self, id: CategoryId) -> Option<&Category> {
+        self.category_store.get_by_id(id)
+    }
+
     pub fn category_description_by_index(&self, index: usize) -> Option<String> {
         self.category_by_index(index)
             .map(|category| category.description.clone())
@@ -415,6 +442,20 @@ impl TimeTracker {
 
     pub fn category_id_by_name(&self, name: &str) -> Option<CategoryId> {
         self.category_store.category_id_by_name(name)
+    }
+
+    pub fn category_name_by_id(&self, id: CategoryId) -> Option<&str> {
+        self.category_by_id(id)
+            .map(|category| category.name.as_str())
+    }
+
+    pub fn category_color_by_id(&self, id: CategoryId) -> Option<Color> {
+        self.category_by_id(id).map(|category| category.color)
+    }
+
+    pub fn category_description_by_id(&self, id: CategoryId) -> Option<&str> {
+        self.category_by_id(id)
+            .map(|category| category.description.as_str())
     }
 
     pub fn active_category_id(&self) -> CategoryId {
@@ -764,6 +805,161 @@ fn build_report_for_date_range(
         entries,
         total_seconds,
     }
+}
+
+fn report_period_contains_today(period: ReportPeriod) -> bool {
+    let today = operational_day_key_now();
+    let (start, end) = report_period_date_bounds(period);
+    today >= start && today <= end
+}
+
+fn category_karma_effect(categories: &[Category], category_id: CategoryId) -> i8 {
+    categories
+        .iter()
+        .find(|category| category.id == category_id)
+        .map(|category| {
+            if category.id == CategoryId::new(0) || category.name == "none" {
+                0
+            } else {
+                category.karma_effect
+            }
+        })
+        .unwrap_or(0)
+}
+
+pub fn sort_karma_entries_for_display(entries: &mut [KarmaReportEntry]) {
+    entries.sort_by(|a, b| {
+        let none_id = CategoryId::new(0);
+        let group = |entry: &KarmaReportEntry| -> u8 {
+            if entry.category_id == none_id {
+                1
+            } else if entry.karma_effect < 0 {
+                2
+            } else {
+                0
+            }
+        };
+
+        let ga = group(a);
+        let gb = group(b);
+
+        ga.cmp(&gb).then_with(|| match ga {
+            0 => b
+                .karma_seconds
+                .cmp(&a.karma_seconds)
+                .then(b.elapsed_seconds.cmp(&a.elapsed_seconds))
+                .then(a.category_name.cmp(&b.category_name)),
+            1 => {
+                let a_is_none = a.category_id == none_id;
+                let b_is_none = b.category_id == none_id;
+                b_is_none
+                    .cmp(&a_is_none)
+                    .then(b.elapsed_seconds.cmp(&a.elapsed_seconds))
+                    .then(a.category_name.cmp(&b.category_name))
+            }
+            _ => a
+                .karma_seconds
+                .cmp(&b.karma_seconds)
+                .reverse()
+                .then(a.elapsed_seconds.cmp(&b.elapsed_seconds))
+                .then(a.category_name.cmp(&b.category_name)),
+        })
+    });
+}
+
+pub fn build_period_karma_report_with_live(
+    sessions: &[Session],
+    categories: &[Category],
+    period: ReportPeriod,
+    live_session: Option<&LiveSessionPreview>,
+) -> KarmaReportSummary {
+    let mut summary = build_period_karma_report(sessions, categories, period);
+
+    if report_period_contains_today(period) {
+        if let Some(live) = live_session {
+            if let Some(entry) = summary
+                .entries
+                .iter_mut()
+                .find(|entry| entry.category_id == live.category_id)
+            {
+                entry.elapsed_seconds += live.elapsed_seconds;
+                entry.karma_seconds += live.elapsed_seconds as isize * entry.karma_effect as isize;
+                summary.total_seconds += live.elapsed_seconds;
+                summary.total_karma_seconds +=
+                    live.elapsed_seconds as isize * entry.karma_effect as isize;
+            }
+        }
+    }
+
+    sort_karma_entries_for_display(&mut summary.entries);
+    summary
+}
+
+pub fn build_category_logs_for_period(
+    sessions: &[Session],
+    categories: &[Category],
+    category_id: CategoryId,
+    period: ReportPeriod,
+    live_session: Option<&LiveSessionPreview>,
+) -> Vec<CategoryLogEntry> {
+    let (start, end) = report_period_date_bounds(period);
+    let karma_effect = category_karma_effect(categories, category_id);
+
+    let mut logs: Vec<CategoryLogEntry> = sessions
+        .iter()
+        .filter_map(|session| {
+            if session.category_id != category_id {
+                return None;
+            }
+
+            let Some(session_date) = NaiveDate::parse_from_str(&session.date, "%Y-%m-%d").ok()
+            else {
+                return None;
+            };
+
+            if session_date < start || session_date > end {
+                return None;
+            }
+
+            Some(CategoryLogEntry {
+                date: session.date.clone(),
+                start_time: session.start_time.clone(),
+                end_time: session.end_time.clone(),
+                description: session.description.clone(),
+                elapsed_seconds: session.elapsed_seconds,
+                karma_effect,
+                karma_seconds: session.elapsed_seconds as isize * karma_effect as isize,
+            })
+        })
+        .collect();
+
+    if report_period_contains_today(period) {
+        if let Some(live) = live_session {
+            if live.category_id == category_id && live.elapsed_seconds > 0 {
+                let day = operational_day_key_for_local(&live.now_local)
+                    .format("%Y-%m-%d")
+                    .to_string();
+                let end_time = live.now_local.format("%H:%M:%S").to_string();
+                let start_time = (live.now_local
+                    - ChronoDuration::seconds(live.elapsed_seconds as i64))
+                .format("%H:%M:%S")
+                .to_string();
+
+                logs.push(CategoryLogEntry {
+                    date: day,
+                    start_time,
+                    end_time,
+                    description: live.description.clone(),
+                    elapsed_seconds: live.elapsed_seconds,
+                    karma_effect,
+                    karma_seconds: live.elapsed_seconds as isize * karma_effect as isize,
+                });
+            }
+        }
+    }
+
+    logs.sort_by(|a, b| b.date.cmp(&a.date).then(b.end_time.cmp(&a.end_time)));
+    logs
 }
 
 #[cfg(test)]
@@ -1357,5 +1553,59 @@ mod tests {
             1
         );
         assert_eq!(tracker.sessions.len(), 2);
+    }
+
+    #[test]
+    fn test_build_category_logs_for_period_keeps_per_session_rows() {
+        let today = operational_day_key_now().format("%Y-%m-%d").to_string();
+        let categories = vec![
+            Category {
+                id: CategoryId::new(0),
+                name: "none".to_string(),
+                color: Color::White,
+                description: String::new(),
+                karma_effect: 0,
+            },
+            Category {
+                id: CategoryId::new(1),
+                name: "Work".to_string(),
+                color: COLORS[0],
+                description: String::new(),
+                karma_effect: 1,
+            },
+        ];
+
+        let sessions = vec![
+            Session {
+                id: 1,
+                date: today.clone(),
+                category_id: CategoryId::new(1),
+                description: "focus".to_string(),
+                start_time: "09:00:00".to_string(),
+                end_time: "09:10:00".to_string(),
+                elapsed_seconds: 600,
+            },
+            Session {
+                id: 2,
+                date: today,
+                category_id: CategoryId::new(1),
+                description: "review".to_string(),
+                start_time: "10:00:00".to_string(),
+                end_time: "10:05:00".to_string(),
+                elapsed_seconds: 300,
+            },
+        ];
+
+        let logs = build_category_logs_for_period(
+            &sessions,
+            &categories,
+            CategoryId::new(1),
+            ReportPeriod::Today,
+            None,
+        );
+
+        assert_eq!(logs.len(), 2);
+        assert!(logs.iter().any(|row| row.description == "focus"));
+        assert!(logs.iter().any(|row| row.description == "review"));
     }
 }

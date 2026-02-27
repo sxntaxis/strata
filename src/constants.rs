@@ -48,11 +48,6 @@ pub const FACE_SETTINGS: FaceSettings = FaceSettings {
     ],
 };
 
-pub const FILE_PATHS: FilePaths = FilePaths {
-    time_log: "./time_log.csv",
-    categories: "./categories.csv",
-};
-
 pub struct TimeSettings {
     pub tick_ms: u64,
     pub physics_ms: u64,
@@ -75,9 +70,4 @@ pub struct BlinkSettings {
 pub struct FaceSettings {
     pub thresholds: &'static [usize],
     pub faces: &'static [&'static str],
-}
-
-pub struct FilePaths {
-    pub time_log: &'static str,
-    pub categories: &'static str,
 }
