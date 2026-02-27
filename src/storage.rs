@@ -336,12 +336,12 @@ pub fn get_data_dir() -> PathBuf {
 }
 
 pub fn get_state_dir() -> PathBuf {
-    if let Some(proj_dirs) = ProjectDirs::from("com", "strata", "strata") {
-        if let Some(state_dir) = proj_dirs.state_dir() {
-            let dir = state_dir.to_path_buf();
-            fs::create_dir_all(&dir).ok();
-            return dir;
-        }
+    if let Some(proj_dirs) = ProjectDirs::from("com", "strata", "strata")
+        && let Some(state_dir) = proj_dirs.state_dir()
+    {
+        let dir = state_dir.to_path_buf();
+        fs::create_dir_all(&dir).ok();
+        return dir;
     }
     PathBuf::from(".")
 }

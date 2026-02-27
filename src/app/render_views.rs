@@ -1,10 +1,10 @@
 use chrono::Local;
 use ratatui::prelude::{Line, Span};
 use ratatui::{
+    Frame,
     layout::Alignment,
     style::{Color, Modifier, Style},
     widgets::{Block, BorderType, Borders, Paragraph},
-    Frame,
 };
 
 use crate::constants::SAND_ENGINE;

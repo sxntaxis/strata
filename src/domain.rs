@@ -3,9 +3,7 @@ use std::{
     time::Instant,
 };
 
-use chrono::{
-    DateTime, Duration as ChronoDuration, FixedOffset, Local, NaiveDate, NaiveTime, TimeZone, Utc,
-};
+use chrono::{DateTime, Duration as ChronoDuration, FixedOffset, Local, NaiveDate, NaiveTime, Utc};
 use ratatui::style::Color;
 
 use crate::constants::COLORS;
@@ -964,6 +962,8 @@ pub fn build_category_logs_for_period(
 
 #[cfg(test)]
 mod tests {
+    use chrono::TimeZone;
+
     use super::*;
 
     #[test]

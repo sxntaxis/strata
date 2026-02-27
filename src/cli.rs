@@ -398,13 +398,11 @@ pub fn run_cli() {
                 std::process::exit(1);
             }
         }
-        Cli::Report { today, week, month } => {
-            let period = if week {
-                ReportPeriod::Week
-            } else if month {
+        Cli::Report { week, month, .. } => {
+            let period = if month {
                 ReportPeriod::Month
-            } else if today {
-                ReportPeriod::Today
+            } else if week {
+                ReportPeriod::Week
             } else {
                 ReportPeriod::Today
             };

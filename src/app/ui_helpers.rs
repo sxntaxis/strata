@@ -57,9 +57,7 @@ pub fn wrap_prev_index(current: usize, len: usize) -> usize {
 }
 
 pub fn wrap_next_index(current: usize, len: usize) -> usize {
-    if len == 0 {
-        0
-    } else if current + 1 >= len {
+    if len == 0 || current + 1 >= len {
         0
     } else {
         current + 1

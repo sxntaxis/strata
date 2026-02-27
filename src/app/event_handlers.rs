@@ -5,7 +5,7 @@ use crate::{
     domain::{CategoryId, ReportPeriod},
 };
 
-use super::{ui_helpers, App};
+use super::{App, ui_helpers};
 
 impl App {
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> bool {
@@ -143,26 +143,22 @@ impl App {
                 if !self.is_on_insert_space()
                     && self.selected_index > 0
                     && self.selected_index < self.time_tracker.category_count()
-                {
-                    if self
+                    && self
                         .time_tracker
                         .set_category_karma_by_index(self.selected_index, 1)
-                    {
-                        self.persist_categories();
-                    }
+                {
+                    self.persist_categories();
                 }
             }
             KeyCode::Char('-') | KeyCode::Char('_') => {
                 if !self.is_on_insert_space()
                     && self.selected_index > 0
                     && self.selected_index < self.time_tracker.category_count()
-                {
-                    if self
+                    && self
                         .time_tracker
                         .set_category_karma_by_index(self.selected_index, -1)
-                    {
-                        self.persist_categories();
-                    }
+                {
+                    self.persist_categories();
                 }
             }
             KeyCode::Char(c) => {
@@ -207,11 +203,11 @@ impl App {
                 if in_logs_view {
                     self.report_logs_category_id = None;
                     self.report_log_selected_index = 0;
-                } else if let Some(entry) = summary.entries.get(self.report_selected_index) {
-                    if entry.category_id != CategoryId::new(0) {
-                        self.report_logs_category_id = Some(entry.category_id);
-                        self.report_log_selected_index = 0;
-                    }
+                } else if let Some(entry) = summary.entries.get(self.report_selected_index)
+                    && entry.category_id != CategoryId::new(0)
+                {
+                    self.report_logs_category_id = Some(entry.category_id);
+                    self.report_log_selected_index = 0;
                 }
             }
             KeyCode::Up => {

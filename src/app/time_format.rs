@@ -49,7 +49,7 @@ impl App {
     }
 
     pub(super) fn format_signed_time(&self, seconds: isize) -> String {
-        let abs_secs = seconds.abs() as usize;
+        let abs_secs = seconds.unsigned_abs();
         let sign = if seconds < 0 { "-" } else { "" };
         format!(
             "{}{:02}:{:02}:{:02}",
@@ -61,7 +61,7 @@ impl App {
     }
 
     pub(super) fn format_karma_time(&self, seconds: isize) -> String {
-        let abs_secs = seconds.abs() as usize;
+        let abs_secs = seconds.unsigned_abs();
         let sign = if seconds < 0 { "-" } else { "+" };
         format!(
             "{}{:02}:{:02}:{:02}",

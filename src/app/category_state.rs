@@ -194,10 +194,10 @@ impl App {
     }
 
     pub(super) fn get_active_color(&self) -> Color {
-        if let Some(idx) = self.time_tracker.active_category_index() {
-            if let Some(category) = self.time_tracker.category_by_index(idx) {
-                return category.color;
-            }
+        if let Some(idx) = self.time_tracker.active_category_index()
+            && let Some(category) = self.time_tracker.category_by_index(idx)
+        {
+            return category.color;
         }
         Color::White
     }

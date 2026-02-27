@@ -7,9 +7,9 @@ use std::{
 use crossterm::{
     event::{self, Event},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{backend::CrosstermBackend, layout::Rect, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend, layout::Rect};
 
 use crate::{
     constants::{BLINK_SETTINGS, FACE_SETTINGS, TIME_SETTINGS},
@@ -18,13 +18,15 @@ use crate::{
     storage,
 };
 
+mod category_modal_view;
 mod category_state;
 mod event_handlers;
-mod modal_views;
 mod render_views;
+mod report_modal_view;
 mod report_state;
 mod time_format;
 mod ui_helpers;
+mod view_style;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum UiMode {
@@ -299,12 +301,11 @@ pub fn run_ui() -> Result<(), io::Error> {
             last_render = Instant::now();
         }
 
-        if event::poll(Duration::from_millis(1))? {
-            if let Event::Key(key) = event::read()? {
-                if app.handle_key(key) {
-                    break;
-                }
-            }
+        if event::poll(Duration::from_millis(1))?
+            && let Event::Key(key) = event::read()?
+            && app.handle_key(key)
+        {
+            break;
         }
     }
 

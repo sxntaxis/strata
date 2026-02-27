@@ -2,8 +2,8 @@ use chrono::Local;
 use ratatui::style::Color;
 
 use crate::domain::{
-    build_category_logs_for_period, build_period_karma_report_with_live, CategoryId,
-    CategoryLogEntry, KarmaReportSummary, LiveSessionPreview, ReportPeriod,
+    CategoryId, CategoryLogEntry, KarmaReportSummary, LiveSessionPreview, ReportPeriod,
+    build_category_logs_for_period, build_period_karma_report_with_live,
 };
 
 use super::App;
