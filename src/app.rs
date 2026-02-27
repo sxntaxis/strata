@@ -24,6 +24,7 @@ use crate::{
     constants::{BLINK_SETTINGS, COLORS, FACE_SETTINGS, FILE_PATHS, SAND_ENGINE, TIME_SETTINGS},
     domain::{
         CategoryId, KarmaReportSummary, ReportPeriod, TimeTracker, build_period_karma_report,
+        operational_day_key_for_local, operational_day_key_now, report_period_date_bounds,
     },
     sand::SandEngine,
     storage,
@@ -224,17 +225,11 @@ impl App {
     }
 
     fn report_period_bounds(period: ReportPeriod) -> (NaiveDate, NaiveDate) {
-        let today = Local::now().date_naive();
-
-        match period {
-            ReportPeriod::Today => (today, today),
-            ReportPeriod::Week => (today - ChronoDuration::days(6), today),
-            ReportPeriod::Month => (today - ChronoDuration::days(29), today),
-        }
+        report_period_date_bounds(period)
     }
 
     fn report_period_includes_today(&self) -> bool {
-        let today = Local::now().date_naive();
+        let today = operational_day_key_now();
         let (start, end) = Self::report_period_bounds(self.report_period);
         today >= start && today <= end
     }
@@ -406,7 +401,9 @@ impl App {
                 let live_elapsed = start_instant.elapsed().as_secs() as usize;
                 if live_elapsed > 0 {
                     let now = Local::now();
-                    let today_str = now.format("%Y-%m-%d").to_string();
+                    let today_str = operational_day_key_for_local(&now)
+                        .format("%Y-%m-%d")
+                        .to_string();
                     let end_time = now.format("%H:%M:%S").to_string();
                     let start_time = (now - ChronoDuration::seconds(live_elapsed as i64))
                         .format("%H:%M:%S")
@@ -680,7 +677,7 @@ impl App {
     }
 
     fn get_karma_adjusted_time(&self) -> isize {
-        let today = Local::now().format("%Y-%m-%d").to_string();
+        let today = operational_day_key_now().format("%Y-%m-%d").to_string();
         let mut total: isize = 0;
         for cat in self.time_tracker.categories_ordered() {
             if cat.name == "none" {
@@ -699,7 +696,7 @@ impl App {
     }
 
     fn get_category_karma_adjusted_time(&self, category_name: &str) -> isize {
-        let today = Local::now().format("%Y-%m-%d").to_string();
+        let today = operational_day_key_now().format("%Y-%m-%d").to_string();
         let categories = self.time_tracker.categories_ordered();
         let cat = categories.iter().find(|c| c.name == category_name);
         if let Some(cat) = cat {
@@ -1218,7 +1215,7 @@ impl App {
             self.handle_report_modal_key(key);
             false
         } else {
-            self.handle_normal_key(key.code)
+            self.handle_normal_key(key)
         }
     }
 
@@ -1482,13 +1479,20 @@ impl App {
         self.render_needed = true;
     }
 
-    fn handle_normal_key(&mut self, key: KeyCode) -> bool {
-        match key {
+    fn handle_normal_key(&mut self, key: KeyEvent) -> bool {
+        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+
+        match key.code {
             KeyCode::Char('q') => true,
-            KeyCode::Char('c') => {
-                self.sand_engine.clear();
-                self.time_tracker.reset_none_counter_today();
-                self.persist_sessions();
+            KeyCode::Char('c') | KeyCode::Char('C') => {
+                let is_shift_clear = shift || matches!(key.code, KeyCode::Char('C'));
+                if is_shift_clear {
+                    self.sand_engine.clear_category(CategoryId::new(0));
+                } else {
+                    self.sand_engine.clear();
+                    self.time_tracker.reset_none_counter_today();
+                    self.persist_sessions();
+                }
                 self.persist_sand_state();
                 false
             }

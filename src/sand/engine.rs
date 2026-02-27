@@ -254,6 +254,21 @@ impl SandEngine {
         self.grain_count = 0;
     }
 
+    pub fn clear_category(&mut self, category_id: CategoryId) {
+        let mut removed = 0usize;
+
+        for row in &mut self.grid {
+            for cell in row {
+                if *cell == Some(category_id) {
+                    *cell = None;
+                    removed += 1;
+                }
+            }
+        }
+
+        self.grain_count = self.grain_count.saturating_sub(removed);
+    }
+
     pub fn snapshot_state(&self) -> SandState {
         let grid_height = self.grid.len();
         let grid_width = self.grid.first().map_or(0, |row| row.len());
@@ -588,5 +603,22 @@ mod tests {
         large.restore_state(&state, &valid);
 
         assert_eq!(large.grain_count, 2);
+    }
+
+    #[test]
+    fn test_clear_category_removes_only_requested_id() {
+        let mut se = SandEngine::new(20, 20);
+        se.clear();
+        se.grid[1][1] = Some(CategoryId::new(0));
+        se.grid[2][2] = Some(CategoryId::new(0));
+        se.grid[3][3] = Some(CategoryId::new(1));
+        se.grain_count = 3;
+
+        se.clear_category(CategoryId::new(0));
+
+        assert_eq!(se.grid[1][1], None);
+        assert_eq!(se.grid[2][2], None);
+        assert_eq!(se.grid[3][3], Some(CategoryId::new(1)));
+        assert_eq!(se.grain_count, 1);
     }
 }

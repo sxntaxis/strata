@@ -3,7 +3,9 @@ use std::{
     time::Instant,
 };
 
-use chrono::{Duration as ChronoDuration, Local, NaiveDate};
+use chrono::{
+    DateTime, Duration as ChronoDuration, FixedOffset, Local, NaiveDate, NaiveTime, TimeZone, Utc,
+};
 use ratatui::style::Color;
 
 use crate::constants::COLORS;
@@ -73,6 +75,72 @@ pub enum ReportPeriod {
     Today,
     Week,
     Month,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum DayBoundaryMode {
+    FixedHour,
+    Sunrise,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DayBoundaryConfig {
+    pub mode: DayBoundaryMode,
+    pub fixed_hour: u32,
+    pub fixed_minute: u32,
+    pub utc_offset_seconds: i32,
+}
+
+impl Default for DayBoundaryConfig {
+    fn default() -> Self {
+        Self {
+            mode: DayBoundaryMode::FixedHour,
+            fixed_hour: 6,
+            fixed_minute: 0,
+            utc_offset_seconds: -6 * 60 * 60,
+        }
+    }
+}
+
+pub fn day_boundary_config() -> DayBoundaryConfig {
+    DayBoundaryConfig::default()
+}
+
+pub fn operational_day_key_now() -> NaiveDate {
+    operational_day_key_from_utc(Utc::now(), &day_boundary_config())
+}
+
+pub fn operational_day_key_for_local(local: &DateTime<Local>) -> NaiveDate {
+    operational_day_key_from_utc(local.with_timezone(&Utc), &day_boundary_config())
+}
+
+pub fn report_period_date_bounds(period: ReportPeriod) -> (NaiveDate, NaiveDate) {
+    let (start, end, _) = period_bounds(period);
+    (start, end)
+}
+
+fn operational_day_key_from_utc(now_utc: DateTime<Utc>, config: &DayBoundaryConfig) -> NaiveDate {
+    let offset = FixedOffset::east_opt(config.utc_offset_seconds)
+        .unwrap_or_else(|| FixedOffset::west_opt(6 * 60 * 60).expect("valid UTC offset"));
+    let local = now_utc.with_timezone(&offset);
+
+    let cutoff = match config.mode {
+        DayBoundaryMode::FixedHour => {
+            NaiveTime::from_hms_opt(config.fixed_hour, config.fixed_minute, 0)
+                .unwrap_or_else(|| NaiveTime::from_hms_opt(6, 0, 0).expect("valid fallback time"))
+        }
+        DayBoundaryMode::Sunrise => {
+            NaiveTime::from_hms_opt(config.fixed_hour, config.fixed_minute, 0)
+                .unwrap_or_else(|| NaiveTime::from_hms_opt(6, 0, 0).expect("valid fallback time"))
+        }
+    };
+
+    let mut day = local.date_naive();
+    if local.time() < cutoff {
+        day -= ChronoDuration::days(1);
+    }
+    day
 }
 
 #[derive(Clone, Debug)]
@@ -437,7 +505,9 @@ impl TimeTracker {
     pub fn record_session(&mut self, cat_id: CategoryId, cat_description: &str, elapsed: usize) {
         let now = Local::now();
         let start_time = now - ChronoDuration::seconds(elapsed as i64);
-        let today = now.format("%Y-%m-%d").to_string();
+        let today = operational_day_key_for_local(&now)
+            .format("%Y-%m-%d")
+            .to_string();
 
         self.sessions.push(Session {
             id: self.session_id_counter,
@@ -452,7 +522,7 @@ impl TimeTracker {
     }
 
     pub fn get_todays_time(&self) -> usize {
-        let today = Local::now().format("%Y-%m-%d").to_string();
+        let today = operational_day_key_now().format("%Y-%m-%d").to_string();
         self.sessions
             .iter()
             .filter(|session| session.date == today && session.category_id != CategoryId::new(0))
@@ -464,7 +534,7 @@ impl TimeTracker {
         let cat_id = self
             .category_id_by_name(category_name)
             .unwrap_or(CategoryId::new(0));
-        let today = Local::now().format("%Y-%m-%d").to_string();
+        let today = operational_day_key_now().format("%Y-%m-%d").to_string();
         self.sessions
             .iter()
             .filter(|session| session.date == today && session.category_id == cat_id)
@@ -473,7 +543,7 @@ impl TimeTracker {
     }
 
     pub fn reset_none_counter_today(&mut self) {
-        let today = Local::now().format("%Y-%m-%d").to_string();
+        let today = operational_day_key_now().format("%Y-%m-%d").to_string();
         self.sessions.retain(|session| {
             !(session.category_id == CategoryId::new(0) && session.date == today)
         });
@@ -485,7 +555,7 @@ impl TimeTracker {
 }
 
 pub fn build_today_report(sessions: &[Session], categories: &[Category]) -> ReportSummary {
-    let today = Local::now().format("%Y-%m-%d").to_string();
+    let today = operational_day_key_now().format("%Y-%m-%d").to_string();
     build_report_for_date(sessions, categories, &today)
 }
 
@@ -518,7 +588,7 @@ pub fn build_period_karma_report(
 }
 
 fn period_bounds(period: ReportPeriod) -> (NaiveDate, NaiveDate, String) {
-    let today = Local::now().date_naive();
+    let today = operational_day_key_now();
 
     match period {
         ReportPeriod::Today => {
@@ -542,7 +612,7 @@ pub fn build_today_karma_report(
     sessions: &[Session],
     categories: &[Category],
 ) -> KarmaReportSummary {
-    let today = Local::now().format("%Y-%m-%d").to_string();
+    let today = operational_day_key_now().format("%Y-%m-%d").to_string();
     build_karma_report_for_date(sessions, categories, &today)
 }
 
@@ -806,6 +876,29 @@ mod tests {
     }
 
     #[test]
+    fn test_operational_day_boundary_uses_6am_costa_rica() {
+        let config = day_boundary_config();
+
+        let before = Utc
+            .with_ymd_and_hms(2026, 2, 10, 11, 59, 0)
+            .single()
+            .expect("valid datetime");
+        let at_cutoff = Utc
+            .with_ymd_and_hms(2026, 2, 10, 12, 0, 0)
+            .single()
+            .expect("valid datetime");
+
+        assert_eq!(
+            operational_day_key_from_utc(before, &config),
+            NaiveDate::from_ymd_opt(2026, 2, 9).expect("valid date")
+        );
+        assert_eq!(
+            operational_day_key_from_utc(at_cutoff, &config),
+            NaiveDate::from_ymd_opt(2026, 2, 10).expect("valid date")
+        );
+    }
+
+    #[test]
     fn test_build_report_for_date_excludes_none_and_sorts() {
         let categories = vec![
             Category {
@@ -1049,7 +1142,7 @@ mod tests {
             },
         ];
 
-        let today = Local::now().date_naive();
+        let today = operational_day_key_now();
         let in_window = (today - ChronoDuration::days(6))
             .format("%Y-%m-%d")
             .to_string();
@@ -1120,7 +1213,7 @@ mod tests {
             },
         ];
 
-        let today = Local::now().date_naive();
+        let today = operational_day_key_now();
         let in_window = (today - ChronoDuration::days(29))
             .format("%Y-%m-%d")
             .to_string();
@@ -1198,7 +1291,7 @@ mod tests {
             },
         ];
 
-        let today = Local::now().format("%Y-%m-%d").to_string();
+        let today = operational_day_key_now().format("%Y-%m-%d").to_string();
         let sessions = vec![Session {
             id: 1,
             date: today.clone(),
@@ -1218,8 +1311,8 @@ mod tests {
     #[test]
     fn test_reset_none_counter_today_clears_only_today_none() {
         let mut tracker = TimeTracker::new();
-        let today = Local::now().format("%Y-%m-%d").to_string();
-        let yesterday = (Local::now().date_naive() - ChronoDuration::days(1))
+        let today = operational_day_key_now().format("%Y-%m-%d").to_string();
+        let yesterday = (operational_day_key_now() - ChronoDuration::days(1))
             .format("%Y-%m-%d")
             .to_string();
 

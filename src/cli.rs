@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     constants::COLORS,
-    domain::{CategoryId, ReportPeriod, Session, build_period_report},
+    domain::{
+        CategoryId, ReportPeriod, Session, build_period_report, operational_day_key_for_local,
+    },
     storage,
 };
 
@@ -168,7 +170,9 @@ pub fn stop_session() -> Result<usize, String> {
     let mut sessions = storage::load_sessions_from_csv(&sessions_path, &categories).sessions;
 
     let now = Local::now();
-    let today = now.format("%Y-%m-%d").to_string();
+    let today = operational_day_key_for_local(&now)
+        .format("%Y-%m-%d")
+        .to_string();
     let start_time = now - ChronoDuration::seconds(elapsed as i64);
 
     let new_id = sessions.iter().map(|s| s.id).max().unwrap_or(0) + 1;
