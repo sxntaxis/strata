@@ -49,6 +49,6 @@ Before opening a PR, run:
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D clippy::dbg_macro -D clippy::todo
+cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
 ```

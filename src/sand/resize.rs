@@ -31,11 +31,16 @@ pub fn resize_grid(
     let (x_src_start, x_src_end, x_dest_offset) = kept_window(old_w, new_w);
     let (y_src_start, y_src_end, y_dest_offset) = kept_window(old_h, new_h);
 
-    for y_src in y_src_start..y_src_end {
-        for x_src in x_src_start..x_src_end {
+    for (y_src, row) in old_grid
+        .iter()
+        .enumerate()
+        .take(y_src_end)
+        .skip(y_src_start)
+    {
+        for (x_src, cell) in row.iter().enumerate().take(x_src_end).skip(x_src_start) {
             let x_dest = x_src - x_src_start + x_dest_offset;
             let y_dest = y_src - y_src_start + y_dest_offset;
-            new_grid[y_dest][x_dest] = old_grid[y_src][x_src];
+            new_grid[y_dest][x_dest] = *cell;
         }
     }
 
@@ -47,8 +52,8 @@ pub fn resize_grid(
     } else {
         new_h / dot_height
     };
-    let band_w = (new_cell_w / 40).max(2).min(6);
-    let band_h = (new_cell_h / 40).max(1).min(3);
+    let band_w = (new_cell_w / 40).clamp(2, 6);
+    let band_h = (new_cell_h / 40).clamp(1, 3);
     let band_w_px = (band_w * dot_width).min(new_w);
     let band_h_px = (band_h * dot_height).min(new_h);
 
@@ -94,16 +99,13 @@ fn classify_lost_grains(
 ) -> LostGrains {
     let mut lost = LostGrains::default();
 
-    let old_h = old_grid.len();
-    let old_w = old_grid.first().map_or(0, |row| row.len());
-
-    for y in 0..old_h {
-        for x in 0..old_w {
+    for (y, row) in old_grid.iter().enumerate() {
+        for (x, cell) in row.iter().enumerate() {
             if x >= x_src_start && x < x_src_end && y >= y_src_start && y < y_src_end {
                 continue;
             }
 
-            if let Some(cat_id) = old_grid[y][x] {
+            if let Some(cat_id) = *cell {
                 let lost_from_left = x < x_src_start;
                 let lost_from_right = x >= x_src_end;
                 let lost_from_top = y < y_src_start;
@@ -132,14 +134,13 @@ fn classify_lost_grains(
 }
 
 fn place_left_band(grid: &mut [Vec<Option<CategoryId>>], grains: &[CategoryId], band_w_px: usize) {
-    let h = grid.len();
     let mut iter = grains.iter();
 
-    'outer: for y in (0..h).rev() {
-        for x in 0..band_w_px {
-            if grid[y][x].is_none() {
+    'outer: for row in grid.iter_mut().rev() {
+        for cell in row.iter_mut().take(band_w_px) {
+            if cell.is_none() {
                 if let Some(cat) = iter.next() {
-                    grid[y][x] = Some(*cat);
+                    *cell = Some(*cat);
                 } else {
                     break 'outer;
                 }
@@ -149,16 +150,15 @@ fn place_left_band(grid: &mut [Vec<Option<CategoryId>>], grains: &[CategoryId], 
 }
 
 fn place_right_band(grid: &mut [Vec<Option<CategoryId>>], grains: &[CategoryId], band_w_px: usize) {
-    let h = grid.len();
     let w = grid.first().map_or(0, |row| row.len());
     let start = w.saturating_sub(band_w_px);
     let mut iter = grains.iter();
 
-    'outer: for y in (0..h).rev() {
-        for x in (start..w).rev() {
-            if grid[y][x].is_none() {
+    'outer: for row in grid.iter_mut().rev() {
+        for cell in row[start..w].iter_mut().rev() {
+            if cell.is_none() {
                 if let Some(cat) = iter.next() {
-                    grid[y][x] = Some(*cat);
+                    *cell = Some(*cat);
                 } else {
                     break 'outer;
                 }
@@ -168,14 +168,13 @@ fn place_right_band(grid: &mut [Vec<Option<CategoryId>>], grains: &[CategoryId],
 }
 
 fn place_top_band(grid: &mut [Vec<Option<CategoryId>>], grains: &[CategoryId], band_h_px: usize) {
-    let w = grid.first().map_or(0, |row| row.len());
     let mut iter = grains.iter();
 
-    'outer: for y in (0..band_h_px).rev() {
-        for x in 0..w {
-            if grid[y][x].is_none() {
+    'outer: for row in grid.iter_mut().take(band_h_px).rev() {
+        for cell in row.iter_mut() {
+            if cell.is_none() {
                 if let Some(cat) = iter.next() {
-                    grid[y][x] = Some(*cat);
+                    *cell = Some(*cat);
                 } else {
                     break 'outer;
                 }
@@ -190,15 +189,14 @@ fn place_bottom_band(
     band_h_px: usize,
 ) {
     let h = grid.len();
-    let w = grid.first().map_or(0, |row| row.len());
     let start = h.saturating_sub(band_h_px);
     let mut iter = grains.iter();
 
-    'outer: for y in start..h {
-        for x in 0..w {
-            if grid[y][x].is_none() {
+    'outer: for row in grid.iter_mut().take(h).skip(start) {
+        for cell in row.iter_mut() {
+            if cell.is_none() {
                 if let Some(cat) = iter.next() {
-                    grid[y][x] = Some(*cat);
+                    *cell = Some(*cat);
                 } else {
                     break 'outer;
                 }
@@ -208,14 +206,11 @@ fn place_bottom_band(
 }
 
 fn place_overflow(grid: &mut [Vec<Option<CategoryId>>], grains: &[CategoryId]) {
-    let h = grid.len();
-    let w = grid.first().map_or(0, |row| row.len());
-
     'grain: for cat in grains {
-        for y in (0..h).rev() {
-            for x in 0..w {
-                if grid[y][x].is_none() {
-                    grid[y][x] = Some(*cat);
+        for row in grid.iter_mut().rev() {
+            for cell in row.iter_mut() {
+                if cell.is_none() {
+                    *cell = Some(*cat);
                     continue 'grain;
                 }
             }

@@ -153,7 +153,7 @@ impl SandEngine {
 
     pub fn update(&mut self) {
         self.frame_count += 1;
-        if self.frame_count % 2 == 0 {
+        if self.frame_count.is_multiple_of(2) {
             self.apply_gravity();
         }
     }
@@ -183,23 +183,24 @@ impl SandEngine {
                         let gx = cx * SAND_ENGINE.dot_width + dx;
                         let gy = cy * SAND_ENGINE.dot_height + dy;
 
-                        if gy < grid_h && gx < grid_w {
-                            if let Some(cat_id) = self.grid[gy][gx] {
-                                let dot_index = match (dx, dy) {
-                                    (0, 0) => 0,
-                                    (0, 1) => 1,
-                                    (0, 2) => 2,
-                                    (0, 3) => 6,
-                                    (1, 0) => 3,
-                                    (1, 1) => 4,
-                                    (1, 2) => 5,
-                                    (1, 3) => 7,
-                                    _ => 0,
-                                };
-                                dots |= 1 << dot_index;
+                        if gy < grid_h
+                            && gx < grid_w
+                            && let Some(cat_id) = self.grid[gy][gx]
+                        {
+                            let dot_index = match (dx, dy) {
+                                (0, 0) => 0,
+                                (0, 1) => 1,
+                                (0, 2) => 2,
+                                (0, 3) => 6,
+                                (1, 0) => 3,
+                                (1, 1) => 4,
+                                (1, 2) => 5,
+                                (1, 3) => 7,
+                                _ => 0,
+                            };
+                            dots |= 1 << dot_index;
 
-                                *counts.entry(cat_id).or_insert(0) += 1;
-                            }
+                            *counts.entry(cat_id).or_insert(0) += 1;
                         }
                     }
                 }
@@ -325,9 +326,10 @@ impl SandEngine {
         let target_height = self.grid.len();
         let target_width = self.grid.first().map_or(0, |row| row.len());
 
-        self.grid = if target_width == 0 || target_height == 0 {
-            restored
-        } else if target_width == state.grid_width && target_height == state.grid_height {
+        self.grid = if target_width == 0
+            || target_height == 0
+            || (target_width == state.grid_width && target_height == state.grid_height)
+        {
             restored
         } else {
             resize_grid(
@@ -429,8 +431,8 @@ mod tests {
     #[test]
     fn test_sand_resize_preserves_count_right_edge() {
         let mut se = SandEngine::new(80, 50);
-        let cell_w = se.width as usize / SAND_ENGINE.dot_width as usize;
-        let cell_h = se.height as usize / SAND_ENGINE.dot_height as usize;
+        let cell_w = se.width as usize / SAND_ENGINE.dot_width;
+        let cell_h = se.height as usize / SAND_ENGINE.dot_height;
 
         for cy in 0..cell_h {
             for cx in (cell_w - 10..cell_w).rev() {
@@ -457,8 +459,8 @@ mod tests {
     #[test]
     fn test_sand_resize_preserves_count_expand() {
         let mut se = SandEngine::new(50, 50);
-        let cell_w = se.width as usize / SAND_ENGINE.dot_width as usize;
-        let cell_h = se.height as usize / SAND_ENGINE.dot_height as usize;
+        let cell_w = se.width as usize / SAND_ENGINE.dot_width;
+        let cell_h = se.height as usize / SAND_ENGINE.dot_height;
 
         if cell_h > 2 && cell_w > 2 {
             se.grid[cell_h / 2][cell_w / 2] = Some(CategoryId::new(0));
@@ -484,7 +486,7 @@ mod tests {
         let mut se = SandEngine::new(40, 40);
 
         for y in 0..se.grid.len() {
-            for x in 0..(5 * SAND_ENGINE.dot_width as usize).min(se.grid[0].len()) {
+            for x in 0..(5 * SAND_ENGINE.dot_width).min(se.grid[0].len()) {
                 se.grid[y][x] = Some(CategoryId::new(1));
             }
         }
@@ -510,7 +512,7 @@ mod tests {
 
         assert_eq!(after, expected);
 
-        let band_w = (30 / 40).max(2).min(6);
+        let band_w = 2;
         let left_band_count: usize = (0..se.grid.len())
             .flat_map(|y| (0..band_w).map(move |x| (y, x)))
             .filter(|(y, x)| se.grid[*y][*x].is_some())

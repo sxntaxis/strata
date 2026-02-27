@@ -519,9 +519,7 @@ impl TimeTracker {
     }
 
     pub fn end_session(&mut self) -> Option<usize> {
-        let Some(start_instant) = self.current_session_start else {
-            return None;
-        };
+        let start_instant = self.current_session_start?;
 
         let elapsed = start_instant.elapsed().as_secs() as usize;
         let cat_id = self.active_category_id;
@@ -873,20 +871,17 @@ pub fn build_period_karma_report_with_live(
 ) -> KarmaReportSummary {
     let mut summary = build_period_karma_report(sessions, categories, period);
 
-    if report_period_contains_today(period) {
-        if let Some(live) = live_session {
-            if let Some(entry) = summary
-                .entries
-                .iter_mut()
-                .find(|entry| entry.category_id == live.category_id)
-            {
-                entry.elapsed_seconds += live.elapsed_seconds;
-                entry.karma_seconds += live.elapsed_seconds as isize * entry.karma_effect as isize;
-                summary.total_seconds += live.elapsed_seconds;
-                summary.total_karma_seconds +=
-                    live.elapsed_seconds as isize * entry.karma_effect as isize;
-            }
-        }
+    if report_period_contains_today(period)
+        && let Some(live) = live_session
+        && let Some(entry) = summary
+            .entries
+            .iter_mut()
+            .find(|entry| entry.category_id == live.category_id)
+    {
+        entry.elapsed_seconds += live.elapsed_seconds;
+        entry.karma_seconds += live.elapsed_seconds as isize * entry.karma_effect as isize;
+        summary.total_seconds += live.elapsed_seconds;
+        summary.total_karma_seconds += live.elapsed_seconds as isize * entry.karma_effect as isize;
     }
 
     sort_karma_entries_for_display(&mut summary.entries);
@@ -910,10 +905,7 @@ pub fn build_category_logs_for_period(
                 return None;
             }
 
-            let Some(session_date) = NaiveDate::parse_from_str(&session.date, "%Y-%m-%d").ok()
-            else {
-                return None;
-            };
+            let session_date = NaiveDate::parse_from_str(&session.date, "%Y-%m-%d").ok()?;
 
             if session_date < start || session_date > end {
                 return None;
@@ -931,29 +923,28 @@ pub fn build_category_logs_for_period(
         })
         .collect();
 
-    if report_period_contains_today(period) {
-        if let Some(live) = live_session {
-            if live.category_id == category_id && live.elapsed_seconds > 0 {
-                let day = operational_day_key_for_local(&live.now_local)
-                    .format("%Y-%m-%d")
-                    .to_string();
-                let end_time = live.now_local.format("%H:%M:%S").to_string();
-                let start_time = (live.now_local
-                    - ChronoDuration::seconds(live.elapsed_seconds as i64))
-                .format("%H:%M:%S")
-                .to_string();
+    if report_period_contains_today(period)
+        && let Some(live) = live_session
+        && live.category_id == category_id
+        && live.elapsed_seconds > 0
+    {
+        let day = operational_day_key_for_local(&live.now_local)
+            .format("%Y-%m-%d")
+            .to_string();
+        let end_time = live.now_local.format("%H:%M:%S").to_string();
+        let start_time = (live.now_local - ChronoDuration::seconds(live.elapsed_seconds as i64))
+            .format("%H:%M:%S")
+            .to_string();
 
-                logs.push(CategoryLogEntry {
-                    date: day,
-                    start_time,
-                    end_time,
-                    description: live.description.clone(),
-                    elapsed_seconds: live.elapsed_seconds,
-                    karma_effect,
-                    karma_seconds: live.elapsed_seconds as isize * karma_effect as isize,
-                });
-            }
-        }
+        logs.push(CategoryLogEntry {
+            date: day,
+            start_time,
+            end_time,
+            description: live.description.clone(),
+            elapsed_seconds: live.elapsed_seconds,
+            karma_effect,
+            karma_seconds: live.elapsed_seconds as isize * karma_effect as isize,
+        });
     }
 
     logs.sort_by(|a, b| b.date.cmp(&a.date).then(b.end_time.cmp(&a.end_time)));
