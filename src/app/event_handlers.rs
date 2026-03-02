@@ -7,7 +7,7 @@ use crate::{
     keybindings::Action,
 };
 
-use super::{App, ui_helpers};
+use super::{App, PaletteCommand, ui_helpers};
 
 impl App {
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> bool {
@@ -15,8 +15,27 @@ impl App {
             return false;
         }
 
+        if self.show_command_palette {
+            return self.handle_command_palette_key(key);
+        }
+
         if self.show_keybindings_modal && self.atlas_overlay.is_some() {
             return self.handle_atlas_overlay_key(key);
+        }
+
+        if self.in_karma_modal() && self.report_logs_category_id.is_some() {
+            let is_text_like = matches!(
+                key.code,
+                KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Delete
+            ) && !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+
+            if is_text_like && self.keymap.action_for_key_event(key) != Some(Action::DeleteCategory)
+            {
+                self.handle_report_logs_text_input(key);
+                return false;
+            }
         }
 
         if let Some(action) = self.resolve_action(key) {
@@ -46,6 +65,11 @@ impl App {
     }
 
     fn route_action(&mut self, action: Action, key: KeyEvent) -> bool {
+        if action == Action::ToggleCommandPalette {
+            self.toggle_command_palette();
+            return false;
+        }
+
         if action == Action::ToggleKeybindingsHelp {
             self.toggle_keybindings_modal();
             return false;
@@ -69,6 +93,131 @@ impl App {
         }
 
         self.handle_main_action(action)
+    }
+
+    fn handle_command_palette_key(&mut self, key: KeyEvent) -> bool {
+        if self.keymap.action_for_key_event(key) == Some(Action::ToggleCommandPalette) {
+            self.close_command_palette();
+            return false;
+        }
+
+        let entries = self.filtered_command_palette_entries();
+        self.clamp_command_palette_selection(entries.len());
+
+        match key.code {
+            KeyCode::Esc => {
+                self.close_command_palette();
+            }
+            KeyCode::Enter => {
+                if let Some(entry) = entries.get(self.command_palette_selected_index) {
+                    return self.execute_palette_command(entry.command);
+                }
+                self.close_command_palette();
+            }
+            KeyCode::Up => {
+                if !entries.is_empty() {
+                    self.command_palette_selected_index = ui_helpers::wrap_prev_index(
+                        self.command_palette_selected_index,
+                        entries.len(),
+                    );
+                    self.render_needed = true;
+                }
+            }
+            KeyCode::Down => {
+                if !entries.is_empty() {
+                    self.command_palette_selected_index = ui_helpers::wrap_next_index(
+                        self.command_palette_selected_index,
+                        entries.len(),
+                    );
+                    self.render_needed = true;
+                }
+            }
+            KeyCode::Home => {
+                self.command_palette_selected_index = 0;
+                self.command_palette_scroll = 0;
+                self.render_needed = true;
+            }
+            KeyCode::End => {
+                if !entries.is_empty() {
+                    self.command_palette_selected_index = entries.len() - 1;
+                    self.render_needed = true;
+                }
+            }
+            KeyCode::Backspace => {
+                self.command_palette_query.pop();
+                let updated = self.filtered_command_palette_entries();
+                self.clamp_command_palette_selection(updated.len());
+                self.render_needed = true;
+            }
+            KeyCode::Char(c)
+                if !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                self.command_palette_query.push(c);
+                let updated = self.filtered_command_palette_entries();
+                self.clamp_command_palette_selection(updated.len());
+                self.render_needed = true;
+            }
+            _ => {}
+        }
+
+        false
+    }
+
+    fn execute_palette_command(&mut self, command: PaletteCommand) -> bool {
+        self.close_command_palette();
+
+        match command {
+            PaletteCommand::Action(Action::ToggleCommandPalette) => false,
+            PaletteCommand::Action(Action::ToggleKeybindingsHelp) => {
+                self.toggle_keybindings_modal();
+                false
+            }
+            PaletteCommand::Action(action) => self.handle_main_action(action),
+            PaletteCommand::SetReportPeriod(period) => {
+                if !self.in_karma_modal() {
+                    self.open_report_modal();
+                }
+                self.set_report_period(period);
+                self.render_needed = true;
+                false
+            }
+            PaletteCommand::SwitchLayer(category_id) => {
+                self.switch_to_layer_from_palette(category_id);
+                false
+            }
+        }
+    }
+
+    fn switch_to_layer_from_palette(&mut self, category_id: CategoryId) {
+        if self.time_tracker.active_category_id() == category_id {
+            self.render_needed = true;
+            return;
+        }
+
+        let Some(target_index) = self
+            .time_tracker
+            .categories_ordered()
+            .iter()
+            .position(|category| category.id == category_id)
+        else {
+            self.render_needed = true;
+            return;
+        };
+
+        self.time_tracker.end_session();
+        self.persist_sessions();
+        let _ = self.time_tracker.set_active_category_by_index(target_index);
+        self.time_tracker.start_session();
+
+        if category_id == CategoryId::new(0) {
+            self.none_entry_time = Some(Instant::now());
+        } else {
+            self.none_entry_time = None;
+        }
+
+        self.render_needed = true;
     }
 
     fn handle_keybindings_modal_action(&mut self, action: Action) -> bool {
@@ -512,9 +661,7 @@ impl App {
                 if in_logs_view {
                     self.report_logs_category_id = None;
                     self.report_log_selected_index = 0;
-                } else if let Some(entry) = summary.entries.get(self.report_selected_index)
-                    && entry.category_id != CategoryId::new(0)
-                {
+                } else if let Some(entry) = summary.entries.get(self.report_selected_index) {
                     self.report_logs_category_id = Some(entry.category_id);
                     self.report_log_selected_index = 0;
                 }
@@ -545,6 +692,12 @@ impl App {
                     );
                 }
             }
+            Action::Left => {
+                self.shift_report_interval_older();
+            }
+            Action::Right => {
+                self.shift_report_interval_newer();
+            }
             Action::ShiftLeft => {
                 self.set_report_period(ui_helpers::report_period_prev(self.report_period));
             }
@@ -560,6 +713,20 @@ impl App {
             Action::ReportMonth => {
                 self.set_report_period(ReportPeriod::Month);
             }
+            Action::DeleteCategory => {
+                if in_logs_view {
+                    handled = self.delete_selected_report_session();
+                } else {
+                    handled = false;
+                }
+            }
+            Action::Backspace => {
+                if in_logs_view {
+                    handled = self.backspace_selected_report_session_tag();
+                } else {
+                    handled = false;
+                }
+            }
             _ => handled = false,
         }
 
@@ -573,15 +740,16 @@ impl App {
             Action::Quit => true,
             Action::ClearAllSand => {
                 self.sand_engine.clear();
-                self.time_tracker.reset_none_counter_today();
                 self.persist_sessions();
                 self.persist_sand_state();
+                self.persist_daily_sand_snapshot();
                 self.render_needed = true;
                 false
             }
             Action::ClearNoneSand => {
                 self.sand_engine.clear_category(CategoryId::new(0));
                 self.persist_sand_state();
+                self.persist_daily_sand_snapshot();
                 self.render_needed = true;
                 false
             }
@@ -624,6 +792,26 @@ impl App {
                 false
             }
             _ => false,
+        }
+    }
+
+    fn handle_report_logs_text_input(&mut self, key: KeyEvent) {
+        if key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        {
+            return;
+        }
+
+        let edited = match key.code {
+            KeyCode::Char(c) => self.append_to_selected_report_session_tag(c),
+            KeyCode::Backspace => self.backspace_selected_report_session_tag(),
+            KeyCode::Delete => self.backspace_selected_report_session_tag(),
+            _ => false,
+        };
+
+        if edited {
+            self.render_needed = true;
         }
     }
 }

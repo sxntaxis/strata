@@ -25,7 +25,12 @@ impl App {
         }
 
         let categories = self.time_tracker.categories_ordered();
-        let sand = self.sand_engine.render(&categories);
+        let sand = if self.in_karma_modal() && self.should_use_report_snapshot() {
+            self.report_snapshot_lines(inner_width, inner_height, &categories)
+                .unwrap_or_else(|| self.sand_engine.render(&categories))
+        } else {
+            self.sand_engine.render(&categories)
+        };
         let active_index = self.time_tracker.active_category_index();
 
         let category_name = if active_index == Some(0) {
@@ -135,6 +140,10 @@ impl App {
 
         if self.show_keybindings_modal {
             self.render_keybindings_modal(f, size);
+        }
+
+        if self.show_command_palette {
+            self.render_command_palette(f, size);
         }
     }
 }

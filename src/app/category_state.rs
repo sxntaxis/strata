@@ -1,6 +1,10 @@
 use ratatui::style::Color;
 
-use crate::{constants::COLORS, domain::CategoryId, storage};
+use crate::{
+    constants::COLORS,
+    domain::{CategoryId, operational_day_key_now},
+    storage,
+};
 
 use super::App;
 
@@ -20,6 +24,18 @@ impl App {
     pub(super) fn persist_sand_state(&self) {
         let state = self.sand_engine.snapshot_state();
         let path = storage::get_sand_state_path();
+        let _ = storage::save_sand_state(&path, &state);
+    }
+
+    pub(super) fn persist_daily_sand_snapshot(&self) {
+        let mut state = self.sand_engine.snapshot_state();
+
+        if self.time_tracker.active_category_id() == CategoryId::new(0) {
+            state.grains.retain(|grain| grain.category_id != 0);
+        }
+
+        let day = operational_day_key_now();
+        let path = storage::get_sand_history_path_for_day(day);
         let _ = storage::save_sand_state(&path, &state);
     }
 

@@ -25,18 +25,24 @@ impl App {
                 let dot = if cat.karma_effect < 0 { "◯ " } else { "● " };
 
                 if is_selected {
-                    let text_color = view_style::text_color_for_bg(cat.color);
+                    let text_color = if cat.id == crate::domain::CategoryId::new(0) {
+                        Color::Black
+                    } else {
+                        view_style::text_color_for_bg(cat.color)
+                    };
                     let layer_name = self.display_layer_name(&cat.name);
                     let description_text = if self.modal_description.is_empty() {
                         Span::raw("")
                     } else {
                         Span::styled(
                             format!(" {}", self.modal_description),
-                            Style::default().add_modifier(ratatui::style::Modifier::ITALIC),
+                            Style::default()
+                                .fg(text_color)
+                                .add_modifier(ratatui::style::Modifier::ITALIC),
                         )
                     };
                     ListItem::new(Line::from(vec![
-                        Span::raw(dot).fg(cat.color),
+                        Span::raw(dot).fg(text_color),
                         Span::raw(layer_name).fg(text_color),
                         description_text,
                     ]))

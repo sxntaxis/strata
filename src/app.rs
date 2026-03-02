@@ -21,6 +21,7 @@ use crate::{
 
 mod category_modal_view;
 mod category_state;
+mod command_palette_view;
 mod event_handlers;
 mod keybindings_modal_view;
 mod render_views;
@@ -53,6 +54,21 @@ enum AtlasOverlay {
     SelectWeekStartDay { selected: usize },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PaletteCommand {
+    Action(keybindings::Action),
+    SetReportPeriod(ReportPeriod),
+    SwitchLayer(CategoryId),
+}
+
+#[derive(Clone, Debug)]
+struct PaletteEntry {
+    command: PaletteCommand,
+    title: String,
+    search_text: String,
+    hint: String,
+}
+
 struct App {
     time_tracker: TimeTracker,
     sand_engine: SandEngine,
@@ -66,11 +82,20 @@ struct App {
     modal_tag_index: Option<usize>,
     report_selected_index: usize,
     report_period: ReportPeriod,
+    report_period_offset: usize,
     report_logs_category_id: Option<CategoryId>,
     report_log_selected_index: usize,
+    report_snapshot_end_day: Option<String>,
+    report_snapshot_state: Option<crate::sand::SandState>,
+    report_snapshot_preview_key: Option<String>,
+    report_snapshot_preview_engine: Option<SandEngine>,
     keymap: keybindings::Keymap,
     runtime_settings: RuntimeSettings,
     keymap_error: Option<String>,
+    show_command_palette: bool,
+    command_palette_query: String,
+    command_palette_selected_index: usize,
+    command_palette_scroll: usize,
     show_keybindings_modal: bool,
     keybindings_scroll: usize,
     atlas_selected_index: usize,
@@ -145,11 +170,20 @@ impl App {
             modal_tag_index: None,
             report_selected_index: 0,
             report_period: ReportPeriod::Today,
+            report_period_offset: 0,
             report_logs_category_id: None,
             report_log_selected_index: 0,
+            report_snapshot_end_day: None,
+            report_snapshot_state: None,
+            report_snapshot_preview_key: None,
+            report_snapshot_preview_engine: None,
             keymap,
             runtime_settings,
             keymap_error,
+            show_command_palette: false,
+            command_palette_query: String::new(),
+            command_palette_selected_index: 0,
+            command_palette_scroll: 0,
             show_keybindings_modal: false,
             keybindings_scroll: 0,
             atlas_selected_index: 0,
@@ -191,8 +225,14 @@ impl App {
         self.ui_mode = UiMode::KarmaModal;
         self.report_selected_index = 0;
         self.report_period = ReportPeriod::Today;
+        self.report_period_offset = 0;
         self.report_logs_category_id = None;
         self.report_log_selected_index = 0;
+        self.report_snapshot_end_day = None;
+        self.report_snapshot_state = None;
+        self.report_snapshot_preview_key = None;
+        self.report_snapshot_preview_engine = None;
+        self.focus_none_report_row();
         self.render_needed = true;
     }
 
@@ -200,6 +240,10 @@ impl App {
         self.ui_mode = UiMode::Main;
         self.report_logs_category_id = None;
         self.report_log_selected_index = 0;
+        self.report_snapshot_end_day = None;
+        self.report_snapshot_state = None;
+        self.report_snapshot_preview_key = None;
+        self.report_snapshot_preview_engine = None;
         self.render_needed = true;
     }
 
@@ -359,6 +403,7 @@ impl App {
             self.atlas_selected_index = 0;
             self.keybindings_scroll = 0;
             self.atlas_overlay = None;
+            self.close_command_palette();
         }
         self.render_needed = true;
     }
@@ -367,6 +412,33 @@ impl App {
         self.show_keybindings_modal = false;
         self.atlas_overlay = None;
         self.render_needed = true;
+    }
+
+    fn toggle_command_palette(&mut self) {
+        self.show_command_palette = !self.show_command_palette;
+        if self.show_command_palette {
+            self.command_palette_query.clear();
+            self.command_palette_selected_index = 0;
+            self.command_palette_scroll = 0;
+            self.close_keybindings_modal();
+        }
+        self.render_needed = true;
+    }
+
+    fn close_command_palette(&mut self) {
+        self.show_command_palette = false;
+        self.command_palette_query.clear();
+        self.command_palette_selected_index = 0;
+        self.command_palette_scroll = 0;
+        self.render_needed = true;
+    }
+
+    fn clamp_command_palette_selection(&mut self, row_count: usize) {
+        if row_count == 0 {
+            self.command_palette_selected_index = 0;
+        } else if self.command_palette_selected_index >= row_count {
+            self.command_palette_selected_index = row_count - 1;
+        }
     }
 
     fn select_previous_keybinding_action(&mut self) {
@@ -508,13 +580,18 @@ impl App {
         let inner_height = compact.height.saturating_sub(2);
         let visible_rows = inner_height as usize;
 
-        let breathing_room = 2usize;
-        let width_is_cramped = inner_width < min_inner_width.saturating_add(breathing_room);
+        let breathing_room = 5usize;
+        let width_is_cramped = inner_width <= min_inner_width.saturating_add(breathing_room);
         let rows_are_cramped = row_count > visible_rows;
 
         let content_is_cramped = width_is_cramped || rows_are_cramped;
         if content_is_cramped {
-            self.modal_rect_ratio(terminal_size, 2, 3)
+            let target_width = terminal_size.width.saturating_mul(2) / 3;
+            let max_width = terminal_size.width.saturating_sub(2).max(1);
+            let modal_width = target_width.clamp(1, max_width);
+            let modal_x = (terminal_size.width.saturating_sub(modal_width)) / 2;
+
+            Rect::new(modal_x, compact.y, modal_width, compact.height)
         } else {
             compact
         }
@@ -613,6 +690,8 @@ pub fn run_ui() -> Result<(), io::Error> {
 
         if last_save.elapsed() >= save_rate {
             app.persist_sessions();
+            app.persist_sand_state();
+            app.persist_daily_sand_snapshot();
             last_save = Instant::now();
         }
 
@@ -637,6 +716,7 @@ pub fn run_ui() -> Result<(), io::Error> {
     app.time_tracker.end_session();
     app.persist_sessions();
     app.persist_sand_state();
+    app.persist_daily_sand_snapshot();
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;

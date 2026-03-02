@@ -1,9 +1,10 @@
+use chrono::NaiveDate;
 use ratatui::prelude::{Line, Span};
 use ratatui::{
     Frame,
     layout::{Alignment, Rect},
     style::{Color, Modifier, Style, Stylize},
-    widgets::{Block, BorderType, Borders, List, ListItem, ListState},
+    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
 };
 
 use crate::domain::{CategoryId, ReportPeriod};
@@ -52,8 +53,11 @@ impl App {
             2 + max_name + 1 + 9
         };
 
-        let modal_rect =
-            self.report_modal_rect(terminal_size, body_row_count, preferred_inner_width);
+        let modal_rect = self.report_modal_rect(
+            terminal_size,
+            body_row_count,
+            preferred_inner_width.saturating_add(4),
+        );
         let selected_summary_index = if summary.entries.is_empty() {
             None
         } else {
@@ -95,9 +99,9 @@ impl App {
 
         let period_bottom_title = Line::from(vec![
             view_style::report_period_label_span("day", self.report_period == ReportPeriod::Today),
-            Span::styled(" · ", Style::default().fg(Color::Gray)),
+            Span::styled("·", Style::default().fg(Color::DarkGray)),
             view_style::report_period_label_span("week", self.report_period == ReportPeriod::Week),
-            Span::styled(" · ", Style::default().fg(Color::Gray)),
+            Span::styled("·", Style::default().fg(Color::DarkGray)),
             view_style::report_period_label_span(
                 "month",
                 self.report_period == ReportPeriod::Month,
@@ -117,6 +121,35 @@ impl App {
         f.render_widget(ratatui::widgets::Clear, modal_rect);
         f.render_widget(frame_block.clone(), modal_rect);
 
+        if modal_rect.width > 2 && modal_rect.height > 2 {
+            let mid_y = modal_rect.y + (modal_rect.height / 2);
+            let left_arrow = Paragraph::new(Line::from(Span::styled(
+                "←",
+                Style::default().fg(Color::Gray),
+            )));
+            let right_arrow = Paragraph::new(Line::from(Span::styled(
+                "→",
+                if self.report_period_offset == 0 {
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::DIM)
+                } else {
+                    Style::default().fg(Color::Gray)
+                },
+            )));
+
+            let left_rect = Rect::new(modal_rect.x, mid_y, 1, 1);
+            let right_rect = Rect::new(
+                modal_rect.x + modal_rect.width.saturating_sub(1),
+                mid_y,
+                1,
+                1,
+            );
+
+            f.render_widget(left_arrow, left_rect);
+            f.render_widget(right_arrow, right_rect);
+        }
+
         let list_area = frame_block.inner(modal_rect);
 
         if let Some(category_id) = self.report_logs_category_id {
@@ -131,9 +164,12 @@ impl App {
 
             let row_width = list_area.width as usize;
             let metric_width = if is_none_category { 8 } else { 9 };
-            let date_width = 7;
-            let detail_width = row_width
-                .saturating_sub(metric_width + date_width + 4)
+            let time_width = 17;
+            let show_date_column = self.report_period != ReportPeriod::Today;
+            let date_width = if show_date_column { 6 } else { 0 };
+            let separator_count = if show_date_column { 3 } else { 2 };
+            let tag_width = row_width
+                .saturating_sub(date_width + time_width + metric_width + separator_count)
                 .max(4);
 
             let items: Vec<ListItem> = logs
@@ -141,19 +177,30 @@ impl App {
                 .enumerate()
                 .map(|(idx, row)| {
                     let is_selected = selected_log_index == Some(idx);
-                    let date = self.truncate_label(
-                        &ui_helpers::format_report_interval_label(&row.date),
-                        date_width,
-                    );
-                    let date_pad = date_width.saturating_sub(date.chars().count()) + 1;
-
-                    let detail_source = if row.description.trim().is_empty() {
-                        format!("{}-{}", row.start_time, row.end_time)
+                    let date_label = if show_date_column {
+                        self.format_log_date_label(&row.date)
                     } else {
-                        format!("{} · {}-{}", row.description, row.start_time, row.end_time)
+                        String::new()
                     };
-                    let detail = self.truncate_label(&detail_source, detail_width);
-                    let detail_pad = detail_width.saturating_sub(detail.chars().count()) + 1;
+                    let date = if show_date_column {
+                        self.truncate_label(&date_label, date_width)
+                    } else {
+                        String::new()
+                    };
+                    let date_cell = if show_date_column {
+                        format!("{date:<width$}", width = date_width)
+                    } else {
+                        String::new()
+                    };
+
+                    let tag = self.truncate_label(row.description.trim(), tag_width);
+                    let tag_cell = format!("{tag:<width$}", width = tag_width);
+
+                    let time_text = self.truncate_label(
+                        &format!("{}-{}", row.start_time, row.end_time),
+                        time_width,
+                    );
+                    let time_cell = format!("{time_text:<width$}", width = time_width);
 
                     let metric_value = if is_none_category {
                         self.format_time(row.elapsed_seconds)
@@ -162,6 +209,7 @@ impl App {
                     } else {
                         self.format_karma_time(row.karma_seconds)
                     };
+                    let metric_cell = format!("{metric_value:>width$}", width = metric_width);
 
                     let metric_color = if is_none_category {
                         Color::Gray
@@ -179,22 +227,32 @@ impl App {
 
                     if is_selected {
                         let text_color = view_style::text_color_for_bg(border_color);
-                        ListItem::new(Line::from(vec![
-                            Span::raw(date).fg(text_color),
-                            Span::raw(" ".repeat(date_pad)).fg(text_color),
-                            Span::raw(detail).fg(text_color),
-                            Span::raw(" ".repeat(detail_pad)).fg(text_color),
-                            Span::raw(metric_value).fg(text_color),
-                        ]))
-                        .style(Style::default().fg(text_color).bg(border_color))
+                        let mut spans = Vec::new();
+                        if show_date_column {
+                            spans.push(Span::raw(date_cell.clone()).fg(text_color));
+                            spans.push(Span::raw(" ").fg(text_color));
+                        }
+                        spans.push(Span::raw(tag_cell.clone()).fg(text_color));
+                        spans.push(Span::raw(" ").fg(text_color));
+                        spans.push(Span::raw(time_cell.clone()).fg(text_color));
+                        spans.push(Span::raw(" ").fg(text_color));
+                        spans.push(Span::raw(metric_cell.clone()).fg(text_color));
+
+                        ListItem::new(Line::from(spans))
+                            .style(Style::default().fg(text_color).bg(border_color))
                     } else {
-                        ListItem::new(Line::from(vec![
-                            Span::raw(date).fg(Color::Gray),
-                            Span::raw(" ".repeat(date_pad)).fg(Color::Gray),
-                            Span::raw(detail).fg(Color::White),
-                            Span::raw(" ".repeat(detail_pad)).fg(Color::White),
-                            Span::raw(metric_value).fg(metric_color),
-                        ]))
+                        let mut spans = Vec::new();
+                        if show_date_column {
+                            spans.push(Span::raw(date_cell).fg(Color::Gray));
+                            spans.push(Span::raw(" ").fg(Color::Gray));
+                        }
+                        spans.push(Span::raw(tag_cell).fg(Color::White));
+                        spans.push(Span::raw(" ").fg(Color::White));
+                        spans.push(Span::raw(time_cell).fg(Color::Gray));
+                        spans.push(Span::raw(" ").fg(Color::White));
+                        spans.push(Span::raw(metric_cell).fg(metric_color));
+
+                        ListItem::new(Line::from(spans))
                     }
                 })
                 .collect();
@@ -256,7 +314,11 @@ impl App {
                     };
 
                     if is_selected {
-                        let text_color = view_style::text_color_for_bg(entry.color);
+                        let text_color = if is_none_row {
+                            Color::Black
+                        } else {
+                            view_style::text_color_for_bg(entry.color)
+                        };
                         ListItem::new(Line::from(vec![
                             Span::raw(dot).fg(text_color),
                             Span::raw(name).fg(text_color),
@@ -288,6 +350,16 @@ impl App {
             };
 
             f.render_stateful_widget(list, list_area, &mut list_state);
+        }
+    }
+
+    fn format_log_date_label(&self, date: &str) -> String {
+        match self.report_period {
+            ReportPeriod::Today => String::new(),
+            ReportPeriod::Week => NaiveDate::parse_from_str(date, "%Y-%m-%d")
+                .map(|parsed| parsed.format("%a %-d").to_string())
+                .unwrap_or_else(|_| date.to_string()),
+            ReportPeriod::Month => ui_helpers::format_report_interval_label(date),
         }
     }
 }

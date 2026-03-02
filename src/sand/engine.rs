@@ -312,6 +312,37 @@ impl SandEngine {
         self.grain_count = self.grain_count.saturating_sub(removed);
     }
 
+    pub fn remove_category_grains(&mut self, category_id: CategoryId, count: usize) -> usize {
+        if count == 0 || self.grain_count == 0 {
+            return 0;
+        }
+
+        let mut removed = 0usize;
+        for row in self.grid.iter_mut().rev() {
+            for cell in row.iter_mut() {
+                if removed >= count {
+                    break;
+                }
+
+                if *cell == Some(category_id) {
+                    *cell = None;
+                    removed += 1;
+                }
+            }
+
+            if removed >= count {
+                break;
+            }
+        }
+
+        if removed > 0 {
+            self.grain_count = self.grain_count.saturating_sub(removed);
+            self.apply_gravity();
+        }
+
+        removed
+    }
+
     pub fn snapshot_state(&self) -> SandState {
         let grid_height = self.grid.len();
         let grid_width = self.grid.first().map_or(0, |row| row.len());
@@ -664,6 +695,38 @@ mod tests {
         assert_eq!(se.grid[2][2], None);
         assert_eq!(se.grid[3][3], Some(CategoryId::new(1)));
         assert_eq!(se.grain_count, 1);
+    }
+
+    #[test]
+    fn test_remove_category_grains_respects_count_and_category() {
+        let mut se = SandEngine::new(20, 20);
+        se.clear();
+        se.grid[0][0] = Some(CategoryId::new(1));
+        se.grid[0][1] = Some(CategoryId::new(1));
+        se.grid[0][2] = Some(CategoryId::new(1));
+        se.grid[0][3] = Some(CategoryId::new(2));
+        se.grain_count = 4;
+
+        let removed = se.remove_category_grains(CategoryId::new(1), 2);
+
+        assert_eq!(removed, 2);
+        assert_eq!(
+            se.grid
+                .iter()
+                .flat_map(|row| row.iter())
+                .filter(|cell| **cell == Some(CategoryId::new(1)))
+                .count(),
+            1
+        );
+        assert_eq!(
+            se.grid
+                .iter()
+                .flat_map(|row| row.iter())
+                .filter(|cell| **cell == Some(CategoryId::new(2)))
+                .count(),
+            1
+        );
+        assert_eq!(se.grain_count, 2);
     }
 
     #[test]

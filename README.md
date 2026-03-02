@@ -49,8 +49,11 @@ Repo-local runtime artifacts are intentionally ignored by git.
 ## Keybindings
 
 - Open the Command Atlas in TUI with `?` or `F1`.
+- Open the Command Palette with `Ctrl+P`.
+- Open Karma with `k` (and `Shift+Enter` as an additional shortcut).
 - In layer text entry, `?` stays a normal character; use `F1` there.
 - Optional config file: `~/.config/strata/keymap.json`
+- In Karma pop-up, `←` moves to older intervals and `→` moves toward current.
 
 Example:
 
@@ -80,6 +83,13 @@ Notes:
 - `time_log_path` accepts a CSV path or directory (directory auto-appends `time_log.csv`).
 - `day_start_mode` accepts `fixed` or `sunrise`.
 - `first_day_of_week` accepts `monday` through `sunday`.
+- `toggle_command_palette` is the action name for rebinding palette open/close.
+
+Karma interval notes:
+
+- `month` uses calendar months (current month-to-date, then full prior months).
+- Daily sand snapshots are written under state `sand_history/`; if active layer is drift, drift grains are filtered from the saved daily snapshot to reduce sleep-noise history.
+- If a historical day snapshot is missing, Strata reconstructs an approximate snapshot from that day in `time_log.csv`.
 
 ## Quality Gates
 

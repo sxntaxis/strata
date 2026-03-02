@@ -43,6 +43,7 @@ impl ActionCategory {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Action {
     Quit,
+    ToggleCommandPalette,
     OpenCategoryModal,
     OpenReportModal,
     SwitchToNone,
@@ -75,8 +76,9 @@ pub(crate) enum Action {
 }
 
 impl Action {
-    const ALL: [Action; 26] = [
+    const ALL: [Action; 27] = [
         Action::Quit,
+        Action::ToggleCommandPalette,
         Action::OpenCategoryModal,
         Action::OpenReportModal,
         Action::SwitchToNone,
@@ -111,6 +113,7 @@ impl Action {
     pub(crate) fn config_name(self) -> &'static str {
         match self {
             Action::Quit => "quit",
+            Action::ToggleCommandPalette => "toggle_command_palette",
             Action::OpenCategoryModal => "open_layer_popup",
             Action::OpenReportModal => "open_karma_popup",
             Action::SwitchToNone => "switch_to_drift",
@@ -146,6 +149,7 @@ impl Action {
     pub(crate) fn from_config_name(name: &str) -> Option<Self> {
         match name.trim().to_ascii_lowercase().as_str() {
             "quit" => Some(Self::Quit),
+            "toggle_command_palette" | "toggle_palette" => Some(Self::ToggleCommandPalette),
 
             "open_layer_popup" | "open_category_modal" => Some(Self::OpenCategoryModal),
             "open_karma_popup" | "open_report_modal" => Some(Self::OpenReportModal),
@@ -185,6 +189,7 @@ impl Action {
     pub(crate) fn description(self) -> &'static str {
         match self {
             Action::Quit => "Exit Strata",
+            Action::ToggleCommandPalette => "Open/close command palette",
             Action::OpenCategoryModal => "Open layer pop-up from main view",
             Action::OpenReportModal => "Open karma pop-up from main view",
             Action::SwitchToNone => "Switch active layer to drift",
@@ -194,8 +199,8 @@ impl Action {
 
             Action::Up => "Move up / previous item",
             Action::Down => "Move down / next item",
-            Action::Left => "Context ← action (layer tags)",
-            Action::Right => "Context → action (layer tags)",
+            Action::Left => "Context ← action (layer tags or older karma interval)",
+            Action::Right => "Context → action (layer tags or newer karma interval)",
             Action::ShiftUp => "Shift+↑ action (layer reorder)",
             Action::ShiftDown => "Shift+↓ action (layer reorder)",
             Action::ShiftLeft => "Shift+← action (color or period)",
@@ -220,6 +225,7 @@ impl Action {
     pub(crate) fn category(self) -> ActionCategory {
         match self {
             Action::Quit
+            | Action::ToggleCommandPalette
             | Action::OpenCategoryModal
             | Action::OpenReportModal
             | Action::SwitchToNone
@@ -614,10 +620,12 @@ fn default_true() -> bool {
     true
 }
 
-const DEFAULT_BINDINGS: [(&str, Action); 29] = [
+const DEFAULT_BINDINGS: [(&str, Action); 31] = [
     ("q", Action::Quit),
     ("ctrl-c", Action::Quit),
+    ("ctrl-p", Action::ToggleCommandPalette),
     ("enter", Action::Confirm),
+    ("shift-enter", Action::OpenReportModal),
     ("esc", Action::Cancel),
     ("k", Action::OpenReportModal),
     ("c", Action::ClearAllSand),
@@ -933,7 +941,7 @@ mod tests {
     use crate::domain::{DayBoundaryMode, FirstDayOfWeek};
 
     use super::{
-        Action, KeyBinding, load_keybindings, load_keymap, set_action_binding,
+        Action, KeyBinding, default_keymap, load_keybindings, load_keymap, set_action_binding,
         set_first_day_of_week,
     };
 
@@ -969,6 +977,45 @@ mod tests {
         let event = KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT);
         let key = KeyBinding::from_key_event(event).expect("event should normalize");
         assert_eq!(key.to_string(), "?");
+    }
+
+    #[test]
+    fn test_default_keymap_has_ctrl_p_for_command_palette() {
+        let keymap = default_keymap();
+        let ctrl_p = KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL);
+
+        assert_eq!(
+            keymap.action_for_key_event(ctrl_p),
+            Some(Action::ToggleCommandPalette)
+        );
+    }
+
+    #[test]
+    fn test_default_keymap_keeps_k_and_adds_shift_enter_for_karma() {
+        let keymap = default_keymap();
+        let k = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE);
+        let shift_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT);
+
+        assert_eq!(
+            keymap.action_for_key_event(k),
+            Some(Action::OpenReportModal)
+        );
+        assert_eq!(
+            keymap.action_for_key_event(shift_enter),
+            Some(Action::OpenReportModal)
+        );
+    }
+
+    #[test]
+    fn test_from_config_name_supports_command_palette_aliases() {
+        assert_eq!(
+            Action::from_config_name("toggle_command_palette"),
+            Some(Action::ToggleCommandPalette)
+        );
+        assert_eq!(
+            Action::from_config_name("toggle_palette"),
+            Some(Action::ToggleCommandPalette)
+        );
     }
 
     #[test]

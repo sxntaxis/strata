@@ -6,7 +6,7 @@ use std::{
     sync::{OnceLock, RwLock},
 };
 
-use chrono::Local;
+use chrono::{Local, NaiveDate};
 use csv::{ReaderBuilder, StringRecord, WriterBuilder};
 use directories::ProjectDirs;
 use ratatui::style::Color;
@@ -397,6 +397,17 @@ pub fn get_sand_state_path() -> PathBuf {
     get_state_dir().join("sand_state.json")
 }
 
+pub fn get_sand_history_dir() -> PathBuf {
+    let dir = get_state_dir().join("sand_history");
+    fs::create_dir_all(&dir).ok();
+    dir
+}
+
+pub fn get_sand_history_path_for_day(day: NaiveDate) -> PathBuf {
+    let filename = format!("{}.json", day.format("%Y-%m-%d"));
+    get_sand_history_dir().join(filename)
+}
+
 pub fn get_category_tags_path() -> PathBuf {
     get_state_dir().join("category_tags.json")
 }
@@ -682,6 +693,15 @@ mod tests {
 
         delete_file_if_exists(&path).unwrap();
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn test_sand_history_path_for_day_uses_expected_filename() {
+        let day = NaiveDate::from_ymd_opt(2026, 2, 25).expect("valid day");
+        let path = get_sand_history_path_for_day(day);
+        let display = path.to_string_lossy();
+
+        assert!(display.ends_with("sand_history/2026-02-25.json"));
     }
 
     #[test]

@@ -73,6 +73,7 @@ pub struct KarmaReportSummary {
 
 #[derive(Debug, Clone)]
 pub struct CategoryLogEntry {
+    pub session_id: Option<usize>,
     pub date: String,
     pub start_time: String,
     pub end_time: String,
@@ -218,8 +219,16 @@ pub fn operational_day_key_for_local(local: &DateTime<Local>) -> NaiveDate {
     operational_day_key_from_utc(local.with_timezone(&Utc), &day_boundary_config())
 }
 
+#[allow(dead_code)]
 pub fn report_period_date_bounds(period: ReportPeriod) -> (NaiveDate, NaiveDate) {
-    let (start, end, _) = period_bounds(period);
+    report_period_date_bounds_with_offset(period, 0)
+}
+
+pub fn report_period_date_bounds_with_offset(
+    period: ReportPeriod,
+    offset: usize,
+) -> (NaiveDate, NaiveDate) {
+    let (start, end, _) = period_bounds_with_offset(period, offset);
     (start, end)
 }
 
@@ -660,6 +669,36 @@ impl TimeTracker {
             .sum()
     }
 
+    pub fn delete_session_by_id(&mut self, session_id: usize) -> bool {
+        let Some(index) = self
+            .sessions
+            .iter()
+            .position(|session| session.id == session_id)
+        else {
+            return false;
+        };
+
+        self.sessions.remove(index);
+        true
+    }
+
+    pub fn set_session_description_by_id(
+        &mut self,
+        session_id: usize,
+        description: String,
+    ) -> bool {
+        let Some(session) = self
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+        else {
+            return false;
+        };
+
+        session.description = description;
+        true
+    }
+
     pub fn reset_none_counter_today(&mut self) {
         let today = operational_day_key_now().format("%Y-%m-%d").to_string();
         self.sessions.retain(|session| {
@@ -682,12 +721,20 @@ pub fn build_period_report(
     categories: &[Category],
     period: ReportPeriod,
 ) -> ReportSummary {
-    if period == ReportPeriod::Today {
+    build_period_report_with_offset(sessions, categories, period, 0)
+}
+
+pub fn build_period_report_with_offset(
+    sessions: &[Session],
+    categories: &[Category],
+    period: ReportPeriod,
+    offset: usize,
+) -> ReportSummary {
+    if period == ReportPeriod::Today && offset == 0 {
         return build_today_report(sessions, categories);
     }
 
-    let (start, end, label) = period_bounds(period);
-
+    let (start, end, label) = period_bounds_with_offset(period, offset);
     build_report_for_date_range(sessions, categories, start, end, label)
 }
 
@@ -696,35 +743,75 @@ pub fn build_period_karma_report(
     categories: &[Category],
     period: ReportPeriod,
 ) -> KarmaReportSummary {
-    if period == ReportPeriod::Today {
-        return build_today_karma_report(sessions, categories);
-    }
-
-    let (start, end, label) = period_bounds(period);
-
-    build_karma_report_for_date_range(sessions, categories, start, end, label)
+    build_period_karma_report_with_offset(sessions, categories, period, 0)
 }
 
+#[allow(dead_code)]
 fn period_bounds(period: ReportPeriod) -> (NaiveDate, NaiveDate, String) {
+    period_bounds_with_offset(period, 0)
+}
+
+fn period_bounds_with_offset(
+    period: ReportPeriod,
+    offset: usize,
+) -> (NaiveDate, NaiveDate, String) {
     let today = operational_day_key_now();
     let settings = runtime_settings();
 
     match period {
         ReportPeriod::Today => {
-            let label = today.format("%Y-%m-%d").to_string();
-            (today, today, label)
+            let day = today - ChronoDuration::days(offset as i64);
+            let label = day.format("%Y-%m-%d").to_string();
+            (day, day, label)
         }
         ReportPeriod::Week => {
-            let start = start_of_week(today, settings.first_day_of_week);
-            let label = format!("{}..{}", start.format("%Y-%m-%d"), today.format("%Y-%m-%d"));
-            (start, today, label)
+            let current_start = start_of_week(today, settings.first_day_of_week);
+            let start = current_start - ChronoDuration::days((offset as i64) * 7);
+            let end = if offset == 0 {
+                today
+            } else {
+                start + ChronoDuration::days(6)
+            };
+            let label = format!("{}..{}", start.format("%Y-%m-%d"), end.format("%Y-%m-%d"));
+            (start, end, label)
         }
         ReportPeriod::Month => {
-            let start = today - ChronoDuration::days(29);
-            let label = format!("{}..{}", start.format("%Y-%m-%d"), today.format("%Y-%m-%d"));
-            (start, today, label)
+            let current_month_start = today.with_day(1).unwrap_or(today);
+
+            let (start, end) = if offset == 0 {
+                (current_month_start, today)
+            } else {
+                let start = shift_month_start(current_month_start, -(offset as i32));
+                let next_start = shift_month_start(start, 1);
+                let end = next_start - ChronoDuration::days(1);
+                (start, end)
+            };
+
+            let label = format!("{}..{}", start.format("%Y-%m-%d"), end.format("%Y-%m-%d"));
+            (start, end, label)
         }
     }
+}
+
+fn shift_month_start(base_start: NaiveDate, delta_months: i32) -> NaiveDate {
+    let total_months = base_start.year() * 12 + (base_start.month0() as i32) + delta_months;
+    let year = total_months.div_euclid(12);
+    let month0 = total_months.rem_euclid(12) as u32;
+    NaiveDate::from_ymd_opt(year, month0 + 1, 1).unwrap_or(base_start)
+}
+
+pub fn build_period_karma_report_with_offset(
+    sessions: &[Session],
+    categories: &[Category],
+    period: ReportPeriod,
+    offset: usize,
+) -> KarmaReportSummary {
+    if period == ReportPeriod::Today && offset == 0 {
+        return build_today_karma_report(sessions, categories);
+    }
+
+    let (start, end, label) = period_bounds_with_offset(period, offset);
+    build_karma_report_for_date_range(sessions, categories, start, end, label)
 }
 
 fn start_of_week(day: NaiveDate, first_day: FirstDayOfWeek) -> NaiveDate {
@@ -892,9 +979,14 @@ fn build_report_for_date_range(
     }
 }
 
+#[allow(dead_code)]
 fn report_period_contains_today(period: ReportPeriod) -> bool {
+    report_period_contains_today_with_offset(period, 0)
+}
+
+fn report_period_contains_today_with_offset(period: ReportPeriod, offset: usize) -> bool {
     let today = operational_day_key_now();
-    let (start, end) = report_period_date_bounds(period);
+    let (start, end) = report_period_date_bounds_with_offset(period, offset);
     today >= start && today <= end
 }
 
@@ -952,15 +1044,26 @@ pub fn sort_karma_entries_for_display(entries: &mut [KarmaReportEntry]) {
     });
 }
 
+#[allow(dead_code)]
 pub fn build_period_karma_report_with_live(
     sessions: &[Session],
     categories: &[Category],
     period: ReportPeriod,
     live_session: Option<&LiveSessionPreview>,
 ) -> KarmaReportSummary {
-    let mut summary = build_period_karma_report(sessions, categories, period);
+    build_period_karma_report_with_live_and_offset(sessions, categories, period, 0, live_session)
+}
 
-    if report_period_contains_today(period)
+pub fn build_period_karma_report_with_live_and_offset(
+    sessions: &[Session],
+    categories: &[Category],
+    period: ReportPeriod,
+    offset: usize,
+    live_session: Option<&LiveSessionPreview>,
+) -> KarmaReportSummary {
+    let mut summary = build_period_karma_report_with_offset(sessions, categories, period, offset);
+
+    if report_period_contains_today_with_offset(period, offset)
         && let Some(live) = live_session
         && let Some(entry) = summary
             .entries
@@ -984,7 +1087,25 @@ pub fn build_category_logs_for_period(
     period: ReportPeriod,
     live_session: Option<&LiveSessionPreview>,
 ) -> Vec<CategoryLogEntry> {
-    let (start, end) = report_period_date_bounds(period);
+    build_category_logs_for_period_with_offset(
+        sessions,
+        categories,
+        category_id,
+        period,
+        0,
+        live_session,
+    )
+}
+
+pub fn build_category_logs_for_period_with_offset(
+    sessions: &[Session],
+    categories: &[Category],
+    category_id: CategoryId,
+    period: ReportPeriod,
+    offset: usize,
+    live_session: Option<&LiveSessionPreview>,
+) -> Vec<CategoryLogEntry> {
+    let (start, end) = report_period_date_bounds_with_offset(period, offset);
     let karma_effect = category_karma_effect(categories, category_id);
 
     let mut logs: Vec<CategoryLogEntry> = sessions
@@ -1001,6 +1122,7 @@ pub fn build_category_logs_for_period(
             }
 
             Some(CategoryLogEntry {
+                session_id: Some(session.id),
                 date: session.date.clone(),
                 start_time: session.start_time.clone(),
                 end_time: session.end_time.clone(),
@@ -1012,7 +1134,7 @@ pub fn build_category_logs_for_period(
         })
         .collect();
 
-    if report_period_contains_today(period)
+    if report_period_contains_today_with_offset(period, offset)
         && let Some(live) = live_session
         && live.category_id == category_id
         && live.elapsed_seconds > 0
@@ -1026,6 +1148,7 @@ pub fn build_category_logs_for_period(
             .to_string();
 
         logs.push(CategoryLogEntry {
+            session_id: None,
             date: day,
             start_time,
             end_time,
@@ -1036,13 +1159,19 @@ pub fn build_category_logs_for_period(
         });
     }
 
-    logs.sort_by(|a, b| b.date.cmp(&a.date).then(b.end_time.cmp(&a.end_time)));
+    logs.sort_by(|a, b| {
+        a.date
+            .cmp(&b.date)
+            .then(a.start_time.cmp(&b.start_time))
+            .then(a.end_time.cmp(&b.end_time))
+            .then(a.session_id.cmp(&b.session_id))
+    });
     logs
 }
 
 #[cfg(test)]
 mod tests {
-    use chrono::TimeZone;
+    use chrono::{Datelike, TimeZone};
 
     use super::*;
 
@@ -1503,17 +1632,13 @@ mod tests {
         ];
 
         let today = operational_day_key_now();
-        let in_window = (today - ChronoDuration::days(29))
-            .format("%Y-%m-%d")
-            .to_string();
-        let out_window = (today - ChronoDuration::days(30))
-            .format("%Y-%m-%d")
-            .to_string();
+        let month_start = today.with_day(1).unwrap_or(today);
+        let previous_month_end = month_start - ChronoDuration::days(1);
 
         let sessions = vec![
             Session {
                 id: 1,
-                date: in_window,
+                date: month_start.format("%Y-%m-%d").to_string(),
                 category_id: CategoryId::new(1),
                 description: String::new(),
                 start_time: "08:00:00".to_string(),
@@ -1531,7 +1656,7 @@ mod tests {
             },
             Session {
                 id: 3,
-                date: out_window,
+                date: previous_month_end.format("%Y-%m-%d").to_string(),
                 category_id: CategoryId::new(1),
                 description: String::new(),
                 start_time: "12:00:00".to_string(),
@@ -1559,6 +1684,114 @@ mod tests {
             .expect("gaming entry");
         assert_eq!(gaming.elapsed_seconds, 1800);
         assert_eq!(gaming.karma_seconds, -1800);
+    }
+
+    #[test]
+    fn test_report_period_month_offset_uses_previous_calendar_month() {
+        let (current_start, current_end) =
+            report_period_date_bounds_with_offset(ReportPeriod::Month, 0);
+        let (previous_start, previous_end) =
+            report_period_date_bounds_with_offset(ReportPeriod::Month, 1);
+
+        assert_eq!(current_start.day(), 1);
+        assert_eq!(current_end, operational_day_key_now());
+        assert_eq!(previous_start.day(), 1);
+        assert_eq!(previous_end, current_start - ChronoDuration::days(1));
+    }
+
+    #[test]
+    fn test_build_period_karma_report_month_offset_aggregates_previous_month_only() {
+        let categories = vec![
+            Category {
+                id: CategoryId::new(0),
+                name: "none".to_string(),
+                color: Color::White,
+                description: String::new(),
+                karma_effect: 0,
+            },
+            Category {
+                id: CategoryId::new(1),
+                name: "Work".to_string(),
+                color: COLORS[0],
+                description: String::new(),
+                karma_effect: 1,
+            },
+            Category {
+                id: CategoryId::new(2),
+                name: "Gaming".to_string(),
+                color: COLORS[5],
+                description: String::new(),
+                karma_effect: -1,
+            },
+        ];
+
+        let (current_start, _) = report_period_date_bounds_with_offset(ReportPeriod::Month, 0);
+        let (previous_start, previous_end) =
+            report_period_date_bounds_with_offset(ReportPeriod::Month, 1);
+
+        let sessions = vec![
+            Session {
+                id: 1,
+                date: previous_start.format("%Y-%m-%d").to_string(),
+                category_id: CategoryId::new(1),
+                description: String::new(),
+                start_time: "08:00:00".to_string(),
+                end_time: "08:20:00".to_string(),
+                elapsed_seconds: 1200,
+            },
+            Session {
+                id: 2,
+                date: previous_end.format("%Y-%m-%d").to_string(),
+                category_id: CategoryId::new(2),
+                description: String::new(),
+                start_time: "21:00:00".to_string(),
+                end_time: "21:10:00".to_string(),
+                elapsed_seconds: 600,
+            },
+            Session {
+                id: 3,
+                date: current_start.format("%Y-%m-%d").to_string(),
+                category_id: CategoryId::new(1),
+                description: String::new(),
+                start_time: "10:00:00".to_string(),
+                end_time: "10:40:00".to_string(),
+                elapsed_seconds: 2400,
+            },
+        ];
+
+        let summary =
+            build_period_karma_report_with_offset(&sessions, &categories, ReportPeriod::Month, 1);
+
+        assert_eq!(
+            summary.date,
+            format!("{}..{}", previous_start, previous_end)
+        );
+        assert_eq!(summary.total_seconds, 1800);
+        assert_eq!(summary.total_karma_seconds, 600);
+    }
+
+    #[test]
+    fn test_report_period_day_offset_moves_back_by_days() {
+        let today = operational_day_key_now();
+        let (start0, end0) = report_period_date_bounds_with_offset(ReportPeriod::Today, 0);
+        let (start2, end2) = report_period_date_bounds_with_offset(ReportPeriod::Today, 2);
+
+        assert_eq!(start0, today);
+        assert_eq!(end0, today);
+        assert_eq!(start2, today - ChronoDuration::days(2));
+        assert_eq!(end2, start2);
+    }
+
+    #[test]
+    fn test_report_period_week_offset_previous_is_full_week() {
+        let (current_start, current_end) =
+            report_period_date_bounds_with_offset(ReportPeriod::Week, 0);
+        let (previous_start, previous_end) =
+            report_period_date_bounds_with_offset(ReportPeriod::Week, 1);
+
+        assert_eq!(current_end, operational_day_key_now());
+        assert_eq!(previous_start, current_start - ChronoDuration::days(7));
+        assert_eq!(previous_end, previous_start + ChronoDuration::days(6));
     }
 
     #[test]
@@ -1698,7 +1931,69 @@ mod tests {
         );
 
         assert_eq!(logs.len(), 2);
-        assert!(logs.iter().any(|row| row.description == "focus"));
-        assert!(logs.iter().any(|row| row.description == "review"));
+        assert_eq!(logs[0].description, "focus");
+        assert_eq!(logs[1].description, "review");
+        assert_eq!(logs[0].session_id, Some(1));
+        assert_eq!(logs[1].session_id, Some(2));
+    }
+
+    #[test]
+    fn test_delete_session_by_id_removes_exact_session() {
+        let mut tracker = TimeTracker::new();
+        tracker.sessions = vec![
+            Session {
+                id: 1,
+                date: "2026-03-01".to_string(),
+                category_id: CategoryId::new(1),
+                description: "focus".to_string(),
+                start_time: "09:00:00".to_string(),
+                end_time: "09:30:00".to_string(),
+                elapsed_seconds: 1800,
+            },
+            Session {
+                id: 2,
+                date: "2026-03-01".to_string(),
+                category_id: CategoryId::new(1),
+                description: "review".to_string(),
+                start_time: "10:00:00".to_string(),
+                end_time: "10:20:00".to_string(),
+                elapsed_seconds: 1200,
+            },
+        ];
+
+        assert!(tracker.delete_session_by_id(1));
+        assert_eq!(tracker.sessions.len(), 1);
+        assert_eq!(tracker.sessions[0].id, 2);
+        assert!(!tracker.delete_session_by_id(999));
+    }
+
+    #[test]
+    fn test_set_session_description_by_id_updates_target_only() {
+        let mut tracker = TimeTracker::new();
+        tracker.sessions = vec![
+            Session {
+                id: 1,
+                date: "2026-03-01".to_string(),
+                category_id: CategoryId::new(1),
+                description: "focus".to_string(),
+                start_time: "09:00:00".to_string(),
+                end_time: "09:30:00".to_string(),
+                elapsed_seconds: 1800,
+            },
+            Session {
+                id: 2,
+                date: "2026-03-01".to_string(),
+                category_id: CategoryId::new(1),
+                description: "review".to_string(),
+                start_time: "10:00:00".to_string(),
+                end_time: "10:20:00".to_string(),
+                elapsed_seconds: 1200,
+            },
+        ];
+
+        assert!(tracker.set_session_description_by_id(2, "retro".to_string()));
+        assert_eq!(tracker.sessions[0].description, "focus");
+        assert_eq!(tracker.sessions[1].description, "retro");
+        assert!(!tracker.set_session_description_by_id(999, "none".to_string()));
     }
 }

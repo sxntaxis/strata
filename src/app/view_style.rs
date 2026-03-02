@@ -9,7 +9,9 @@ pub(super) fn report_period_label_span(label: &str, active: bool) -> Span<'stati
             .fg(Color::White)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::Gray)
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM)
     };
 
     Span::styled(label.to_string(), style)
