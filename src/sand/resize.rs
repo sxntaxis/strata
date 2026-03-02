@@ -1,3 +1,4 @@
+use crate::constants::SAND_RESIZE_SETTINGS;
 use crate::domain::CategoryId;
 
 #[derive(Default)]
@@ -52,8 +53,14 @@ pub fn resize_grid(
     } else {
         new_h / dot_height
     };
-    let band_w = (new_cell_w / 40).clamp(2, 6);
-    let band_h = (new_cell_h / 40).clamp(1, 3);
+    let band_w = (new_cell_w / SAND_RESIZE_SETTINGS.band_scale_divisor).clamp(
+        SAND_RESIZE_SETTINGS.min_band_width_cells,
+        SAND_RESIZE_SETTINGS.max_band_width_cells,
+    );
+    let band_h = (new_cell_h / SAND_RESIZE_SETTINGS.band_scale_divisor).clamp(
+        SAND_RESIZE_SETTINGS.min_band_height_cells,
+        SAND_RESIZE_SETTINGS.max_band_height_cells,
+    );
     let band_w_px = (band_w * dot_width).min(new_w);
     let band_h_px = (band_h * dot_height).min(new_h);
 

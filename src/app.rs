@@ -14,9 +14,14 @@ use ratatui::{Terminal, backend::CrosstermBackend, layout::Rect};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    constants::{BLINK_SETTINGS, CATCHUP_SETTINGS, FACE_SETTINGS, SAND_ENGINE, TIME_SETTINGS},
+    constants::{
+        APP_LAYOUT_SETTINGS, BLINK_SETTINGS, CATCHUP_SETTINGS, FACE_SETTINGS,
+        RUNTIME_LOOP_SETTINGS, SAND_ENGINE, TIME_SETTINGS,
+    },
     domain::{
-        Category, CategoryId, ReportPeriod, RuntimeSettings, TimeTracker, set_runtime_settings,
+        Category, CategoryId, DRIFT_CATEGORY_DISPLAY_NAME, DRIFT_CATEGORY_ID, FirstDayOfWeek,
+        ReportPeriod, RuntimeSettings, TimeTracker, is_drift_category_id,
+        operational_day_key_for_local, set_runtime_settings,
     },
     keybindings,
     sand::{SandEngine, SandState, SandStateGrain},
@@ -63,7 +68,6 @@ enum PaletteCommand {
     Action(keybindings::Action),
     SetReportPeriod(ReportPeriod),
     SwitchLayer(CategoryId),
-    Detach,
 }
 
 #[derive(Clone, Debug)]
@@ -114,10 +118,29 @@ struct DetachedRuntimeCheckpoint {
     pending_mutations: Vec<QueuedMutationEventRecord>,
 }
 
+struct SessionState {
+    blink_state: i32,
+    active_session_started_at_utc: Option<DateTime<Utc>>,
+    none_entry_time: Option<Instant>,
+}
+
+struct SimulationState {
+    simulation_time_utc: DateTime<Utc>,
+    spawn_accumulator: Duration,
+    physics_accumulator: Duration,
+    catchup_cadence_accumulator: Duration,
+    catchup_visual_engine: Option<SandEngine>,
+    catchup_visual_last_refresh: Instant,
+    catchup_progress_anchor: Option<Duration>,
+    catchup_gauge_hold_until: Option<Instant>,
+    catchup_was_active: bool,
+    pending_mutations: VecDeque<QueuedMutationEvent>,
+}
+
 struct App {
     time_tracker: TimeTracker,
     sand_engine: SandEngine,
-    blink_state: i32,
+    session: SessionState,
     ui_mode: UiMode,
     selected_index: usize,
     new_category_name: String,
@@ -134,17 +157,7 @@ struct App {
     report_snapshot_state: Option<crate::sand::SandState>,
     report_snapshot_preview_key: Option<String>,
     report_snapshot_preview_engine: Option<SandEngine>,
-    active_session_started_at_utc: Option<DateTime<Utc>>,
-    simulation_time_utc: DateTime<Utc>,
-    sim_spawn_accumulator: Duration,
-    sim_physics_accumulator: Duration,
-    catchup_cadence_accumulator: Duration,
-    catchup_visual_engine: Option<SandEngine>,
-    catchup_visual_last_refresh: Instant,
-    catchup_progress_anchor: Option<Duration>,
-    catchup_gauge_hold_until: Option<Instant>,
-    catchup_was_active: bool,
-    pending_mutations: VecDeque<QueuedMutationEvent>,
+    simulation: SimulationState,
     detach_requested: bool,
     keymap: keybindings::Keymap,
     runtime_settings: RuntimeSettings,
@@ -160,7 +173,6 @@ struct App {
     keymap_last_modified: Option<SystemTime>,
     keymap_last_poll: Instant,
     render_needed: bool,
-    none_entry_time: Option<Instant>,
 }
 
 impl App {
@@ -217,7 +229,11 @@ impl App {
         let mut app = Self {
             time_tracker: tracker,
             sand_engine: SandEngine::new(width, height),
-            blink_state: 0,
+            session: SessionState {
+                blink_state: 0,
+                active_session_started_at_utc: None,
+                none_entry_time: None,
+            },
             ui_mode: UiMode::Main,
             selected_index: 0,
             new_category_name: String::new(),
@@ -234,17 +250,18 @@ impl App {
             report_snapshot_state: None,
             report_snapshot_preview_key: None,
             report_snapshot_preview_engine: None,
-            active_session_started_at_utc: None,
-            simulation_time_utc: Utc::now(),
-            sim_spawn_accumulator: Duration::ZERO,
-            sim_physics_accumulator: Duration::ZERO,
-            catchup_cadence_accumulator: Duration::ZERO,
-            catchup_visual_engine: None,
-            catchup_visual_last_refresh: Instant::now(),
-            catchup_progress_anchor: None,
-            catchup_gauge_hold_until: None,
-            catchup_was_active: false,
-            pending_mutations: VecDeque::new(),
+            simulation: SimulationState {
+                simulation_time_utc: Utc::now(),
+                spawn_accumulator: Duration::ZERO,
+                physics_accumulator: Duration::ZERO,
+                catchup_cadence_accumulator: Duration::ZERO,
+                catchup_visual_engine: None,
+                catchup_visual_last_refresh: Instant::now(),
+                catchup_progress_anchor: None,
+                catchup_gauge_hold_until: None,
+                catchup_was_active: false,
+                pending_mutations: VecDeque::new(),
+            },
             detach_requested: false,
             keymap,
             runtime_settings,
@@ -260,7 +277,6 @@ impl App {
             keymap_last_modified,
             keymap_last_poll: Instant::now(),
             render_needed: true,
-            none_entry_time: None,
         };
 
         app.persist_category_tags();
@@ -270,13 +286,7 @@ impl App {
             app.restore_sand_state();
         }
 
-        if app.time_tracker.active_category_index() == Some(0) {
-            app.blink_state = app.next_blink_interval();
-            app.none_entry_time = app.active_session_started_at_utc.map(|started_at| {
-                let elapsed = (Utc::now() - started_at).to_std().unwrap_or(Duration::ZERO);
-                Instant::now() - elapsed
-            });
-        }
+        app.sync_drift_idle_state();
 
         app
     }
@@ -332,14 +342,29 @@ impl App {
     }
 
     fn is_drift_name(name: &str) -> bool {
-        name.eq_ignore_ascii_case("none") || name.eq_ignore_ascii_case("drift")
+        crate::domain::is_drift_name(name)
     }
 
     fn display_layer_name(&self, name: &str) -> String {
         if Self::is_drift_name(name) {
-            "drift".to_string()
+            DRIFT_CATEGORY_DISPLAY_NAME.to_string()
         } else {
             name.to_string()
+        }
+    }
+
+    fn sync_drift_idle_state(&mut self) {
+        if is_drift_category_id(self.time_tracker.active_category_id()) {
+            self.session.blink_state = self.next_blink_interval();
+            self.session.none_entry_time =
+                self.session
+                    .active_session_started_at_utc
+                    .map(|started_at| {
+                        let elapsed = (Utc::now() - started_at).to_std().unwrap_or(Duration::ZERO);
+                        Instant::now() - elapsed
+                    });
+        } else {
+            self.session.none_entry_time = None;
         }
     }
 
@@ -429,15 +454,15 @@ impl App {
         ]
     }
 
-    fn week_start_options() -> [crate::domain::FirstDayOfWeek; 7] {
+    fn week_start_options() -> [FirstDayOfWeek; 7] {
         [
-            crate::domain::FirstDayOfWeek::Monday,
-            crate::domain::FirstDayOfWeek::Tuesday,
-            crate::domain::FirstDayOfWeek::Wednesday,
-            crate::domain::FirstDayOfWeek::Thursday,
-            crate::domain::FirstDayOfWeek::Friday,
-            crate::domain::FirstDayOfWeek::Saturday,
-            crate::domain::FirstDayOfWeek::Sunday,
+            FirstDayOfWeek::Monday,
+            FirstDayOfWeek::Tuesday,
+            FirstDayOfWeek::Wednesday,
+            FirstDayOfWeek::Thursday,
+            FirstDayOfWeek::Friday,
+            FirstDayOfWeek::Saturday,
+            FirstDayOfWeek::Sunday,
         ]
     }
 
@@ -453,7 +478,7 @@ impl App {
         } else {
             "+"
         };
-        let abs_offset = boundary.utc_offset_seconds.unsigned_abs() as u32;
+        let abs_offset = boundary.utc_offset_seconds.unsigned_abs();
         let offset_hours = abs_offset / 3600;
         let offset_minutes = (abs_offset % 3600) / 60;
 
@@ -596,8 +621,8 @@ impl App {
     }
 
     fn refresh_keymap_if_changed(&mut self) {
-        const POLL_INTERVAL: Duration = Duration::from_millis(300);
-        if self.keymap_last_poll.elapsed() < POLL_INTERVAL {
+        let poll_interval = Duration::from_millis(RUNTIME_LOOP_SETTINGS.keymap_poll_ms);
+        if self.keymap_last_poll.elapsed() < poll_interval {
             return;
         }
         self.keymap_last_poll = Instant::now();
@@ -631,10 +656,20 @@ impl App {
 
     fn modal_rect_ratio(&self, terminal_size: Rect, numerator: u16, denominator: u16) -> Rect {
         let target_width = terminal_size.width.saturating_mul(numerator) / denominator;
-        let target_height = (terminal_size.height.saturating_mul(numerator) / denominator).max(10);
+        let target_height = (terminal_size.height.saturating_mul(numerator) / denominator)
+            .max(APP_LAYOUT_SETTINGS.modal_min_height);
 
-        let max_width = terminal_size.width.saturating_sub(2).max(1);
-        let max_height = terminal_size.height.saturating_sub(2).max(1);
+        let frame_padding = APP_LAYOUT_SETTINGS.frame_margin;
+        let max_width = terminal_size
+            .width
+            .saturating_sub(frame_padding)
+            .saturating_sub(frame_padding)
+            .max(1);
+        let max_height = terminal_size
+            .height
+            .saturating_sub(frame_padding)
+            .saturating_sub(frame_padding)
+            .max(1);
 
         let modal_width = target_width.clamp(1, max_width);
         let modal_height = target_height.clamp(1, max_height);
@@ -656,14 +691,19 @@ impl App {
         let inner_height = compact.height.saturating_sub(2);
         let visible_rows = inner_height as usize;
 
-        let breathing_room = 5usize;
+        let breathing_room = APP_LAYOUT_SETTINGS.report_breathing_room;
         let width_is_cramped = inner_width <= min_inner_width.saturating_add(breathing_room);
         let rows_are_cramped = row_count > visible_rows;
 
         let content_is_cramped = width_is_cramped || rows_are_cramped;
         if content_is_cramped {
             let target_width = terminal_size.width.saturating_mul(2) / 3;
-            let max_width = terminal_size.width.saturating_sub(2).max(1);
+            let frame_padding = APP_LAYOUT_SETTINGS.frame_margin;
+            let max_width = terminal_size
+                .width
+                .saturating_sub(frame_padding)
+                .saturating_sub(frame_padding)
+                .max(1);
             let modal_width = target_width.clamp(1, max_width);
             let modal_x = (terminal_size.width.saturating_sub(modal_width)) / 2;
 
@@ -675,12 +715,13 @@ impl App {
 
     fn get_idle_face(&self) -> String {
         let idle_seconds = self
+            .session
             .none_entry_time
             .map_or(0, |t| t.elapsed().as_secs() as usize);
 
-        if self.blink_state < 0 {
+        if self.session.blink_state < 0 {
             "(-_-)".to_string()
-        } else if self.blink_state > 0 {
+        } else if self.session.blink_state > 0 {
             "(o_o)".to_string()
         } else {
             let faces = FACE_SETTINGS.faces;
@@ -697,18 +738,18 @@ impl App {
     }
 
     fn update_blink(&mut self) {
-        if self.blink_state < 0 {
-            self.blink_state -= 1;
+        if self.session.blink_state < 0 {
+            self.session.blink_state -= 1;
             let blink_duration = BLINK_SETTINGS.duration_min_frames
                 + (rand::random::<i32>()
                     % (BLINK_SETTINGS.duration_max_frames - BLINK_SETTINGS.duration_min_frames));
-            if self.blink_state < -blink_duration {
-                self.blink_state = self.next_blink_interval();
+            if self.session.blink_state < -blink_duration {
+                self.session.blink_state = self.next_blink_interval();
             }
-        } else if self.blink_state > 0 {
-            self.blink_state -= 1;
-            if self.blink_state == 0 {
-                self.blink_state = -1;
+        } else if self.session.blink_state > 0 {
+            self.session.blink_state -= 1;
+            if self.session.blink_state == 0 {
+                self.session.blink_state = -1;
             }
         }
     }
@@ -716,7 +757,7 @@ impl App {
     fn begin_active_session_now(&mut self) {
         let now = Utc::now();
         self.time_tracker.start_session();
-        self.active_session_started_at_utc = Some(now);
+        self.session.active_session_started_at_utc = Some(now);
     }
 
     fn begin_active_session_at(&mut self, started_at_utc: DateTime<Utc>) {
@@ -729,7 +770,7 @@ impl App {
         let elapsed = (now - clamped_start).to_std().unwrap_or(Duration::ZERO);
         self.time_tracker
             .start_session_with_elapsed(elapsed.as_secs() as usize);
-        self.active_session_started_at_utc = Some(clamped_start);
+        self.session.active_session_started_at_utc = Some(clamped_start);
     }
 
     fn end_active_session_now(&mut self) -> Option<usize> {
@@ -738,6 +779,7 @@ impl App {
 
     fn end_active_session_at(&mut self, ended_at_utc: DateTime<Utc>) -> Option<usize> {
         let start_utc = self
+            .session
             .active_session_started_at_utc
             .or_else(|| {
                 self.time_tracker.current_session_start.map(|start| {
@@ -762,15 +804,41 @@ impl App {
         let result = self
             .time_tracker
             .end_session_with_elapsed_at_local(elapsed, ended_local);
-        self.active_session_started_at_utc = None;
+        self.session.active_session_started_at_utc = None;
         result
     }
 
+    fn switch_active_category_at(
+        &mut self,
+        category_id: CategoryId,
+        switched_at_utc: DateTime<Utc>,
+    ) -> bool {
+        if self.time_tracker.active_category_id() == category_id {
+            return false;
+        }
+
+        if self.time_tracker.category_by_id(category_id).is_none() {
+            return false;
+        }
+
+        self.end_active_session_at(switched_at_utc);
+        self.persist_sessions();
+
+        if !self.time_tracker.set_active_category_by_id(category_id) {
+            return false;
+        }
+
+        self.begin_active_session_at(switched_at_utc);
+        self.sync_drift_idle_state();
+
+        true
+    }
+
     fn simulation_backlog_duration_at(&self, now_utc: DateTime<Utc>) -> Duration {
-        if now_utc <= self.simulation_time_utc {
+        if now_utc <= self.simulation.simulation_time_utc {
             Duration::ZERO
         } else {
-            (now_utc - self.simulation_time_utc)
+            (now_utc - self.simulation.simulation_time_utc)
                 .to_std()
                 .unwrap_or(Duration::ZERO)
         }
@@ -781,7 +849,7 @@ impl App {
     }
 
     fn catchup_target_utc(&self, now_utc: DateTime<Utc>) -> DateTime<Utc> {
-        if let Some(next) = self.pending_mutations.front()
+        if let Some(next) = self.simulation.pending_mutations.front()
             && next.execute_at_utc > now_utc
         {
             next.execute_at_utc
@@ -804,15 +872,17 @@ impl App {
 
     fn is_catching_up(&self) -> bool {
         self.simulation_backlog_duration() > self.catchup_visibility_threshold()
-            || !self.pending_mutations.is_empty()
+            || !self.simulation.pending_mutations.is_empty()
     }
 
     fn queue_or_apply_mutation(&mut self, mutation: QueuedMutation) {
-        if self.is_catching_up() || !self.pending_mutations.is_empty() {
-            self.pending_mutations.push_back(QueuedMutationEvent {
-                execute_at_utc: Utc::now(),
-                mutation,
-            });
+        if self.is_catching_up() || !self.simulation.pending_mutations.is_empty() {
+            self.simulation
+                .pending_mutations
+                .push_back(QueuedMutationEvent {
+                    execute_at_utc: Utc::now(),
+                    mutation,
+                });
         } else {
             self.apply_mutation_at(mutation, Utc::now());
         }
@@ -826,12 +896,23 @@ impl App {
             }
             QueuedMutation::ClearAllSand => {
                 self.sand_engine.clear();
+
+                let scheduled_local = scheduled_at_utc.with_timezone(&Local);
+                let scheduled_day = operational_day_key_for_local(&scheduled_local);
+                self.time_tracker
+                    .clear_drift_sessions_for_day(scheduled_day);
+
+                if is_drift_category_id(self.time_tracker.active_category_id()) {
+                    self.begin_active_session_at(scheduled_at_utc);
+                    self.sync_drift_idle_state();
+                }
+
                 self.persist_sessions();
                 self.persist_sand_state();
                 self.persist_daily_sand_snapshot();
             }
             QueuedMutation::ClearDriftSand => {
-                self.sand_engine.clear_category(CategoryId::new(0));
+                self.sand_engine.clear_category(DRIFT_CATEGORY_ID);
                 self.persist_sand_state();
                 self.persist_daily_sand_snapshot();
             }
@@ -839,27 +920,7 @@ impl App {
     }
 
     fn apply_switch_layer_at(&mut self, category_id: CategoryId, scheduled_at_utc: DateTime<Utc>) {
-        if self.time_tracker.active_category_id() == category_id {
-            return;
-        }
-
-        if self.time_tracker.category_by_id(category_id).is_none() {
-            return;
-        }
-        self.end_active_session_at(scheduled_at_utc);
-        self.persist_sessions();
-
-        if !self.time_tracker.set_active_category_by_id(category_id) {
-            return;
-        }
-
-        self.begin_active_session_at(scheduled_at_utc);
-
-        if category_id == CategoryId::new(0) {
-            self.none_entry_time = Some(Instant::now());
-        } else {
-            self.none_entry_time = None;
-        }
+        self.switch_active_category_at(category_id, scheduled_at_utc);
     }
 
     fn advance_runtime(
@@ -868,21 +929,26 @@ impl App {
         tick_rate: Duration,
         physics_rate: Duration,
     ) {
-        let was_catching = self.catchup_was_active;
+        let was_catching = self.simulation.catchup_was_active;
         let cadence = Duration::from_millis(CATCHUP_SETTINGS.cadence_ms);
-        self.catchup_cadence_accumulator =
-            self.catchup_cadence_accumulator.saturating_add(wall_delta);
+        self.simulation.catchup_cadence_accumulator = self
+            .simulation
+            .catchup_cadence_accumulator
+            .saturating_add(wall_delta);
 
         let target_utc = self.catchup_target_utc(Utc::now());
         let backlog = self.simulation_backlog_duration_at(target_utc);
 
         if backlog.is_zero() {
             self.advance_simulation_by(Duration::ZERO, tick_rate, physics_rate);
-            self.catchup_cadence_accumulator = self.catchup_cadence_accumulator.min(cadence);
+            self.simulation.catchup_cadence_accumulator =
+                self.simulation.catchup_cadence_accumulator.min(cadence);
         } else {
-            while self.catchup_cadence_accumulator >= cadence {
-                self.catchup_cadence_accumulator =
-                    self.catchup_cadence_accumulator.saturating_sub(cadence);
+            while self.simulation.catchup_cadence_accumulator >= cadence {
+                self.simulation.catchup_cadence_accumulator = self
+                    .simulation
+                    .catchup_cadence_accumulator
+                    .saturating_sub(cadence);
 
                 let step_target_utc = self.catchup_target_utc(Utc::now());
                 let step_backlog = self.simulation_backlog_duration_at(step_target_utc);
@@ -906,10 +972,10 @@ impl App {
         let now_catching = self.is_catching_up();
         if was_catching && !now_catching {
             self.finalize_catchup_transition();
-            self.catchup_gauge_hold_until =
+            self.simulation.catchup_gauge_hold_until =
                 Some(Instant::now() + Duration::from_millis(CATCHUP_SETTINGS.gauge_hold_ms));
         }
-        self.catchup_was_active = now_catching;
+        self.simulation.catchup_was_active = now_catching;
     }
 
     fn finalize_catchup_transition(&mut self) {
@@ -922,10 +988,10 @@ impl App {
             .collect::<HashSet<_>>();
         self.sand_engine
             .restore_state(&settled, &valid_category_ids);
-        self.catchup_visual_engine = None;
-        self.catchup_progress_anchor = None;
-        self.catchup_visual_last_refresh = Instant::now();
-        self.catchup_cadence_accumulator = Duration::ZERO;
+        self.simulation.catchup_visual_engine = None;
+        self.simulation.catchup_progress_anchor = None;
+        self.simulation.catchup_visual_last_refresh = Instant::now();
+        self.simulation.catchup_cadence_accumulator = Duration::ZERO;
         self.render_needed = true;
     }
 
@@ -936,7 +1002,7 @@ impl App {
         categories: &[Category],
     ) -> Option<Vec<ratatui::prelude::Line<'static>>> {
         if !self.is_catching_up() {
-            self.catchup_visual_engine = None;
+            self.simulation.catchup_visual_engine = None;
             return None;
         }
 
@@ -945,6 +1011,7 @@ impl App {
         let visual_cadence = Duration::from_millis(CATCHUP_SETTINGS.visual_refresh_ms);
 
         let should_recreate = self
+            .simulation
             .catchup_visual_engine
             .as_ref()
             .map(|engine| {
@@ -952,11 +1019,12 @@ impl App {
             })
             .unwrap_or(true);
         if should_recreate {
-            self.catchup_visual_engine = Some(SandEngine::new(cell_width, cell_height));
-            self.catchup_visual_last_refresh = Instant::now() - visual_cadence;
+            self.simulation.catchup_visual_engine = Some(SandEngine::new(cell_width, cell_height));
+            self.simulation.catchup_visual_last_refresh = Instant::now() - visual_cadence;
         }
 
-        let should_refresh = self.catchup_visual_last_refresh.elapsed() >= visual_cadence;
+        let should_refresh =
+            self.simulation.catchup_visual_last_refresh.elapsed() >= visual_cadence;
         if should_refresh {
             let state = self.sand_engine.snapshot_state();
             let projected_state = self.build_catchup_projection_state(&state);
@@ -966,13 +1034,14 @@ impl App {
                 .map(|category| category.id)
                 .collect::<HashSet<_>>();
 
-            if let Some(engine) = self.catchup_visual_engine.as_mut() {
+            if let Some(engine) = self.simulation.catchup_visual_engine.as_mut() {
                 engine.restore_state(&projected_state, &valid_category_ids);
             }
-            self.catchup_visual_last_refresh = Instant::now();
+            self.simulation.catchup_visual_last_refresh = Instant::now();
         }
 
-        self.catchup_visual_engine
+        self.simulation
+            .catchup_visual_engine
             .as_ref()
             .map(|engine| engine.render(categories))
     }
@@ -1064,11 +1133,11 @@ impl App {
         tick_rate: Duration,
         physics_rate: Duration,
     ) {
-        let target_time = self.simulation_time_utc
+        let target_time = self.simulation.simulation_time_utc
             + ChronoDuration::from_std(delta).unwrap_or(ChronoDuration::zero());
 
         loop {
-            let Some(next) = self.pending_mutations.front().cloned() else {
+            let Some(next) = self.simulation.pending_mutations.front().cloned() else {
                 break;
             };
 
@@ -1077,15 +1146,15 @@ impl App {
             }
 
             let mut pre_delta = Duration::ZERO;
-            if next.execute_at_utc > self.simulation_time_utc {
-                pre_delta = (next.execute_at_utc - self.simulation_time_utc)
+            if next.execute_at_utc > self.simulation.simulation_time_utc {
+                pre_delta = (next.execute_at_utc - self.simulation.simulation_time_utc)
                     .to_std()
                     .unwrap_or(Duration::ZERO);
             }
 
             self.process_simulation_delta(pre_delta, tick_rate, physics_rate);
-            self.simulation_time_utc = next.execute_at_utc;
-            self.pending_mutations.pop_front();
+            self.simulation.simulation_time_utc = next.execute_at_utc;
+            self.simulation.pending_mutations.pop_front();
             self.apply_mutation_at(next.mutation, next.execute_at_utc);
         }
 
@@ -1094,14 +1163,14 @@ impl App {
         }
 
         let mut remaining = Duration::ZERO;
-        if target_time > self.simulation_time_utc {
-            remaining = (target_time - self.simulation_time_utc)
+        if target_time > self.simulation.simulation_time_utc {
+            remaining = (target_time - self.simulation.simulation_time_utc)
                 .to_std()
                 .unwrap_or(Duration::ZERO);
         }
 
         self.process_simulation_delta(remaining, tick_rate, physics_rate);
-        self.simulation_time_utc = target_time;
+        self.simulation.simulation_time_utc = target_time;
     }
 
     fn process_simulation_delta(
@@ -1111,26 +1180,29 @@ impl App {
         physics_rate: Duration,
     ) {
         while !delta.is_zero() {
-            let spawn_left = tick_rate.saturating_sub(self.sim_spawn_accumulator);
-            let physics_left = physics_rate.saturating_sub(self.sim_physics_accumulator);
+            let spawn_left = tick_rate.saturating_sub(self.simulation.spawn_accumulator);
+            let physics_left = physics_rate.saturating_sub(self.simulation.physics_accumulator);
             let next_event = spawn_left.min(physics_left);
 
             let step = delta.min(next_event);
-            self.sim_spawn_accumulator += step;
-            self.sim_physics_accumulator += step;
+            self.simulation.spawn_accumulator += step;
+            self.simulation.physics_accumulator += step;
             delta = delta.saturating_sub(step);
 
-            let spawn_due = self.sim_spawn_accumulator >= tick_rate;
-            let physics_due = self.sim_physics_accumulator >= physics_rate;
+            let spawn_due = self.simulation.spawn_accumulator >= tick_rate;
+            let physics_due = self.simulation.physics_accumulator >= physics_rate;
 
             if spawn_due {
-                self.sim_spawn_accumulator = self.sim_spawn_accumulator.saturating_sub(tick_rate);
+                self.simulation.spawn_accumulator =
+                    self.simulation.spawn_accumulator.saturating_sub(tick_rate);
                 self.run_spawn_tick();
             }
 
             if physics_due {
-                self.sim_physics_accumulator =
-                    self.sim_physics_accumulator.saturating_sub(physics_rate);
+                self.simulation.physics_accumulator = self
+                    .simulation
+                    .physics_accumulator
+                    .saturating_sub(physics_rate);
                 self.run_physics_tick();
             }
 
@@ -1152,7 +1224,7 @@ impl App {
 
     fn run_physics_tick(&mut self) {
         self.sand_engine.update();
-        if self.time_tracker.active_category_index() == Some(0) && !self.is_catching_up() {
+        if is_drift_category_id(self.time_tracker.active_category_id()) && !self.is_catching_up() {
             self.update_blink();
         }
     }
@@ -1161,32 +1233,36 @@ impl App {
         let target_utc = self.catchup_target_utc(Utc::now());
         let backlog = self.simulation_backlog_duration_at(target_utc);
 
-        if backlog <= self.catchup_visibility_threshold() && self.pending_mutations.is_empty() {
-            if let Some(until) = self.catchup_gauge_hold_until {
-                if Instant::now() < until {
-                    return Some(1.0);
-                }
-                self.catchup_gauge_hold_until = None;
+        if backlog <= self.catchup_visibility_threshold()
+            && self.simulation.pending_mutations.is_empty()
+            && let Some(until) = self.simulation.catchup_gauge_hold_until
+        {
+            if Instant::now() < until {
+                return Some(1.0);
             }
+            self.simulation.catchup_gauge_hold_until = None;
         }
 
-        if backlog <= self.catchup_visibility_threshold() && self.pending_mutations.is_empty() {
-            if self.catchup_progress_anchor.is_some() {
-                self.catchup_progress_anchor = None;
+        if backlog <= self.catchup_visibility_threshold()
+            && self.simulation.pending_mutations.is_empty()
+        {
+            if self.simulation.catchup_progress_anchor.is_some() {
+                self.simulation.catchup_progress_anchor = None;
                 return Some(1.0);
             }
             return None;
         }
 
-        self.catchup_gauge_hold_until = None;
+        self.simulation.catchup_gauge_hold_until = None;
 
         if backlog <= self.catchup_visibility_threshold() {
             return Some(1.0);
         }
 
         let effective_backlog = backlog;
-        let min_anchor = Duration::from_millis(10);
+        let min_anchor = Duration::from_millis(APP_LAYOUT_SETTINGS.catchup_progress_min_anchor_ms);
         let anchor = self
+            .simulation
             .catchup_progress_anchor
             .get_or_insert(effective_backlog.max(min_anchor));
         if effective_backlog > *anchor {
@@ -1213,21 +1289,25 @@ impl App {
         let checkpoint = DetachedRuntimeCheckpoint {
             schema_version: 1,
             detached_at_utc: Utc::now(),
-            simulation_time_utc: self.simulation_time_utc,
-            spawn_accumulator_nanos: self.sim_spawn_accumulator.as_nanos().min(u64::MAX as u128)
-                as u64,
+            simulation_time_utc: self.simulation.simulation_time_utc,
+            spawn_accumulator_nanos: self
+                .simulation
+                .spawn_accumulator
+                .as_nanos()
+                .min(u64::MAX as u128) as u64,
             physics_accumulator_nanos: self
-                .sim_physics_accumulator
+                .simulation
+                .physics_accumulator
                 .as_nanos()
                 .min(u64::MAX as u128) as u64,
             active_category_id: active_category_id.0,
             active_description,
-            active_session_started_at_utc: self.active_session_started_at_utc,
+            active_session_started_at_utc: self.session.active_session_started_at_utc,
             sand_state: self.sand_engine.snapshot_state(),
             pending_mutations: self
+                .simulation
                 .pending_mutations
                 .iter()
-                .cloned()
                 .map(|event| QueuedMutationEventRecord {
                     execute_at_utc: event.execute_at_utc,
                     mutation: match event.mutation {
@@ -1285,7 +1365,9 @@ impl App {
             .time_tracker
             .set_active_category_by_id(active_category_id)
         {
-            let _ = self.time_tracker.set_active_category_by_index(0);
+            let _ = self
+                .time_tracker
+                .set_active_category_by_id(DRIFT_CATEGORY_ID);
         }
         let active_id = self.time_tracker.active_category_id();
         let _ = self
@@ -1298,10 +1380,12 @@ impl App {
             self.begin_active_session_now();
         }
 
-        self.simulation_time_utc = checkpoint.simulation_time_utc;
-        self.sim_spawn_accumulator = Duration::from_nanos(checkpoint.spawn_accumulator_nanos);
-        self.sim_physics_accumulator = Duration::from_nanos(checkpoint.physics_accumulator_nanos);
-        self.pending_mutations = checkpoint
+        self.simulation.simulation_time_utc = checkpoint.simulation_time_utc;
+        self.simulation.spawn_accumulator =
+            Duration::from_nanos(checkpoint.spawn_accumulator_nanos);
+        self.simulation.physics_accumulator =
+            Duration::from_nanos(checkpoint.physics_accumulator_nanos);
+        self.simulation.pending_mutations = checkpoint
             .pending_mutations
             .into_iter()
             .map(|event| QueuedMutationEvent {
@@ -1316,7 +1400,8 @@ impl App {
             })
             .collect();
 
-        self.pending_mutations
+        self.simulation
+            .pending_mutations
             .make_contiguous()
             .sort_by(|a, b| a.execute_at_utc.cmp(&b.execute_at_utc));
 
@@ -1345,7 +1430,7 @@ pub fn run_ui() -> Result<(), io::Error> {
     let physics_rate = Duration::from_millis(TIME_SETTINGS.physics_ms);
     let tick_rate = Duration::from_millis(TIME_SETTINGS.tick_ms);
     let render_rate = Duration::from_millis(1000 / TIME_SETTINGS.target_fps);
-    let save_rate = Duration::from_secs(60);
+    let save_rate = Duration::from_secs(RUNTIME_LOOP_SETTINGS.autosave_secs);
     let mut last_simulation_update = Instant::now();
     let mut last_render = Instant::now();
     let mut last_save = Instant::now();
@@ -1373,7 +1458,7 @@ pub fn run_ui() -> Result<(), io::Error> {
             last_render = Instant::now();
         }
 
-        if event::poll(Duration::from_millis(1))?
+        if event::poll(Duration::from_millis(RUNTIME_LOOP_SETTINGS.input_poll_ms))?
             && let Event::Key(key) = event::read()?
         {
             if app.handle_key(key) {

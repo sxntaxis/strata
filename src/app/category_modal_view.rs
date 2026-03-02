@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use crate::constants::COLORS;
+use crate::domain::DRIFT_CATEGORY_ID;
 
 use super::{App, view_style};
 
@@ -25,7 +26,7 @@ impl App {
                 let dot = if cat.karma_effect < 0 { "◯ " } else { "● " };
 
                 if is_selected {
-                    let text_color = if cat.id == crate::domain::CategoryId::new(0) {
+                    let text_color = if cat.id == DRIFT_CATEGORY_ID {
                         Color::Black
                     } else {
                         view_style::text_color_for_bg(cat.color)

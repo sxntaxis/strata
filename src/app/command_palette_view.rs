@@ -7,7 +7,8 @@ use ratatui::{
 };
 
 use crate::{
-    domain::{CategoryId, ReportPeriod},
+    constants::{APP_LAYOUT_SETTINGS, COMMAND_PALETTE_SETTINGS},
+    domain::ReportPeriod,
     keybindings::Action,
 };
 
@@ -147,6 +148,11 @@ impl App {
                 &["karma", "report", "popup"],
             ),
             self.palette_action_entry(
+                Action::Detach,
+                "Detach Strata (keep tracking)",
+                &["detach", "detached", "dettached", "headless", "background"],
+            ),
+            self.palette_action_entry(
                 Action::ToggleKeybindingsHelp,
                 "Open command atlas",
                 &["atlas", "help", "keybindings", "commands"],
@@ -173,18 +179,11 @@ impl App {
                 "Clear drift sand",
                 &["clear", "drift", "none", "idle"],
             ),
-            PaletteEntry {
-                command: PaletteCommand::Detach,
-                title: "Detach Strata (keep tracking)".to_string(),
-                search_text: "detach detached dettached headless background keep running"
-                    .to_string(),
-                hint: "d".to_string(),
-            },
             self.palette_action_entry(Action::Quit, "Quit Strata", &["exit", "close", "stop"]),
         ];
 
         for category in self.time_tracker.categories_ordered() {
-            if category.id == CategoryId::new(0) {
+            if crate::domain::is_drift_category_id(category.id) {
                 continue;
             }
 
@@ -264,7 +263,9 @@ impl App {
         is_selected: bool,
         accent: Color,
     ) -> Line<'static> {
-        let max_hint_width = row_width.saturating_div(3).max(1);
+        let max_hint_width = row_width
+            .saturating_div(COMMAND_PALETTE_SETTINGS.hint_width_divisor)
+            .max(1);
         let hint = if entry.hint.is_empty() {
             String::new()
         } else {
@@ -312,14 +313,30 @@ impl App {
     }
 
     fn command_palette_rect(&self, terminal_size: Rect) -> Rect {
-        let target_width = terminal_size.width.saturating_mul(5) / 6;
-        let target_height = terminal_size.height.saturating_mul(1) / 2;
+        let target_width = terminal_size
+            .width
+            .saturating_mul(COMMAND_PALETTE_SETTINGS.rect_width_num)
+            / COMMAND_PALETTE_SETTINGS.rect_width_den;
+        let target_height = terminal_size
+            .height
+            .saturating_mul(COMMAND_PALETTE_SETTINGS.rect_height_num)
+            / COMMAND_PALETTE_SETTINGS.rect_height_den;
 
-        let max_width = terminal_size.width.saturating_sub(2).max(1);
-        let max_height = terminal_size.height.saturating_sub(2).max(1);
+        let max_width = terminal_size
+            .width
+            .saturating_sub(APP_LAYOUT_SETTINGS.frame_margin)
+            .saturating_sub(APP_LAYOUT_SETTINGS.frame_margin)
+            .max(1);
+        let max_height = terminal_size
+            .height
+            .saturating_sub(APP_LAYOUT_SETTINGS.frame_margin)
+            .saturating_sub(APP_LAYOUT_SETTINGS.frame_margin)
+            .max(1);
 
         let modal_width = target_width.clamp(1, max_width);
-        let modal_height = target_height.max(8).clamp(1, max_height);
+        let modal_height = target_height
+            .max(COMMAND_PALETTE_SETTINGS.min_height)
+            .clamp(1, max_height);
 
         let modal_x = (terminal_size.width.saturating_sub(modal_width)) / 2;
         let modal_y = (terminal_size.height.saturating_sub(modal_height)) / 3;
@@ -355,25 +372,29 @@ fn palette_token_score(token: &str, haystack: &str) -> Option<usize> {
     }
 
     if haystack.starts_with(token) {
-        return Some(2);
+        return Some(COMMAND_PALETTE_SETTINGS.score_prefix);
     }
 
     if haystack
         .split(|ch: char| !ch.is_ascii_alphanumeric())
         .any(|word| !word.is_empty() && word.starts_with(token))
     {
-        return Some(6);
+        return Some(COMMAND_PALETTE_SETTINGS.score_word_prefix);
     }
 
     if let Some(position) = haystack.find(token) {
-        return Some(12 + position);
+        return Some(COMMAND_PALETTE_SETTINGS.score_contains_base + position);
     }
 
     if let Some(distance) = best_typo_distance(token, haystack, 2) {
-        return Some(24 + distance * 4);
+        return Some(
+            COMMAND_PALETTE_SETTINGS.score_typo_base
+                + distance * COMMAND_PALETTE_SETTINGS.score_typo_distance_weight,
+        );
     }
 
-    palette_subsequence_score(token, haystack).map(|score| 60 + score)
+    palette_subsequence_score(token, haystack)
+        .map(|score| COMMAND_PALETTE_SETTINGS.score_subsequence_base + score)
 }
 
 fn best_typo_distance(token: &str, haystack: &str, max_distance: usize) -> Option<usize> {

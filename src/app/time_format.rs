@@ -1,4 +1,4 @@
-use crate::domain::operational_day_key_now;
+use crate::domain::{is_drift_name, operational_day_key_now};
 
 use super::App;
 
@@ -15,7 +15,7 @@ impl App {
         let today = operational_day_key_now().format("%Y-%m-%d").to_string();
         let mut total: isize = 0;
         for cat in self.time_tracker.categories_ordered() {
-            if cat.name == "none" {
+            if is_drift_name(&cat.name) {
                 continue;
             }
             let cat_time: isize = self

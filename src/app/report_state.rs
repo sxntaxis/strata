@@ -4,9 +4,10 @@ use chrono::{Duration as ChronoDuration, Local, NaiveDate};
 use ratatui::{prelude::Line, style::Color};
 
 use crate::domain::{
-    Category, CategoryId, CategoryLogEntry, KarmaReportSummary, LiveSessionPreview, ReportPeriod,
-    build_category_logs_for_period_with_offset, build_period_karma_report_with_live_and_offset,
-    operational_day_key_now, report_period_date_bounds_with_offset,
+    Category, CategoryId, CategoryLogEntry, DRIFT_CATEGORY_ID, KarmaReportSummary,
+    LiveSessionPreview, ReportPeriod, build_category_logs_for_period_with_offset,
+    build_period_karma_report_with_live_and_offset, operational_day_key_now,
+    report_period_date_bounds_with_offset,
 };
 use crate::{
     sand::{SandEngine, SandState, SandStateGrain},
@@ -21,7 +22,7 @@ impl App {
         self.report_selected_index = summary
             .entries
             .iter()
-            .position(|entry| entry.category_id == CategoryId::new(0))
+            .position(|entry| entry.category_id == DRIFT_CATEGORY_ID)
             .unwrap_or(0);
         self.clamp_report_selection(summary.entries.len());
     }

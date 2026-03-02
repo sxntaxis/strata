@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     constants::SAND_ENGINE,
-    domain::{Category, CategoryId},
+    domain::{Category, CategoryId, DRIFT_CATEGORY_ID},
 };
 
 use super::resize::resize_grid;
@@ -225,7 +225,7 @@ impl SandEngine {
             .iter()
             .map(|category| (category.id, category.color))
             .collect();
-        let none_id = CategoryId::new(0);
+        let none_id = DRIFT_CATEGORY_ID;
 
         for cy in 0..cell_h {
             let mut spans: Vec<Span<'static>> = Vec::with_capacity(cell_w);
@@ -396,7 +396,7 @@ impl SandEngine {
         }
 
         let mut restored = vec![vec![None; state.grid_width]; state.grid_height];
-        let none_id = CategoryId::new(0);
+        let none_id = DRIFT_CATEGORY_ID;
 
         for grain in &state.grains {
             if grain.x >= state.grid_width || grain.y >= state.grid_height {

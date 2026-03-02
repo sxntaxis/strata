@@ -7,7 +7,8 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, LineGauge, Paragraph},
 };
 
-use crate::constants::SAND_ENGINE;
+use crate::constants::{APP_LAYOUT_SETTINGS, SAND_ENGINE};
+use crate::domain::{DRIFT_CATEGORY_CONFIG_NAME, is_drift_category_id};
 
 use super::App;
 
@@ -37,7 +38,8 @@ impl App {
         };
         let active_index = self.time_tracker.active_category_index();
 
-        let category_name = if active_index == Some(0) {
+        let active_category_id = self.time_tracker.active_category_id();
+        let category_name = if is_drift_category_id(active_category_id) {
             self.get_idle_face()
         } else if let Some(idx) = active_index {
             categories
@@ -56,7 +58,7 @@ impl App {
             })
             .unwrap_or_default();
 
-        let session_timer = if active_index == Some(0) {
+        let session_timer = if is_drift_category_id(active_category_id) {
             Local::now().format("%H:%M:%S").to_string()
         } else if let Some(start) = self.time_tracker.current_session_start {
             let elapsed = start.elapsed();
@@ -69,21 +71,21 @@ impl App {
             let cat_name = categories
                 .get(self.selected_index)
                 .map(|category| category.name.as_str())
-                .unwrap_or("none");
-            let karma_time = if cat_name == "none" {
+                .unwrap_or(DRIFT_CATEGORY_CONFIG_NAME);
+            let karma_time = if cat_name == DRIFT_CATEGORY_CONFIG_NAME {
                 self.get_karma_adjusted_time()
             } else {
                 self.get_category_karma_adjusted_time(cat_name)
             };
             self.format_signed_time(karma_time)
-        } else if active_index == Some(0) {
+        } else if is_drift_category_id(active_category_id) {
             let karma_time = self.get_karma_adjusted_time();
             self.format_signed_time(karma_time)
         } else if let Some(idx) = active_index {
             let cat_name = categories
                 .get(idx)
                 .map(|category| category.name.as_str())
-                .unwrap_or("none");
+                .unwrap_or(DRIFT_CATEGORY_CONFIG_NAME);
             let mut total = self.get_effective_time_for_category(cat_name);
             if let Some(start) = self.time_tracker.current_session_start {
                 total += start.elapsed().as_secs() as usize;
@@ -138,8 +140,15 @@ impl App {
         f.render_widget(paragraph, size);
 
         if let Some(progress) = self.catchup_progress_ratio() {
-            let max_width = size.width.saturating_sub(4);
-            let gauge_width = ((size.width.saturating_mul(2)) / 5).max(12).min(max_width);
+            let max_width = size
+                .width
+                .saturating_sub(APP_LAYOUT_SETTINGS.frame_margin.saturating_mul(2));
+            let gauge_width = ((size
+                .width
+                .saturating_mul(APP_LAYOUT_SETTINGS.catchup_gauge_width_num))
+                / APP_LAYOUT_SETTINGS.catchup_gauge_width_den)
+                .max(APP_LAYOUT_SETTINGS.catchup_gauge_min_width)
+                .min(max_width);
             if gauge_width > 0 {
                 let gauge_x = size.x + (size.width.saturating_sub(gauge_width)) / 2;
                 let gauge_y = size.y + size.height.saturating_sub(1);

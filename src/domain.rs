@@ -20,6 +20,19 @@ impl CategoryId {
     }
 }
 
+pub const DRIFT_CATEGORY_ID: CategoryId = CategoryId(0);
+pub const DRIFT_CATEGORY_CONFIG_NAME: &str = "none";
+pub const DRIFT_CATEGORY_DISPLAY_NAME: &str = "drift";
+
+pub fn is_drift_category_id(category_id: CategoryId) -> bool {
+    category_id == DRIFT_CATEGORY_ID
+}
+
+pub fn is_drift_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case(DRIFT_CATEGORY_CONFIG_NAME)
+        || name.eq_ignore_ascii_case(DRIFT_CATEGORY_DISPLAY_NAME)
+}
+
 #[derive(Clone, Debug)]
 pub struct Category {
     pub id: CategoryId,
@@ -99,7 +112,6 @@ pub enum ReportPeriod {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum DayBoundaryMode {
     FixedHour,
     Sunrise,
@@ -219,11 +231,6 @@ pub fn operational_day_key_for_local(local: &DateTime<Local>) -> NaiveDate {
     operational_day_key_from_utc(local.with_timezone(&Utc), &day_boundary_config())
 }
 
-#[allow(dead_code)]
-pub fn report_period_date_bounds(period: ReportPeriod) -> (NaiveDate, NaiveDate) {
-    report_period_date_bounds_with_offset(period, 0)
-}
-
 pub fn report_period_date_bounds_with_offset(
     period: ReportPeriod,
     offset: usize,
@@ -270,8 +277,8 @@ impl CategoryStore {
     pub fn new() -> Self {
         let mut by_id = HashMap::new();
         let none = Category {
-            id: CategoryId::new(0),
-            name: "none".to_string(),
+            id: DRIFT_CATEGORY_ID,
+            name: DRIFT_CATEGORY_CONFIG_NAME.to_string(),
             color: Color::White,
             description: String::new(),
             karma_effect: 0,
@@ -280,7 +287,7 @@ impl CategoryStore {
 
         Self {
             by_id,
-            order: vec![CategoryId::new(0)],
+            order: vec![DRIFT_CATEGORY_ID],
             next_id: 1,
         }
     }
@@ -288,14 +295,14 @@ impl CategoryStore {
     pub fn from_loaded(categories: Vec<Category>, next_id: u64) -> Self {
         let mut store = Self::new();
         let mut seen_names: HashSet<String> = HashSet::new();
-        seen_names.insert("none".to_string());
+        seen_names.insert(DRIFT_CATEGORY_CONFIG_NAME.to_string());
 
         let mut max_id = 0u64;
 
         for category in categories {
             max_id = max_id.max(category.id.0);
 
-            if category.id.0 == 0 || category.name.eq_ignore_ascii_case("none") {
+            if is_drift_category_id(category.id) || is_drift_name(&category.name) {
                 continue;
             }
 
@@ -484,7 +491,7 @@ impl TimeTracker {
             category_store: CategoryStore::new(),
             current_session_start: None,
             session_id_counter: 1,
-            active_category_id: CategoryId::new(0),
+            active_category_id: DRIFT_CATEGORY_ID,
         }
     }
 
@@ -504,7 +511,7 @@ impl TimeTracker {
             .get_by_id(self.active_category_id)
             .is_none()
         {
-            self.active_category_id = CategoryId::new(0);
+            self.active_category_id = DRIFT_CATEGORY_ID;
         }
     }
 
@@ -552,14 +559,6 @@ impl TimeTracker {
 
     pub fn active_category_index(&self) -> Option<usize> {
         self.category_store.index_of_id(self.active_category_id)
-    }
-
-    pub fn set_active_category_by_index(&mut self, index: usize) -> bool {
-        let Some(id) = self.category_store.id_at_index(index) else {
-            return false;
-        };
-        self.active_category_id = id;
-        true
     }
 
     pub fn set_active_category_by_id(&mut self, category_id: CategoryId) -> bool {
@@ -619,7 +618,7 @@ impl TimeTracker {
         let removed = self.category_store.delete_by_index(index);
         if let Some(removed_id) = removed {
             if self.active_category_id == removed_id {
-                self.active_category_id = CategoryId::new(0);
+                self.active_category_id = DRIFT_CATEGORY_ID;
             }
             return true;
         }
@@ -633,13 +632,6 @@ impl TimeTracker {
     pub fn start_session_with_elapsed(&mut self, elapsed_seconds: usize) {
         let offset = Duration::from_secs(elapsed_seconds as u64);
         self.current_session_start = Some(Instant::now() - offset);
-    }
-
-    #[allow(dead_code)]
-    pub fn end_session(&mut self) -> Option<usize> {
-        let start_instant = self.current_session_start?;
-        let elapsed = start_instant.elapsed().as_secs() as usize;
-        self.end_session_with_elapsed_at_local(elapsed, Local::now())
     }
 
     pub fn end_session_with_elapsed_at_local(
@@ -663,10 +655,6 @@ impl TimeTracker {
 
         self.current_session_start = None;
         Some(elapsed)
-    }
-
-    pub fn record_session(&mut self, cat_id: CategoryId, cat_description: &str, elapsed: usize) {
-        self.record_session_at(cat_id, cat_description, elapsed, Local::now());
     }
 
     pub fn record_session_at(
@@ -697,7 +685,7 @@ impl TimeTracker {
         let today = operational_day_key_now().format("%Y-%m-%d").to_string();
         self.sessions
             .iter()
-            .filter(|session| session.date == today && session.category_id != CategoryId::new(0))
+            .filter(|session| session.date == today && !is_drift_category_id(session.category_id))
             .map(|session| session.elapsed_seconds)
             .sum()
     }
@@ -705,7 +693,7 @@ impl TimeTracker {
     pub fn get_category_time(&self, category_name: &str) -> usize {
         let cat_id = self
             .category_id_by_name(category_name)
-            .unwrap_or(CategoryId::new(0));
+            .unwrap_or(DRIFT_CATEGORY_ID);
         let today = operational_day_key_now().format("%Y-%m-%d").to_string();
         self.sessions
             .iter()
@@ -744,15 +732,11 @@ impl TimeTracker {
         true
     }
 
-    pub fn reset_none_counter_today(&mut self) {
-        let today = operational_day_key_now().format("%Y-%m-%d").to_string();
+    pub fn clear_drift_sessions_for_day(&mut self, day: NaiveDate) {
+        let day_key = day.format("%Y-%m-%d").to_string();
         self.sessions.retain(|session| {
-            !(session.category_id == CategoryId::new(0) && session.date == today)
+            !(is_drift_category_id(session.category_id) && session.date == day_key)
         });
-
-        if self.active_category_id == CategoryId::new(0) {
-            self.current_session_start = Some(Instant::now());
-        }
     }
 }
 
@@ -781,19 +765,6 @@ pub fn build_period_report_with_offset(
 
     let (start, end, label) = period_bounds_with_offset(period, offset);
     build_report_for_date_range(sessions, categories, start, end, label)
-}
-
-pub fn build_period_karma_report(
-    sessions: &[Session],
-    categories: &[Category],
-    period: ReportPeriod,
-) -> KarmaReportSummary {
-    build_period_karma_report_with_offset(sessions, categories, period, 0)
-}
-
-#[allow(dead_code)]
-fn period_bounds(period: ReportPeriod) -> (NaiveDate, NaiveDate, String) {
-    period_bounds_with_offset(period, 0)
 }
 
 fn period_bounds_with_offset(
@@ -911,7 +882,7 @@ fn build_karma_report_for_date_range(
             category_name: category.name.clone(),
             color: category.color,
             elapsed_seconds: 0,
-            karma_effect: if category.id == CategoryId::new(0) || category.name == "none" {
+            karma_effect: if is_drift_category_id(category.id) || is_drift_name(&category.name) {
                 0
             } else {
                 category.karma_effect
@@ -985,7 +956,7 @@ fn build_report_for_date_range(
 ) -> ReportSummary {
     let category_names: HashMap<CategoryId, String> = categories
         .iter()
-        .filter(|category| category.id != CategoryId::new(0) && category.name != "none")
+        .filter(|category| !is_drift_category_id(category.id) && !is_drift_name(&category.name))
         .map(|category| (category.id, category.name.clone()))
         .collect();
 
@@ -1024,11 +995,6 @@ fn build_report_for_date_range(
     }
 }
 
-#[allow(dead_code)]
-fn report_period_contains_today(period: ReportPeriod) -> bool {
-    report_period_contains_today_with_offset(period, 0)
-}
-
 fn report_period_contains_today_with_offset(period: ReportPeriod, offset: usize) -> bool {
     let today = operational_day_key_now();
     let (start, end) = report_period_date_bounds_with_offset(period, offset);
@@ -1040,7 +1006,7 @@ fn category_karma_effect(categories: &[Category], category_id: CategoryId) -> i8
         .iter()
         .find(|category| category.id == category_id)
         .map(|category| {
-            if category.id == CategoryId::new(0) || category.name == "none" {
+            if is_drift_category_id(category.id) || is_drift_name(&category.name) {
                 0
             } else {
                 category.karma_effect
@@ -1051,9 +1017,8 @@ fn category_karma_effect(categories: &[Category], category_id: CategoryId) -> i8
 
 pub fn sort_karma_entries_for_display(entries: &mut [KarmaReportEntry]) {
     entries.sort_by(|a, b| {
-        let none_id = CategoryId::new(0);
         let group = |entry: &KarmaReportEntry| -> u8 {
-            if entry.category_id == none_id {
+            if is_drift_category_id(entry.category_id) {
                 1
             } else if entry.karma_effect < 0 {
                 2
@@ -1072,8 +1037,8 @@ pub fn sort_karma_entries_for_display(entries: &mut [KarmaReportEntry]) {
                 .then(b.elapsed_seconds.cmp(&a.elapsed_seconds))
                 .then(a.category_name.cmp(&b.category_name)),
             1 => {
-                let a_is_none = a.category_id == none_id;
-                let b_is_none = b.category_id == none_id;
+                let a_is_none = is_drift_category_id(a.category_id);
+                let b_is_none = is_drift_category_id(b.category_id);
                 b_is_none
                     .cmp(&a_is_none)
                     .then(b.elapsed_seconds.cmp(&a.elapsed_seconds))
@@ -1087,16 +1052,6 @@ pub fn sort_karma_entries_for_display(entries: &mut [KarmaReportEntry]) {
                 .then(a.category_name.cmp(&b.category_name)),
         })
     });
-}
-
-#[allow(dead_code)]
-pub fn build_period_karma_report_with_live(
-    sessions: &[Session],
-    categories: &[Category],
-    period: ReportPeriod,
-    live_session: Option<&LiveSessionPreview>,
-) -> KarmaReportSummary {
-    build_period_karma_report_with_live_and_offset(sessions, categories, period, 0, live_session)
 }
 
 pub fn build_period_karma_report_with_live_and_offset(
@@ -1123,23 +1078,6 @@ pub fn build_period_karma_report_with_live_and_offset(
 
     sort_karma_entries_for_display(&mut summary.entries);
     summary
-}
-
-pub fn build_category_logs_for_period(
-    sessions: &[Session],
-    categories: &[Category],
-    category_id: CategoryId,
-    period: ReportPeriod,
-    live_session: Option<&LiveSessionPreview>,
-) -> Vec<CategoryLogEntry> {
-    build_category_logs_for_period_with_offset(
-        sessions,
-        categories,
-        category_id,
-        period,
-        0,
-        live_session,
-    )
 }
 
 pub fn build_category_logs_for_period_with_offset(
@@ -1281,8 +1219,17 @@ mod tests {
             Some(1),
         );
 
-        tracker.record_session(CategoryId::new(1), "work session", 100);
-        tracker.record_session(CategoryId::new(2), "personal session", 200);
+        let t1 = Local
+            .with_ymd_and_hms(2026, 2, 1, 9, 0, 0)
+            .single()
+            .expect("valid datetime");
+        let t2 = Local
+            .with_ymd_and_hms(2026, 2, 1, 10, 0, 0)
+            .single()
+            .expect("valid datetime");
+
+        tracker.record_session_at(CategoryId::new(1), "work session", 100, t1);
+        tracker.record_session_at(CategoryId::new(2), "personal session", 200, t2);
 
         let work_count_before = tracker
             .sessions
@@ -1316,8 +1263,17 @@ mod tests {
     #[test]
     fn test_record_session_creates_distinct_rows_per_session() {
         let mut tracker = TimeTracker::new();
-        tracker.record_session(CategoryId::new(1), "focus", 120);
-        tracker.record_session(CategoryId::new(1), "review", 180);
+        let t1 = Local
+            .with_ymd_and_hms(2026, 2, 1, 11, 0, 0)
+            .single()
+            .expect("valid datetime");
+        let t2 = Local
+            .with_ymd_and_hms(2026, 2, 1, 11, 30, 0)
+            .single()
+            .expect("valid datetime");
+
+        tracker.record_session_at(CategoryId::new(1), "focus", 120, t1);
+        tracker.record_session_at(CategoryId::new(1), "review", 180, t2);
 
         assert_eq!(tracker.sessions.len(), 2);
         assert_eq!(tracker.sessions[0].description, "focus");
@@ -1710,7 +1666,8 @@ mod tests {
             },
         ];
 
-        let summary = build_period_karma_report(&sessions, &categories, ReportPeriod::Month);
+        let summary =
+            build_period_karma_report_with_offset(&sessions, &categories, ReportPeriod::Month, 0);
         assert_eq!(summary.total_seconds, 5400);
         assert_eq!(summary.total_karma_seconds, 1800);
 
@@ -1869,14 +1826,15 @@ mod tests {
             elapsed_seconds: 600,
         }];
 
-        let summary = build_period_karma_report(&sessions, &categories, ReportPeriod::Today);
+        let summary =
+            build_period_karma_report_with_offset(&sessions, &categories, ReportPeriod::Today, 0);
         assert_eq!(summary.date, today);
         assert_eq!(summary.total_seconds, 600);
         assert_eq!(summary.total_karma_seconds, 600);
     }
 
     #[test]
-    fn test_reset_none_counter_today_clears_only_today_none() {
+    fn test_clear_drift_sessions_for_day_clears_only_target_day() {
         let mut tracker = TimeTracker::new();
         let today = operational_day_key_now().format("%Y-%m-%d").to_string();
         let yesterday = (operational_day_key_now() - ChronoDuration::days(1))
@@ -1913,7 +1871,7 @@ mod tests {
             },
         ];
 
-        tracker.reset_none_counter_today();
+        tracker.clear_drift_sessions_for_day(operational_day_key_now());
 
         assert_eq!(
             tracker
@@ -1967,11 +1925,12 @@ mod tests {
             },
         ];
 
-        let logs = build_category_logs_for_period(
+        let logs = build_category_logs_for_period_with_offset(
             &sessions,
             &categories,
             CategoryId::new(1),
             ReportPeriod::Today,
+            0,
             None,
         );
 

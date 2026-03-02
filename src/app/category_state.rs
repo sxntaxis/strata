@@ -1,8 +1,8 @@
 use ratatui::style::Color;
 
 use crate::{
-    constants::COLORS,
-    domain::{CategoryId, operational_day_key_now},
+    constants::{CATEGORY_SETTINGS, COLORS},
+    domain::{CategoryId, DRIFT_CATEGORY_ID, is_drift_category_id, operational_day_key_now},
     storage,
 };
 
@@ -30,7 +30,7 @@ impl App {
     pub(super) fn persist_daily_sand_snapshot(&self) {
         let mut state = self.sand_engine.snapshot_state();
 
-        if self.time_tracker.active_category_id() == CategoryId::new(0) {
+        if is_drift_category_id(self.time_tracker.active_category_id()) {
             state.grains.retain(|grain| grain.category_id != 0);
         }
 
@@ -99,8 +99,7 @@ impl App {
             .or_default();
         tags.retain(|existing| existing != tag);
         tags.insert(0, tag.to_string());
-        const MAX_TAGS_PER_CATEGORY: usize = 24;
-        tags.truncate(MAX_TAGS_PER_CATEGORY);
+        tags.truncate(CATEGORY_SETTINGS.max_tags_per_category);
 
         self.modal_tag_index = Some(0);
         self.persist_category_tags();
@@ -162,12 +161,9 @@ impl App {
                 String::new(),
                 Some(self.color_index),
             );
-            if added.is_some() {
-                let index = self.time_tracker.category_count().saturating_sub(1);
-                let _ = self.time_tracker.set_active_category_by_index(index);
-                self.begin_active_session_now();
-                self.none_entry_time = None;
+            if let Some(added_id) = added {
                 self.persist_categories();
+                self.switch_active_category_at(added_id, chrono::Utc::now());
                 self.sync_modal_description_from_selection();
             }
         }
@@ -182,6 +178,14 @@ impl App {
                 .time_tracker
                 .category_by_index(self.selected_index)
                 .map(|category| category.id);
+
+            let was_active = removed_id
+                .map(|category_id| category_id == self.time_tracker.active_category_id())
+                .unwrap_or(false);
+
+            if was_active {
+                self.switch_active_category_at(DRIFT_CATEGORY_ID, chrono::Utc::now());
+            }
 
             if self.time_tracker.delete_category(self.selected_index) {
                 if let Some(category_id) = removed_id {

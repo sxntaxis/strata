@@ -1,6 +1,6 @@
 use crate::{
     constants::COLORS,
-    domain::{CategoryId, ReportPeriod},
+    domain::{CategoryId, DRIFT_CATEGORY_ID, ReportPeriod},
     keybindings::Action,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -185,10 +185,6 @@ impl App {
                 self.switch_to_layer_from_palette(category_id);
                 false
             }
-            PaletteCommand::Detach => {
-                self.detach_requested = true;
-                true
-            }
         }
     }
 
@@ -286,22 +282,8 @@ impl App {
                 return;
             }
             KeyCode::Enter => {
-                let trimmed = input.trim();
-                let value = if trimmed.is_empty() {
-                    None
-                } else {
-                    let candidate = std::path::PathBuf::from(trimmed);
-                    let normalized = if candidate
-                        .extension()
-                        .and_then(|ext| ext.to_str())
-                        .is_some_and(|ext| ext.eq_ignore_ascii_case("csv"))
-                    {
-                        candidate
-                    } else {
-                        candidate.join("time_log.csv")
-                    };
-                    Some(normalized.display().to_string())
-                };
+                let value = crate::storage::normalize_time_log_path_input(input.as_str())
+                    .map(|path| path.display().to_string());
 
                 let keymap_path = crate::storage::get_keymap_path();
                 match crate::keybindings::set_time_log_path(&keymap_path, value) {
@@ -536,17 +518,13 @@ impl App {
                         }
                         self.remember_selected_tag();
                     }
-                    if self.time_tracker.active_category_index() != Some(self.selected_index) {
-                        let now_utc = chrono::Utc::now();
-                        self.end_active_session_at(now_utc);
-                        self.persist_sessions();
-                        let _ = self
+                    if self.time_tracker.active_category_index() != Some(self.selected_index)
+                        && let Some(category_id) = self
                             .time_tracker
-                            .set_active_category_by_index(self.selected_index);
-                        self.begin_active_session_at(now_utc);
-                        if self.selected_index != 0 {
-                            self.none_entry_time = None;
-                        }
+                            .category_by_index(self.selected_index)
+                            .map(|category| category.id)
+                    {
+                        self.queue_or_apply_mutation(QueuedMutation::SwitchLayer(category_id));
                     }
                     self.close_modal();
                 }
@@ -690,6 +668,9 @@ impl App {
             Action::ReportMonth => {
                 self.set_report_period(ReportPeriod::Month);
             }
+            Action::Detach => {
+                self.set_report_period(ReportPeriod::Today);
+            }
             Action::DeleteCategory => {
                 if in_logs_view {
                     handled = self.delete_selected_report_session();
@@ -742,18 +723,27 @@ impl App {
                 false
             }
             Action::SwitchToNone => {
-                self.queue_or_apply_mutation(QueuedMutation::SwitchLayer(CategoryId::new(0)));
+                self.queue_or_apply_mutation(QueuedMutation::SwitchLayer(DRIFT_CATEGORY_ID));
                 false
+            }
+            Action::Detach => {
+                self.detach_requested = true;
+                true
             }
             Action::Cancel => {
                 if self.keymap.keys_for_action(Action::SwitchToNone).is_empty() {
-                    self.queue_or_apply_mutation(QueuedMutation::SwitchLayer(CategoryId::new(0)));
+                    self.queue_or_apply_mutation(QueuedMutation::SwitchLayer(DRIFT_CATEGORY_ID));
                 }
                 false
             }
             Action::ReportToday => {
-                self.detach_requested = true;
-                true
+                if self.keymap.keys_for_action(Action::Detach).is_empty() {
+                    self.detach_requested = true;
+                    return true;
+                }
+                self.open_report_modal();
+                self.set_report_period(ReportPeriod::Today);
+                false
             }
             _ => false,
         }

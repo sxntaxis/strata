@@ -15,7 +15,7 @@ use thiserror::Error;
 
 use crate::{
     constants::COLORS,
-    domain::{Category, CategoryId, Session},
+    domain::{Category, CategoryId, DRIFT_CATEGORY_CONFIG_NAME, DRIFT_CATEGORY_ID, Session},
     sand::SandState,
 };
 
@@ -42,6 +42,7 @@ const SESSIONS_HEADER: [&str; 8] = [
     "end_time",
     "elapsed_seconds",
 ];
+const BACKUP_RETENTION_MAX_FILES: usize = 10;
 
 #[derive(Debug, Error)]
 pub enum StorageError {
@@ -102,8 +103,8 @@ pub fn set_runtime_storage_settings(settings: RuntimeStorageSettings) {
 fn default_categories_loaded() -> LoadedCategories {
     LoadedCategories {
         categories: vec![Category {
-            id: CategoryId::new(0),
-            name: "none".to_string(),
+            id: DRIFT_CATEGORY_ID,
+            name: DRIFT_CATEGORY_CONFIG_NAME.to_string(),
             color: Color::White,
             description: String::new(),
             karma_effect: 0,
@@ -172,12 +173,12 @@ pub fn try_load_categories_from_csv(path: &Path) -> Result<LoadedCategories, Sto
             }
         };
 
-        if id == 0 {
+        if id == DRIFT_CATEGORY_ID.0 {
             continue;
         }
 
         let name = record.get(1).unwrap_or_default().trim().to_string();
-        if name.is_empty() || name.eq_ignore_ascii_case("none") {
+        if name.is_empty() || name.eq_ignore_ascii_case(DRIFT_CATEGORY_CONFIG_NAME) {
             continue;
         }
 
@@ -258,7 +259,7 @@ pub fn try_load_sessions_from_csv(
             .get(2)
             .and_then(|value| value.parse::<u64>().ok())
             .and_then(|raw| category_by_id.get(&raw).copied())
-            .unwrap_or(CategoryId::new(0));
+            .unwrap_or(DRIFT_CATEGORY_ID);
 
         loaded.sessions.push(Session {
             id,
@@ -327,7 +328,7 @@ pub fn save_sessions_to_csv(
             .iter()
             .find(|category| category.id == session.category_id)
             .map(|category| category.name.as_str())
-            .unwrap_or("none");
+            .unwrap_or(DRIFT_CATEGORY_CONFIG_NAME);
 
         writer
             .write_record([
@@ -435,6 +436,26 @@ pub fn get_time_log_path() -> PathBuf {
     get_data_dir().join("time_log.csv")
 }
 
+pub fn normalize_time_log_path_input(raw: &str) -> Option<PathBuf> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let candidate = PathBuf::from(trimmed);
+    let normalized = if candidate
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("csv"))
+    {
+        candidate
+    } else {
+        candidate.join("time_log.csv")
+    };
+
+    Some(normalized)
+}
+
 pub fn load_sand_state(path: &Path) -> Option<SandState> {
     if !path.exists() {
         return None;
@@ -534,7 +555,7 @@ pub fn create_backup(path: &Path) -> Result<(), String> {
             .collect();
         backups.sort_by_key(|e| e.metadata().ok().and_then(|m| m.modified().ok()));
 
-        while backups.len() > 10 {
+        while backups.len() > BACKUP_RETENTION_MAX_FILES {
             if let Some(oldest) = backups.first() {
                 let _ = fs::remove_file(oldest.path());
                 backups.remove(0);

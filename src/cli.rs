@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     constants::COLORS,
     domain::{
-        CategoryId, ReportPeriod, Session, build_period_report, operational_day_key_for_local,
+        CategoryId, DRIFT_CATEGORY_CONFIG_NAME, ReportPeriod, Session, build_period_report,
+        operational_day_key_for_local,
     },
     storage,
 };
@@ -124,7 +125,7 @@ pub fn start_session(
     let categories_path = storage::get_categories_path();
     let categories = storage::load_categories_from_csv(&categories_path).categories;
 
-    let cat_name = category_name.unwrap_or_else(|| "none".to_string());
+    let cat_name = category_name.unwrap_or_else(|| DRIFT_CATEGORY_CONFIG_NAME.to_string());
     let category = categories
         .iter()
         .find(|c| c.name == cat_name || c.id.0.to_string() == cat_name)
@@ -263,7 +264,7 @@ pub fn export_data(format: ExportFormat, out_path: Option<PathBuf>) -> Result<()
                     .iter()
                     .find(|c| c.id == s.category_id)
                     .map(|c| c.name.as_str())
-                    .unwrap_or("none")
+                    .unwrap_or(DRIFT_CATEGORY_CONFIG_NAME)
                     .to_string();
                 SessionExport {
                     id: s.id,
@@ -297,7 +298,9 @@ pub fn export_data(format: ExportFormat, out_path: Option<PathBuf>) -> Result<()
             ics.push_str("PRODID:-//strata//time tracking//EN\r\n");
 
             for session in &export.sessions {
-                if session.category_name == "none" || session.elapsed_seconds == 0 {
+                if session.category_name == DRIFT_CATEGORY_CONFIG_NAME
+                    || session.elapsed_seconds == 0
+                {
                     continue;
                 }
                 let dt_start = format_ics_datetime(&session.date, &session.start_time);

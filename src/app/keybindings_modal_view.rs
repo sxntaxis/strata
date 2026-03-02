@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use crate::{
+    constants::ATLAS_LAYOUT_SETTINGS,
     domain::{DayBoundaryMode, FirstDayOfWeek},
     keybindings::{Action, ActionCategory},
 };
@@ -116,76 +117,71 @@ impl App {
     }
 
     fn command_atlas_rows(&self, selected_item: AtlasSelectable) -> Vec<AtlasRow> {
-        const VALUE_COL: usize = 30;
-        const ACTION_COL: usize = 24;
+        let value_col = ATLAS_LAYOUT_SETTINGS.value_col_width;
+        let action_col = ATLAS_LAYOUT_SETTINGS.action_col_width;
 
-        let mut rows = Vec::new();
-
-        rows.push(AtlasRow {
-            selectable: None,
-            line: Line::from(vec![
-                Span::styled(
-                    pad_column("binding/value", VALUE_COL),
+        let mut rows = vec![
+            AtlasRow {
+                selectable: None,
+                line: Line::from(vec![
+                    Span::styled(
+                        pad_column("binding/value", value_col),
+                        Style::default()
+                            .fg(Color::Gray)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "target",
+                        Style::default()
+                            .fg(Color::Gray)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+            },
+            AtlasRow {
+                selectable: None,
+                line: Line::from(Span::styled(
+                    "Atlas Settings",
                     Style::default()
-                        .fg(Color::Gray)
+                        .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD),
+                )),
+            },
+            self.selectable_row(
+                AtlasSelectable::TimeLogPath,
+                selected_item,
+                self.atlas_item_color(AtlasSelectable::TimeLogPath),
+                pad_column(
+                    &self.truncate_label(
+                        &crate::storage::get_time_log_path().display().to_string(),
+                        value_col,
+                    ),
+                    value_col,
                 ),
-                Span::styled(
-                    "target",
-                    Style::default()
-                        .fg(Color::Gray)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]),
-        });
-
-        rows.push(AtlasRow {
-            selectable: None,
-            line: Line::from(Span::styled(
-                "Atlas Settings",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            )),
-        });
-
-        rows.push(self.selectable_row(
-            AtlasSelectable::TimeLogPath,
-            selected_item,
-            self.atlas_item_color(AtlasSelectable::TimeLogPath),
-            pad_column(
-                &self.truncate_label(
-                    &crate::storage::get_time_log_path().display().to_string(),
-                    VALUE_COL,
-                ),
-                VALUE_COL,
+                "time_log_path".to_string(),
+                action_col,
             ),
-            "time_log_path".to_string(),
-            ACTION_COL,
-        ));
-
-        rows.push(self.selectable_row(
-            AtlasSelectable::DayStartMode,
-            selected_item,
-            self.atlas_item_color(AtlasSelectable::DayStartMode),
-            pad_column(&self.day_start_setting_label(), VALUE_COL),
-            "day_start".to_string(),
-            ACTION_COL,
-        ));
-
-        rows.push(self.selectable_row(
-            AtlasSelectable::WeekStartDay,
-            selected_item,
-            self.atlas_item_color(AtlasSelectable::WeekStartDay),
-            pad_column(&self.first_day_of_week_label(), VALUE_COL),
-            "week_start".to_string(),
-            ACTION_COL,
-        ));
-
-        rows.push(AtlasRow {
-            selectable: None,
-            line: Line::from(""),
-        });
+            self.selectable_row(
+                AtlasSelectable::DayStartMode,
+                selected_item,
+                self.atlas_item_color(AtlasSelectable::DayStartMode),
+                pad_column(&self.day_start_setting_label(), value_col),
+                "day_start".to_string(),
+                action_col,
+            ),
+            self.selectable_row(
+                AtlasSelectable::WeekStartDay,
+                selected_item,
+                self.atlas_item_color(AtlasSelectable::WeekStartDay),
+                pad_column(&self.first_day_of_week_label(), value_col),
+                "week_start".to_string(),
+                action_col,
+            ),
+            AtlasRow {
+                selectable: None,
+                line: Line::from(""),
+            },
+        ];
 
         for category in ActionCategory::all() {
             let section_color = self.atlas_item_color(AtlasSelectable::Action(
@@ -225,9 +221,9 @@ impl App {
                     AtlasSelectable::Action(action),
                     selected_item,
                     self.atlas_item_color(AtlasSelectable::Action(action)),
-                    pad_column(&key_text, VALUE_COL),
+                    pad_column(&key_text, value_col),
                     action.config_name().to_string(),
-                    ACTION_COL,
+                    action_col,
                 ));
             }
 

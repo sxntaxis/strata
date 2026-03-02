@@ -52,6 +52,7 @@ Repo-local runtime artifacts are intentionally ignored by git.
 - Open the Command Palette with `Ctrl+P`.
 - Open Karma with `k`.
 - In main view, `d` detaches Strata while tracking continues.
+- In Karma pop-up, `d` or `t` sets day range, `w` week, and `m` month.
 - In layer text entry, `?` stays a normal character; use `F1` there.
 - Optional config file: `~/.config/strata/keymap.json`
 - In Karma pop-up, `←` moves to older intervals and `→` moves toward current.

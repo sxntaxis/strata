@@ -46,6 +46,7 @@ pub(crate) enum Action {
     ToggleCommandPalette,
     OpenCategoryModal,
     OpenReportModal,
+    Detach,
     SwitchToNone,
     ClearAllSand,
     ClearNoneSand,
@@ -76,11 +77,12 @@ pub(crate) enum Action {
 }
 
 impl Action {
-    const ALL: [Action; 27] = [
+    const ALL: [Action; 28] = [
         Action::Quit,
         Action::ToggleCommandPalette,
         Action::OpenCategoryModal,
         Action::OpenReportModal,
+        Action::Detach,
         Action::SwitchToNone,
         Action::ClearAllSand,
         Action::ClearNoneSand,
@@ -116,6 +118,7 @@ impl Action {
             Action::ToggleCommandPalette => "toggle_command_palette",
             Action::OpenCategoryModal => "open_layer_popup",
             Action::OpenReportModal => "open_karma_popup",
+            Action::Detach => "detach",
             Action::SwitchToNone => "switch_to_drift",
             Action::ClearAllSand => "clear_all_sand",
             Action::ClearNoneSand => "clear_drift_sand",
@@ -153,6 +156,7 @@ impl Action {
 
             "open_layer_popup" | "open_category_modal" => Some(Self::OpenCategoryModal),
             "open_karma_popup" | "open_report_modal" => Some(Self::OpenReportModal),
+            "detach" | "detach_from_main" => Some(Self::Detach),
             "switch_to_drift" | "switch_to_none" => Some(Self::SwitchToNone),
 
             "clear_all_sand" => Some(Self::ClearAllSand),
@@ -192,6 +196,7 @@ impl Action {
             Action::ToggleCommandPalette => "Open/close command palette",
             Action::OpenCategoryModal => "Open layer pop-up from main view",
             Action::OpenReportModal => "Open karma pop-up from main view",
+            Action::Detach => "Detach from main view (in karma pop-up: day range)",
             Action::SwitchToNone => "Switch active layer to drift",
             Action::ClearAllSand => "Clear all sand and reset drift timer",
             Action::ClearNoneSand => "Clear only drift sand",
@@ -213,7 +218,7 @@ impl Action {
             Action::DecreaseKarma => "Set selected layer karma to -1",
             Action::Backspace => "Delete one typed character in layer pop-up",
 
-            Action::ReportToday => "Set karma pop-up range to day (detach from main view)",
+            Action::ReportToday => "Set karma pop-up range to day",
             Action::ReportWeek => "Set karma pop-up range to week",
             Action::ReportMonth => "Set karma pop-up range to month",
 
@@ -228,6 +233,7 @@ impl Action {
             | Action::ToggleCommandPalette
             | Action::OpenCategoryModal
             | Action::OpenReportModal
+            | Action::Detach
             | Action::SwitchToNone
             | Action::ClearAllSand
             | Action::ClearNoneSand
@@ -497,10 +503,9 @@ fn parse_key_code(raw: &str) -> Result<(KeyCodeSpec, bool), String> {
             if normalized.starts_with('f')
                 && normalized.len() > 1
                 && let Ok(n) = normalized[1..].parse::<u8>()
+                && (1..=24).contains(&n)
             {
-                if (1..=24).contains(&n) {
-                    return Ok((KeyCodeSpec::F(n), false));
-                }
+                return Ok((KeyCodeSpec::F(n), false));
             }
 
             let mut chars = token.chars();
@@ -620,13 +625,14 @@ fn default_true() -> bool {
     true
 }
 
-const DEFAULT_BINDINGS: [(&str, Action); 30] = [
+const DEFAULT_BINDINGS: [(&str, Action); 31] = [
     ("q", Action::Quit),
     ("ctrl-c", Action::Quit),
     ("ctrl-p", Action::ToggleCommandPalette),
     ("enter", Action::Confirm),
     ("esc", Action::Cancel),
     ("k", Action::OpenReportModal),
+    ("d", Action::Detach),
     ("c", Action::ClearAllSand),
     ("shift-c", Action::ClearNoneSand),
     ("f1", Action::ToggleKeybindingsHelp),
@@ -645,7 +651,7 @@ const DEFAULT_BINDINGS: [(&str, Action); 30] = [
     ("-", Action::DecreaseKarma),
     ("_", Action::DecreaseKarma),
     ("backspace", Action::Backspace),
-    ("d", Action::ReportToday),
+    ("t", Action::ReportToday),
     ("w", Action::ReportWeek),
     ("m", Action::ReportMonth),
     ("home", Action::HelpTop),
@@ -749,23 +755,7 @@ fn parse_unbound_actions(config: &KeymapConfig, path: &Path) -> Result<HashSet<A
 }
 
 fn parse_time_log_path(config: &KeymapConfig) -> Option<PathBuf> {
-    let raw = config.time_log_path.as_ref()?.trim();
-    if raw.is_empty() {
-        return None;
-    }
-
-    let candidate = PathBuf::from(raw);
-    let normalized = if candidate
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("csv"))
-    {
-        candidate
-    } else {
-        candidate.join("time_log.csv")
-    };
-
-    Some(normalized)
+    crate::storage::normalize_time_log_path_input(config.time_log_path.as_deref()?)
 }
 
 fn load_config_or_default(path: &Path) -> Result<KeymapConfig, String> {
@@ -857,10 +847,6 @@ pub(crate) fn load_keybindings(path: &Path) -> Result<LoadedKeybindings, String>
     })
 }
 
-pub(crate) fn load_keymap(path: &Path) -> Result<Keymap, String> {
-    load_keybindings(path).map(|loaded| loaded.keymap)
-}
-
 fn remove_action_keymap_entries(config: &mut KeymapConfig, action: Action) {
     config.keymap.retain(|_, mapped| match mapped {
         Some(action_name) => Action::from_config_name(action_name) != Some(action),
@@ -940,7 +926,7 @@ mod tests {
     use crate::domain::{DayBoundaryMode, FirstDayOfWeek};
 
     use super::{
-        Action, KeyBinding, default_keymap, load_keybindings, load_keymap, set_action_binding,
+        Action, KeyBinding, Keymap, default_keymap, load_keybindings, set_action_binding,
         set_first_day_of_week,
     };
 
@@ -950,6 +936,10 @@ mod tests {
             .unwrap_or_default()
             .as_nanos();
         PathBuf::from(format!("/tmp/{prefix}_{now}.json"))
+    }
+
+    fn load_keymap_for_test(path: &std::path::Path) -> Result<Keymap, String> {
+        load_keybindings(path).map(|loaded| loaded.keymap)
     }
 
     #[test]
@@ -1001,6 +991,22 @@ mod tests {
     }
 
     #[test]
+    fn test_default_keymap_has_d_for_detach() {
+        let keymap = default_keymap();
+        let d = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE);
+
+        assert_eq!(keymap.action_for_key_event(d), Some(Action::Detach));
+    }
+
+    #[test]
+    fn test_default_keymap_has_t_for_karma_day() {
+        let keymap = default_keymap();
+        let t = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE);
+
+        assert_eq!(keymap.action_for_key_event(t), Some(Action::ReportToday));
+    }
+
+    #[test]
     fn test_from_config_name_supports_command_palette_aliases() {
         assert_eq!(
             Action::from_config_name("toggle_command_palette"),
@@ -1009,6 +1015,15 @@ mod tests {
         assert_eq!(
             Action::from_config_name("toggle_palette"),
             Some(Action::ToggleCommandPalette)
+        );
+    }
+
+    #[test]
+    fn test_from_config_name_supports_detach_aliases() {
+        assert_eq!(Action::from_config_name("detach"), Some(Action::Detach));
+        assert_eq!(
+            Action::from_config_name("detach_from_main"),
+            Some(Action::Detach)
         );
     }
 
@@ -1023,7 +1038,7 @@ mod tests {
 }"#;
         fs::write(&path, raw).expect("write config");
 
-        let keymap = load_keymap(&path).expect("keymap should load");
+        let keymap = load_keymap_for_test(&path).expect("keymap should load");
 
         let q = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
         let ctrl_q = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL);
@@ -1045,7 +1060,7 @@ mod tests {
 }"#;
         fs::write(&path, raw).expect("write config");
 
-        let keymap = load_keymap(&path).expect("keymap should load");
+        let keymap = load_keymap_for_test(&path).expect("keymap should load");
         let key = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE);
 
         assert_eq!(keymap.action_for_key_event(key), None);
@@ -1064,7 +1079,7 @@ mod tests {
 }"#;
         fs::write(&path, raw).expect("write config");
 
-        let keymap = load_keymap(&path).expect("keymap should load");
+        let keymap = load_keymap_for_test(&path).expect("keymap should load");
         let f = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE);
         let k = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE);
 
@@ -1088,7 +1103,7 @@ mod tests {
 }"#;
         fs::write(&path, raw).expect("write config");
 
-        let err = load_keymap(&path).expect_err("config should fail");
+        let err = load_keymap_for_test(&path).expect_err("config should fail");
         assert!(err.contains("Unknown action 'not_real'"));
 
         fs::remove_file(path).ok();
