@@ -213,7 +213,7 @@ impl Action {
             Action::DecreaseKarma => "Set selected layer karma to -1",
             Action::Backspace => "Delete one typed character in layer pop-up",
 
-            Action::ReportToday => "Set karma pop-up range to day",
+            Action::ReportToday => "Set karma pop-up range to day (detach from main view)",
             Action::ReportWeek => "Set karma pop-up range to week",
             Action::ReportMonth => "Set karma pop-up range to month",
 
@@ -620,12 +620,11 @@ fn default_true() -> bool {
     true
 }
 
-const DEFAULT_BINDINGS: [(&str, Action); 31] = [
+const DEFAULT_BINDINGS: [(&str, Action); 30] = [
     ("q", Action::Quit),
     ("ctrl-c", Action::Quit),
     ("ctrl-p", Action::ToggleCommandPalette),
     ("enter", Action::Confirm),
-    ("shift-enter", Action::OpenReportModal),
     ("esc", Action::Cancel),
     ("k", Action::OpenReportModal),
     ("c", Action::ClearAllSand),
@@ -991,17 +990,12 @@ mod tests {
     }
 
     #[test]
-    fn test_default_keymap_keeps_k_and_adds_shift_enter_for_karma() {
+    fn test_default_keymap_keeps_k_for_karma() {
         let keymap = default_keymap();
         let k = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE);
-        let shift_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT);
 
         assert_eq!(
             keymap.action_for_key_event(k),
-            Some(Action::OpenReportModal)
-        );
-        assert_eq!(
-            keymap.action_for_key_event(shift_enter),
             Some(Action::OpenReportModal)
         );
     }

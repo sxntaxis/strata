@@ -399,6 +399,9 @@ impl App {
             grid_width,
             grid_height,
             grains,
+            frame_count: 0,
+            sweep_left_to_right: true,
+            rng_state: 0,
         })
     }
 

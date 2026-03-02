@@ -173,6 +173,13 @@ impl App {
                 "Clear drift sand",
                 &["clear", "drift", "none", "idle"],
             ),
+            PaletteEntry {
+                command: PaletteCommand::Detach,
+                title: "Detach Strata (keep tracking)".to_string(),
+                search_text: "detach detached dettached headless background keep running"
+                    .to_string(),
+                hint: "d".to_string(),
+            },
             self.palette_action_entry(Action::Quit, "Quit Strata", &["exit", "close", "stop"]),
         ];
 

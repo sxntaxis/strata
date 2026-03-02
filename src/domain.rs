@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::{OnceLock, RwLock},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use chrono::{
@@ -562,9 +562,31 @@ impl TimeTracker {
         true
     }
 
+    pub fn set_active_category_by_id(&mut self, category_id: CategoryId) -> bool {
+        if self.category_store.get_by_id(category_id).is_none() {
+            return false;
+        }
+
+        self.active_category_id = category_id;
+        true
+    }
+
     pub fn set_category_description_by_index(&mut self, index: usize, description: String) -> bool {
         self.category_store
             .set_description_by_index(index, description)
+    }
+
+    pub fn set_category_description_by_id(
+        &mut self,
+        category_id: CategoryId,
+        description: String,
+    ) -> bool {
+        let Some(category) = self.category_store.get_mut_by_id(category_id) else {
+            return false;
+        };
+
+        category.description = description;
+        true
     }
 
     pub fn set_category_color_by_index(&mut self, index: usize, color: Color) -> bool {
@@ -608,10 +630,24 @@ impl TimeTracker {
         self.current_session_start = Some(Instant::now());
     }
 
+    pub fn start_session_with_elapsed(&mut self, elapsed_seconds: usize) {
+        let offset = Duration::from_secs(elapsed_seconds as u64);
+        self.current_session_start = Some(Instant::now() - offset);
+    }
+
+    #[allow(dead_code)]
     pub fn end_session(&mut self) -> Option<usize> {
         let start_instant = self.current_session_start?;
-
         let elapsed = start_instant.elapsed().as_secs() as usize;
+        self.end_session_with_elapsed_at_local(elapsed, Local::now())
+    }
+
+    pub fn end_session_with_elapsed_at_local(
+        &mut self,
+        elapsed: usize,
+        end_local: DateTime<Local>,
+    ) -> Option<usize> {
+        self.current_session_start?;
         let cat_id = self.active_category_id;
         let cat_description = self
             .category_store
@@ -619,7 +655,7 @@ impl TimeTracker {
             .map(|category| category.description.clone())
             .unwrap_or_default();
 
-        self.record_session(cat_id, &cat_description, elapsed);
+        self.record_session_at(cat_id, &cat_description, elapsed, end_local);
 
         if let Some(category) = self.category_store.get_mut_by_id(cat_id) {
             category.description.clear();
@@ -630,9 +666,18 @@ impl TimeTracker {
     }
 
     pub fn record_session(&mut self, cat_id: CategoryId, cat_description: &str, elapsed: usize) {
-        let now = Local::now();
-        let start_time = now - ChronoDuration::seconds(elapsed as i64);
-        let today = operational_day_key_for_local(&now)
+        self.record_session_at(cat_id, cat_description, elapsed, Local::now());
+    }
+
+    pub fn record_session_at(
+        &mut self,
+        cat_id: CategoryId,
+        cat_description: &str,
+        elapsed: usize,
+        end_local: DateTime<Local>,
+    ) {
+        let start_time = end_local - ChronoDuration::seconds(elapsed as i64);
+        let today = operational_day_key_for_local(&end_local)
             .format("%Y-%m-%d")
             .to_string();
 
@@ -642,7 +687,7 @@ impl TimeTracker {
             category_id: cat_id,
             description: cat_description.to_string(),
             start_time: start_time.format("%H:%M:%S").to_string(),
-            end_time: now.format("%H:%M:%S").to_string(),
+            end_time: end_local.format("%H:%M:%S").to_string(),
             elapsed_seconds: elapsed,
         });
         self.session_id_counter += 1;

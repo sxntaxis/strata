@@ -165,7 +165,7 @@ impl App {
             if added.is_some() {
                 let index = self.time_tracker.category_count().saturating_sub(1);
                 let _ = self.time_tracker.set_active_category_by_index(index);
-                self.time_tracker.start_session();
+                self.begin_active_session_now();
                 self.none_entry_time = None;
                 self.persist_categories();
                 self.sync_modal_description_from_selection();

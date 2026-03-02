@@ -50,7 +50,8 @@ Repo-local runtime artifacts are intentionally ignored by git.
 
 - Open the Command Atlas in TUI with `?` or `F1`.
 - Open the Command Palette with `Ctrl+P`.
-- Open Karma with `k` (and `Shift+Enter` as an additional shortcut).
+- Open Karma with `k`.
+- In main view, `d` detaches Strata while tracking continues.
 - In layer text entry, `?` stays a normal character; use `F1` there.
 - Optional config file: `~/.config/strata/keymap.json`
 - In Karma pop-up, `←` moves to older intervals and `→` moves toward current.
@@ -90,6 +91,13 @@ Karma interval notes:
 - `month` uses calendar months (current month-to-date, then full prior months).
 - Daily sand snapshots are written under state `sand_history/`; if active layer is drift, drift grains are filtered from the saved daily snapshot to reduce sleep-noise history.
 - If a historical day snapshot is missing, Strata reconstructs an approximate snapshot from that day in `time_log.csv`.
+
+Detached mode notes:
+
+- Detach writes a runtime checkpoint under state and exits TUI without ending the active session.
+- Reopening Strata resumes visualization and catches up in background at fixed cadence (24x) with a centered bottom line gauge.
+- During catch-up, mutating main-view actions are queued and replayed when simulation time reaches them.
+- Catch-up view renders settled sediment projection (quiet/no falling animation), then switches to live falling dots once synced.
 
 ## Quality Gates
 

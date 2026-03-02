@@ -1,13 +1,11 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use std::time::Instant;
-
 use crate::{
     constants::COLORS,
     domain::{CategoryId, ReportPeriod},
     keybindings::Action,
 };
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
-use super::{App, PaletteCommand, ui_helpers};
+use super::{App, PaletteCommand, QueuedMutation, ui_helpers};
 
 impl App {
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> bool {
@@ -187,37 +185,15 @@ impl App {
                 self.switch_to_layer_from_palette(category_id);
                 false
             }
+            PaletteCommand::Detach => {
+                self.detach_requested = true;
+                true
+            }
         }
     }
 
     fn switch_to_layer_from_palette(&mut self, category_id: CategoryId) {
-        if self.time_tracker.active_category_id() == category_id {
-            self.render_needed = true;
-            return;
-        }
-
-        let Some(target_index) = self
-            .time_tracker
-            .categories_ordered()
-            .iter()
-            .position(|category| category.id == category_id)
-        else {
-            self.render_needed = true;
-            return;
-        };
-
-        self.time_tracker.end_session();
-        self.persist_sessions();
-        let _ = self.time_tracker.set_active_category_by_index(target_index);
-        self.time_tracker.start_session();
-
-        if category_id == CategoryId::new(0) {
-            self.none_entry_time = Some(Instant::now());
-        } else {
-            self.none_entry_time = None;
-        }
-
-        self.render_needed = true;
+        self.queue_or_apply_mutation(QueuedMutation::SwitchLayer(category_id));
     }
 
     fn handle_keybindings_modal_action(&mut self, action: Action) -> bool {
@@ -561,12 +537,13 @@ impl App {
                         self.remember_selected_tag();
                     }
                     if self.time_tracker.active_category_index() != Some(self.selected_index) {
-                        self.time_tracker.end_session();
+                        let now_utc = chrono::Utc::now();
+                        self.end_active_session_at(now_utc);
                         self.persist_sessions();
                         let _ = self
                             .time_tracker
                             .set_active_category_by_index(self.selected_index);
-                        self.time_tracker.start_session();
+                        self.begin_active_session_at(now_utc);
                         if self.selected_index != 0 {
                             self.none_entry_time = None;
                         }
@@ -739,18 +716,11 @@ impl App {
         match action {
             Action::Quit => true,
             Action::ClearAllSand => {
-                self.sand_engine.clear();
-                self.persist_sessions();
-                self.persist_sand_state();
-                self.persist_daily_sand_snapshot();
-                self.render_needed = true;
+                self.queue_or_apply_mutation(QueuedMutation::ClearAllSand);
                 false
             }
             Action::ClearNoneSand => {
-                self.sand_engine.clear_category(CategoryId::new(0));
-                self.persist_sand_state();
-                self.persist_daily_sand_snapshot();
-                self.render_needed = true;
+                self.queue_or_apply_mutation(QueuedMutation::ClearDriftSand);
                 false
             }
             Action::OpenReportModal => {
@@ -772,24 +742,18 @@ impl App {
                 false
             }
             Action::SwitchToNone => {
-                self.time_tracker.end_session();
-                self.persist_sessions();
-                let _ = self.time_tracker.set_active_category_by_index(0);
-                self.time_tracker.start_session();
-                self.none_entry_time = Some(Instant::now());
-                self.render_needed = true;
+                self.queue_or_apply_mutation(QueuedMutation::SwitchLayer(CategoryId::new(0)));
                 false
             }
             Action::Cancel => {
                 if self.keymap.keys_for_action(Action::SwitchToNone).is_empty() {
-                    self.time_tracker.end_session();
-                    self.persist_sessions();
-                    let _ = self.time_tracker.set_active_category_by_index(0);
-                    self.time_tracker.start_session();
-                    self.none_entry_time = Some(Instant::now());
-                    self.render_needed = true;
+                    self.queue_or_apply_mutation(QueuedMutation::SwitchLayer(CategoryId::new(0)));
                 }
                 false
+            }
+            Action::ReportToday => {
+                self.detach_requested = true;
+                true
             }
             _ => false,
         }

@@ -48,6 +48,15 @@ pub const FACE_SETTINGS: FaceSettings = FaceSettings {
     ],
 };
 
+pub const CATCHUP_SETTINGS: CatchupSettings = CatchupSettings {
+    cadence_ms: 120,
+    accelerated_multiplier: 24,
+    visual_refresh_ms: 120,
+    gauge_hold_ms: 300,
+    repose_threshold: 2,
+    relax_passes: 3,
+};
+
 pub struct TimeSettings {
     pub tick_ms: u64,
     pub physics_ms: u64,
@@ -70,4 +79,13 @@ pub struct BlinkSettings {
 pub struct FaceSettings {
     pub thresholds: &'static [usize],
     pub faces: &'static [&'static str],
+}
+
+pub struct CatchupSettings {
+    pub cadence_ms: u64,
+    pub accelerated_multiplier: u32,
+    pub visual_refresh_ms: u64,
+    pub gauge_hold_ms: u64,
+    pub repose_threshold: usize,
+    pub relax_passes: usize,
 }

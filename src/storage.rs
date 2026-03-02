@@ -393,6 +393,10 @@ pub fn get_active_session_path() -> PathBuf {
     get_state_dir().join("active_session.json")
 }
 
+pub fn get_detached_runtime_path() -> PathBuf {
+    get_state_dir().join("detached_runtime.json")
+}
+
 pub fn get_sand_state_path() -> PathBuf {
     get_state_dir().join("sand_state.json")
 }
@@ -685,6 +689,9 @@ mod tests {
                     category_id: 0,
                 },
             ],
+            frame_count: 12,
+            sweep_left_to_right: false,
+            rng_state: 12345,
         };
 
         save_sand_state(&path, &state).unwrap();

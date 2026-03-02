@@ -2,9 +2,9 @@ use chrono::Local;
 use ratatui::prelude::{Line, Span};
 use ratatui::{
     Frame,
-    layout::Alignment,
+    layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, BorderType, Borders, Paragraph},
+    widgets::{Block, BorderType, Borders, LineGauge, Paragraph},
 };
 
 use crate::constants::SAND_ENGINE;
@@ -28,6 +28,10 @@ impl App {
         let sand = if self.in_karma_modal() && self.should_use_report_snapshot() {
             self.report_snapshot_lines(inner_width, inner_height, &categories)
                 .unwrap_or_else(|| self.sand_engine.render(&categories))
+        } else if let Some(catchup_lines) =
+            self.catchup_visual_lines(inner_width, inner_height, &categories)
+        {
+            catchup_lines
         } else {
             self.sand_engine.render(&categories)
         };
@@ -129,8 +133,25 @@ impl App {
                 .alignment(Alignment::Right),
             )
             .border_style(Style::default().fg(border_color));
+
         let paragraph = Paragraph::new(sand).block(block);
         f.render_widget(paragraph, size);
+
+        if let Some(progress) = self.catchup_progress_ratio() {
+            let max_width = size.width.saturating_sub(4);
+            let gauge_width = ((size.width.saturating_mul(2)) / 5).max(12).min(max_width);
+            if gauge_width > 0 {
+                let gauge_x = size.x + (size.width.saturating_sub(gauge_width)) / 2;
+                let gauge_y = size.y + size.height.saturating_sub(1);
+                let gauge = LineGauge::default()
+                    .ratio(progress)
+                    .label("")
+                    .line_set(ratatui::symbols::line::THICK)
+                    .style(Style::default().fg(Color::DarkGray))
+                    .gauge_style(Style::default().fg(border_color).bg(Color::DarkGray));
+                f.render_widget(gauge, Rect::new(gauge_x, gauge_y, gauge_width, 1));
+            }
+        }
 
         if self.in_category_modal() {
             self.render_modal(f, size);

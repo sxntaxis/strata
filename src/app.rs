@@ -1,21 +1,25 @@
 use std::{
-    collections::HashSet,
+    collections::{HashSet, VecDeque},
     io,
     time::{Duration, Instant, SystemTime},
 };
 
+use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
 use crossterm::{
     event::{self, Event},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend, layout::Rect};
+use serde::{Deserialize, Serialize};
 
 use crate::{
-    constants::{BLINK_SETTINGS, FACE_SETTINGS, TIME_SETTINGS},
-    domain::{CategoryId, ReportPeriod, RuntimeSettings, TimeTracker, set_runtime_settings},
+    constants::{BLINK_SETTINGS, CATCHUP_SETTINGS, FACE_SETTINGS, SAND_ENGINE, TIME_SETTINGS},
+    domain::{
+        Category, CategoryId, ReportPeriod, RuntimeSettings, TimeTracker, set_runtime_settings,
+    },
     keybindings,
-    sand::SandEngine,
+    sand::{SandEngine, SandState, SandStateGrain},
     storage,
 };
 
@@ -59,6 +63,7 @@ enum PaletteCommand {
     Action(keybindings::Action),
     SetReportPeriod(ReportPeriod),
     SwitchLayer(CategoryId),
+    Detach,
 }
 
 #[derive(Clone, Debug)]
@@ -67,6 +72,46 @@ struct PaletteEntry {
     title: String,
     search_text: String,
     hint: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum QueuedMutation {
+    SwitchLayer(CategoryId),
+    ClearAllSand,
+    ClearDriftSand,
+}
+
+#[derive(Clone, Debug)]
+struct QueuedMutationEvent {
+    execute_at_utc: DateTime<Utc>,
+    mutation: QueuedMutation,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+enum QueuedMutationRecord {
+    SwitchLayer { category_id: u64 },
+    ClearAllSand,
+    ClearDriftSand,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct QueuedMutationEventRecord {
+    execute_at_utc: DateTime<Utc>,
+    mutation: QueuedMutationRecord,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct DetachedRuntimeCheckpoint {
+    schema_version: u8,
+    detached_at_utc: DateTime<Utc>,
+    simulation_time_utc: DateTime<Utc>,
+    spawn_accumulator_nanos: u64,
+    physics_accumulator_nanos: u64,
+    active_category_id: u64,
+    active_description: String,
+    active_session_started_at_utc: Option<DateTime<Utc>>,
+    sand_state: crate::sand::SandState,
+    pending_mutations: Vec<QueuedMutationEventRecord>,
 }
 
 struct App {
@@ -89,6 +134,18 @@ struct App {
     report_snapshot_state: Option<crate::sand::SandState>,
     report_snapshot_preview_key: Option<String>,
     report_snapshot_preview_engine: Option<SandEngine>,
+    active_session_started_at_utc: Option<DateTime<Utc>>,
+    simulation_time_utc: DateTime<Utc>,
+    sim_spawn_accumulator: Duration,
+    sim_physics_accumulator: Duration,
+    catchup_cadence_accumulator: Duration,
+    catchup_visual_engine: Option<SandEngine>,
+    catchup_visual_last_refresh: Instant,
+    catchup_progress_anchor: Option<Duration>,
+    catchup_gauge_hold_until: Option<Instant>,
+    catchup_was_active: bool,
+    pending_mutations: VecDeque<QueuedMutationEvent>,
+    detach_requested: bool,
     keymap: keybindings::Keymap,
     runtime_settings: RuntimeSettings,
     keymap_error: Option<String>,
@@ -177,6 +234,18 @@ impl App {
             report_snapshot_state: None,
             report_snapshot_preview_key: None,
             report_snapshot_preview_engine: None,
+            active_session_started_at_utc: None,
+            simulation_time_utc: Utc::now(),
+            sim_spawn_accumulator: Duration::ZERO,
+            sim_physics_accumulator: Duration::ZERO,
+            catchup_cadence_accumulator: Duration::ZERO,
+            catchup_visual_engine: None,
+            catchup_visual_last_refresh: Instant::now(),
+            catchup_progress_anchor: None,
+            catchup_gauge_hold_until: None,
+            catchup_was_active: false,
+            pending_mutations: VecDeque::new(),
+            detach_requested: false,
             keymap,
             runtime_settings,
             keymap_error,
@@ -196,10 +265,17 @@ impl App {
 
         app.persist_category_tags();
 
-        app.time_tracker.start_session();
+        if !app.restore_from_detached_checkpoint() {
+            app.begin_active_session_now();
+            app.restore_sand_state();
+        }
+
         if app.time_tracker.active_category_index() == Some(0) {
             app.blink_state = app.next_blink_interval();
-            app.none_entry_time = Some(Instant::now());
+            app.none_entry_time = app.active_session_started_at_utc.map(|started_at| {
+                let elapsed = (Utc::now() - started_at).to_std().unwrap_or(Duration::ZERO);
+                Instant::now() - elapsed
+            });
         }
 
         app
@@ -637,6 +713,617 @@ impl App {
         }
     }
 
+    fn begin_active_session_now(&mut self) {
+        let now = Utc::now();
+        self.time_tracker.start_session();
+        self.active_session_started_at_utc = Some(now);
+    }
+
+    fn begin_active_session_at(&mut self, started_at_utc: DateTime<Utc>) {
+        let now = Utc::now();
+        let clamped_start = if started_at_utc > now {
+            now
+        } else {
+            started_at_utc
+        };
+        let elapsed = (now - clamped_start).to_std().unwrap_or(Duration::ZERO);
+        self.time_tracker
+            .start_session_with_elapsed(elapsed.as_secs() as usize);
+        self.active_session_started_at_utc = Some(clamped_start);
+    }
+
+    fn end_active_session_now(&mut self) -> Option<usize> {
+        self.end_active_session_at(Utc::now())
+    }
+
+    fn end_active_session_at(&mut self, ended_at_utc: DateTime<Utc>) -> Option<usize> {
+        let start_utc = self
+            .active_session_started_at_utc
+            .or_else(|| {
+                self.time_tracker.current_session_start.map(|start| {
+                    Utc::now()
+                        - ChronoDuration::from_std(start.elapsed())
+                            .unwrap_or(ChronoDuration::zero())
+                })
+            })
+            .unwrap_or(ended_at_utc);
+
+        let clamped_end = if ended_at_utc < start_utc {
+            start_utc
+        } else {
+            ended_at_utc
+        };
+
+        let elapsed = (clamped_end - start_utc)
+            .to_std()
+            .unwrap_or(Duration::ZERO)
+            .as_secs() as usize;
+        let ended_local = clamped_end.with_timezone(&Local);
+        let result = self
+            .time_tracker
+            .end_session_with_elapsed_at_local(elapsed, ended_local);
+        self.active_session_started_at_utc = None;
+        result
+    }
+
+    fn simulation_backlog_duration_at(&self, now_utc: DateTime<Utc>) -> Duration {
+        if now_utc <= self.simulation_time_utc {
+            Duration::ZERO
+        } else {
+            (now_utc - self.simulation_time_utc)
+                .to_std()
+                .unwrap_or(Duration::ZERO)
+        }
+    }
+
+    fn simulation_backlog_duration(&self) -> Duration {
+        self.simulation_backlog_duration_at(Utc::now())
+    }
+
+    fn catchup_target_utc(&self, now_utc: DateTime<Utc>) -> DateTime<Utc> {
+        if let Some(next) = self.pending_mutations.front()
+            && next.execute_at_utc > now_utc
+        {
+            next.execute_at_utc
+        } else {
+            now_utc
+        }
+    }
+
+    fn current_catchup_multiplier(&self, backlog: Duration) -> u32 {
+        if backlog.is_zero() {
+            return 1;
+        }
+
+        CATCHUP_SETTINGS.accelerated_multiplier.max(2)
+    }
+
+    fn catchup_visibility_threshold(&self) -> Duration {
+        Duration::from_millis(CATCHUP_SETTINGS.cadence_ms)
+    }
+
+    fn is_catching_up(&self) -> bool {
+        self.simulation_backlog_duration() > self.catchup_visibility_threshold()
+            || !self.pending_mutations.is_empty()
+    }
+
+    fn queue_or_apply_mutation(&mut self, mutation: QueuedMutation) {
+        if self.is_catching_up() || !self.pending_mutations.is_empty() {
+            self.pending_mutations.push_back(QueuedMutationEvent {
+                execute_at_utc: Utc::now(),
+                mutation,
+            });
+        } else {
+            self.apply_mutation_at(mutation, Utc::now());
+        }
+        self.render_needed = true;
+    }
+
+    fn apply_mutation_at(&mut self, mutation: QueuedMutation, scheduled_at_utc: DateTime<Utc>) {
+        match mutation {
+            QueuedMutation::SwitchLayer(category_id) => {
+                self.apply_switch_layer_at(category_id, scheduled_at_utc);
+            }
+            QueuedMutation::ClearAllSand => {
+                self.sand_engine.clear();
+                self.persist_sessions();
+                self.persist_sand_state();
+                self.persist_daily_sand_snapshot();
+            }
+            QueuedMutation::ClearDriftSand => {
+                self.sand_engine.clear_category(CategoryId::new(0));
+                self.persist_sand_state();
+                self.persist_daily_sand_snapshot();
+            }
+        }
+    }
+
+    fn apply_switch_layer_at(&mut self, category_id: CategoryId, scheduled_at_utc: DateTime<Utc>) {
+        if self.time_tracker.active_category_id() == category_id {
+            return;
+        }
+
+        if self.time_tracker.category_by_id(category_id).is_none() {
+            return;
+        }
+        self.end_active_session_at(scheduled_at_utc);
+        self.persist_sessions();
+
+        if !self.time_tracker.set_active_category_by_id(category_id) {
+            return;
+        }
+
+        self.begin_active_session_at(scheduled_at_utc);
+
+        if category_id == CategoryId::new(0) {
+            self.none_entry_time = Some(Instant::now());
+        } else {
+            self.none_entry_time = None;
+        }
+    }
+
+    fn advance_runtime(
+        &mut self,
+        wall_delta: Duration,
+        tick_rate: Duration,
+        physics_rate: Duration,
+    ) {
+        let was_catching = self.catchup_was_active;
+        let cadence = Duration::from_millis(CATCHUP_SETTINGS.cadence_ms);
+        self.catchup_cadence_accumulator =
+            self.catchup_cadence_accumulator.saturating_add(wall_delta);
+
+        let target_utc = self.catchup_target_utc(Utc::now());
+        let backlog = self.simulation_backlog_duration_at(target_utc);
+
+        if backlog.is_zero() {
+            self.advance_simulation_by(Duration::ZERO, tick_rate, physics_rate);
+            self.catchup_cadence_accumulator = self.catchup_cadence_accumulator.min(cadence);
+        } else {
+            while self.catchup_cadence_accumulator >= cadence {
+                self.catchup_cadence_accumulator =
+                    self.catchup_cadence_accumulator.saturating_sub(cadence);
+
+                let step_target_utc = self.catchup_target_utc(Utc::now());
+                let step_backlog = self.simulation_backlog_duration_at(step_target_utc);
+                if step_backlog.is_zero() {
+                    self.advance_simulation_by(Duration::ZERO, tick_rate, physics_rate);
+                    break;
+                }
+
+                let speed = self.current_catchup_multiplier(step_backlog);
+                let step_budget = cadence.saturating_mul(speed);
+                let advance_by = step_backlog.min(step_budget);
+                if advance_by.is_zero() {
+                    break;
+                }
+
+                self.advance_simulation_by(advance_by, tick_rate, physics_rate);
+                self.render_needed = true;
+            }
+        }
+
+        let now_catching = self.is_catching_up();
+        if was_catching && !now_catching {
+            self.finalize_catchup_transition();
+            self.catchup_gauge_hold_until =
+                Some(Instant::now() + Duration::from_millis(CATCHUP_SETTINGS.gauge_hold_ms));
+        }
+        self.catchup_was_active = now_catching;
+    }
+
+    fn finalize_catchup_transition(&mut self) {
+        let settled = self.build_catchup_projection_state(&self.sand_engine.snapshot_state());
+        let valid_category_ids = self
+            .time_tracker
+            .categories_for_storage()
+            .into_iter()
+            .map(|category| category.id)
+            .collect::<HashSet<_>>();
+        self.sand_engine
+            .restore_state(&settled, &valid_category_ids);
+        self.catchup_visual_engine = None;
+        self.catchup_progress_anchor = None;
+        self.catchup_visual_last_refresh = Instant::now();
+        self.catchup_cadence_accumulator = Duration::ZERO;
+        self.render_needed = true;
+    }
+
+    fn catchup_visual_lines(
+        &mut self,
+        cell_width: u16,
+        cell_height: u16,
+        categories: &[Category],
+    ) -> Option<Vec<ratatui::prelude::Line<'static>>> {
+        if !self.is_catching_up() {
+            self.catchup_visual_engine = None;
+            return None;
+        }
+
+        let expected_grid_width = cell_width * SAND_ENGINE.dot_width as u16;
+        let expected_grid_height = cell_height * SAND_ENGINE.dot_height as u16;
+        let visual_cadence = Duration::from_millis(CATCHUP_SETTINGS.visual_refresh_ms);
+
+        let should_recreate = self
+            .catchup_visual_engine
+            .as_ref()
+            .map(|engine| {
+                engine.width != expected_grid_width || engine.height != expected_grid_height
+            })
+            .unwrap_or(true);
+        if should_recreate {
+            self.catchup_visual_engine = Some(SandEngine::new(cell_width, cell_height));
+            self.catchup_visual_last_refresh = Instant::now() - visual_cadence;
+        }
+
+        let should_refresh = self.catchup_visual_last_refresh.elapsed() >= visual_cadence;
+        if should_refresh {
+            let state = self.sand_engine.snapshot_state();
+            let projected_state = self.build_catchup_projection_state(&state);
+
+            let valid_category_ids = categories
+                .iter()
+                .map(|category| category.id)
+                .collect::<HashSet<_>>();
+
+            if let Some(engine) = self.catchup_visual_engine.as_mut() {
+                engine.restore_state(&projected_state, &valid_category_ids);
+            }
+            self.catchup_visual_last_refresh = Instant::now();
+        }
+
+        self.catchup_visual_engine
+            .as_ref()
+            .map(|engine| engine.render(categories))
+    }
+
+    fn build_catchup_projection_state(&self, state: &SandState) -> SandState {
+        if state.grid_width == 0 || state.grid_height == 0 {
+            return state.clone();
+        }
+
+        let mut columns: Vec<Vec<u64>> = vec![Vec::new(); state.grid_width];
+        let mut grains = state.grains.clone();
+        grains.sort_by(|a, b| a.x.cmp(&b.x).then(b.y.cmp(&a.y)));
+
+        for grain in grains {
+            if grain.x < state.grid_width && grain.y < state.grid_height {
+                columns[grain.x].push(grain.category_id);
+            }
+        }
+
+        self.relax_projection_columns(&mut columns, state.grid_height);
+
+        let mut projected_grains = Vec::with_capacity(state.grains.len());
+        for (x, column) in columns.into_iter().enumerate() {
+            for (index, category_id) in column.into_iter().take(state.grid_height).enumerate() {
+                let y = state.grid_height - 1 - index;
+                projected_grains.push(SandStateGrain { x, y, category_id });
+            }
+        }
+
+        SandState {
+            version: state.version,
+            grid_width: state.grid_width,
+            grid_height: state.grid_height,
+            grains: projected_grains,
+            frame_count: state.frame_count,
+            sweep_left_to_right: state.sweep_left_to_right,
+            rng_state: state.rng_state,
+        }
+    }
+
+    fn relax_projection_columns(&self, columns: &mut [Vec<u64>], max_height: usize) {
+        if columns.len() < 2 {
+            return;
+        }
+
+        let threshold = CATCHUP_SETTINGS.repose_threshold.max(1);
+        for _ in 0..CATCHUP_SETTINGS.relax_passes {
+            let mut moved = false;
+
+            for idx in 0..(columns.len() - 1) {
+                moved |= Self::relax_projection_pair(columns, idx, idx + 1, threshold, max_height);
+            }
+
+            for idx in (1..columns.len()).rev() {
+                moved |= Self::relax_projection_pair(columns, idx, idx - 1, threshold, max_height);
+            }
+
+            if !moved {
+                break;
+            }
+        }
+    }
+
+    fn relax_projection_pair(
+        columns: &mut [Vec<u64>],
+        from: usize,
+        to: usize,
+        threshold: usize,
+        max_height: usize,
+    ) -> bool {
+        let from_height = columns[from].len();
+        let to_height = columns[to].len();
+
+        if from_height <= to_height + threshold || to_height >= max_height {
+            return false;
+        }
+
+        if let Some(grain) = columns[from].pop() {
+            columns[to].push(grain);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn advance_simulation_by(
+        &mut self,
+        delta: Duration,
+        tick_rate: Duration,
+        physics_rate: Duration,
+    ) {
+        let target_time = self.simulation_time_utc
+            + ChronoDuration::from_std(delta).unwrap_or(ChronoDuration::zero());
+
+        loop {
+            let Some(next) = self.pending_mutations.front().cloned() else {
+                break;
+            };
+
+            if next.execute_at_utc > target_time {
+                break;
+            }
+
+            let mut pre_delta = Duration::ZERO;
+            if next.execute_at_utc > self.simulation_time_utc {
+                pre_delta = (next.execute_at_utc - self.simulation_time_utc)
+                    .to_std()
+                    .unwrap_or(Duration::ZERO);
+            }
+
+            self.process_simulation_delta(pre_delta, tick_rate, physics_rate);
+            self.simulation_time_utc = next.execute_at_utc;
+            self.pending_mutations.pop_front();
+            self.apply_mutation_at(next.mutation, next.execute_at_utc);
+        }
+
+        if delta.is_zero() {
+            return;
+        }
+
+        let mut remaining = Duration::ZERO;
+        if target_time > self.simulation_time_utc {
+            remaining = (target_time - self.simulation_time_utc)
+                .to_std()
+                .unwrap_or(Duration::ZERO);
+        }
+
+        self.process_simulation_delta(remaining, tick_rate, physics_rate);
+        self.simulation_time_utc = target_time;
+    }
+
+    fn process_simulation_delta(
+        &mut self,
+        mut delta: Duration,
+        tick_rate: Duration,
+        physics_rate: Duration,
+    ) {
+        while !delta.is_zero() {
+            let spawn_left = tick_rate.saturating_sub(self.sim_spawn_accumulator);
+            let physics_left = physics_rate.saturating_sub(self.sim_physics_accumulator);
+            let next_event = spawn_left.min(physics_left);
+
+            let step = delta.min(next_event);
+            self.sim_spawn_accumulator += step;
+            self.sim_physics_accumulator += step;
+            delta = delta.saturating_sub(step);
+
+            let spawn_due = self.sim_spawn_accumulator >= tick_rate;
+            let physics_due = self.sim_physics_accumulator >= physics_rate;
+
+            if spawn_due {
+                self.sim_spawn_accumulator = self.sim_spawn_accumulator.saturating_sub(tick_rate);
+                self.run_spawn_tick();
+            }
+
+            if physics_due {
+                self.sim_physics_accumulator =
+                    self.sim_physics_accumulator.saturating_sub(physics_rate);
+                self.run_physics_tick();
+            }
+
+            if step.is_zero() && !spawn_due && !physics_due {
+                break;
+            }
+        }
+    }
+
+    fn run_spawn_tick(&mut self) {
+        let should_spawn = self.time_tracker.current_session_start.is_some()
+            && self.time_tracker.active_category_index().is_some();
+
+        if should_spawn {
+            let cat_id = self.time_tracker.active_category_id();
+            self.sand_engine.spawn(cat_id);
+        }
+    }
+
+    fn run_physics_tick(&mut self) {
+        self.sand_engine.update();
+        if self.time_tracker.active_category_index() == Some(0) && !self.is_catching_up() {
+            self.update_blink();
+        }
+    }
+
+    fn catchup_progress_ratio(&mut self) -> Option<f64> {
+        let target_utc = self.catchup_target_utc(Utc::now());
+        let backlog = self.simulation_backlog_duration_at(target_utc);
+
+        if backlog <= self.catchup_visibility_threshold() && self.pending_mutations.is_empty() {
+            if let Some(until) = self.catchup_gauge_hold_until {
+                if Instant::now() < until {
+                    return Some(1.0);
+                }
+                self.catchup_gauge_hold_until = None;
+            }
+        }
+
+        if backlog <= self.catchup_visibility_threshold() && self.pending_mutations.is_empty() {
+            if self.catchup_progress_anchor.is_some() {
+                self.catchup_progress_anchor = None;
+                return Some(1.0);
+            }
+            return None;
+        }
+
+        self.catchup_gauge_hold_until = None;
+
+        if backlog <= self.catchup_visibility_threshold() {
+            return Some(1.0);
+        }
+
+        let effective_backlog = backlog;
+        let min_anchor = Duration::from_millis(10);
+        let anchor = self
+            .catchup_progress_anchor
+            .get_or_insert(effective_backlog.max(min_anchor));
+        if effective_backlog > *anchor {
+            *anchor = effective_backlog;
+        }
+
+        let denom = anchor.as_secs_f64();
+        if denom <= f64::EPSILON {
+            return Some(1.0);
+        }
+
+        let ratio = 1.0 - (effective_backlog.as_secs_f64() / denom);
+        Some(ratio.clamp(0.0, 1.0))
+    }
+
+    fn persist_detached_checkpoint(&self) {
+        let active_category_id = self.time_tracker.active_category_id();
+        let active_description = self
+            .time_tracker
+            .category_description_by_id(active_category_id)
+            .unwrap_or_default()
+            .to_string();
+
+        let checkpoint = DetachedRuntimeCheckpoint {
+            schema_version: 1,
+            detached_at_utc: Utc::now(),
+            simulation_time_utc: self.simulation_time_utc,
+            spawn_accumulator_nanos: self.sim_spawn_accumulator.as_nanos().min(u64::MAX as u128)
+                as u64,
+            physics_accumulator_nanos: self
+                .sim_physics_accumulator
+                .as_nanos()
+                .min(u64::MAX as u128) as u64,
+            active_category_id: active_category_id.0,
+            active_description,
+            active_session_started_at_utc: self.active_session_started_at_utc,
+            sand_state: self.sand_engine.snapshot_state(),
+            pending_mutations: self
+                .pending_mutations
+                .iter()
+                .cloned()
+                .map(|event| QueuedMutationEventRecord {
+                    execute_at_utc: event.execute_at_utc,
+                    mutation: match event.mutation {
+                        QueuedMutation::SwitchLayer(category_id) => {
+                            QueuedMutationRecord::SwitchLayer {
+                                category_id: category_id.0,
+                            }
+                        }
+                        QueuedMutation::ClearAllSand => QueuedMutationRecord::ClearAllSand,
+                        QueuedMutation::ClearDriftSand => QueuedMutationRecord::ClearDriftSand,
+                    },
+                })
+                .collect(),
+        };
+
+        let path = storage::get_detached_runtime_path();
+        let _ = storage::write_json_atomic(&path, &checkpoint);
+    }
+
+    fn clear_detached_checkpoint(&self) {
+        let path = storage::get_detached_runtime_path();
+        let _ = storage::delete_file_if_exists(&path);
+    }
+
+    fn restore_from_detached_checkpoint(&mut self) -> bool {
+        let path = storage::get_detached_runtime_path();
+        if !storage::file_exists(&path) {
+            return false;
+        }
+
+        let checkpoint: DetachedRuntimeCheckpoint = match storage::read_json(&path) {
+            Ok(value) => value,
+            Err(_) => {
+                let _ = storage::delete_file_if_exists(&path);
+                return false;
+            }
+        };
+
+        if checkpoint.schema_version != 1 {
+            let _ = storage::delete_file_if_exists(&path);
+            return false;
+        }
+
+        let valid_category_ids = self
+            .time_tracker
+            .categories_for_storage()
+            .into_iter()
+            .map(|category| category.id)
+            .collect::<HashSet<_>>();
+        self.sand_engine
+            .restore_state(&checkpoint.sand_state, &valid_category_ids);
+
+        let active_category_id = CategoryId::new(checkpoint.active_category_id);
+        if !self
+            .time_tracker
+            .set_active_category_by_id(active_category_id)
+        {
+            let _ = self.time_tracker.set_active_category_by_index(0);
+        }
+        let active_id = self.time_tracker.active_category_id();
+        let _ = self
+            .time_tracker
+            .set_category_description_by_id(active_id, checkpoint.active_description);
+
+        if let Some(started_at) = checkpoint.active_session_started_at_utc {
+            self.begin_active_session_at(started_at);
+        } else {
+            self.begin_active_session_now();
+        }
+
+        self.simulation_time_utc = checkpoint.simulation_time_utc;
+        self.sim_spawn_accumulator = Duration::from_nanos(checkpoint.spawn_accumulator_nanos);
+        self.sim_physics_accumulator = Duration::from_nanos(checkpoint.physics_accumulator_nanos);
+        self.pending_mutations = checkpoint
+            .pending_mutations
+            .into_iter()
+            .map(|event| QueuedMutationEvent {
+                execute_at_utc: event.execute_at_utc,
+                mutation: match event.mutation {
+                    QueuedMutationRecord::SwitchLayer { category_id } => {
+                        QueuedMutation::SwitchLayer(CategoryId::new(category_id))
+                    }
+                    QueuedMutationRecord::ClearAllSand => QueuedMutation::ClearAllSand,
+                    QueuedMutationRecord::ClearDriftSand => QueuedMutation::ClearDriftSand,
+                },
+            })
+            .collect();
+
+        self.pending_mutations
+            .make_contiguous()
+            .sort_by(|a, b| a.execute_at_utc.cmp(&b.execute_at_utc));
+
+        self.clear_detached_checkpoint();
+        true
+    }
+
     fn next_blink_interval(&self) -> i32 {
         BLINK_SETTINGS.interval_min_frames
             + (rand::random::<i32>()
@@ -654,39 +1341,20 @@ pub fn run_ui() -> Result<(), io::Error> {
 
     let size = terminal.size()?;
     let mut app = App::new(size.width, size.height);
-    app.restore_sand_state();
 
     let physics_rate = Duration::from_millis(TIME_SETTINGS.physics_ms);
     let tick_rate = Duration::from_millis(TIME_SETTINGS.tick_ms);
     let render_rate = Duration::from_millis(1000 / TIME_SETTINGS.target_fps);
     let save_rate = Duration::from_secs(60);
-    let mut last_spawn = Instant::now();
-    let mut last_physics = Instant::now();
+    let mut last_simulation_update = Instant::now();
     let mut last_render = Instant::now();
     let mut last_save = Instant::now();
 
     loop {
-        if last_spawn.elapsed() >= tick_rate {
-            let should_spawn = app.time_tracker.current_session_start.is_some()
-                && app.time_tracker.active_category_index().is_some();
-
-            if should_spawn {
-                let cat_id = app.time_tracker.active_category_id();
-                app.sand_engine.spawn(cat_id);
-                app.render_needed = true;
-            }
-
-            last_spawn = Instant::now();
-        }
-
-        if last_physics.elapsed() >= physics_rate {
-            app.sand_engine.update();
-            app.render_needed = true;
-            if app.time_tracker.active_category_index() == Some(0) {
-                app.update_blink();
-            }
-            last_physics = Instant::now();
-        }
+        let now = Instant::now();
+        let wall_delta = now.saturating_duration_since(last_simulation_update);
+        last_simulation_update = now;
+        app.advance_runtime(wall_delta, tick_rate, physics_rate);
 
         if last_save.elapsed() >= save_rate {
             app.persist_sessions();
@@ -707,16 +1375,28 @@ pub fn run_ui() -> Result<(), io::Error> {
 
         if event::poll(Duration::from_millis(1))?
             && let Event::Key(key) = event::read()?
-            && app.handle_key(key)
         {
-            break;
+            if app.handle_key(key) {
+                break;
+            }
+            if app.detach_requested {
+                break;
+            }
         }
     }
 
-    app.time_tracker.end_session();
-    app.persist_sessions();
-    app.persist_sand_state();
-    app.persist_daily_sand_snapshot();
+    if app.detach_requested {
+        app.persist_sessions();
+        app.persist_sand_state();
+        app.persist_daily_sand_snapshot();
+        app.persist_detached_checkpoint();
+    } else {
+        app.end_active_session_now();
+        app.persist_sessions();
+        app.persist_sand_state();
+        app.persist_daily_sand_snapshot();
+        app.clear_detached_checkpoint();
+    }
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;

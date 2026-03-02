@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-use rand::Rng;
 use ratatui::{
     prelude::{Line, Span},
     style::{Color, Stylize},
@@ -27,10 +26,24 @@ pub struct SandState {
     pub grid_width: usize,
     pub grid_height: usize,
     pub grains: Vec<SandStateGrain>,
+    #[serde(default)]
+    pub frame_count: usize,
+    #[serde(default = "default_sweep_left_to_right")]
+    pub sweep_left_to_right: bool,
+    #[serde(default = "default_rng_state")]
+    pub rng_state: u64,
 }
 
 impl SandState {
     pub const VERSION: u8 = 1;
+}
+
+fn default_sweep_left_to_right() -> bool {
+    true
+}
+
+fn default_rng_state() -> u64 {
+    0x9E37_79B9_7F4A_7C15
 }
 
 pub struct SandEngine {
@@ -39,6 +52,7 @@ pub struct SandEngine {
     pub height: u16,
     frame_count: usize,
     sweep_left_to_right: bool,
+    rng_state: u64,
     pub grain_count: usize,
 }
 
@@ -50,6 +64,7 @@ impl SandEngine {
             height,
             frame_count: 0,
             sweep_left_to_right: true,
+            rng_state: rand::random::<u64>() | 1,
             grain_count: 0,
         };
         se.resize(width, height);
@@ -112,16 +127,15 @@ impl SandEngine {
             return;
         }
 
-        let mut rng = rand::thread_rng();
         let w = self.grid[0].len();
 
-        let x = rng.gen_range(0..w);
+        let x = self.random_index(w);
 
         if self.grid[0][x].is_none() {
             self.grid[0][x] = Some(category_id);
             self.grain_count += 1;
         } else {
-            let fallback_x = rng.gen_range(0..w);
+            let fallback_x = self.random_index(w);
             if self.grid[0][fallback_x].is_none() {
                 self.grid[0][fallback_x] = Some(category_id);
                 self.grain_count += 1;
@@ -156,7 +170,7 @@ impl SandEngine {
                             self.grid[y + 1][x] = Some(cat);
                             self.grid[y][x] = None;
                         } else {
-                            let dir: isize = if rand::random() { 1 } else { -1 };
+                            let dir: isize = if self.random_bool() { 1 } else { -1 };
                             let nx = (x as isize) + dir;
 
                             if nx >= 0
@@ -176,7 +190,7 @@ impl SandEngine {
                             self.grid[y + 1][x] = Some(cat);
                             self.grid[y][x] = None;
                         } else {
-                            let dir: isize = if rand::random() { 1 } else { -1 };
+                            let dir: isize = if self.random_bool() { 1 } else { -1 };
                             let nx = (x as isize) + dir;
 
                             if nx >= 0
@@ -365,6 +379,9 @@ impl SandEngine {
             grid_width,
             grid_height,
             grains,
+            frame_count: self.frame_count,
+            sweep_left_to_right: self.sweep_left_to_right,
+            rng_state: self.rng_state,
         }
     }
 
@@ -420,6 +437,39 @@ impl SandEngine {
             .flat_map(|row| row.iter())
             .filter(|cell| cell.is_some())
             .count();
+
+        self.frame_count = state.frame_count;
+        self.sweep_left_to_right = state.sweep_left_to_right;
+        self.rng_state = if state.rng_state == 0 {
+            default_rng_state()
+        } else {
+            state.rng_state
+        };
+    }
+
+    fn next_random_u64(&mut self) -> u64 {
+        if self.rng_state == 0 {
+            self.rng_state = default_rng_state();
+        }
+
+        let mut x = self.rng_state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.rng_state = x;
+        x
+    }
+
+    fn random_bool(&mut self) -> bool {
+        self.next_random_u64() & 1 == 1
+    }
+
+    fn random_index(&mut self, upper: usize) -> usize {
+        if upper <= 1 {
+            0
+        } else {
+            (self.next_random_u64() % upper as u64) as usize
+        }
     }
 }
 
@@ -727,6 +777,30 @@ mod tests {
             1
         );
         assert_eq!(se.grain_count, 2);
+    }
+
+    #[test]
+    fn test_sand_state_snapshot_round_trips_engine_metadata() {
+        let mut se = SandEngine::new(10, 10);
+        se.clear();
+        se.grid[0][0] = Some(CategoryId::new(1));
+        se.grain_count = 1;
+        se.frame_count = 9;
+        se.sweep_left_to_right = false;
+        se.rng_state = 0xABCD_1234;
+
+        let state = se.snapshot_state();
+        assert_eq!(state.frame_count, 9);
+        assert!(!state.sweep_left_to_right);
+        assert_eq!(state.rng_state, 0xABCD_1234);
+
+        let mut restored = SandEngine::new(10, 10);
+        let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
+        restored.restore_state(&state, &valid);
+
+        assert_eq!(restored.frame_count, 9);
+        assert!(!restored.sweep_left_to_right);
+        assert_eq!(restored.rng_state, 0xABCD_1234);
     }
 
     #[test]
