@@ -33,7 +33,7 @@ impl App {
         } else if let Some(idx) = active_index {
             categories
                 .get(idx)
-                .map(|category| category.name.clone())
+                .map(|category| self.display_layer_name(&category.name))
                 .unwrap_or_else(|| self.get_idle_face())
         } else {
             self.get_idle_face()
@@ -131,6 +131,10 @@ impl App {
             self.render_modal(f, size);
         } else if self.in_karma_modal() {
             self.render_report_modal(f, size);
+        }
+
+        if self.show_keybindings_modal {
+            self.render_keybindings_modal(f, size);
         }
     }
 }

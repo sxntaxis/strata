@@ -1,9 +1,12 @@
 use std::{
     collections::{HashMap, HashSet},
+    sync::{OnceLock, RwLock},
     time::Instant,
 };
 
-use chrono::{DateTime, Duration as ChronoDuration, FixedOffset, Local, NaiveDate, NaiveTime, Utc};
+use chrono::{
+    DateTime, Datelike, Duration as ChronoDuration, FixedOffset, Local, NaiveDate, NaiveTime, Utc,
+};
 use ratatui::style::Color;
 
 use crate::constants::COLORS;
@@ -102,6 +105,56 @@ pub enum DayBoundaryMode {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FirstDayOfWeek {
+    Monday,
+    Tuesday,
+    Wednesday,
+    Thursday,
+    Friday,
+    Saturday,
+    Sunday,
+}
+
+impl FirstDayOfWeek {
+    pub fn from_config_name(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "monday" | "mon" => Some(Self::Monday),
+            "tuesday" | "tue" | "tues" => Some(Self::Tuesday),
+            "wednesday" | "wed" => Some(Self::Wednesday),
+            "thursday" | "thu" | "thurs" => Some(Self::Thursday),
+            "friday" | "fri" => Some(Self::Friday),
+            "saturday" | "sat" => Some(Self::Saturday),
+            "sunday" | "sun" => Some(Self::Sunday),
+            _ => None,
+        }
+    }
+
+    pub const fn as_config_name(self) -> &'static str {
+        match self {
+            Self::Monday => "monday",
+            Self::Tuesday => "tuesday",
+            Self::Wednesday => "wednesday",
+            Self::Thursday => "thursday",
+            Self::Friday => "friday",
+            Self::Saturday => "saturday",
+            Self::Sunday => "sunday",
+        }
+    }
+
+    const fn num_days_from_monday(self) -> u32 {
+        match self {
+            Self::Monday => 0,
+            Self::Tuesday => 1,
+            Self::Wednesday => 2,
+            Self::Thursday => 3,
+            Self::Friday => 4,
+            Self::Saturday => 5,
+            Self::Sunday => 6,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DayBoundaryConfig {
     pub mode: DayBoundaryMode,
     pub fixed_hour: u32,
@@ -120,8 +173,41 @@ impl Default for DayBoundaryConfig {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RuntimeSettings {
+    pub day_boundary: DayBoundaryConfig,
+    pub first_day_of_week: FirstDayOfWeek,
+}
+
+impl Default for RuntimeSettings {
+    fn default() -> Self {
+        Self {
+            day_boundary: DayBoundaryConfig::default(),
+            first_day_of_week: FirstDayOfWeek::Monday,
+        }
+    }
+}
+
+fn runtime_settings_cell() -> &'static RwLock<RuntimeSettings> {
+    static CELL: OnceLock<RwLock<RuntimeSettings>> = OnceLock::new();
+    CELL.get_or_init(|| RwLock::new(RuntimeSettings::default()))
+}
+
+pub fn runtime_settings() -> RuntimeSettings {
+    runtime_settings_cell()
+        .read()
+        .map(|guard| *guard)
+        .unwrap_or_default()
+}
+
+pub fn set_runtime_settings(settings: RuntimeSettings) {
+    if let Ok(mut guard) = runtime_settings_cell().write() {
+        *guard = settings;
+    }
+}
+
 pub fn day_boundary_config() -> DayBoundaryConfig {
-    DayBoundaryConfig::default()
+    runtime_settings().day_boundary
 }
 
 pub fn operational_day_key_now() -> NaiveDate {
@@ -442,11 +528,6 @@ impl TimeTracker {
         self.category_store.category_id_by_name(name)
     }
 
-    pub fn category_name_by_id(&self, id: CategoryId) -> Option<&str> {
-        self.category_by_id(id)
-            .map(|category| category.name.as_str())
-    }
-
     pub fn category_color_by_id(&self, id: CategoryId) -> Option<Color> {
         self.category_by_id(id).map(|category| category.color)
     }
@@ -626,6 +707,7 @@ pub fn build_period_karma_report(
 
 fn period_bounds(period: ReportPeriod) -> (NaiveDate, NaiveDate, String) {
     let today = operational_day_key_now();
+    let settings = runtime_settings();
 
     match period {
         ReportPeriod::Today => {
@@ -633,7 +715,7 @@ fn period_bounds(period: ReportPeriod) -> (NaiveDate, NaiveDate, String) {
             (today, today, label)
         }
         ReportPeriod::Week => {
-            let start = today - ChronoDuration::days(6);
+            let start = start_of_week(today, settings.first_day_of_week);
             let label = format!("{}..{}", start.format("%Y-%m-%d"), today.format("%Y-%m-%d"));
             (start, today, label)
         }
@@ -643,6 +725,13 @@ fn period_bounds(period: ReportPeriod) -> (NaiveDate, NaiveDate, String) {
             (start, today, label)
         }
     }
+}
+
+fn start_of_week(day: NaiveDate, first_day: FirstDayOfWeek) -> NaiveDate {
+    let day_index = day.weekday().num_days_from_monday() as i64;
+    let first_index = first_day.num_days_from_monday() as i64;
+    let distance = (7 + day_index - first_index) % 7;
+    day - ChronoDuration::days(distance)
 }
 
 pub fn build_today_karma_report(
@@ -1086,6 +1175,20 @@ mod tests {
     }
 
     #[test]
+    fn test_start_of_week_respects_selected_first_day() {
+        let sunday = NaiveDate::from_ymd_opt(2026, 3, 1).expect("valid date");
+
+        let monday_start = start_of_week(sunday, FirstDayOfWeek::Monday);
+        let sunday_start = start_of_week(sunday, FirstDayOfWeek::Sunday);
+
+        assert_eq!(
+            monday_start,
+            NaiveDate::from_ymd_opt(2026, 2, 23).expect("valid date")
+        );
+        assert_eq!(sunday_start, sunday);
+    }
+
+    #[test]
     fn test_build_report_for_date_excludes_none_and_sorts() {
         let categories = vec![
             Category {
@@ -1311,7 +1414,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_period_report_week_includes_last_seven_days() {
+    fn test_build_period_report_week_uses_configured_week_start() {
         let categories = vec![
             Category {
                 id: CategoryId::new(0),
@@ -1330,10 +1433,9 @@ mod tests {
         ];
 
         let today = operational_day_key_now();
-        let in_window = (today - ChronoDuration::days(6))
-            .format("%Y-%m-%d")
-            .to_string();
-        let out_window = (today - ChronoDuration::days(7))
+        let week_start = start_of_week(today, runtime_settings().first_day_of_week);
+        let in_window = week_start.format("%Y-%m-%d").to_string();
+        let out_window = (week_start - ChronoDuration::days(1))
             .format("%Y-%m-%d")
             .to_string();
 

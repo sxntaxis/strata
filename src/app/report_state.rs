@@ -9,13 +9,6 @@ use crate::domain::{
 use super::App;
 
 impl App {
-    pub(super) fn category_name_for_id(&self, category_id: CategoryId) -> String {
-        self.time_tracker
-            .category_name_by_id(category_id)
-            .map(ToString::to_string)
-            .unwrap_or_else(|| "unknown".to_string())
-    }
-
     pub(super) fn category_color_for_id(&self, category_id: CategoryId) -> Color {
         self.time_tracker
             .category_color_by_id(category_id)

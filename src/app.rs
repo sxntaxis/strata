@@ -1,7 +1,7 @@
 use std::{
     collections::HashSet,
     io,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use crossterm::{
@@ -13,7 +13,8 @@ use ratatui::{Terminal, backend::CrosstermBackend, layout::Rect};
 
 use crate::{
     constants::{BLINK_SETTINGS, FACE_SETTINGS, TIME_SETTINGS},
-    domain::{CategoryId, ReportPeriod, TimeTracker},
+    domain::{CategoryId, ReportPeriod, RuntimeSettings, TimeTracker, set_runtime_settings},
+    keybindings,
     sand::SandEngine,
     storage,
 };
@@ -21,6 +22,7 @@ use crate::{
 mod category_modal_view;
 mod category_state;
 mod event_handlers;
+mod keybindings_modal_view;
 mod render_views;
 mod report_modal_view;
 mod report_state;
@@ -33,6 +35,22 @@ enum UiMode {
     Main,
     CategoryModal,
     KarmaModal,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AtlasSelectable {
+    TimeLogPath,
+    DayStartMode,
+    WeekStartDay,
+    Action(keybindings::Action),
+}
+
+#[derive(Clone, Debug)]
+enum AtlasOverlay {
+    CaptureKey { action: keybindings::Action },
+    EditTimeLogPath { input: String },
+    SelectDayStartMode { selected: usize },
+    SelectWeekStartDay { selected: usize },
 }
 
 struct App {
@@ -50,16 +68,49 @@ struct App {
     report_period: ReportPeriod,
     report_logs_category_id: Option<CategoryId>,
     report_log_selected_index: usize,
-    report_show_help: bool,
+    keymap: keybindings::Keymap,
+    runtime_settings: RuntimeSettings,
+    keymap_error: Option<String>,
+    show_keybindings_modal: bool,
+    keybindings_scroll: usize,
+    atlas_selected_index: usize,
+    atlas_overlay: Option<AtlasOverlay>,
+    keymap_last_modified: Option<SystemTime>,
+    keymap_last_poll: Instant,
     render_needed: bool,
+    none_entry_time: Option<Instant>,
 }
 
 impl App {
     fn new(width: u16, height: u16) -> Self {
+        let keymap_path = storage::get_keymap_path();
+        let keymap_last_modified = std::fs::metadata(&keymap_path)
+            .and_then(|metadata| metadata.modified())
+            .ok();
+        let (keymap, runtime_settings, loaded_time_log_path, keymap_error) =
+            match keybindings::load_keybindings(&keymap_path) {
+                Ok(loaded) => (
+                    loaded.keymap,
+                    loaded.runtime_settings,
+                    loaded.time_log_path,
+                    None,
+                ),
+                Err(err) => (
+                    keybindings::default_keymap(),
+                    keybindings::default_runtime_settings(),
+                    None,
+                    Some(err),
+                ),
+            };
+
+        set_runtime_settings(runtime_settings);
+        storage::set_runtime_storage_settings(storage::RuntimeStorageSettings {
+            time_log_path: loaded_time_log_path.clone(),
+        });
+
         let mut tracker = TimeTracker::new();
-        let data_dir = storage::get_data_dir();
-        let categories_path = data_dir.join("categories.csv");
-        let sessions_path = data_dir.join("time_log.csv");
+        let categories_path = storage::get_categories_path();
+        let sessions_path = storage::get_time_log_path();
 
         let loaded_categories = storage::load_categories_from_csv(&categories_path);
         let loaded_sessions =
@@ -96,8 +147,17 @@ impl App {
             report_period: ReportPeriod::Today,
             report_logs_category_id: None,
             report_log_selected_index: 0,
-            report_show_help: false,
+            keymap,
+            runtime_settings,
+            keymap_error,
+            show_keybindings_modal: false,
+            keybindings_scroll: 0,
+            atlas_selected_index: 0,
+            atlas_overlay: None,
+            keymap_last_modified,
+            keymap_last_poll: Instant::now(),
             render_needed: true,
+            none_entry_time: None,
         };
 
         app.persist_category_tags();
@@ -105,6 +165,7 @@ impl App {
         app.time_tracker.start_session();
         if app.time_tracker.active_category_index() == Some(0) {
             app.blink_state = app.next_blink_interval();
+            app.none_entry_time = Some(Instant::now());
         }
 
         app
@@ -132,7 +193,6 @@ impl App {
         self.report_period = ReportPeriod::Today;
         self.report_logs_category_id = None;
         self.report_log_selected_index = 0;
-        self.report_show_help = false;
         self.render_needed = true;
     }
 
@@ -140,7 +200,6 @@ impl App {
         self.ui_mode = UiMode::Main;
         self.report_logs_category_id = None;
         self.report_log_selected_index = 0;
-        self.report_show_help = false;
         self.render_needed = true;
     }
 
@@ -150,6 +209,272 @@ impl App {
 
     fn in_karma_modal(&self) -> bool {
         matches!(self.ui_mode, UiMode::KarmaModal)
+    }
+
+    fn is_drift_name(name: &str) -> bool {
+        name.eq_ignore_ascii_case("none") || name.eq_ignore_ascii_case("drift")
+    }
+
+    fn display_layer_name(&self, name: &str) -> String {
+        if Self::is_drift_name(name) {
+            "drift".to_string()
+        } else {
+            name.to_string()
+        }
+    }
+
+    fn atlas_items(&self) -> Vec<AtlasSelectable> {
+        let mut items = vec![
+            AtlasSelectable::TimeLogPath,
+            AtlasSelectable::DayStartMode,
+            AtlasSelectable::WeekStartDay,
+        ];
+        items.extend(
+            keybindings::Action::all()
+                .iter()
+                .copied()
+                .map(AtlasSelectable::Action),
+        );
+        items
+    }
+
+    fn selected_atlas_item(&self) -> AtlasSelectable {
+        let items = self.atlas_items();
+        items
+            .get(self.atlas_selected_index)
+            .copied()
+            .unwrap_or(AtlasSelectable::Action(keybindings::Action::all()[0]))
+    }
+
+    fn total_atlas_items(&self) -> usize {
+        self.atlas_items().len()
+    }
+
+    fn effective_keys_for_action(
+        &self,
+        action: keybindings::Action,
+    ) -> Vec<keybindings::KeyBinding> {
+        let direct = self.keymap.keys_for_action(action);
+        if !direct.is_empty() {
+            return direct;
+        }
+
+        match action {
+            keybindings::Action::OpenCategoryModal => {
+                self.keymap.keys_for_action(keybindings::Action::Confirm)
+            }
+            keybindings::Action::SwitchToNone => {
+                self.keymap.keys_for_action(keybindings::Action::Cancel)
+            }
+            _ => direct,
+        }
+    }
+
+    fn atlas_item_description(&self, item: AtlasSelectable) -> String {
+        match item {
+            AtlasSelectable::TimeLogPath => {
+                "Path where session rows are written (time_log.csv).".to_string()
+            }
+            AtlasSelectable::DayStartMode => {
+                "Operational day boundary mode used for day rollover.".to_string()
+            }
+            AtlasSelectable::WeekStartDay => {
+                "First weekday used by Week range in Karma pop-up.".to_string()
+            }
+            AtlasSelectable::Action(action) => action.description().to_string(),
+        }
+    }
+
+    fn atlas_item_color(&self, item: AtlasSelectable) -> ratatui::style::Color {
+        use ratatui::style::Color;
+
+        match item {
+            AtlasSelectable::TimeLogPath => Color::Cyan,
+            AtlasSelectable::DayStartMode => Color::Yellow,
+            AtlasSelectable::WeekStartDay => Color::Green,
+            AtlasSelectable::Action(action) => match action.category() {
+                keybindings::ActionCategory::Global => Color::Cyan,
+                keybindings::ActionCategory::Navigation => Color::Yellow,
+                keybindings::ActionCategory::CategoryModal => Color::Green,
+                keybindings::ActionCategory::ReportModal => Color::Magenta,
+                keybindings::ActionCategory::HelpModal => Color::Blue,
+            },
+        }
+    }
+
+    fn day_start_mode_options() -> [crate::domain::DayBoundaryMode; 2] {
+        [
+            crate::domain::DayBoundaryMode::FixedHour,
+            crate::domain::DayBoundaryMode::Sunrise,
+        ]
+    }
+
+    fn week_start_options() -> [crate::domain::FirstDayOfWeek; 7] {
+        [
+            crate::domain::FirstDayOfWeek::Monday,
+            crate::domain::FirstDayOfWeek::Tuesday,
+            crate::domain::FirstDayOfWeek::Wednesday,
+            crate::domain::FirstDayOfWeek::Thursday,
+            crate::domain::FirstDayOfWeek::Friday,
+            crate::domain::FirstDayOfWeek::Saturday,
+            crate::domain::FirstDayOfWeek::Sunday,
+        ]
+    }
+
+    fn day_start_setting_label(&self) -> String {
+        let boundary = self.runtime_settings.day_boundary;
+        let mode = match boundary.mode {
+            crate::domain::DayBoundaryMode::FixedHour => "fixed",
+            crate::domain::DayBoundaryMode::Sunrise => "sunrise",
+        };
+
+        let sign = if boundary.utc_offset_seconds < 0 {
+            "-"
+        } else {
+            "+"
+        };
+        let abs_offset = boundary.utc_offset_seconds.unsigned_abs() as u32;
+        let offset_hours = abs_offset / 3600;
+        let offset_minutes = (abs_offset % 3600) / 60;
+
+        format!(
+            "{} {:02}:{:02} (UTC{}{:02}:{:02})",
+            mode, boundary.fixed_hour, boundary.fixed_minute, sign, offset_hours, offset_minutes
+        )
+    }
+
+    fn first_day_of_week_label(&self) -> String {
+        let raw = self.runtime_settings.first_day_of_week.as_config_name();
+        let mut chars = raw.chars();
+        let Some(first) = chars.next() else {
+            return "Monday".to_string();
+        };
+
+        format!("{}{}", first.to_ascii_uppercase(), chars.as_str())
+    }
+
+    fn toggle_keybindings_modal(&mut self) {
+        self.show_keybindings_modal = !self.show_keybindings_modal;
+        if self.show_keybindings_modal {
+            self.atlas_selected_index = 0;
+            self.keybindings_scroll = 0;
+            self.atlas_overlay = None;
+        }
+        self.render_needed = true;
+    }
+
+    fn close_keybindings_modal(&mut self) {
+        self.show_keybindings_modal = false;
+        self.atlas_overlay = None;
+        self.render_needed = true;
+    }
+
+    fn select_previous_keybinding_action(&mut self) {
+        let total = self.total_atlas_items();
+        if total == 0 {
+            return;
+        }
+        self.atlas_selected_index = (self.atlas_selected_index + total - 1) % total;
+        self.render_needed = true;
+    }
+
+    fn select_next_keybinding_action(&mut self) {
+        let total = self.total_atlas_items();
+        if total == 0 {
+            return;
+        }
+        self.atlas_selected_index = (self.atlas_selected_index + 1) % total;
+        self.render_needed = true;
+    }
+
+    fn jump_keybindings_top(&mut self) {
+        self.atlas_selected_index = 0;
+        self.keybindings_scroll = 0;
+        self.render_needed = true;
+    }
+
+    fn jump_keybindings_bottom(&mut self) {
+        let total = self.total_atlas_items();
+        if total == 0 {
+            return;
+        }
+        self.atlas_selected_index = total - 1;
+        self.render_needed = true;
+    }
+
+    fn open_atlas_editor_for_selection(&mut self) {
+        match self.selected_atlas_item() {
+            AtlasSelectable::Action(action) => {
+                self.atlas_overlay = Some(AtlasOverlay::CaptureKey { action });
+            }
+            AtlasSelectable::TimeLogPath => {
+                self.atlas_overlay = Some(AtlasOverlay::EditTimeLogPath {
+                    input: storage::get_time_log_path().display().to_string(),
+                });
+            }
+            AtlasSelectable::DayStartMode => {
+                let selected = Self::day_start_mode_options()
+                    .iter()
+                    .position(|mode| *mode == self.runtime_settings.day_boundary.mode)
+                    .unwrap_or(0);
+                self.atlas_overlay = Some(AtlasOverlay::SelectDayStartMode { selected });
+            }
+            AtlasSelectable::WeekStartDay => {
+                let selected = Self::week_start_options()
+                    .iter()
+                    .position(|day| *day == self.runtime_settings.first_day_of_week)
+                    .unwrap_or(0);
+                self.atlas_overlay = Some(AtlasOverlay::SelectWeekStartDay { selected });
+            }
+        }
+
+        self.render_needed = true;
+    }
+
+    fn close_atlas_overlay(&mut self) {
+        self.atlas_overlay = None;
+        self.render_needed = true;
+    }
+
+    fn apply_loaded_keybindings(&mut self, loaded: keybindings::LoadedKeybindings) {
+        self.keymap = loaded.keymap;
+        self.runtime_settings = loaded.runtime_settings;
+        set_runtime_settings(self.runtime_settings);
+        storage::set_runtime_storage_settings(storage::RuntimeStorageSettings {
+            time_log_path: loaded.time_log_path,
+        });
+        self.keymap_error = None;
+        self.render_needed = true;
+    }
+
+    fn refresh_keymap_if_changed(&mut self) {
+        const POLL_INTERVAL: Duration = Duration::from_millis(300);
+        if self.keymap_last_poll.elapsed() < POLL_INTERVAL {
+            return;
+        }
+        self.keymap_last_poll = Instant::now();
+
+        let keymap_path = storage::get_keymap_path();
+        let modified = std::fs::metadata(&keymap_path)
+            .and_then(|metadata| metadata.modified())
+            .ok();
+
+        if modified == self.keymap_last_modified {
+            return;
+        }
+
+        self.keymap_last_modified = modified;
+
+        match keybindings::load_keybindings(&keymap_path) {
+            Ok(loaded) => {
+                self.apply_loaded_keybindings(loaded);
+            }
+            Err(err) => {
+                self.keymap_error = Some(err);
+            }
+        }
+
+        self.render_needed = true;
     }
 
     fn modal_rect(&self, terminal_size: Rect) -> Rect {
@@ -181,8 +506,7 @@ impl App {
         let compact = self.modal_rect(terminal_size);
         let inner_width = compact.width.saturating_sub(2) as usize;
         let inner_height = compact.height.saturating_sub(2);
-        let footer_height = if self.report_show_help { 1 } else { 0 };
-        let visible_rows = inner_height.saturating_sub(footer_height) as usize;
+        let visible_rows = inner_height as usize;
 
         let breathing_room = 2usize;
         let width_is_cramped = inner_width < min_inner_width.saturating_add(breathing_room);
@@ -198,9 +522,8 @@ impl App {
 
     fn get_idle_face(&self) -> String {
         let idle_seconds = self
-            .time_tracker
-            .current_session_start
-            .map_or(0, |s| s.elapsed().as_secs() as usize);
+            .none_entry_time
+            .map_or(0, |t| t.elapsed().as_secs() as usize);
 
         if self.blink_state < 0 {
             "(-_-)".to_string()
@@ -292,6 +615,8 @@ pub fn run_ui() -> Result<(), io::Error> {
             app.persist_sessions();
             last_save = Instant::now();
         }
+
+        app.refresh_keymap_if_changed();
 
         if last_render.elapsed() >= render_rate && app.render_needed {
             terminal.draw(|f| {

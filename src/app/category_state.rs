@@ -7,13 +7,13 @@ use super::App;
 impl App {
     pub(super) fn persist_categories(&self) {
         let categories = self.time_tracker.categories_for_storage();
-        let path = storage::get_data_dir().join("categories.csv");
+        let path = storage::get_categories_path();
         let _ = storage::save_categories_to_csv(&path, &categories);
     }
 
     pub(super) fn persist_sessions(&self) {
         let categories = self.time_tracker.categories_for_storage();
-        let path = storage::get_data_dir().join("time_log.csv");
+        let path = storage::get_time_log_path();
         let _ = storage::save_sessions_to_csv(&path, &self.time_tracker.sessions, &categories);
     }
 
@@ -150,6 +150,7 @@ impl App {
                 let index = self.time_tracker.category_count().saturating_sub(1);
                 let _ = self.time_tracker.set_active_category_by_index(index);
                 self.time_tracker.start_session();
+                self.none_entry_time = None;
                 self.persist_categories();
                 self.sync_modal_description_from_selection();
             }

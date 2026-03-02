@@ -26,6 +26,7 @@ impl App {
 
                 if is_selected {
                     let text_color = view_style::text_color_for_bg(cat.color);
+                    let layer_name = self.display_layer_name(&cat.name);
                     let description_text = if self.modal_description.is_empty() {
                         Span::raw("")
                     } else {
@@ -36,14 +37,15 @@ impl App {
                     };
                     ListItem::new(Line::from(vec![
                         Span::raw(dot).fg(cat.color),
-                        Span::raw(&cat.name).fg(text_color),
+                        Span::raw(layer_name).fg(text_color),
                         description_text,
                     ]))
                     .style(Style::default().fg(text_color).bg(cat.color))
                 } else {
+                    let layer_name = self.display_layer_name(&cat.name);
                     ListItem::new(Line::from(vec![
                         Span::raw(dot).fg(cat.color),
-                        Span::raw(&cat.name).fg(Color::White),
+                        Span::raw(layer_name).fg(Color::White),
                     ]))
                 }
             })
@@ -55,7 +57,7 @@ impl App {
                     ListItem::new(Line::from(vec![
                         Span::raw("● ").fg(cycling_color),
                         Span::raw(if self.new_category_name.is_empty() {
-                            "+ Add new..."
+                            "+ Forge new layer..."
                         } else {
                             &self.new_category_name
                         }),
@@ -65,7 +67,7 @@ impl App {
                     ListItem::new(Line::from(vec![
                         Span::raw("● ").fg(cycling_color),
                         Span::raw(if self.new_category_name.is_empty() {
-                            "+ Add new..."
+                            "+ Forge new layer..."
                         } else {
                             &self.new_category_name
                         })
@@ -84,7 +86,7 @@ impl App {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .title(Line::from(Span::styled(
-                        "strata",
+                        "Strata",
                         Style::default().fg(Color::White),
                     )))
                     .title_alignment(ratatui::layout::Alignment::Center)

@@ -38,6 +38,7 @@ pub struct SandEngine {
     pub width: u16,
     pub height: u16,
     frame_count: usize,
+    sweep_left_to_right: bool,
     pub grain_count: usize,
 }
 
@@ -48,6 +49,7 @@ impl SandEngine {
             width,
             height,
             frame_count: 0,
+            sweep_left_to_right: true,
             grain_count: 0,
         };
         se.resize(width, height);
@@ -129,21 +131,61 @@ impl SandEngine {
 
     fn apply_gravity(&mut self) {
         let h = self.grid.len();
+        if h < 2 {
+            return;
+        }
         let w = self.grid[0].len();
+        if w == 0 {
+            return;
+        }
+
+        let base_left_to_right = self.sweep_left_to_right;
+        self.sweep_left_to_right = !self.sweep_left_to_right;
 
         for y in (0..h - 1).rev() {
-            for x in 0..w {
-                if let Some(cat) = self.grid[y][x] {
-                    if self.grid[y + 1][x].is_none() {
-                        self.grid[y + 1][x] = Some(cat);
-                        self.grid[y][x] = None;
-                    } else {
-                        let dir: isize = if rand::random() { 1 } else { -1 };
-                        let nx = (x as isize) + dir;
+            let left_to_right = if y.is_multiple_of(2) {
+                base_left_to_right
+            } else {
+                !base_left_to_right
+            };
 
-                        if nx >= 0 && (nx as usize) < w && self.grid[y + 1][nx as usize].is_none() {
-                            self.grid[y + 1][nx as usize] = Some(cat);
+            if left_to_right {
+                for x in 0..w {
+                    if let Some(cat) = self.grid[y][x] {
+                        if self.grid[y + 1][x].is_none() {
+                            self.grid[y + 1][x] = Some(cat);
                             self.grid[y][x] = None;
+                        } else {
+                            let dir: isize = if rand::random() { 1 } else { -1 };
+                            let nx = (x as isize) + dir;
+
+                            if nx >= 0
+                                && (nx as usize) < w
+                                && self.grid[y + 1][nx as usize].is_none()
+                            {
+                                self.grid[y + 1][nx as usize] = Some(cat);
+                                self.grid[y][x] = None;
+                            }
+                        }
+                    }
+                }
+            } else {
+                for x in (0..w).rev() {
+                    if let Some(cat) = self.grid[y][x] {
+                        if self.grid[y + 1][x].is_none() {
+                            self.grid[y + 1][x] = Some(cat);
+                            self.grid[y][x] = None;
+                        } else {
+                            let dir: isize = if rand::random() { 1 } else { -1 };
+                            let nx = (x as isize) + dir;
+
+                            if nx >= 0
+                                && (nx as usize) < w
+                                && self.grid[y + 1][nx as usize].is_none()
+                            {
+                                self.grid[y + 1][nx as usize] = Some(cat);
+                                self.grid[y][x] = None;
+                            }
                         }
                     }
                 }
@@ -622,5 +664,20 @@ mod tests {
         assert_eq!(se.grid[2][2], None);
         assert_eq!(se.grid[3][3], Some(CategoryId::new(1)));
         assert_eq!(se.grain_count, 1);
+    }
+
+    #[test]
+    fn test_apply_gravity_alternates_horizontal_sweep_direction() {
+        let mut se = SandEngine::new(10, 10);
+        let initial = se.sweep_left_to_right;
+
+        se.apply_gravity();
+        let after_first = se.sweep_left_to_right;
+
+        se.apply_gravity();
+        let after_second = se.sweep_left_to_right;
+
+        assert_ne!(after_first, initial);
+        assert_eq!(after_second, initial);
     }
 }

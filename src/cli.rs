@@ -121,8 +121,7 @@ pub fn start_session(
     description: Option<String>,
     category_name: Option<String>,
 ) -> Result<(), String> {
-    let data_dir = storage::get_data_dir();
-    let categories_path = data_dir.join("categories.csv");
+    let categories_path = storage::get_categories_path();
     let categories = storage::load_categories_from_csv(&categories_path).categories;
 
     let cat_name = category_name.unwrap_or_else(|| "none".to_string());
@@ -159,9 +158,8 @@ pub fn stop_session() -> Result<usize, String> {
 
     let elapsed = (Utc::now() - active_session.start_time).num_seconds() as usize;
 
-    let data_dir = storage::get_data_dir();
-    let sessions_path = data_dir.join("time_log.csv");
-    let categories_path = data_dir.join("categories.csv");
+    let sessions_path = storage::get_time_log_path();
+    let categories_path = storage::get_categories_path();
 
     let categories = storage::load_categories_from_csv(&categories_path).categories;
     let mut sessions = storage::load_sessions_from_csv(&sessions_path, &categories).sessions;
@@ -197,9 +195,8 @@ pub fn stop_session() -> Result<usize, String> {
 }
 
 pub fn report(period: ReportPeriod) -> Result<(), String> {
-    let data_dir = storage::get_data_dir();
-    let sessions_path = data_dir.join("time_log.csv");
-    let categories_path = data_dir.join("categories.csv");
+    let sessions_path = storage::get_time_log_path();
+    let categories_path = storage::get_categories_path();
 
     let categories = storage::load_categories_from_csv(&categories_path).categories;
     let sessions = storage::load_sessions_from_csv(&sessions_path, &categories).sessions;
@@ -236,9 +233,8 @@ pub fn report(period: ReportPeriod) -> Result<(), String> {
 }
 
 pub fn export_data(format: ExportFormat, out_path: Option<PathBuf>) -> Result<(), String> {
-    let data_dir = storage::get_data_dir();
-    let sessions_path = data_dir.join("time_log.csv");
-    let categories_path = data_dir.join("categories.csv");
+    let sessions_path = storage::get_time_log_path();
+    let categories_path = storage::get_categories_path();
 
     let categories = storage::load_categories_from_csv(&categories_path).categories;
     let sessions = storage::load_sessions_from_csv(&sessions_path, &categories).sessions;

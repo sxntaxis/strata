@@ -1,9 +1,9 @@
 use ratatui::prelude::{Line, Span};
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Rect},
     style::{Color, Modifier, Style, Stylize},
-    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, BorderType, Borders, List, ListItem, ListState},
 };
 
 use crate::domain::{CategoryId, ReportPeriod};
@@ -77,11 +77,7 @@ impl App {
         ))
         .alignment(Alignment::Left);
 
-        let center_label = if let Some(category_id) = self.report_logs_category_id {
-            format!("{} logs", self.category_name_for_id(category_id))
-        } else {
-            "karma".to_string()
-        };
+        let center_label = "Karma".to_string();
 
         let center_title = Line::from(Span::styled(
             center_label,
@@ -121,12 +117,7 @@ impl App {
         f.render_widget(ratatui::widgets::Clear, modal_rect);
         f.render_widget(frame_block.clone(), modal_rect);
 
-        let inner = frame_block.inner(modal_rect);
-        let footer_height = if self.report_show_help { 1 } else { 0 };
-        let vertical = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(3), Constraint::Length(footer_height)])
-            .split(inner);
+        let list_area = frame_block.inner(modal_rect);
 
         if let Some(category_id) = self.report_logs_category_id {
             let empty_logs = Vec::new();
@@ -138,7 +129,7 @@ impl App {
             };
             let is_none_category = category_id == CategoryId::new(0);
 
-            let row_width = vertical[0].width as usize;
+            let row_width = list_area.width as usize;
             let metric_width = if is_none_category { 8 } else { 9 };
             let date_width = 7;
             let detail_width = row_width
@@ -213,16 +204,16 @@ impl App {
 
             let list = if logs.is_empty() {
                 List::new(vec![ListItem::new(Line::from(vec![Span::styled(
-                    "No logs for this category in this period.",
+                    "No logs for this layer in this period.",
                     Style::default().fg(Color::Gray),
                 )]))])
             } else {
                 List::new(items)
             };
 
-            f.render_stateful_widget(list, vertical[0], &mut list_state);
+            f.render_stateful_widget(list, list_area, &mut list_state);
         } else {
-            let row_width = vertical[0].width as usize;
+            let row_width = list_area.width as usize;
             let metric_width = 9;
             let name_width = row_width.saturating_sub(metric_width + 4).max(4);
 
@@ -239,7 +230,8 @@ impl App {
                     } else {
                         "● "
                     };
-                    let name = self.truncate_label(&entry.category_name, name_width);
+                    let branded_name = self.display_layer_name(&entry.category_name);
+                    let name = self.truncate_label(&branded_name, name_width);
                     let pad = name_width.saturating_sub(name.chars().count()) + 1;
                     let is_none_row = entry.category_id == CategoryId::new(0);
                     let metric_value = if is_none_row {
@@ -295,17 +287,7 @@ impl App {
                 List::new(items)
             };
 
-            f.render_stateful_widget(list, vertical[0], &mut list_state);
-        }
-
-        if self.report_show_help {
-            let help_text = if self.report_logs_category_id.is_some() {
-                "keys: up/down  shift+left/right  d/w/m  esc back  ?"
-            } else {
-                "keys: up/down  enter logs  shift+left/right  d/w/m  esc  ?"
-            };
-            let footer = Paragraph::new(Line::from(Span::raw(help_text).fg(Color::DarkGray)));
-            f.render_widget(footer, vertical[1]);
+            f.render_stateful_widget(list, list_area, &mut list_state);
         }
     }
 }

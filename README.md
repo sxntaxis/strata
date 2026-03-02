@@ -40,8 +40,46 @@ Strata stores runtime data in XDG paths:
 
 - Data: `~/.local/share/strata/`
 - State: `~/.local/state/strata/`
+- Config: `~/.config/strata/`
+
+You can override the data directory with `STRATA_DATA_DIR=/your/path`.
 
 Repo-local runtime artifacts are intentionally ignored by git.
+
+## Keybindings
+
+- Open the Command Atlas in TUI with `?` or `F1`.
+- In layer text entry, `?` stays a normal character; use `F1` there.
+- Optional config file: `~/.config/strata/keymap.json`
+
+Example:
+
+```json
+{
+  "keymap_inherit": true,
+  "time_log_path": "/home/user/.local/share/strata/time_log.csv",
+  "day_start_mode": "sunrise",
+  "day_start_hour": 6,
+  "day_start_minute": 0,
+  "first_day_of_week": "monday",
+  "unbind_actions": ["open_layer_popup"],
+  "keymap": {
+    "f": "open_karma_popup",
+    "k": null,
+    "ctrl-q": "quit"
+  }
+}
+```
+
+Notes:
+
+- `keymap_inherit: true` starts from built-in defaults, then applies overrides.
+- Setting a key to `null` unbinds that key.
+- `unbind_actions` disables specific actions by name.
+- Setting `keymap_inherit: false` starts from an empty keymap.
+- `time_log_path` accepts a CSV path or directory (directory auto-appends `time_log.csv`).
+- `day_start_mode` accepts `fixed` or `sunrise`.
+- `first_day_of_week` accepts `monday` through `sunday`.
 
 ## Quality Gates
 
