@@ -1,0 +1,32 @@
+name: sqlite005-switch-safe
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  switch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: storage/005-interchange-recovery
+          fetch-depth: 0
+
+      - name: Switch to safe fragments
+        run: |
+          sed -i 's#\.sqlite005/payload\.\*#.sqlite005/safe.*#' .github/workflows/sqlite005-assemble.yml
+          rm -f .github/workflows/sqlite005-switch-safe.yml
+
+      - name: Commit switch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore(storage): switch SQLITE-005 transport"
+          git push origin HEAD:storage/005-interchange-recovery
