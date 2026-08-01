@@ -131,9 +131,7 @@ PRAGMA user_version = 1;
 pub(crate) enum SqliteStoreError {
     #[error("SQLite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
-    #[error(
-        "database schema version {found} is newer than the supported version {supported}"
-    )]
+    #[error("database schema version {found} is newer than the supported version {supported}")]
     UnsupportedSchema { found: i64, supported: i64 },
     #[error("there is no active session to finish")]
     NoActiveSession,
@@ -179,8 +177,7 @@ impl SqliteRepository {
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "synchronous", "NORMAL")?;
 
-        let version: i64 =
-            connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
         if version > CURRENT_SCHEMA_VERSION {
             return Err(SqliteStoreError::UnsupportedSchema {
                 found: version,
@@ -210,10 +207,7 @@ impl SqliteRepository {
             .query_row("PRAGMA integrity_check", [], |row| row.get(0))?)
     }
 
-    pub fn start_session(
-        &mut self,
-        active: &NewActiveSession<'_>,
-    ) -> Result<(), SqliteStoreError> {
+    pub fn start_session(&mut self, active: &NewActiveSession<'_>) -> Result<(), SqliteStoreError> {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
