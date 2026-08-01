@@ -1,0 +1,59 @@
+schema_version = 2
+name = "Strata"
+lifecycle = "active"
+locale = "en"
+verified_on = "2026-08-01"
+languages = ["rust"]
+interfaces = ["tui", "cli"]
+storage = ["csv", "files"]
+
+[authority]
+canonical = "Accepted docs, Rust source, tests, and verified runtime behavior"
+projections = ["terminal UI", "CLI reports", "CSV/JSON/ICS exports", "sediment visualization"]
+
+[commands]
+check = "cargo fmt --all -- --check && cargo clippy --all-targets --all-features -- -D warnings"
+test = "cargo test --all-features"
+smoke = "cargo run -- --help"
+
+[agent]
+max_lines = 220
+
+[architecture]
+source_roots = ["src", "tests"]
+warn_file_lines = 500
+
+[[components]]
+name = "runtime"
+path = "src"
+status = "supported"
+rationale = "Rust application containing the TUI, CLI, domain, storage, and sediment simulation"
+remove_by = ""
+
+[[components]]
+name = "tui"
+path = "src/app.rs"
+status = "supported"
+rationale = "Primary continuous-ledger and sediment interaction surface"
+remove_by = ""
+
+[[components]]
+name = "cli"
+path = "src/cli.rs"
+status = "supported"
+rationale = "Non-interactive timer, reporting, and export interface"
+remove_by = ""
+
+[[components]]
+name = "sediment"
+path = "src/sand"
+status = "supported"
+rationale = "Falling-sand simulation and Braille-cell rendering"
+remove_by = ""
+
+[[components]]
+name = "notebook"
+path = "notebook"
+status = "experimental"
+rationale = "Repository-local product memory, decisions, evidence, research, and current frontier"
+remove_by = ""
