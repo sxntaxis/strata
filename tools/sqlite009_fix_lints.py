@@ -9,3 +9,11 @@ text = text.replace(
 text = text.replace("    EmergencyExport,\n", "")
 text = text.replace('            Self::EmergencyExport => "emergency recovery export",\n', "")
 path.write_text(text)
+
+path = Path("tests/sqlite_cli_authority.rs")
+text = path.read_text()
+text = text.replace(
+    "        let mut files = fs::read_dir(directory)",
+    "        let mut files: Vec<PathBuf> = fs::read_dir(directory)",
+)
+path.write_text(text)
