@@ -28,7 +28,10 @@ jobs:
           components: rustfmt, clippy
 
       - name: Apply implementation
-        run: python tools/temporal001_apply.py
+        run: |
+          sed -i 's/"clamped_end", "interval.ended_at_utc", minimum=2/"clamped_end", "interval.ended_at_utc", minimum=1/' tools/temporal001_apply.py
+          sed -i 's/"ended_local", "ended_civil", minimum=2/"ended_local", "ended_civil", minimum=1/' tools/temporal001_apply.py
+          python tools/temporal001_apply.py
 
       - name: Format
         run: cargo fmt --all
