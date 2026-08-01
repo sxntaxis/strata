@@ -414,6 +414,17 @@ impl App {
         started_at_utc: DateTime<Utc>,
         accept_large_wall_interval: bool,
     ) {
+        if let Err(error) =
+            temporal::checked_wall_interval(started_at_utc, Utc::now(), accept_large_wall_interval)
+        {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::ActiveStart,
+                RecoveryAction::ReloadAuthority,
+                Err(error),
+            );
+            return;
+        }
+
         if let Some(database_path) = self.sqlite_database_path.clone() {
             let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
                 self.record_storage_result_for::<()>(
@@ -930,9 +941,24 @@ impl App {
             accept_large_wall_interval,
         )?;
         self.time_tracker
-            .start_session_with_elapsed(interval.elapsed_seconds);
+            .start_session_with_elapsed(interval.elapsed_seconds)?;
         self.session.active_session_started_at_utc = Some(started_at_utc);
         Ok(())
+    }
+
+    fn begin_transition_session(
+        &mut self,
+        started_at_utc: DateTime<Utc>,
+        clock_mode: SessionClockMode,
+    ) -> Result<(), String> {
+        match clock_mode {
+            SessionClockMode::LiveMonotonic => {
+                self.time_tracker.start_session();
+                self.session.active_session_started_at_utc = Some(started_at_utc);
+                Ok(())
+            }
+            SessionClockMode::HistoricalWall => self.begin_active_session_at(started_at_utc, true),
+        }
     }
 
     fn reconciled_active_interval(
@@ -1099,10 +1125,7 @@ impl App {
                 return false;
             }
             self.session.active_session_stable_id = receipt.resulting_active_stable_id;
-            if let Err(error) = self.begin_active_session_at(
-                interval.ended_at_utc,
-                clock_mode == SessionClockMode::HistoricalWall,
-            ) {
+            if let Err(error) = self.begin_transition_session(interval.ended_at_utc, clock_mode) {
                 self.record_storage_result_for::<()>(
                     PersistenceOperation::ActiveStart,
                     RecoveryAction::ReloadAuthority,
@@ -1116,17 +1139,19 @@ impl App {
             return true;
         }
 
-        self.end_active_session_at(switched_at_utc, clock_mode);
+        if self
+            .end_active_session_at(switched_at_utc, clock_mode)
+            .is_none()
+        {
+            return false;
+        }
         self.persist_sessions();
 
         if !self.time_tracker.set_active_category_by_id(category_id) {
             return false;
         }
 
-        if let Err(error) = self.begin_active_session_at(
-            switched_at_utc,
-            clock_mode == SessionClockMode::HistoricalWall,
-        ) {
+        if let Err(error) = self.begin_transition_session(switched_at_utc, clock_mode) {
             self.record_storage_result_for::<()>(
                 PersistenceOperation::ActiveStart,
                 RecoveryAction::ReloadAuthority,

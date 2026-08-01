@@ -4,7 +4,7 @@ use chrono::{DateTime, Duration as ChronoDuration, FixedOffset, NaiveDate, Naive
 
 use crate::domain::{DayBoundaryConfig, DayBoundaryMode};
 
-pub(crate) const MAX_LIVE_CLOCK_SKEW: Duration = Duration::from_secs(5 * 60);
+pub(crate) const MAX_LIVE_CLOCK_SKEW: Duration = Duration::from_secs(5);
 pub(crate) const MAX_UNATTENDED_WALL_INTERVAL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,6 +152,16 @@ mod tests {
                 .elapsed_seconds,
             8 * 24 * 60 * 60
         );
+    }
+
+    #[test]
+    fn ordinary_subsecond_wall_jitter_uses_monotonic_elapsed() {
+        let start = Utc.with_ymd_and_hms(2026, 8, 1, 12, 0, 0).single().unwrap();
+        let elapsed = Duration::from_secs(60);
+        let observed = start + ChronoDuration::seconds(61);
+        let interval = reconcile_live_interval(start, observed, elapsed).unwrap();
+        assert_eq!(interval.elapsed_seconds, 60);
+        assert_eq!(interval.ended_at_utc, start + ChronoDuration::seconds(60));
     }
 
     #[test]

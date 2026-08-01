@@ -641,9 +641,15 @@ impl TimeTracker {
         self.current_session_start = Some(Instant::now());
     }
 
-    pub fn start_session_with_elapsed(&mut self, elapsed_seconds: usize) {
+    pub fn start_session_with_elapsed(&mut self, elapsed_seconds: usize) -> Result<(), String> {
         let offset = Duration::from_secs(elapsed_seconds as u64);
-        self.current_session_start = Some(Instant::now() - offset);
+        let start = Instant::now().checked_sub(offset).ok_or_else(|| {
+            format!(
+                "elapsed interval of {elapsed_seconds} seconds exceeds the monotonic clock range"
+            )
+        })?;
+        self.current_session_start = Some(start);
+        Ok(())
     }
 
     pub fn current_elapsed(&self) -> Option<Duration> {
