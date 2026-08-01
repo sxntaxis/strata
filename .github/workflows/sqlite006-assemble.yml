@@ -18,82 +18,9 @@ jobs:
           ref: storage/006-cli-authority-activation
           fetch-depth: 0
 
-      - name: Recover and run wiring script
+      - name: Wire authority and CLI boundaries
         run: |
-          git show HEAD~2:.github/workflows/sqlite006-assemble.yml > /tmp/sqlite006-old.yml
-          python3 - <<'PY'
-          from pathlib import Path
-
-          lines = Path('/tmp/sqlite006-old.yml').read_text().splitlines()
-          start = next(index for index, line in enumerate(lines) if "python3 - <<'PY'" in line) + 1
-          end = next(index for index in range(start, len(lines)) if lines[index].strip() == 'PY')
-          script = '\n'.join(
-              line[10:] if line.startswith('          ') else line
-              for line in lines[start:end]
-          ) + '\n'
-
-          block_start = script.index("integrity_anchor = '''")
-          block_end = script.index("sqlite.write_text(text)", block_start)
-          replacement = """metadata_methods = r'''    pub fn metadata_value(&self, key: &str) -> Result<Option<String>, SqliteStoreError> {
-        Ok(self
-            .connection
-            .query_row(
-                \"SELECT value FROM database_metadata WHERE key = ?1\",
-                params![key],
-                |row| row.get(0),
-            )
-            .optional()?)
-    }
-
-    pub fn transition_storage_authority(
-        &mut self,
-        expected: &str,
-        next: &str,
-        activated_at_utc: &str,
-    ) -> Result<(), SqliteStoreError> {
-        let transaction = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current: Option<String> = transaction
-            .query_row(
-                \"SELECT value FROM database_metadata WHERE key = 'storage_authority'\",
-                [],
-                |row| row.get(0),
-            )
-            .optional()?;
-        let found = current.unwrap_or_else(|| \"missing\".to_string());
-        if found != expected {
-            return Err(SqliteStoreError::AuthorityConflict {
-                expected: expected.to_string(),
-                found,
-            });
-        }
-        transaction.execute(
-            \"UPDATE database_metadata SET value = ?1 WHERE key = 'storage_authority'\",
-            params![next],
-        )?;
-        transaction.execute(
-            \"INSERT INTO database_metadata(key, value)
-             VALUES ('sqlite_cli_activated_at_utc', ?1)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value\",
-            params![activated_at_utc],
-        )?;
-        transaction.commit()?;
-        Ok(())
-    }
-
-'''
-if 'pub fn metadata_value(' not in text:
-    text = replace_once(
-        text,
-        \"    pub fn start_session(&mut self, active: &NewActiveSession<'_>)\",
-        metadata_methods + \"    pub fn start_session(&mut self, active: &NewActiveSession<'_>)\",
-        'metadata methods',
-    )
-"""
-          script = script[:block_start] + replacement + script[block_end:]
-          Path('/tmp/sqlite006-wire.py').write_text(script)
-          PY
+          python3 tools/sqlite006_recover.py
           python3 /tmp/sqlite006-wire.py
 
       - name: Set up Rust
