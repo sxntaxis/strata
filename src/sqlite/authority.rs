@@ -3,6 +3,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(test)]
+use std::cell::Cell;
+
 use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -183,8 +186,47 @@ pub(crate) fn ensure_tui_legacy_allowed() -> Result<(), String> {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    static TEST_PAGE_LIMIT_ENABLED: Cell<bool> = const { Cell::new(false) };
+}
+
+#[cfg(test)]
+pub(crate) fn with_test_page_limit<T>(action: impl FnOnce() -> T) -> T {
+    struct Reset(bool);
+
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            TEST_PAGE_LIMIT_ENABLED.with(|enabled| enabled.set(self.0));
+        }
+    }
+
+    let previous = TEST_PAGE_LIMIT_ENABLED.with(|enabled| enabled.replace(true));
+    let _reset = Reset(previous);
+    action()
+}
+
 pub(crate) fn open_cli_repository(path: &Path) -> Result<SqliteRepository, String> {
     let repository = SqliteRepository::open(path).map_err(|error| error.to_string())?;
+    #[cfg(test)]
+    TEST_PAGE_LIMIT_ENABLED.with(|enabled| -> Result<(), String> {
+        if !enabled.get() {
+            return Ok(());
+        }
+        repository
+            .connection
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode=DELETE;")
+            .map_err(|error| error.to_string())?;
+        let page_count: i64 = repository
+            .connection
+            .query_row("PRAGMA page_count", [], |row| row.get(0))
+            .map_err(|error| error.to_string())?;
+        repository
+            .connection
+            .pragma_update(None, "max_page_count", page_count)
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    })?;
     let metadata = repository
         .metadata_value("storage_authority")
         .map_err(|error| error.to_string())?

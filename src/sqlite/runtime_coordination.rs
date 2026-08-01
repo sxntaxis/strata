@@ -5,6 +5,9 @@ use std::{
     collections::HashSet,
     sync::{Mutex, OnceLock},
 };
+
+#[cfg(test)]
+use std::cell::RefCell;
 use thiserror::Error;
 
 use super::repository::{ActiveSessionRecord, SandStateRecord};
@@ -391,6 +394,7 @@ pub(crate) fn claim_checkpoint(
                  WHERE singleton = 1 AND status = 'pending'",
                 [],
             )?;
+            maybe_inject_test_fault("checkpoint-claim", "commit")?;
             transaction.commit()?;
             Ok(Some(ClaimedCheckpoint {
                 active_session_stable_id,
@@ -398,6 +402,7 @@ pub(crate) fn claim_checkpoint(
             }))
         }
         "recovering" => {
+            maybe_inject_test_fault("checkpoint-claim", "commit")?;
             transaction.commit()?;
             Ok(Some(ClaimedCheckpoint {
                 active_session_stable_id,
@@ -409,6 +414,7 @@ pub(crate) fn claim_checkpoint(
                 "DELETE FROM runtime_checkpoint WHERE singleton = 1 AND status = 'committed'",
                 [],
             )?;
+            maybe_inject_test_fault("checkpoint-claim", "commit")?;
             transaction.commit()?;
             Ok(None)
         }
@@ -447,6 +453,7 @@ pub(crate) fn quarantine_checkpoint(
             actual: actual.unwrap_or_else(|| "missing".to_string()),
         });
     }
+    maybe_inject_test_fault("checkpoint-quarantine", "commit")?;
     transaction.commit()?;
     Ok(())
 }
@@ -555,6 +562,7 @@ pub(crate) fn clear_committed_checkpoint(
                 "DELETE FROM runtime_checkpoint WHERE singleton = 1 AND status = 'committed'",
                 [],
             )?;
+            maybe_inject_test_fault("checkpoint-clear", "commit")?;
             transaction.commit()?;
             Ok(())
         }
@@ -565,10 +573,76 @@ pub(crate) fn clear_committed_checkpoint(
     }
 }
 
+#[cfg(test)]
+#[derive(Clone)]
+struct ScopedTestFault {
+    operation: String,
+    phase: String,
+    class: String,
+    remaining: usize,
+}
+
+#[cfg(test)]
+thread_local! {
+    static SCOPED_TEST_FAULT: RefCell<Option<ScopedTestFault>> = const { RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn with_test_fault<T>(
+    operation: &str,
+    phase: &str,
+    class: &str,
+    action: impl FnOnce() -> T,
+) -> T {
+    struct Reset(Option<ScopedTestFault>);
+
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            SCOPED_TEST_FAULT.with(|slot| {
+                slot.replace(self.0.take());
+            });
+        }
+    }
+
+    let previous = SCOPED_TEST_FAULT.with(|slot| {
+        slot.replace(Some(ScopedTestFault {
+            operation: operation.to_string(),
+            phase: phase.to_string(),
+            class: class.to_string(),
+            remaining: 1,
+        }))
+    });
+    let _reset = Reset(previous);
+    action()
+}
+
 pub(crate) fn maybe_inject_test_fault(
     operation: &str,
     phase: &str,
 ) -> Result<(), CoordinationError> {
+    #[cfg(test)]
+    {
+        let injected = SCOPED_TEST_FAULT.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let specification = slot.as_mut()?;
+            if specification.operation != operation
+                || specification.phase != phase
+                || specification.remaining == 0
+            {
+                return None;
+            }
+            specification.remaining -= 1;
+            Some(specification.class.clone())
+        });
+        if let Some(class) = injected {
+            return Err(CoordinationError::InjectedFailure {
+                operation: operation.to_string(),
+                phase: phase.to_string(),
+                class,
+            });
+        }
+    }
+
     #[cfg(debug_assertions)]
     {
         if let Ok(specification) = std::env::var("STRATA_TEST_SQLITE_FAULT") {
