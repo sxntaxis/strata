@@ -14,6 +14,7 @@ mod sand;
 #[allow(dead_code)]
 mod sqlite;
 mod storage;
+mod temporal;
 
 fn load_startup_configuration(
     ignore_config: bool,

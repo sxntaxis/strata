@@ -4,12 +4,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use chrono::{
-    DateTime, Datelike, Duration as ChronoDuration, FixedOffset, Local, NaiveDate, NaiveTime, Utc,
-};
+#[cfg(test)]
+use chrono::Local;
+use chrono::{DateTime, Datelike, Duration as ChronoDuration, FixedOffset, NaiveDate, Utc};
 use ratatui::style::Color;
 
-use crate::constants::COLORS;
+use crate::{constants::COLORS, temporal};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct CategoryId(pub u64);
@@ -101,7 +101,7 @@ pub struct LiveSessionPreview {
     pub category_id: CategoryId,
     pub description: String,
     pub elapsed_seconds: usize,
-    pub now_local: DateTime<Local>,
+    pub now_civil: DateTime<FixedOffset>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -227,8 +227,13 @@ pub fn operational_day_key_now() -> NaiveDate {
     operational_day_key_from_utc(Utc::now(), &day_boundary_config())
 }
 
-pub fn operational_day_key_for_local(local: &DateTime<Local>) -> NaiveDate {
-    operational_day_key_from_utc(local.with_timezone(&Utc), &day_boundary_config())
+pub fn operational_day_key_for_utc(timestamp: DateTime<Utc>) -> NaiveDate {
+    operational_day_key_from_utc(timestamp, &day_boundary_config())
+}
+
+pub fn civil_time_for_utc(timestamp: DateTime<Utc>) -> DateTime<FixedOffset> {
+    temporal::civil_from_utc(timestamp, &day_boundary_config())
+        .expect("runtime UTC offset must be validated before time authority is used")
 }
 
 pub fn report_period_date_bounds_with_offset(
@@ -239,31 +244,12 @@ pub fn report_period_date_bounds_with_offset(
     (start, end)
 }
 
-fn operational_day_key_from_utc(now_utc: DateTime<Utc>, config: &DayBoundaryConfig) -> NaiveDate {
-    let offset = if let Some(offset) = FixedOffset::east_opt(config.utc_offset_seconds) {
-        offset
-    } else if let Some(offset) = FixedOffset::west_opt(6 * 60 * 60) {
-        offset
-    } else if let Some(offset) = FixedOffset::east_opt(0) {
-        offset
-    } else {
-        return now_utc.date_naive();
-    };
-    let local = now_utc.with_timezone(&offset);
-
-    let cutoff = match config.mode {
-        DayBoundaryMode::FixedHour | DayBoundaryMode::Sunrise => {
-            NaiveTime::from_hms_opt(config.fixed_hour, config.fixed_minute, 0)
-                .or_else(|| NaiveTime::from_hms_opt(6, 0, 0))
-                .unwrap_or(NaiveTime::MIN)
-        }
-    };
-
-    let mut day = local.date_naive();
-    if local.time() < cutoff {
-        day -= ChronoDuration::days(1);
-    }
-    day
+pub(crate) fn operational_day_key_from_utc(
+    now_utc: DateTime<Utc>,
+    config: &DayBoundaryConfig,
+) -> NaiveDate {
+    temporal::operational_day_from_utc(now_utc, config)
+        .expect("runtime time policy must be validated before operational-day allocation")
 }
 
 #[derive(Clone, Debug)]
@@ -660,11 +646,19 @@ impl TimeTracker {
         self.current_session_start = Some(Instant::now() - offset);
     }
 
-    pub fn end_session_with_elapsed_at_local(
+    pub fn current_elapsed(&self) -> Option<Duration> {
+        self.current_session_start.map(|start| start.elapsed())
+    }
+
+    pub fn end_session_with_elapsed_at_local<Tz>(
         &mut self,
         elapsed: usize,
-        end_local: DateTime<Local>,
-    ) -> Option<usize> {
+        end_local: DateTime<Tz>,
+    ) -> Option<usize>
+    where
+        Tz: chrono::TimeZone,
+        Tz::Offset: std::fmt::Display,
+    {
         self.current_session_start?;
         let cat_id = self.active_category_id;
         let cat_description = self
@@ -683,15 +677,19 @@ impl TimeTracker {
         Some(elapsed)
     }
 
-    pub fn record_session_at(
+    pub fn record_session_at<Tz>(
         &mut self,
         cat_id: CategoryId,
         cat_description: &str,
         elapsed: usize,
-        end_local: DateTime<Local>,
-    ) {
-        let start_time = end_local - ChronoDuration::seconds(elapsed as i64);
-        let today = operational_day_key_for_local(&end_local)
+        end_local: DateTime<Tz>,
+    ) where
+        Tz: chrono::TimeZone,
+        Tz::Offset: std::fmt::Display,
+    {
+        let end_utc = end_local.with_timezone(&Utc);
+        let start_time = end_local.clone() - ChronoDuration::seconds(elapsed as i64);
+        let today = operational_day_key_for_utc(end_utc)
             .format("%Y-%m-%d")
             .to_string();
 
@@ -1148,11 +1146,11 @@ pub fn build_category_logs_for_period_with_offset(
         && live.category_id == category_id
         && live.elapsed_seconds > 0
     {
-        let day = operational_day_key_for_local(&live.now_local)
+        let day = operational_day_key_for_utc(live.now_civil.with_timezone(&Utc))
             .format("%Y-%m-%d")
             .to_string();
-        let end_time = live.now_local.format("%H:%M:%S").to_string();
-        let start_time = (live.now_local - ChronoDuration::seconds(live.elapsed_seconds as i64))
+        let end_time = live.now_civil.format("%H:%M:%S").to_string();
+        let start_time = (live.now_civil - ChronoDuration::seconds(live.elapsed_seconds as i64))
             .format("%H:%M:%S")
             .to_string();
 

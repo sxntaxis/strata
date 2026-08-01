@@ -317,7 +317,11 @@ impl App {
 
         if let Some(added_id) = added_id {
             self.persist_categories();
-            self.switch_active_category_at(added_id, chrono::Utc::now());
+            self.switch_active_category_at(
+                added_id,
+                chrono::Utc::now(),
+                super::SessionClockMode::LiveMonotonic,
+            );
             self.sync_modal_description_from_selection();
         }
     }
@@ -337,7 +341,11 @@ impl App {
                 .unwrap_or(false);
 
             if was_active {
-                self.switch_active_category_at(DRIFT_CATEGORY_ID, chrono::Utc::now());
+                self.switch_active_category_at(
+                    DRIFT_CATEGORY_ID,
+                    chrono::Utc::now(),
+                    super::SessionClockMode::LiveMonotonic,
+                );
             }
 
             if let Some(category_id) = removed_id

@@ -1,13 +1,14 @@
 use std::{collections::BTreeMap, path::Path, process};
 
-use chrono::{DateTime, FixedOffset, Local, SecondsFormat, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 
 use crate::{
     constants::COLORS,
     domain::{
-        Category, CategoryId, DRIFT_CATEGORY_CONFIG_NAME, Session, is_drift_name,
-        operational_day_key_for_local, runtime_settings,
+        Category, CategoryId, DRIFT_CATEGORY_CONFIG_NAME, Session, civil_time_for_utc,
+        is_drift_name, operational_day_key_for_utc,
     },
+    temporal,
 };
 
 use super::{
@@ -108,7 +109,10 @@ pub(crate) fn start_session(
     })
 }
 
-pub(crate) fn stop_session(database_path: &Path) -> Result<SqliteCliStopResult, String> {
+pub(crate) fn stop_session(
+    database_path: &Path,
+    accept_clock_jump: bool,
+) -> Result<SqliteCliStopResult, String> {
     let mut repository = open_cli_repository(database_path)?;
     let active = repository
         .active_session()
@@ -118,9 +122,11 @@ pub(crate) fn stop_session(database_path: &Path) -> Result<SqliteCliStopResult, 
         let started_at = DateTime::parse_from_rfc3339(&active.started_at_utc)
             .map_err(|error| format!("Active session has an invalid start timestamp: {error}"))?
             .with_timezone(&Utc);
-        let ended_at = Utc::now();
-        let elapsed_i64 = (ended_at - started_at).num_seconds().max(0);
-        let operational_day = operational_day_key_for_local(&Local::now())
+        let interval = temporal::checked_wall_interval(started_at, Utc::now(), accept_clock_jump)?;
+        let ended_at = interval.ended_at_utc;
+        let elapsed_i64 = i64::try_from(interval.elapsed_seconds)
+            .map_err(|_| "Active session duration exceeds SQLite's supported range".to_string())?;
+        let operational_day = operational_day_key_for_utc(ended_at)
             .format("%Y-%m-%d")
             .to_string();
         let ended_at_utc = ended_at.to_rfc3339_opts(SecondsFormat::Millis, true);
@@ -236,10 +242,7 @@ fn local_clock(timestamp: &str) -> Result<String, String> {
     let utc = DateTime::parse_from_rfc3339(timestamp)
         .map_err(|error| format!("Invalid SQLite session timestamp '{timestamp}': {error}"))?
         .with_timezone(&Utc);
-    let configured_offset = runtime_settings().day_boundary.utc_offset_seconds;
-    let offset = FixedOffset::east_opt(configured_offset)
-        .ok_or_else(|| format!("Configured UTC offset {configured_offset} is invalid"))?;
-    Ok(utc.with_timezone(&offset).format("%H:%M:%S").to_string())
+    Ok(civil_time_for_utc(utc).format("%H:%M:%S").to_string())
 }
 
 fn display_category_name(category_id: i64, stored_name: &str) -> String {
