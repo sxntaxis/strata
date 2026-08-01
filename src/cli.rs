@@ -844,9 +844,14 @@ pub fn sqlite_import(
     dry_run: bool,
     json: bool,
 ) -> Result<(), String> {
+    let database_path = match database {
+        Some(path) => path,
+        None if dry_run => PathBuf::new(),
+        None => default_sqlite_database_path(),
+    };
     let report = sqlite::run_bundle_import(sqlite::BundleImportOptions {
         bundle_directory: bundle,
-        database_path: database.unwrap_or_else(default_sqlite_database_path),
+        database_path,
         dry_run,
     })?;
     print_maintenance_report(report, json)

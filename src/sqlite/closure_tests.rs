@@ -24,6 +24,15 @@ fn unique_root(name: &str) -> PathBuf {
     ))
 }
 
+fn test_fingerprint(bytes: &[u8]) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
 fn remove_database(path: &Path) {
     fs::remove_file(path).ok();
     fs::remove_file(format!("{}-wal", path.display())).ok();
@@ -190,6 +199,40 @@ impl EvidenceFixture {
                 )
                 .unwrap();
         }
+        let source_manifest = serde_json::json!({
+            "entries": [
+                {
+                    "logical_name": "categories.csv",
+                    "path": live_categories.to_string_lossy(),
+                    "exists": true,
+                    "byte_count": categories.len(),
+                    "content_fingerprint": test_fingerprint(categories),
+                },
+                {
+                    "logical_name": "time_log.csv",
+                    "path": live_sessions.to_string_lossy(),
+                    "exists": true,
+                    "byte_count": sessions.len(),
+                    "content_fingerprint": test_fingerprint(sessions),
+                }
+            ]
+        });
+        repository
+            .connection
+            .execute(
+                "INSERT INTO legacy_imports (
+                    source_fingerprint, status, source_manifest_json, utc_offset_seconds,
+                    operational_day_start_minutes, quantum_seconds, category_count, session_count,
+                    total_elapsed_seconds, active_session_present, checkpoint_present,
+                    sand_state_present, snapshot_count, verification_json, started_at_utc, completed_at_utc
+                 ) VALUES (?1, 'verified', ?2, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, '{}', ?3, ?3)",
+                params![
+                    fingerprint,
+                    source_manifest.to_string(),
+                    "2026-08-01T20:00:00Z"
+                ],
+            )
+            .unwrap();
         drop(repository);
 
         let marker = state.join("storage_authority.json");
@@ -244,13 +287,19 @@ fn legacy_evidence_archive_and_interrupted_removal_are_retry_safe() {
     assert!(inventory.is_healthy());
     assert_eq!(inventory.files.len(), 2);
 
+    legacy_disposition::create_test_partial_archive(LegacyEvidenceArchiveOptions {
+        authority_marker_path: fixture.marker.clone(),
+        output_directory: fixture.archive.clone(),
+        confirm: true,
+    })
+    .unwrap();
     let archived = legacy_disposition::archive(LegacyEvidenceArchiveOptions {
         authority_marker_path: fixture.marker.clone(),
         output_directory: fixture.archive.clone(),
         confirm: true,
     })
     .unwrap();
-    assert_eq!(archived.status, "archived");
+    assert_eq!(archived.status, "recovered-archive");
     assert!(
         fixture
             .archive
@@ -323,4 +372,30 @@ fn legacy_evidence_disposition_refuses_changed_sources_and_wrong_confirmation() 
     assert!(error.contains(&fixture.fingerprint));
     assert!(fixture.live_categories.exists());
     assert!(fixture.live_sessions.exists());
+}
+
+#[test]
+fn legacy_evidence_inventory_rejects_tampered_path_provenance() {
+    let fixture = EvidenceFixture::create();
+    let provenance_path = fixture
+        .marker
+        .parent()
+        .unwrap()
+        .join("storage_migration/backups/test-fingerprint/source_paths.json");
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&fs::read(&provenance_path).unwrap()).unwrap();
+    value["files"][0]["original_path"] = serde_json::Value::String(
+        fixture
+            .root
+            .join("other/categories.csv")
+            .to_string_lossy()
+            .into_owned(),
+    );
+    fs::write(&provenance_path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+
+    let error = legacy_disposition::inventory(LegacyEvidenceInventoryOptions {
+        authority_marker_path: fixture.marker.clone(),
+    })
+    .unwrap_err();
+    assert!(error.contains("verified SQLite source manifest"));
 }

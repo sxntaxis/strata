@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
     io::{ErrorKind, Write},
     path::{Path, PathBuf},
@@ -17,6 +17,7 @@ const PROVENANCE_SCHEMA_VERSION: u8 = 1;
 const ARCHIVE_SCHEMA_VERSION: u8 = 1;
 const REMOVAL_SCHEMA_VERSION: u8 = 1;
 const ARCHIVE_MANIFEST_FILENAME: &str = "legacy_evidence_manifest.json";
+const ARCHIVE_INTENT_FILENAME: &str = ".strata_legacy_archive_intent.json";
 const SOURCE_PATHS_FILENAME: &str = "source_paths.json";
 
 #[derive(Debug, Clone)]
@@ -178,6 +179,27 @@ struct BackupProvenanceEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct ArchiveIntent {
+    schema_version: u8,
+    source_fingerprint: String,
+    output_path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct StoredSourceManifest {
+    entries: Vec<StoredSourceManifestEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct StoredSourceManifestEntry {
+    logical_name: String,
+    path: String,
+    exists: bool,
+    byte_count: usize,
+    content_fingerprint: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct ArchiveManifest {
     schema_version: u8,
     source_fingerprint: String,
@@ -295,25 +317,39 @@ fn archive_inner(
     }
 
     let staging = archive_staging_path(&output, &context.source_fingerprint)?;
+    let mut recovered_partial = false;
     if staging.exists() {
-        validate_archive(&context, &staging)
+        validate_archive_intent(&context, &staging, &output)
             .map_err(|_| LegacyEvidenceError::StagingConflict(display_path(&staging)))?;
-        ensure_parent(&output)?;
-        fs::rename(&staging, &output)
-            .map_err(|error| io_error("recovering archive publication", &output, error))?;
-        sync_parent(&output)?;
-        return Ok(build_report(
-            &context,
-            "sqlite-legacy-archive",
-            "recovered-archive",
-            Some(&output),
-            None,
-        ));
+        if validate_archive(&context, &staging).is_ok() {
+            ensure_parent(&output)?;
+            fs::rename(&staging, &output)
+                .map_err(|error| io_error("recovering archive publication", &output, error))?;
+            sync_parent(&output)?;
+            return Ok(build_report(
+                &context,
+                "sqlite-legacy-archive",
+                "recovered-archive",
+                Some(&output),
+                None,
+            ));
+        }
+        fs::remove_dir_all(&staging)
+            .map_err(|error| io_error("discarding interrupted archive staging", &staging, error))?;
+        recovered_partial = true;
     }
 
     ensure_parent(&staging)?;
     fs::create_dir(&staging)
         .map_err(|error| io_error("creating archive staging directory", &staging, error))?;
+    write_new_json(
+        &staging.join(ARCHIVE_INTENT_FILENAME),
+        &ArchiveIntent {
+            schema_version: ARCHIVE_SCHEMA_VERSION,
+            source_fingerprint: context.source_fingerprint.clone(),
+            output_path: display_path(&output),
+        },
+    )?;
     let result: Result<(), LegacyEvidenceError> = (|| {
         let mut manifest_files = Vec::with_capacity(context.files.len());
         for file in &context.files {
@@ -361,7 +397,11 @@ fn archive_inner(
     Ok(build_report(
         &context,
         "sqlite-legacy-archive",
-        "archived",
+        if recovered_partial {
+            "recovered-archive"
+        } else {
+            "archived"
+        },
         Some(&output),
         None,
     ))
@@ -493,6 +533,42 @@ fn remove_with_hook(
 }
 
 #[cfg(test)]
+pub(super) fn create_test_partial_archive(
+    options: LegacyEvidenceArchiveOptions,
+) -> Result<(), String> {
+    let context =
+        load_context(&options.authority_marker_path).map_err(|error| error.to_string())?;
+    require_all_live_matches(&context).map_err(|error| error.to_string())?;
+    let output =
+        absolute_output_path(&options.output_directory).map_err(|error| error.to_string())?;
+    let staging = archive_staging_path(&output, &context.source_fingerprint)
+        .map_err(|error| error.to_string())?;
+    ensure_parent(&staging).map_err(|error| error.to_string())?;
+    fs::create_dir(&staging).map_err(|error| error.to_string())?;
+    write_new_json(
+        &staging.join(ARCHIVE_INTENT_FILENAME),
+        &ArchiveIntent {
+            schema_version: ARCHIVE_SCHEMA_VERSION,
+            source_fingerprint: context.source_fingerprint.clone(),
+            output_path: display_path(&output),
+        },
+    )
+    .map_err(|error| error.to_string())?;
+    let first = context
+        .files
+        .first()
+        .ok_or_else(|| "no evidence files".to_string())?;
+    let destination = staging.join(&first.archive_relative_path);
+    write_new_file(
+        &destination,
+        &read_regular_file(&first.backup_path, "reading migration backup evidence")
+            .map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
+    sync_directory(&staging).map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
 pub(super) fn remove_with_test_failure(
     options: LegacyEvidenceRemoveOptions,
     fail_after: usize,
@@ -517,7 +593,8 @@ fn load_context(marker_path: &Path) -> Result<EvidenceContext, LegacyEvidenceErr
     validate_marker(&marker)?;
     let database_path = absolute_existing_path(Path::new(&marker.sqlite_candidate.database_path))?;
     let backup_path = absolute_existing_path(Path::new(&marker.sqlite_candidate.backup_path))?;
-    verify_database(&database_path, &marker.sqlite_candidate.source_fingerprint)?;
+    let stored_manifest =
+        verify_database(&database_path, &marker.sqlite_candidate.source_fingerprint)?;
 
     let provenance_path = backup_path.join(SOURCE_PATHS_FILENAME);
     let provenance: BackupProvenance = read_json(&provenance_path)?;
@@ -529,12 +606,44 @@ fn load_context(marker_path: &Path) -> Result<EvidenceContext, LegacyEvidenceErr
         )));
     }
 
+    let expected_existing = stored_manifest
+        .values()
+        .filter(|entry| entry.exists)
+        .count();
+    if provenance.files.len() != expected_existing {
+        return Err(LegacyEvidenceError::InvalidProvenance(format!(
+            "source_paths.json contains {} files but the verified import manifest contains {expected_existing}",
+            provenance.files.len()
+        )));
+    }
+
     let mut names = BTreeSet::new();
     let mut files = Vec::with_capacity(provenance.files.len());
     for entry in provenance.files {
         if !names.insert(entry.logical_name.clone()) {
             return Err(LegacyEvidenceError::InvalidProvenance(format!(
                 "duplicate logical name {}",
+                entry.logical_name
+            )));
+        }
+        let stored = stored_manifest.get(&entry.logical_name).ok_or_else(|| {
+            LegacyEvidenceError::InvalidProvenance(format!(
+                "{} is absent from the verified SQLite source manifest",
+                entry.logical_name
+            ))
+        })?;
+        let stored_byte_count = u64::try_from(stored.byte_count).map_err(|_| {
+            LegacyEvidenceError::InvalidProvenance(format!(
+                "{} exceeds supported size",
+                entry.logical_name
+            ))
+        })?;
+        if !stored.exists
+            || stored.path != entry.original_path
+            || stored_byte_count != entry.byte_count
+        {
+            return Err(LegacyEvidenceError::InvalidProvenance(format!(
+                "{} differs from the verified SQLite source manifest",
                 entry.logical_name
             )));
         }
@@ -554,9 +663,12 @@ fn load_context(marker_path: &Path) -> Result<EvidenceContext, LegacyEvidenceErr
                 entry.logical_name
             ))
         })?;
-        if byte_count != entry.byte_count {
+        if byte_count != entry.byte_count
+            || stored.content_fingerprint.as_deref()
+                != Some(fingerprint_bytes(&backup_bytes).as_str())
+        {
             return Err(LegacyEvidenceError::InvalidProvenance(format!(
-                "{} byte count differs from provenance",
+                "{} content differs from the verified SQLite source manifest",
                 entry.logical_name
             )));
         }
@@ -603,7 +715,10 @@ fn validate_marker(marker: &StorageAuthorityMarker) -> Result<(), LegacyEvidence
     Ok(())
 }
 
-fn verify_database(path: &Path, fingerprint: &str) -> Result<(), LegacyEvidenceError> {
+fn verify_database(
+    path: &Path,
+    fingerprint: &str,
+) -> Result<BTreeMap<String, StoredSourceManifestEntry>, LegacyEvidenceError> {
     let connection = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -630,6 +745,46 @@ fn verify_database(path: &Path, fingerprint: &str) -> Result<(), LegacyEvidenceE
         return Err(LegacyEvidenceError::AuthorityVerification(
             "database metadata does not match migration provenance".to_string(),
         ));
+    }
+    let manifest_json: String = connection
+        .query_row(
+            "SELECT source_manifest_json FROM legacy_imports
+             WHERE source_fingerprint = ?1 AND status = 'verified'",
+            params![fingerprint],
+            |row| row.get(0),
+        )
+        .map_err(|error| {
+            LegacyEvidenceError::AuthorityVerification(format!(
+                "verified source manifest is unavailable: {error}"
+            ))
+        })?;
+    let manifest: StoredSourceManifest = serde_json::from_str(&manifest_json).map_err(|error| {
+        LegacyEvidenceError::AuthorityVerification(format!(
+            "verified source manifest is invalid: {error}"
+        ))
+    })?;
+    let mut entries = BTreeMap::new();
+    for entry in manifest.entries {
+        if entries.insert(entry.logical_name.clone(), entry).is_some() {
+            return Err(LegacyEvidenceError::AuthorityVerification(
+                "verified source manifest contains duplicate logical names".to_string(),
+            ));
+        }
+    }
+    Ok(entries)
+}
+
+fn validate_archive_intent(
+    context: &EvidenceContext,
+    staging: &Path,
+    output: &Path,
+) -> Result<(), LegacyEvidenceError> {
+    let intent: ArchiveIntent = read_json(&staging.join(ARCHIVE_INTENT_FILENAME))?;
+    if intent.schema_version != ARCHIVE_SCHEMA_VERSION
+        || intent.source_fingerprint != context.source_fingerprint
+        || intent.output_path != display_path(output)
+    {
+        return Err(LegacyEvidenceError::StagingConflict(display_path(staging)));
     }
     Ok(())
 }
@@ -911,7 +1066,7 @@ fn fingerprint_bytes(bytes: &[u8]) -> String {
         hash ^= u64::from(*byte);
         hash = hash.wrapping_mul(0x100000001b3);
     }
-    format!("fnv1a64-{hash:016x}")
+    format!("{hash:016x}")
 }
 
 fn now_utc() -> String {
