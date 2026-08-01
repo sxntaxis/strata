@@ -28,6 +28,7 @@ jobs:
             python3 tools/sqlite008_fix_compile.py
           fi
           python3 tools/sqlite008_refine.py
+          python3 tools/sqlite008_fix_refine.py
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
