@@ -23,7 +23,7 @@ cargo run -- report --today
 ## Architecture
 
 - `src/domain.rs`: business rules for categories, sessions, operational days, and reports.
-- `src/sqlite.rs` and `src/sqlite/*`: SQLite schema, repository operations, migration, authority activation, maintenance, runtime coordination, and TUI adapters.
+- `src/sqlite.rs` and `src/sqlite/*`: SQLite schema, repository operations, migration, authority activation, maintenance, runtime coordination, legacy-evidence custody, and TUI adapters.
 - `src/storage.rs`: XDG paths, legacy CSV/JSON compatibility needed before migration, and atomic file helpers.
 - `src/app.rs` and `src/app/*`: TUI orchestration, rendering, event handling, and persistence-recovery controls.
 - `src/cli.rs`: command parsing and non-TUI output.
@@ -46,14 +46,14 @@ Strata uses XDG paths:
 
 You can override the data directory with `STRATA_DATA_DIR=/your/path`.
 
-The normal SQLite candidate is stored under the Strata data directory. Migration reports, authority metadata, immutable source backups, recovery exports, and runtime state use the corresponding data/state roots. Repo-local runtime artifacts are intentionally ignored by Git.
+The normal SQLite database is stored under the Strata data directory. Migration reports, authority metadata, immutable source backups, removal ledgers, recovery exports, and runtime state use the corresponding data/state roots. Repo-local runtime artifacts are intentionally ignored by Git.
 
 ## Persistence authority
 
 Strata has two explicit authority phases:
 
 1. **Legacy authority** — existing CSV/JSON files remain live until migration and activation are completed.
-2. **SQLite authority** — after explicit activation, both CLI and TUI use one SQLite database. Legacy files remain unchanged as migration evidence and are not dual-written.
+2. **SQLite authority** — after explicit activation, both CLI and TUI use one SQLite database. Legacy files become preserved migration evidence and are not dual-written.
 
 Strata does not automatically migrate during startup, replace a damaged database with an empty one, or fall back from SQLite to stale legacy files.
 
@@ -95,15 +95,21 @@ strata sqlite-export --out ./strata-bundle
 
 The bundle contains a manifest plus deterministic CSV files for categories, category tags, sessions, active state, runtime checkpoints, current sediment state, and sediment snapshots.
 
-Import a validated bundle into a **new** SQLite database:
+Validate the full import without publishing a target database:
+
+```bash
+strata sqlite-import --bundle ./strata-bundle --dry-run
+```
+
+Dry-run uses the same parser, temporary SQLite import, integrity check, and repository-snapshot reconciliation as a real import. It does not create the requested database, its parent directory, a publication lock, or an authority marker.
+
+Import the validated bundle into a **new** SQLite database:
 
 ```bash
 strata sqlite-import --bundle ./strata-bundle --database ./restored.sqlite3
 ```
 
-Import validates manifest fingerprints, file sizes, schemas, identities, references, totals, and repository-snapshot parity. Existing targets are not overwritten.
-
-Current limitation: portable import does not yet expose a validation-only `--dry-run` mode. This is tracked as a migration-program closure requirement in [`docs/SQLITE_MIGRATION_CLOSURE_AUDIT.md`](docs/SQLITE_MIGRATION_CLOSURE_AUDIT.md).
+Import validates manifest fingerprints, file sizes, schemas, identities, references, totals, and repository-snapshot parity. Existing targets are not overwritten. Use `--json` for a machine-readable validation or import report.
 
 The general `strata export --format ...` command remains for JSON and ICS session exports; full-fidelity CSV interchange uses `sqlite-export` and `sqlite-import`.
 
@@ -129,17 +135,57 @@ strata sqlite-restore --backup ./strata-backup.sqlite3 --replace
 
 Maintenance operations use explicit locking and refuse stale temporary artifacts or active SQLite sidecars where publication would be unsafe. Add `--json` for machine-readable reports.
 
+## Legacy migration evidence
+
+Migration preserves an immutable fingerprinted backup and leaves the original CSV/JSON files untouched. After activation, those originals are evidence rather than live authority.
+
+Inspect the verified evidence set:
+
+```bash
+strata sqlite-legacy-inventory
+```
+
+Inventory requires an active, healthy SQLite authority. It reconciles:
+
+- the authority marker and activation provenance;
+- SQLite migration metadata and the verified source manifest stored in the database;
+- the immutable migration backup and `source_paths.json`;
+- every live source path, byte count, and content fingerprint.
+
+Changed, missing, symlinked, redirected, or unprovenanced sources fail closed.
+
+Archive verified evidence before considering removal:
+
+```bash
+strata sqlite-legacy-archive --out ./strata-legacy-evidence --confirm
+```
+
+The archive is built from the immutable migration backup, not from potentially changed live files. Publication uses a fingerprint-owned staging directory, verifies every archived byte, and is idempotent. A complete interrupted publication is finished on retry; an owned partial stage is safely rebuilt. Foreign staging directories are never removed automatically.
+
+Original source removal is a separate irreversible command:
+
+```bash
+strata sqlite-legacy-remove \
+  --archive ./strata-legacy-evidence \
+  --confirm-fingerprint <MIGRATION_FINGERPRINT>
+```
+
+Removal requires all of the following:
+
+- active SQLite authority matching the original verified migration;
+- a fully verified archive;
+- the exact migration fingerprint printed by inventory/archive;
+- unchanged original source bytes.
+
+A durable removal ledger makes interrupted multi-file deletion retryable. Strata removes only the exact paths recorded by the verified SQLite source manifest; unrelated files in the same directories are never selected. The immutable migration backup, archive, SQLite database, authority marker, and removal ledger remain available afterward.
+
+All three evidence commands support `--authority-marker <PATH>` and `--json`.
+
 ## Persistence failure recovery
 
 When an authoritative TUI write fails, Strata freezes normal mutation and displays a non-dismissible recovery surface. Available actions include retry, authoritative reload, emergency custody export, safe export-and-exit, and explicit exit without saving.
 
-The emergency JSON bundle is a custody artifact generated from current application state. It is not the same as the portable CSV bundle and is not yet a supported import format.
-
-## Legacy evidence retention
-
-Migration and activation preserve legacy source bytes. After activation, those files are evidence rather than live authority.
-
-Current limitation: Strata does not yet provide a supported command to inventory, archive, or remove verified legacy evidence. Do not assume that deleting every CSV/JSON file in the data directory is safe; custom paths and unrelated files may exist. The bounded closure work is defined in the SQLite migration audit linked above.
+The emergency JSON bundle is a custody artifact generated from current application state. It is not the same as the portable CSV bundle and is not a supported import format.
 
 ## Keybindings
 
@@ -177,7 +223,7 @@ Notes:
 - Setting a key to `null` unbinds that key.
 - `unbind_actions` disables specific actions by name.
 - Setting `keymap_inherit: false` starts from an empty keymap.
-- `time_log_path` configures the legacy CSV source before SQLite activation and is migration input afterward.
+- `time_log_path` configures the legacy CSV source before SQLite activation and is migration provenance afterward.
 - `day_start_mode` accepts `fixed` or `sunrise`.
 - `first_day_of_week` accepts `monday` through `sunday`.
 - `toggle_command_palette` is the action name for rebinding palette open/close.
@@ -194,6 +240,10 @@ Detached mode notes:
 - Under SQLite authority, checkpoint claim, catch-up sediment publication, daily snapshot publication, and checkpoint completion are transactionally coordinated.
 - A failed recovery commit leaves the checkpoint reclaimable on the next launch.
 - During catch-up, mutating main-view actions are queued and replayed when simulation time reaches them.
+
+## SQLite migration closure
+
+The full acceptance reconciliation is recorded in [`docs/SQLITE_MIGRATION_CLOSURE_AUDIT.md`](docs/SQLITE_MIGRATION_CLOSURE_AUDIT.md). SQLITE-012 completes all nine acceptance criteria from issue #8 without automatic migration, legacy dual writes, or emergency-JSON import scope.
 
 ## Quality gates
 

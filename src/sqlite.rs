@@ -6,7 +6,10 @@ use thiserror::Error;
 mod authority;
 mod cli_runtime;
 #[cfg(test)]
+mod closure_tests;
+#[cfg(test)]
 mod fault_certification;
+mod legacy_disposition;
 mod legacy_import;
 mod maintenance;
 mod migration_command;
@@ -20,6 +23,10 @@ pub(crate) use authority::{
 pub(crate) use cli_runtime::{
     acknowledge_stop as acknowledge_cli_stop, read_snapshot as read_cli_snapshot,
     start_session as start_cli_session, stop_session as stop_cli_session,
+};
+pub(crate) use legacy_disposition::{
+    LegacyEvidenceArchiveOptions, LegacyEvidenceInventoryOptions, LegacyEvidenceRemoveOptions,
+    LegacyEvidenceReport,
 };
 pub(crate) use maintenance::{
     BackupOptions, BundleExportOptions, BundleImportOptions, DoctorOptions, RestoreOptions,
@@ -51,6 +58,24 @@ pub(crate) fn run_controlled_migration(
     options: ControlledMigrationOptions,
 ) -> Result<ControlledMigrationReport, String> {
     migration_command::run_controlled_migration(options).map_err(|error| error.to_string())
+}
+
+pub(crate) fn run_legacy_evidence_inventory(
+    options: LegacyEvidenceInventoryOptions,
+) -> Result<LegacyEvidenceReport, String> {
+    legacy_disposition::inventory(options)
+}
+
+pub(crate) fn run_legacy_evidence_archive(
+    options: LegacyEvidenceArchiveOptions,
+) -> Result<LegacyEvidenceReport, String> {
+    legacy_disposition::archive(options)
+}
+
+pub(crate) fn run_legacy_evidence_remove(
+    options: LegacyEvidenceRemoveOptions,
+) -> Result<LegacyEvidenceReport, String> {
+    legacy_disposition::remove(options)
 }
 
 pub(crate) fn run_bundle_export(

@@ -1,134 +1,167 @@
 # SQLite Migration Closure Audit
 
-- Audit unit: `SQLITE-011`
-- Baseline: `a2b7d1b64779c7db86cd9ffd12a92c5bd459df91`
+- Final audit unit: `SQLITE-012`
+- Baseline before closure: `fb89964fb0404217d5c52dbe664e8cf23633cbe1`
 - Tracking issue: #8
 - Audit date: 2026-08-01
-- Verdict: **NOT READY TO CLOSE**
+- Verdict: **READY TO CLOSE — 9/9 PASS**
 
 ## Executive conclusion
 
-The SQLite authority migration is operationally complete after explicit activation: CLI and TUI share one SQLite authority, runtime transitions are transactional and retry-safe, repository failures fail visibly, portable CSV bundles round-trip through a consistent snapshot, and database maintenance operations are tested.
+The authoritative persistence migration is complete.
 
-Issue #8 should nevertheless remain open because two requirements are not yet fully satisfied:
+After explicit migration and activation, CLI and TUI share one SQLite authority. Runtime transitions and detached recovery are transactional, fenced, retry-safe, and crash-recoverable. Persistence failures remain visible and actionable. Deterministic CSV bundles support validation-only import and lossless publication. Database doctor, backup, restore, migration rollback, multi-process coordination, and exhaustive persistence-fault tests are present. Legacy sources remain available until an explicit, provenance-verified archive and separately confirmed removal operation.
 
-1. Portable CSV import has no first-class dry-run/validation-only mode, and the repository does not document the migration and interchange workflow.
-2. Legacy CSV/JSON migration evidence is preserved, but Strata has no supported command that inventories and archives or removes it under explicit user control.
-
-These are bounded completion gaps. They do not justify reopening the repository, authority, runtime-coordination, or persistence-failure designs.
+No acceptance criterion requires automatic startup migration, removal of migration parsers, or import of SQLITE-009 emergency JSON custody bundles.
 
 ## Acceptance-criteria reconciliation
 
-| # | Issue #8 acceptance criterion | Verdict | Merged evidence | Residual |
-|---|---|---|---|---|
-| 1 | SQLite is the sole live source of truth after migration. | PASS | SQLITE-006 activates a verified candidate explicitly; SQLITE-007 routes CLI and TUI through SQLite and proves no legacy dual writes. | Activation remains deliberately explicit rather than automatic. |
-| 2 | Existing CSV/JSON data imports without losing identity, descriptions, timestamps, or duration totals. | PASS | SQLITE-002 performs strict all-source validation and transactional import; SQLITE-004 verifies domain-visible parity. | None. |
-| 3 | CLI and TUI use the same repository without stale-snapshot overwrites. | PASS | SQLITE-007 moves the TUI to the SQLite repository and makes autosave update-only; SQLITE-008 adds stable-ID fencing and durable operation receipts. | None. |
-| 4 | Active-session and detach/recovery transitions are transactional and crash-safe. | PASS | SQLITE-008 makes start/finish/switch/reset idempotent and retains checkpoints until atomic recovery commit; SQLITE-010 certifies rollback/recoverability across all transition families. | None. |
-| 5 | Historical sessions cannot disappear through category deletion or missing references. | PASS | Foreign keys and archival begin in SQLITE-001; repository and TUI archive/restore behavior is covered in SQLITE-004 and SQLITE-007. | None. |
-| 6 | Database/schema errors are visible and never trigger writable empty fallback state. | PASS | SQLITE-006/007 fail closed on authority disagreement and repository load failure; SQLITE-009 adds the non-dismissible recovery surface; SQLITE-010 covers real corruption/read-only/full/busy failures. | None. |
-| 7 | Deterministic CSV export and validated CSV import are documented and tested. | PARTIAL — BLOCKING | SQLITE-005 implements and tests a versioned seven-file CSV bundle with deterministic ordering, fingerprints, strict validation, and snapshot parity. | No repository documentation existed at audit start, and `sqlite-import` has no `--dry-run` validation-only mode. The generic `export --format` surface still exposes only JSON and ICS; the CSV bundle is a separate `sqlite-export` command. |
-| 8 | Backup, restore, integrity, migration rollback, and multi-process tests exist. | PASS | SQLITE-003 covers migration rollback/publication; SQLITE-005 covers doctor/backup/restore and maintenance locking; SQLITE-008/010 cover concurrent transitions, busy locking, commit failure, and recovery. | None. |
-| 9 | Legacy files remain available until the user explicitly archives or removes them. | PARTIAL — BLOCKING | Migration and activation preserve legacy files byte-for-byte and stop writing them after activation. | Strata has no supported inventory/archive/remove command, custody manifest, or explicit acknowledgement flow. Manual filesystem deletion is not a sufficient product contract. |
+| # | Issue #8 acceptance criterion | Verdict | Final evidence |
+|---|---|---|---|
+| 1 | SQLite is the sole live source of truth after migration. | PASS | SQLITE-006 activates a verified candidate explicitly. SQLITE-007 routes CLI and TUI through SQLite and proves no legacy dual writes. |
+| 2 | Existing CSV/JSON data imports without losing IDs, category/project identity, descriptions, timestamps, or duration totals. | PASS | SQLITE-002 performs strict transactional import and complete reconciliation. SQLITE-004 proves repository/domain parity. |
+| 3 | CLI and TUI use the same repository and avoid stale-snapshot overwrites. | PASS | SQLITE-007 completes the TUI cutover and update-only persistence. SQLITE-008 adds stable-ID fencing and durable operation receipts. |
+| 4 | Active-session and detach/recovery transitions are transactional and crash-safe. | PASS | SQLITE-008 makes runtime transitions idempotent and retains checkpoints until atomic recovery commit. SQLITE-010 certifies every persistence family under failure. |
+| 5 | Historical sessions cannot become invisible through category deletion or missing references. | PASS | Foreign keys, category archival, stable-ID restoration, and history-preserving repository/TUI behavior are tested from SQLITE-001 through SQLITE-007. |
+| 6 | Database/schema errors are visible and never trigger writable empty fallback state. | PASS | Authority disagreement, unsupported schema, corruption, busy, read-only, full-disk, constraint, commit, and I/O failures fail visibly. SQLITE-009 supplies non-dismissible retry/export/safe-exit recovery. |
+| 7 | First-class deterministic CSV export and validated CSV import are documented and tested. | PASS | SQLITE-005 provides deterministic versioned bundles and strict round-trip import. SQLITE-012 adds `sqlite-import --dry-run` through the same temporary SQLite import, integrity, and exact snapshot-reconciliation path without target publication. README documents both workflows. |
+| 8 | Backup, restore, integrity-check, migration rollback, and multi-process tests exist. | PASS | SQLITE-003 covers migration rollback/publication. SQLITE-005 covers doctor, backup, restore, maintenance locking, and interrupted restore. SQLITE-008/010 cover concurrent transitions and real SQLite failure classes. |
+| 9 | Legacy files remain available until the user explicitly archives or removes them. | PASS | Migration and activation preserve source bytes. SQLITE-012 adds verified inventory, archive-first custody, exact-fingerprint removal confirmation, and a retryable removal ledger. |
 
-Summary: **7 PASS, 2 PARTIAL/BLOCKING**.
+Summary: **9 PASS, 0 PARTIAL, 0 FAIL**.
 
-## Normative requirement audit beyond the acceptance checklist
+## SQLITE-012 closure controls
 
-### Satisfied
+### Validation-only portable import
 
-- Foreign keys are enabled on repository connections.
-- WAL mode and a bounded busy timeout are deliberate connection policy.
-- Schema migrations are versioned and tested.
-- Legacy sources are parsed completely before mutation.
-- Migration uses an immutable fingerprinted backup and publishes a verified candidate atomically.
-- Source identity, row counts, ID sets, elapsed totals, per-category totals, active state, checkpoints, category tags, sediment state, and snapshots are reconciled.
-- Consistent repository read transactions back portable exports.
-- Import refuses existing targets and validates fingerprints, sizes, schemas, references, and snapshot parity.
-- Doctor, backup, and restore are explicit user operations.
-- Runtime authority never falls back automatically from a damaged SQLite database to stale legacy files.
-- Persistence failure handling preserves active authority and offers retry, authoritative reload, emergency export, safe export-and-exit, or explicit exit without saving.
+```bash
+strata sqlite-import --bundle <DIRECTORY> --dry-run
+```
 
-### Incomplete
+The dry-run path:
 
-#### R1 — Validation-only portable import
+1. parses and fingerprints the complete bundle;
+2. validates manifest sizes, schemas, ordering, identities, and references;
+3. imports into a unique disposable SQLite database;
+4. checkpoints and runs database health checks;
+5. reads the complete repository snapshot back;
+6. requires exact equality with the parsed bundle;
+7. removes all disposable database artifacts;
+8. publishes no target, target parent, maintenance lock, or authority marker.
 
-Issue #8 asks for CSV import with dry-run validation and an actionable error report. `strata sqlite-import` currently validates while constructing a new database, but it has no validation-only mode.
+Actual import calls the same candidate-validation function before atomic publication, preventing validation drift.
 
-Required closure behavior:
+### Legacy evidence inventory
 
-- `strata sqlite-import --bundle <dir> --dry-run` performs all manifest, CSV, identity, reference, schema, fingerprint, and repository-snapshot checks;
-- it creates no target database, lock, temporary publication artifact, or authority marker;
-- human and `--json` reports identify the failing file, row/field where available, invariant, and suggested correction;
-- dry-run and actual import share one validation pipeline so they cannot drift.
+```bash
+strata sqlite-legacy-inventory
+```
 
-#### R2 — Explicit legacy-evidence disposition
+Inventory fails closed unless all authority and provenance layers agree:
 
-Legacy sources are correctly preserved after activation, but there is no supported end state for users who want to archive or remove them.
+- active authority marker is `sqlite-cli`;
+- activation and candidate paths/fingerprints agree;
+- SQLite integrity passes;
+- database metadata identifies the verified migration;
+- `legacy_imports.source_manifest_json` contains the same logical names, original paths, existence flags, byte counts, and content fingerprints as the immutable backup provenance;
+- live originals are regular files whose bytes match the migration backup.
 
-Required closure behavior:
+This cross-check prevents a modified `source_paths.json` from redirecting archive or removal to another path.
 
-- inventory every migration source and compare it with the fingerprinted migration manifest;
-- refuse operation unless SQLite is active, healthy, and matches the verified candidate provenance;
-- default to archive, not deletion;
-- create a deterministic archive directory or package containing source bytes, manifest, candidate/report references, and archive timestamp;
-- require explicit confirmation;
-- make retries idempotent and fail closed on partial publication;
-- offer removal only as a separate, more explicit mode after verified archive publication;
-- never touch unrelated custom files merely because they share a directory.
+### Archive-first custody
 
-#### R3 — Durable user documentation
+```bash
+strata sqlite-legacy-archive --out <DIRECTORY> --confirm
+```
 
-This audit updates the README, but final closure documentation must remain synchronized with the actual command surface and include:
+Archive publication:
 
-- authority states and one-way activation semantics;
-- migration dry-run, migration execution, and activation sequence;
-- portable CSV bundle structure and schema version;
-- doctor, backup, and restore workflows;
-- legacy evidence retention and disposition;
-- recovery behavior for busy, read-only, full, corrupt, and unsupported-schema failures.
+- copies from the immutable migration backup, not mutable live files;
+- includes source provenance and a custody manifest;
+- verifies every byte before publication;
+- uses a fingerprint-owned staging directory and atomic rename;
+- is idempotent when the target already matches;
+- finishes a complete interrupted publication;
+- safely rebuilds an owned incomplete stage;
+- refuses foreign or mismatched staging directories.
 
-R3 is resolved for the current command surface by SQLITE-011's README update, but documentation must be amended again when R1 and R2 land.
+### Separately confirmed removal
 
-## Scope decisions
+```bash
+strata sqlite-legacy-remove \
+  --archive <DIRECTORY> \
+  --confirm-fingerprint <MIGRATION_FINGERPRINT>
+```
+
+Removal requires a healthy active SQLite authority, a verified archive, the exact migration fingerprint, and unchanged live source bytes. A durable ledger is published before the first deletion. Missing files are accepted only while resuming that matching in-progress ledger. Completion is durable and idempotent.
+
+Only exact paths recorded in SQLite's verified source manifest are eligible. Unrelated files sharing a source directory are never selected. The SQLite database, immutable migration backup, custody archive, authority marker, and removal ledger remain intact.
+
+## Final executable evidence
+
+The hosted SQLITE-012 gate passed:
+
+- formatting: PASS;
+- strict Clippy with all targets/features and warnings denied: PASS;
+- unit tests: **119 passed**;
+- legacy CLI lifecycle process tests: **7 passed**;
+- SQLite authority/TUI process tests: **11 passed**;
+- doc tests: PASS.
+
+Focused SQLITE-012 proofs include:
+
+- full validation-only import with no requested target or parent publication;
+- ordinary import through the same validation path;
+- legacy inventory against active authority and immutable provenance;
+- archive idempotency;
+- recovery from an owned partial archive stage;
+- refusal of changed live evidence;
+- refusal of incorrect removal confirmation;
+- retry after an injected interruption between legacy-file deletions;
+- rejection of tampered path provenance against SQLite's verified source manifest.
+
+The complete prior persistence-fault matrix remains green: all 19 authoritative write/transition families plus real busy, read-only, constraint, full-disk, and corrupt-database scenarios.
+
+## Authority and custody end state
+
+Before explicit activation:
+
+```text
+CLI + TUI -> legacy CSV/JSON authority
+SQLite    -> absent or verified candidate
+```
+
+After explicit activation:
+
+```text
+CLI + TUI -> SQLite authority
+legacy CSV/JSON -> unchanged migration evidence, no dual writes
+```
+
+After optional verified removal:
+
+```text
+CLI + TUI -> SQLite authority
+immutable migration backup -> retained
+verified custody archive    -> retained
+original legacy paths       -> removed under exact-fingerprint confirmation
+removal ledger              -> retained
+```
+
+## Scope decisions retained
+
+### Explicit migration rather than automatic startup mutation
+
+`migrate-sqlite` and `activate-sqlite --confirm` remain deliberate commands. This is safer than automatic first-run authority mutation and satisfies the requirement that SQLite becomes sole authority after migration.
 
 ### Emergency recovery JSON
 
-SQLITE-009 emergency JSON is a custody artifact generated from in-memory application state when authority writes fail. A supported import/reconciliation workflow would be valuable, but it is not the deterministic SQLite CSV interchange requirement defined by issue #8.
+The SQLITE-009 emergency JSON file is a custody artifact generated from in-memory state during write failure. A future reconciliation/import feature may be useful, but it is not the deterministic CSV interchange requirement and is not a migration-closure blocker.
 
-It should be tracked as a separate recovery feature rather than expanding the migration-closure critical path.
+### Legacy compatibility code
 
-### Automatic first-run migration
+Legacy readers and strict import parsers remain necessary before activation and for migration evidence interpretation. Their presence does not create dual authority because activated CLI/TUI paths use SQLite exclusively.
 
-The implemented model requires explicit `migrate-sqlite` and `activate-sqlite --confirm`. This is intentionally safer than mutating authority during normal startup and still satisfies the acceptance criterion that SQLite becomes sole authority *after migration*.
+## Closure decision
 
-Automatic startup migration is therefore not a closure requirement.
-
-### Legacy runtime code
-
-Legacy readers/writers remain necessary before explicit activation and for strict source migration. Their continued presence is not dual authority: after activation, CLI and TUI use SQLite and do not write legacy runtime files.
-
-Removing all legacy parsing code is not a closure requirement.
-
-## Required next unit
-
-`SQLITE-012 — close interchange validation and legacy evidence disposition`
-
-Bounded scope:
-
-1. add validation-only `sqlite-import --dry-run` using the existing strict import pipeline;
-2. add an explicit legacy evidence inventory/archive command with verified provenance and idempotent publication;
-3. add optional separately confirmed source removal only after a verified archive exists;
-4. document the final command workflows and portable bundle contract;
-5. certify process-level no-side-effect dry-run, archive retry, provenance mismatch refusal, partial-publication recovery, and no-dual-write behavior;
-6. rerun the complete SQLite authority, maintenance, runtime coordination, and persistence-fault suites;
-7. close issue #8 only if the final audit reaches 9/9 PASS.
-
-## Non-goals for SQLITE-012
-
-- no automatic startup migration or activation;
-- no emergency JSON reconciliation;
-- no repository or schema redesign unless required for archive provenance;
-- no removal of legacy parsers needed for migration;
-- no fallback from SQLite authority;
-- no unrelated TUI changes.
+Issue #8 may close when SQLITE-012 merges and the exact final source/documentation tree passes ordinary CI. No residual migration-program implementation requirement remains.
