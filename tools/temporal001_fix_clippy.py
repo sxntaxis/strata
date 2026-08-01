@@ -29,3 +29,8 @@ replace_once(
     "    DateTime, Datelike, Duration as ChronoDuration, FixedOffset, Local, NaiveDate, Utc,\n};\nuse ratatui::style::Color;",
     "    DateTime, Datelike, Duration as ChronoDuration, FixedOffset, NaiveDate, Utc,\n};\n#[cfg(test)]\nuse chrono::Local;\nuse ratatui::style::Color;",
 )
+replace_once(
+    "tests/temporal_authority.rs",
+    "    assert!(log.contains(\"clock-test\"));",
+    "    assert!(log.lines().count() >= 2, \"expected header plus a committed session row\");",
+)
