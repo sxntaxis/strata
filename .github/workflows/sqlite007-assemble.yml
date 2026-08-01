@@ -26,6 +26,7 @@ jobs:
             python3 tools/sqlite007_fix_clippy.py
           fi
           python3 tools/sqlite007_refine.py
+          python3 tools/sqlite007_fix_dead_code.py
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
