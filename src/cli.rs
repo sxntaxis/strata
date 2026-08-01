@@ -123,7 +123,9 @@ pub fn start_session(
     category_name: Option<String>,
 ) -> Result<(), String> {
     let categories_path = storage::get_categories_path();
-    let categories = storage::load_categories_from_csv(&categories_path).categories;
+    let categories = storage::try_load_categories_from_csv(&categories_path)
+        .map_err(|error| error.to_string())?
+        .categories;
 
     let cat_name = category_name.unwrap_or_else(|| DRIFT_CATEGORY_CONFIG_NAME.to_string());
     let category = categories
@@ -168,8 +170,12 @@ pub fn stop_session() -> Result<usize, String> {
     let sessions_path = storage::get_time_log_path();
     let categories_path = storage::get_categories_path();
 
-    let categories = storage::load_categories_from_csv(&categories_path).categories;
-    let mut sessions = storage::load_sessions_from_csv(&sessions_path, &categories).sessions;
+    let categories = storage::try_load_categories_from_csv(&categories_path)
+        .map_err(|error| error.to_string())?
+        .categories;
+    let mut sessions = storage::try_load_sessions_from_csv(&sessions_path, &categories)
+        .map_err(|error| error.to_string())?
+        .sessions;
 
     let now = Local::now();
     let today = operational_day_key_for_local(&now)
@@ -205,8 +211,12 @@ pub fn report(period: ReportPeriod) -> Result<(), String> {
     let sessions_path = storage::get_time_log_path();
     let categories_path = storage::get_categories_path();
 
-    let categories = storage::load_categories_from_csv(&categories_path).categories;
-    let sessions = storage::load_sessions_from_csv(&sessions_path, &categories).sessions;
+    let categories = storage::try_load_categories_from_csv(&categories_path)
+        .map_err(|error| error.to_string())?
+        .categories;
+    let sessions = storage::try_load_sessions_from_csv(&sessions_path, &categories)
+        .map_err(|error| error.to_string())?
+        .sessions;
 
     let summary = build_period_report(&sessions, &categories, period);
 
@@ -243,8 +253,12 @@ pub fn export_data(format: ExportFormat, out_path: Option<PathBuf>) -> Result<()
     let sessions_path = storage::get_time_log_path();
     let categories_path = storage::get_categories_path();
 
-    let categories = storage::load_categories_from_csv(&categories_path).categories;
-    let sessions = storage::load_sessions_from_csv(&sessions_path, &categories).sessions;
+    let categories = storage::try_load_categories_from_csv(&categories_path)
+        .map_err(|error| error.to_string())?
+        .categories;
+    let sessions = storage::try_load_sessions_from_csv(&sessions_path, &categories)
+        .map_err(|error| error.to_string())?
+        .sessions;
 
     let export = DataExport {
         schema_version: 1,
