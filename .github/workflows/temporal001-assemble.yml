@@ -27,13 +27,8 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Apply implementation
-        run: |
-          sed -i 's/"clamped_end", "interval.ended_at_utc", minimum=2/"clamped_end", "interval.ended_at_utc", minimum=1/' tools/temporal001_apply.py
-          sed -i 's/"ended_local", "ended_civil", minimum=2/"ended_local", "ended_civil", minimum=1/' tools/temporal001_apply.py
-          python tools/temporal001_apply.py
-          python tools/temporal001_fix_compile.py
-          python tools/temporal001_fix_clippy.py
+      - name: Apply post-audit corrections
+        run: python tools/temporal001_post_audit.py
 
       - name: Format
         run: cargo fmt --all
@@ -47,10 +42,10 @@ jobs:
       - name: Run tests
         run: cargo test --all-features
 
-      - name: Commit certified implementation
+      - name: Commit certified corrections
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add src/lib.rs src/temporal.rs src/domain.rs src/cli.rs src/app.rs src/app/category_state.rs src/app/persistence_recovery.rs src/app/report_state.rs src/sqlite/cli_runtime.rs tests/temporal_authority.rs
-          git commit -m 'TEMPORAL-001: establish explicit time authority'
+          git add src/temporal.rs src/domain.rs src/app.rs
+          git commit -m 'TEMPORAL-001: harden transition failure semantics'
           git push origin HEAD:temporal/001-explicit-time-authority
