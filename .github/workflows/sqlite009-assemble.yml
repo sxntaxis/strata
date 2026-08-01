@@ -25,6 +25,7 @@ jobs:
             python3 tools/sqlite009_mutation_context.py
             python3 tools/sqlite009_fault_contracts.py
           fi
+          python3 tools/sqlite009_fix_lints.py
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
