@@ -33,6 +33,7 @@ jobs:
           sed -i 's/"ended_local", "ended_civil", minimum=2/"ended_local", "ended_civil", minimum=1/' tools/temporal001_apply.py
           python tools/temporal001_apply.py
           python tools/temporal001_fix_compile.py
+          python tools/temporal001_fix_clippy.py
 
       - name: Format
         run: cargo fmt --all
