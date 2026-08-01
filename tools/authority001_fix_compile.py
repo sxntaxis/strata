@@ -19,3 +19,8 @@ replace_once(
     "            time_log_path: loaded_time_log_path,",
     "            time_log_path: _,",
 )
+replace_once(
+    "tests/config_authority.rs",
+    "    path::{Path, PathBuf},",
+    "    path::PathBuf,",
+)
