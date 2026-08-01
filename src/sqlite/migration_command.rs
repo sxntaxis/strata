@@ -99,7 +99,8 @@ impl ControlledMigrationReport {
         println!("Tags: {}", self.source_summary.tag_count);
         println!(
             "Active recovery: {}",
-            if self.source_summary.active_session_present {
+            if self.source_summary.active_session_present || self.source_summary.checkpoint_present
+            {
                 "present"
             } else {
                 "none"
@@ -449,7 +450,9 @@ fn enforce_active_recovery_policy(
     plan: &LegacyImportPlan,
     options: &ControlledMigrationOptions,
 ) -> Result<(), ControlledMigrationError> {
-    if plan.summary().active_session_present && !options.include_active_recovery {
+    if (plan.summary().active_session_present || plan.summary().checkpoint_present)
+        && !options.include_active_recovery
+    {
         return Err(ControlledMigrationError::ActiveRecoveryRequiresOptIn);
     }
     Ok(())
@@ -1260,6 +1263,53 @@ mod tests {
         let report = execute_controlled_migration(&fixture.layout(), &allowed).unwrap();
         assert_eq!(report.status, ControlledMigrationStatus::Published);
         assert!(report.source_summary.active_session_present);
+    }
+
+    #[test]
+    fn detached_checkpoint_requires_explicit_opt_in() {
+        let fixture = Fixture::new("detached_checkpoint");
+        let sand = r#"{
+            "version": 1,
+            "grid_width": 1,
+            "grid_height": 1,
+            "grains": [],
+            "frame_count": 0,
+            "sweep_left_to_right": true,
+            "rng_state": 42
+        }"#;
+        fs::write(
+            fixture.state.join("detached_runtime.json"),
+            format!(
+                r#"{{
+                    "schema_version": 1,
+                    "detached_at_utc": "2026-08-01T16:00:00Z",
+                    "simulation_time_utc": "2026-08-01T16:00:00Z",
+                    "spawn_accumulator_nanos": 0,
+                    "physics_accumulator_nanos": 0,
+                    "active_category_id": 0,
+                    "active_description": "",
+                    "active_session_started_at_utc": null,
+                    "sand_state": {sand},
+                    "pending_mutations": []
+                }}"#
+            ),
+        )
+        .unwrap();
+
+        let error = execute_controlled_migration(&fixture.layout(), &options(false))
+            .expect_err("detached checkpoint should require opt in");
+        assert!(matches!(
+            error,
+            ControlledMigrationError::ActiveRecoveryRequiresOptIn
+        ));
+        assert!(!fixture.database.exists());
+
+        let mut allowed = options(false);
+        allowed.include_active_recovery = true;
+        let report = execute_controlled_migration(&fixture.layout(), &allowed).unwrap();
+        assert_eq!(report.status, ControlledMigrationStatus::Published);
+        assert!(report.source_summary.checkpoint_present);
+        assert!(!report.source_summary.active_session_present);
     }
 
     #[test]
