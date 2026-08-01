@@ -84,15 +84,15 @@ pub(super) enum LegacyImportOutcome {
 
 #[derive(Debug, Error)]
 pub(super) enum LegacyImportError {
-    #[error("I/O error while reading {source}: {message}")]
-    Io { source: String, message: String },
-    #[error("CSV error in {source}: {message}")]
-    Csv { source: String, message: String },
-    #[error("JSON error in {source}: {message}")]
-    Json { source: String, message: String },
-    #[error("invalid legacy source {source}: {message}")]
+    #[error("I/O error while reading {path}: {message}")]
+    Io { path: String, message: String },
+    #[error("CSV error in {path}: {message}")]
+    Csv { path: String, message: String },
+    #[error("JSON error in {path}: {message}")]
+    Json { path: String, message: String },
+    #[error("invalid legacy source {path}: {message}")]
     InvalidSource {
-        source: String,
+        path: String,
         row: Option<usize>,
         message: String,
     },
@@ -387,7 +387,7 @@ impl LegacyImportPlan {
 
         let source_manifest_json =
             serde_json::to_string(&sources.manifest).map_err(|error| LegacyImportError::Json {
-                source: "source manifest".to_string(),
+                path: "source manifest".to_string(),
                 message: error.to_string(),
             })?;
 
@@ -578,7 +578,7 @@ impl SqliteRepository {
         if let Some(sand_state) = &plan.sand_state {
             let payload_json =
                 serde_json::to_string(sand_state).map_err(|error| LegacyImportError::Json {
-                    source: "sand state".to_string(),
+                    path: "sand state".to_string(),
                     message: error.to_string(),
                 })?;
             let updated_at = plan
@@ -634,7 +634,7 @@ impl SqliteRepository {
         verify_import(&transaction, plan, import_id)?;
         let verification_json =
             serde_json::to_string(&plan.summary).map_err(|error| LegacyImportError::Json {
-                source: "verification summary".to_string(),
+                path: "verification summary".to_string(),
                 message: error.to_string(),
             })?;
         let completed_at_utc = now_utc();
@@ -690,7 +690,7 @@ impl SqliteRepository {
             ))
         })?;
         let summary = serde_json::from_str(&json).map_err(|error| LegacyImportError::Json {
-            source: "stored verification summary".to_string(),
+            path: "stored verification summary".to_string(),
             message: error.to_string(),
         })?;
         Ok(Some(summary))
@@ -1238,7 +1238,7 @@ fn parse_snapshots(
         let state = parse_sand_state(logical_name, bytes, category_ids)?;
         let payload_json =
             serde_json::to_string(&state).map_err(|error| LegacyImportError::Json {
-                source: logical_name.clone(),
+                path: logical_name.clone(),
                 message: error.to_string(),
             })?;
         snapshots.push(LegacySnapshot {
@@ -1658,7 +1658,7 @@ fn bool_i64(value: bool) -> i64 {
 
 fn usize_to_i64(value: usize, label: &str) -> Result<i64, LegacyImportError> {
     i64::try_from(value).map_err(|_| LegacyImportError::InvalidSource {
-        source: "sand state".to_string(),
+        path: "sand state".to_string(),
         row: None,
         message: format!("{label} exceeds SQLite integer range"),
     })
@@ -1680,7 +1680,7 @@ fn invalid(
     message: impl Into<String>,
 ) -> LegacyImportError {
     LegacyImportError::InvalidSource {
-        source: source.into(),
+        path: source.into(),
         row,
         message: message.into(),
     }
@@ -1688,21 +1688,21 @@ fn invalid(
 
 fn io_error(source: &str, error: std::io::Error) -> LegacyImportError {
     LegacyImportError::Io {
-        source: source.to_string(),
+        path: source.to_string(),
         message: error.to_string(),
     }
 }
 
 fn csv_error(source: &str, error: csv::Error) -> LegacyImportError {
     LegacyImportError::Csv {
-        source: source.to_string(),
+        path: source.to_string(),
         message: error.to_string(),
     }
 }
 
 fn json_error(source: &str, error: serde_json::Error) -> LegacyImportError {
     LegacyImportError::Json {
-        source: source.to_string(),
+        path: source.to_string(),
         message: error.to_string(),
     }
 }
