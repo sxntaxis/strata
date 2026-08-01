@@ -34,12 +34,15 @@ mod category_state;
 mod command_palette_view;
 mod event_handlers;
 mod keybindings_modal_view;
+mod persistence_recovery;
 mod render_views;
 mod report_modal_view;
 mod report_state;
 mod time_format;
 mod ui_helpers;
 mod view_style;
+
+use persistence_recovery::{PersistenceOperation, PersistenceRecoveryState, RecoveryAction};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum UiMode {
@@ -178,7 +181,9 @@ struct App {
     sqlite_database_path: Option<PathBuf>,
     archived_categories: Vec<Category>,
     checkpoint_recovery_active: bool,
-    storage_error: Option<String>,
+    persistence_recovery: Option<PersistenceRecoveryState>,
+    recovery_exit_requested: bool,
+    recovery_exit_error: Option<String>,
 }
 
 impl App {
@@ -321,7 +326,9 @@ impl App {
             sqlite_database_path,
             archived_categories,
             checkpoint_recovery_active: false,
-            storage_error: None,
+            persistence_recovery: None,
+            recovery_exit_requested: false,
+            recovery_exit_error: None,
         };
 
         app.persist_category_tags();
@@ -351,23 +358,11 @@ impl App {
 
         app.sync_drift_idle_state();
         app.commit_checkpoint_recovery_if_ready();
-        if let Some(error) = app.storage_error.take() {
-            return Err(error);
+        if let Some(recovery) = app.persistence_recovery.take() {
+            return Err(recovery.failure.summary());
         }
 
         Ok(app)
-    }
-
-    fn record_storage_result<T>(&mut self, result: Result<T, String>) -> Option<T> {
-        match result {
-            Ok(value) => Some(value),
-            Err(error) => {
-                if self.storage_error.is_none() {
-                    self.storage_error = Some(error);
-                }
-                None
-            }
-        }
     }
 
     fn persist_active_session_start(&mut self) {
@@ -390,7 +385,11 @@ impl App {
             &description,
             started_at,
         );
-        if let Some(stable_id) = self.record_storage_result(result) {
+        if let Some(stable_id) = self.record_storage_result_for(
+            PersistenceOperation::ActiveStart,
+            RecoveryAction::ReloadAuthority,
+            result,
+        ) {
             self.session.active_session_stable_id = Some(stable_id);
         }
     }
@@ -399,7 +398,11 @@ impl App {
         let Some(database_path) = self.sqlite_database_path.clone() else {
             return true;
         };
-        let Some(state) = self.record_storage_result(sqlite::load_tui_state(&database_path)) else {
+        let Some(state) = self.record_storage_result_for(
+            PersistenceOperation::StateReload,
+            RecoveryAction::ReloadAuthority,
+            sqlite::load_tui_state(&database_path),
+        ) else {
             return false;
         };
         self.time_tracker.sessions = state.loaded_sessions.sessions;
@@ -430,7 +433,11 @@ impl App {
                 &next_stable_id,
                 started_at_utc,
             );
-            let Some(receipt) = self.record_storage_result(result) else {
+            let Some(receipt) = self.record_storage_result_for(
+                PersistenceOperation::ActiveReset,
+                RecoveryAction::ReloadAuthority,
+                result,
+            ) else {
                 return;
             };
             self.session.active_session_stable_id = receipt.resulting_active_stable_id;
@@ -960,14 +967,18 @@ impl App {
                 .format("%Y-%m-%d")
                 .to_string();
             let operation_id = format!("finish:{expected_stable_id}");
-            self.record_storage_result(sqlite::finish_tui_active_session(
-                &database_path,
-                &expected_stable_id,
-                &operation_id,
-                clamped_end,
-                &operational_day,
-                elapsed,
-            ))?;
+            self.record_storage_result_for(
+                PersistenceOperation::ActiveFinish,
+                RecoveryAction::ReloadAuthority,
+                sqlite::finish_tui_active_session(
+                    &database_path,
+                    &expected_stable_id,
+                    &operation_id,
+                    clamped_end,
+                    &operational_day,
+                    elapsed,
+                ),
+            )?;
             let active_category_id = self.time_tracker.active_category_id();
             let _ = self
                 .time_tracker
@@ -1042,7 +1053,11 @@ impl App {
                 &operational_day,
                 elapsed,
             );
-            let Some(receipt) = self.record_storage_result(result) else {
+            let Some(receipt) = self.record_storage_result_for(
+                PersistenceOperation::ActiveSwitch,
+                RecoveryAction::ReloadAuthority,
+                result,
+            ) else {
                 return false;
             };
             let previous_category_id = self.time_tracker.active_category_id();
@@ -1157,7 +1172,14 @@ impl App {
                 if let Some(database_path) = self.sqlite_database_path.clone() {
                     let day = scheduled_day.format("%Y-%m-%d").to_string();
                     let result = sqlite::delete_tui_drift_sessions_for_day(&database_path, &day);
-                    if self.record_storage_result(result).is_none() {
+                    if self
+                        .record_storage_result_for(
+                            PersistenceOperation::DriftSessionDelete,
+                            RecoveryAction::ReloadAuthority,
+                            result,
+                        )
+                        .is_none()
+                    {
                         return;
                     }
                 }
@@ -1603,7 +1625,11 @@ impl App {
                 checkpoint.simulation_time_utc,
                 &checkpoint,
             );
-            self.record_storage_result(result);
+            self.record_storage_result_for(
+                PersistenceOperation::CheckpointSave,
+                RecoveryAction::DetachAndExit,
+                result,
+            );
         } else {
             let path = storage::get_detached_runtime_path();
             if let Err(error) = storage::write_json_atomic(&path, &checkpoint) {
@@ -1615,7 +1641,11 @@ impl App {
     fn clear_detached_checkpoint(&mut self) {
         if let Some(database_path) = self.sqlite_database_path.clone() {
             let result = sqlite::clear_tui_checkpoint(&database_path);
-            self.record_storage_result(result);
+            self.record_storage_result_for(
+                PersistenceOperation::CheckpointClear,
+                RecoveryAction::FlushCurrentState,
+                result,
+            );
         } else {
             let path = storage::get_detached_runtime_path();
             if let Err(error) = storage::delete_file_if_exists(&path) {
@@ -1755,12 +1785,16 @@ impl App {
             .format("%Y-%m-%d")
             .to_string();
         if self
-            .record_storage_result(sqlite::commit_tui_checkpoint_recovery(
-                &database_path,
-                &expected_stable_id,
-                &operational_day,
-                &state,
-            ))
+            .record_storage_result_for(
+                PersistenceOperation::CheckpointRecovery,
+                RecoveryAction::CommitCheckpointRecovery,
+                sqlite::commit_tui_checkpoint_recovery(
+                    &database_path,
+                    &expected_stable_id,
+                    &operational_day,
+                    &state,
+                ),
+            )
             .is_none()
         {
             return;
@@ -1800,68 +1834,104 @@ pub fn run_ui() -> Result<(), io::Error> {
     let mut last_save = Instant::now();
     let mut runtime_error = None;
 
-    loop {
-        if let Some(error) = app.storage_error.take() {
-            runtime_error = Some(error);
-            break;
-        }
+    'runtime: loop {
+        loop {
+            if !app.has_persistence_recovery() {
+                let now = Instant::now();
+                let wall_delta = now.saturating_duration_since(last_simulation_update);
+                last_simulation_update = now;
+                app.advance_runtime(wall_delta, tick_rate, physics_rate);
 
-        let now = Instant::now();
-        let wall_delta = now.saturating_duration_since(last_simulation_update);
-        last_simulation_update = now;
-        app.advance_runtime(wall_delta, tick_rate, physics_rate);
+                if last_save.elapsed() >= save_rate {
+                    app.persist_sessions();
+                    if !app.has_persistence_recovery() {
+                        app.persist_sand_state();
+                    }
+                    if !app.has_persistence_recovery() {
+                        app.persist_daily_sand_snapshot();
+                    }
+                    last_save = Instant::now();
+                }
 
-        if last_save.elapsed() >= save_rate {
-            app.persist_sessions();
-            app.persist_sand_state();
-            app.persist_daily_sand_snapshot();
-            last_save = Instant::now();
-        }
-
-        app.refresh_keymap_if_changed();
-
-        if last_render.elapsed() >= render_rate && app.render_needed {
-            terminal.draw(|f| {
-                app.draw_frame(f);
-            })?;
-            app.render_needed = false;
-            last_render = Instant::now();
-        }
-
-        if event::poll(Duration::from_millis(RUNTIME_LOOP_SETTINGS.input_poll_ms))?
-            && let Event::Key(key) = event::read()?
-        {
-            if app.handle_key(key) {
-                break;
+                app.refresh_keymap_if_changed();
             }
-            if app.detach_requested {
-                break;
+
+            if last_render.elapsed() >= render_rate && app.render_needed {
+                terminal.draw(|f| {
+                    app.draw_frame(f);
+                })?;
+                app.render_needed = false;
+                last_render = Instant::now();
+            }
+
+            if event::poll(Duration::from_millis(RUNTIME_LOOP_SETTINGS.input_poll_ms))?
+                && let Event::Key(key) = event::read()?
+            {
+                if app.handle_key(key) {
+                    break;
+                }
+                if app.detach_requested {
+                    break;
+                }
             }
         }
-    }
 
-    if runtime_error.is_none() {
+        if app.recovery_exit_requested {
+            runtime_error = app.recovery_exit_error.take();
+            break 'runtime;
+        }
+
+        if app.has_persistence_recovery() {
+            continue 'runtime;
+        }
+
         if app.checkpoint_recovery_active {
-            if !app.detach_requested {
-                runtime_error = Some(
-                    "recovery catch-up is not durably committed; checkpoint retained".to_string(),
-                );
-            }
-        } else if app.detach_requested {
+            app.begin_manual_persistence_failure(
+                PersistenceOperation::CheckpointRecovery,
+                RecoveryAction::CommitCheckpointRecovery,
+                "recovery catch-up is not durably committed; checkpoint retained",
+            );
+            app.detach_requested = false;
+            continue 'runtime;
+        }
+
+        if app.detach_requested {
             app.persist_sessions();
-            app.persist_sand_state();
-            app.persist_daily_sand_snapshot();
-            app.persist_detached_checkpoint();
+            if !app.has_persistence_recovery() {
+                app.persist_sand_state();
+            }
+            if !app.has_persistence_recovery() {
+                app.persist_daily_sand_snapshot();
+            }
+            if !app.has_persistence_recovery() {
+                app.persist_detached_checkpoint();
+            }
+            if app.has_persistence_recovery() {
+                app.promote_recovery_action(RecoveryAction::DetachAndExit);
+                app.detach_requested = false;
+                continue 'runtime;
+            }
         } else {
             app.end_active_session_now();
-            app.persist_sessions();
-            app.persist_sand_state();
-            app.persist_daily_sand_snapshot();
-            app.clear_detached_checkpoint();
+            if !app.has_persistence_recovery() {
+                app.persist_sessions();
+            }
+            if !app.has_persistence_recovery() {
+                app.persist_sand_state();
+            }
+            if !app.has_persistence_recovery() {
+                app.persist_daily_sand_snapshot();
+            }
+            if !app.has_persistence_recovery() {
+                app.clear_detached_checkpoint();
+            }
+            if app.has_persistence_recovery() {
+                app.promote_recovery_action(RecoveryAction::FinishAndExit);
+                continue 'runtime;
+            }
         }
-        if runtime_error.is_none() {
-            runtime_error = app.storage_error.take();
-        }
+
+        break 'runtime;
     }
 
     disable_raw_mode()?;

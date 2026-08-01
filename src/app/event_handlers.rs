@@ -13,6 +13,10 @@ impl App {
             return false;
         }
 
+        if self.has_persistence_recovery() {
+            return self.handle_persistence_recovery_key(key);
+        }
+
         if self.show_command_palette {
             return self.handle_command_palette_key(key);
         }
@@ -444,12 +448,18 @@ impl App {
                 if self.time_tracker.move_category_up(self.selected_index) {
                     self.selected_index = self.selected_index.saturating_sub(1);
                     self.persist_categories();
+                    if self.has_persistence_recovery() {
+                        return true;
+                    }
                 }
             }
             Action::ShiftDown => {
                 if self.time_tracker.move_category_down(self.selected_index) {
                     self.selected_index += 1;
                     self.persist_categories();
+                    if self.has_persistence_recovery() {
+                        return true;
+                    }
                 }
             }
             Action::ShiftLeft => {
@@ -515,8 +525,16 @@ impl App {
                             self.modal_description.clone(),
                         ) {
                             self.persist_categories();
+                            if self.has_persistence_recovery() {
+                                self.render_needed = true;
+                                return true;
+                            }
                         }
                         self.remember_selected_tag();
+                        if self.has_persistence_recovery() {
+                            self.render_needed = true;
+                            return true;
+                        }
                     }
                     if self.time_tracker.active_category_index() != Some(self.selected_index)
                         && let Some(category_id) = self

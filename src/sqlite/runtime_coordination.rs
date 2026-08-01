@@ -20,6 +20,12 @@ pub(crate) enum CoordinationError {
     ReceiptConflict { operation_id: String },
     #[error("runtime checkpoint is {actual}; expected {expected}")]
     CheckpointConflict { expected: String, actual: String },
+    #[error("injected {class} failure during {operation} {phase}")]
+    InjectedFailure {
+        operation: String,
+        phase: String,
+        class: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +63,7 @@ pub(crate) fn start_active_session(
         });
     }
     insert_active(&transaction, active)?;
+    maybe_inject_test_fault("active-start", "commit")?;
     transaction.commit()?;
     Ok(())
 }
@@ -93,6 +100,7 @@ pub(crate) fn finish_active_session(
         completion.ended_at_utc,
         acknowledged_at_utc,
     )?;
+    maybe_inject_test_fault("finish", "commit")?;
     transaction.commit()?;
     Ok(RuntimeTransitionReceipt {
         operation_id: operation_id.to_string(),
@@ -151,6 +159,7 @@ pub(crate) fn switch_active_session(
         completion.ended_at_utc,
         Some(completion.ended_at_utc),
     )?;
+    maybe_inject_test_fault("switch", "commit")?;
     transaction.commit()?;
     Ok(RuntimeTransitionReceipt {
         operation_id: operation_id.to_string(),
@@ -206,6 +215,7 @@ pub(crate) fn reset_active_session(
         applied_at_utc,
         Some(applied_at_utc),
     )?;
+    maybe_inject_test_fault("reset", "commit")?;
     transaction.commit()?;
     Ok(RuntimeTransitionReceipt {
         operation_id: operation_id.to_string(),
@@ -307,20 +317,24 @@ pub(crate) fn save_checkpoint(
         .transaction_with_behavior(TransactionBehavior::Immediate)?;
     let active = query_active(&transaction)?.ok_or(CoordinationError::NoActiveSession)?;
     require_expected_active(&active, expected_active_stable_id)?;
-    let existing_status: Option<String> = transaction
+    let existing: Option<(String, Option<String>)> = transaction
         .query_row(
-            "SELECT status FROM runtime_checkpoint WHERE singleton = 1",
+            "SELECT status, active_session_stable_id
+             FROM runtime_checkpoint WHERE singleton = 1",
             [],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
-    if let Some(status) = existing_status
-        && status != "committed"
-    {
-        return Err(CoordinationError::CheckpointConflict {
-            expected: "no checkpoint or committed".to_string(),
-            actual: status,
-        });
+    if let Some((status, existing_active)) = existing {
+        let replaceable_pending =
+            status == "pending" && existing_active.as_deref() == Some(expected_active_stable_id);
+        if status != "committed" && !replaceable_pending {
+            return Err(CoordinationError::CheckpointConflict {
+                expected: "no checkpoint, committed, or pending for the same active session"
+                    .to_string(),
+                actual: status,
+            });
+        }
     }
     transaction.execute(
         "INSERT INTO runtime_checkpoint (
@@ -341,6 +355,7 @@ pub(crate) fn save_checkpoint(
             payload_json,
         ],
     )?;
+    maybe_inject_test_fault("checkpoint-save", "commit")?;
     transaction.commit()?;
     Ok(())
 }
@@ -506,6 +521,7 @@ pub(crate) fn commit_checkpoint_recovery(
             actual: "changed concurrently".to_string(),
         });
     }
+    maybe_inject_test_fault("checkpoint-recovery", "commit")?;
     transaction.commit()?;
     Ok(())
 }
@@ -541,6 +557,29 @@ pub(crate) fn clear_committed_checkpoint(
             actual: actual.to_string(),
         }),
     }
+}
+
+pub(crate) fn maybe_inject_test_fault(
+    operation: &str,
+    phase: &str,
+) -> Result<(), CoordinationError> {
+    #[cfg(debug_assertions)]
+    {
+        if let Ok(specification) = std::env::var("STRATA_TEST_SQLITE_FAULT") {
+            let mut parts = specification.splitn(3, ':');
+            let requested_operation = parts.next().unwrap_or_default();
+            let requested_phase = parts.next().unwrap_or_default();
+            let class = parts.next().unwrap_or("unknown");
+            if requested_operation == operation && requested_phase == phase {
+                return Err(CoordinationError::InjectedFailure {
+                    operation: operation.to_string(),
+                    phase: phase.to_string(),
+                    class: class.to_string(),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_transition_inputs(

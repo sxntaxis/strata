@@ -6,7 +6,7 @@ use crate::{
     sqlite, storage,
 };
 
-use super::App;
+use super::{App, PersistenceOperation, RecoveryAction};
 use chrono::NaiveDate;
 
 impl App {
@@ -19,7 +19,11 @@ impl App {
                 self.time_tracker.active_category_id(),
                 self.session.active_session_stable_id.as_deref(),
             );
-            if let Some(archived) = self.record_storage_result(result) {
+            if let Some(archived) = self.record_storage_result_for(
+                PersistenceOperation::CategorySync,
+                RecoveryAction::FlushCurrentState,
+                result,
+            ) {
                 self.archived_categories = archived;
             }
         } else {
@@ -33,7 +37,11 @@ impl App {
     pub(super) fn persist_sessions(&mut self) {
         if let Some(database_path) = self.sqlite_database_path.clone() {
             let result = sqlite::sync_tui_sessions(&database_path, &self.time_tracker.sessions);
-            self.record_storage_result(result);
+            self.record_storage_result_for(
+                PersistenceOperation::SessionSync,
+                RecoveryAction::FlushCurrentState,
+                result,
+            );
         } else {
             let categories = self.time_tracker.categories_for_storage();
             let path = storage::get_time_log_path();
@@ -49,7 +57,11 @@ impl App {
         let state = self.sand_engine.snapshot_state();
         if let Some(database_path) = self.sqlite_database_path.clone() {
             let result = sqlite::save_tui_sand_state(&database_path, &state);
-            self.record_storage_result(result);
+            self.record_storage_result_for(
+                PersistenceOperation::SandStateSave,
+                RecoveryAction::FlushCurrentState,
+                result,
+            );
         } else {
             let path = storage::get_sand_state_path();
             if let Err(error) = storage::save_sand_state(&path, &state) {
@@ -76,7 +88,11 @@ impl App {
                 .collect::<Vec<_>>();
             let result =
                 sqlite::sync_tui_category_tags(&database_path, &self.category_tags, &category_ids);
-            self.record_storage_result(result);
+            self.record_storage_result_for(
+                PersistenceOperation::CategoryTagsSync,
+                RecoveryAction::FlushCurrentState,
+                result,
+            );
         } else {
             let path = storage::get_category_tags_path();
             if let Err(error) = storage::save_category_tags(&path, &self.category_tags) {
@@ -90,7 +106,11 @@ impl App {
             match sqlite::load_tui_sand_state(&database_path) {
                 Ok(value) => value,
                 Err(error) => {
-                    self.record_storage_result::<()>(Err(error));
+                    self.record_storage_result_for::<()>(
+                        PersistenceOperation::StateReload,
+                        RecoveryAction::ReloadAuthority,
+                        Err(error),
+                    );
                     return;
                 }
             }
@@ -120,7 +140,11 @@ impl App {
             match sqlite::load_tui_daily_snapshot(&database_path, &day) {
                 Ok(value) => value,
                 Err(error) => {
-                    self.record_storage_result::<()>(Err(error));
+                    self.record_storage_result_for::<()>(
+                        PersistenceOperation::StateReload,
+                        RecoveryAction::ReloadAuthority,
+                        Err(error),
+                    );
                     None
                 }
             }
@@ -137,7 +161,11 @@ impl App {
         if let Some(database_path) = self.sqlite_database_path.clone() {
             let day = day.format("%Y-%m-%d").to_string();
             let result = sqlite::save_tui_daily_snapshot(&database_path, &day, state);
-            self.record_storage_result(result);
+            self.record_storage_result_for(
+                PersistenceOperation::DailySnapshotSave,
+                RecoveryAction::FlushCurrentState,
+                result,
+            );
         } else {
             let path = storage::get_sand_history_path_for_day(day);
             if let Err(error) = storage::save_sand_state(&path, state) {
@@ -150,7 +178,11 @@ impl App {
         if let Some(database_path) = self.sqlite_database_path.clone() {
             let day = day.format("%Y-%m-%d").to_string();
             let result = sqlite::delete_tui_daily_snapshot(&database_path, &day);
-            self.record_storage_result(result);
+            self.record_storage_result_for(
+                PersistenceOperation::DailySnapshotDelete,
+                RecoveryAction::FlushCurrentState,
+                result,
+            );
         } else {
             let path = storage::get_sand_history_path_for_day(day);
             if let Err(error) = storage::delete_file_if_exists(&path) {
@@ -312,7 +344,14 @@ impl App {
                 && let Some(database_path) = self.sqlite_database_path.clone()
             {
                 let result = sqlite::archive_tui_category(&database_path, category_id);
-                if self.record_storage_result(result).is_none() {
+                if self
+                    .record_storage_result_for(
+                        PersistenceOperation::CategoryArchive,
+                        RecoveryAction::ReloadAuthority,
+                        result,
+                    )
+                    .is_none()
+                {
                     return;
                 }
             }

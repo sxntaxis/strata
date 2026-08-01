@@ -11,7 +11,7 @@ use crate::domain::{
 };
 use crate::sand::{SandEngine, SandState, SandStateGrain};
 
-use super::App;
+use super::{App, PersistenceOperation, RecoveryAction};
 
 impl App {
     pub(super) fn focus_none_report_row(&mut self) {
@@ -197,7 +197,14 @@ impl App {
 
         if let Some(database_path) = self.sqlite_database_path.clone() {
             let result = crate::sqlite::delete_tui_session(&database_path, session_id);
-            if self.record_storage_result(result).is_none() {
+            if self
+                .record_storage_result_for(
+                    PersistenceOperation::SessionDelete,
+                    RecoveryAction::ReloadAuthority,
+                    result,
+                )
+                .is_none()
+            {
                 return false;
             }
         }
@@ -256,7 +263,14 @@ impl App {
                 session_id,
                 &description,
             );
-            if self.record_storage_result(result).is_none() {
+            if self
+                .record_storage_result_for(
+                    PersistenceOperation::SessionEdit,
+                    RecoveryAction::ReloadAuthority,
+                    result,
+                )
+                .is_none()
+            {
                 return false;
             }
         }

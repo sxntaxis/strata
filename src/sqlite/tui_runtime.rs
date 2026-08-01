@@ -38,6 +38,8 @@ pub(crate) struct SqliteTuiState {
 }
 
 pub(crate) fn load_state(database_path: &Path) -> Result<SqliteTuiState, String> {
+    runtime_coordination::maybe_inject_test_fault("state-load", "before-read")
+        .map_err(|error| error.to_string())?;
     let repository = open_cli_repository(database_path)?;
     let category_rows = repository
         .list_categories(true)
@@ -268,6 +270,8 @@ pub(crate) fn sync_categories(
     active_category_id: CategoryId,
     expected_active_stable_id: Option<&str>,
 ) -> Result<Vec<Category>, String> {
+    runtime_coordination::maybe_inject_test_fault("category-sync", "before-write")
+        .map_err(|error| error.to_string())?;
     let mut repository = open_cli_repository(database_path)?;
     let transaction = repository
         .connection
@@ -452,6 +456,8 @@ pub(crate) fn update_session_description(
     session_id: usize,
     description: &str,
 ) -> Result<(), String> {
+    runtime_coordination::maybe_inject_test_fault("session-edit", "before-write")
+        .map_err(|error| error.to_string())?;
     let repository = open_cli_repository(database_path)?;
     let session_id =
         i64::try_from(session_id).map_err(|_| "session ID is too large".to_string())?;
@@ -469,6 +475,8 @@ pub(crate) fn update_session_description(
 }
 
 pub(crate) fn delete_session(database_path: &Path, session_id: usize) -> Result<(), String> {
+    runtime_coordination::maybe_inject_test_fault("session-delete", "before-write")
+        .map_err(|error| error.to_string())?;
     let repository = open_cli_repository(database_path)?;
     let session_id =
         i64::try_from(session_id).map_err(|_| "session ID is too large".to_string())?;
@@ -498,6 +506,8 @@ pub(crate) fn delete_drift_sessions_for_day(
 }
 
 pub(crate) fn save_sand_state(database_path: &Path, state: &SandState) -> Result<(), String> {
+    runtime_coordination::maybe_inject_test_fault("sand-state", "before-write")
+        .map_err(|error| error.to_string())?;
     let mut repository = open_cli_repository(database_path)?;
     let existing = repository.sand_state().map_err(|error| error.to_string())?;
     let formation_id = existing
@@ -537,6 +547,8 @@ pub(crate) fn save_daily_snapshot(
     operational_day: &str,
     state: &SandState,
 ) -> Result<(), String> {
+    runtime_coordination::maybe_inject_test_fault("daily-snapshot", "before-write")
+        .map_err(|error| error.to_string())?;
     let mut repository = open_cli_repository(database_path)?;
     let existing = repository.sand_state().map_err(|error| error.to_string())?;
     let formation_id = existing
