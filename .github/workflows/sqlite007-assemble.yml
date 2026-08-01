@@ -19,7 +19,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply TUI repository cutover
-        run: python3 tools/sqlite007_apply.py
+        run: |
+          python3 tools/sqlite007_apply.py
+          python3 tools/sqlite007_fix_compile.py
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
