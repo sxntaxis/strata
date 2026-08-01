@@ -419,7 +419,7 @@ struct ParsedDetachedCheckpoint {
 }
 
 impl SqliteRepository {
-    pub fn import_legacy(
+    pub(super) fn import_legacy(
         &mut self,
         plan: &LegacyImportPlan,
     ) -> Result<LegacyImportOutcome, LegacyImportError> {
