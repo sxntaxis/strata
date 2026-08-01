@@ -115,6 +115,69 @@ pub enum Cli {
         json: bool,
     },
 
+    #[command(about = "Export a deterministic portable bundle from SQLite")]
+    SqliteExport {
+        #[arg(long, value_name = "PATH", help = "SQLite database path")]
+        database: Option<PathBuf>,
+
+        #[arg(long, value_name = "DIRECTORY", help = "New portable bundle directory")]
+        out: PathBuf,
+
+        #[arg(long, help = "Print the result as JSON")]
+        json: bool,
+    },
+
+    #[command(about = "Import a validated portable bundle into a new SQLite database")]
+    SqliteImport {
+        #[arg(long, value_name = "DIRECTORY", help = "Portable bundle directory")]
+        bundle: PathBuf,
+
+        #[arg(long, value_name = "PATH", help = "New SQLite database path")]
+        database: Option<PathBuf>,
+
+        #[arg(long, help = "Print the result as JSON")]
+        json: bool,
+    },
+
+    #[command(about = "Check SQLite integrity, schema, foreign keys, and authority metadata")]
+    SqliteDoctor {
+        #[arg(long, value_name = "PATH", help = "SQLite database path")]
+        database: Option<PathBuf>,
+
+        #[arg(long, value_name = "PATH", help = "Authority marker to validate")]
+        authority_marker: Option<PathBuf>,
+
+        #[arg(long, help = "Print the result as JSON")]
+        json: bool,
+    },
+
+    #[command(about = "Create a verified standalone SQLite backup")]
+    SqliteBackup {
+        #[arg(long, value_name = "PATH", help = "SQLite database path")]
+        database: Option<PathBuf>,
+
+        #[arg(long, value_name = "PATH", help = "New backup database path")]
+        out: PathBuf,
+
+        #[arg(long, help = "Print the result as JSON")]
+        json: bool,
+    },
+
+    #[command(about = "Verify and atomically restore a SQLite backup")]
+    SqliteRestore {
+        #[arg(long, value_name = "PATH", help = "Verified backup database path")]
+        backup: PathBuf,
+
+        #[arg(long, value_name = "PATH", help = "SQLite database path")]
+        database: Option<PathBuf>,
+
+        #[arg(long, help = "Preserve and replace an existing target database")]
+        replace: bool,
+
+        #[arg(long, help = "Print the result as JSON")]
+        json: bool,
+    },
+
     #[command(about = "Generate shell completions")]
     Completions {
         #[arg(help = "Shell type (bash, zsh, fish)")]
@@ -476,6 +539,83 @@ pub fn migrate_sqlite(
     Ok(())
 }
 
+fn default_sqlite_database_path() -> PathBuf {
+    storage::get_data_dir().join("strata.sqlite3")
+}
+
+fn default_authority_marker_path() -> PathBuf {
+    storage::get_state_dir().join("storage_authority.json")
+}
+
+fn print_maintenance_report(
+    report: sqlite::SqliteMaintenanceReport,
+    json: bool,
+) -> Result<(), String> {
+    let healthy = report.is_healthy();
+    if json {
+        println!("{}", report.to_pretty_json()?);
+    } else {
+        report.print_human();
+    }
+    if healthy {
+        Ok(())
+    } else {
+        Err("SQLite doctor reported an unhealthy database".to_string())
+    }
+}
+
+pub fn sqlite_export(database: Option<PathBuf>, out: PathBuf, json: bool) -> Result<(), String> {
+    let report = sqlite::run_bundle_export(sqlite::BundleExportOptions {
+        database_path: database.unwrap_or_else(default_sqlite_database_path),
+        output_directory: out,
+    })?;
+    print_maintenance_report(report, json)
+}
+
+pub fn sqlite_import(bundle: PathBuf, database: Option<PathBuf>, json: bool) -> Result<(), String> {
+    let report = sqlite::run_bundle_import(sqlite::BundleImportOptions {
+        bundle_directory: bundle,
+        database_path: database.unwrap_or_else(default_sqlite_database_path),
+    })?;
+    print_maintenance_report(report, json)
+}
+
+pub fn sqlite_doctor(
+    database: Option<PathBuf>,
+    authority_marker: Option<PathBuf>,
+    json: bool,
+) -> Result<(), String> {
+    let use_default_marker = database.is_none() && authority_marker.is_none();
+    let report = sqlite::run_doctor(sqlite::DoctorOptions {
+        database_path: database.unwrap_or_else(default_sqlite_database_path),
+        authority_marker_path: authority_marker
+            .or_else(|| use_default_marker.then(default_authority_marker_path)),
+    })?;
+    print_maintenance_report(report, json)
+}
+
+pub fn sqlite_backup(database: Option<PathBuf>, out: PathBuf, json: bool) -> Result<(), String> {
+    let report = sqlite::run_backup(sqlite::BackupOptions {
+        database_path: database.unwrap_or_else(default_sqlite_database_path),
+        backup_path: out,
+    })?;
+    print_maintenance_report(report, json)
+}
+
+pub fn sqlite_restore(
+    backup: PathBuf,
+    database: Option<PathBuf>,
+    replace: bool,
+    json: bool,
+) -> Result<(), String> {
+    let report = sqlite::run_restore(sqlite::RestoreOptions {
+        backup_path: backup,
+        database_path: database.unwrap_or_else(default_sqlite_database_path),
+        replace,
+    })?;
+    print_maintenance_report(report, json)
+}
+
 pub fn print_completions(shell: &str) -> Result<(), String> {
     use clap_complete::Shell;
     match shell {
@@ -571,6 +711,59 @@ pub fn run_cli() {
                 std::process::exit(1);
             }
         }
+
+        Cli::SqliteExport {
+            database,
+            out,
+            json,
+        } => {
+            if let Err(error) = sqlite_export(database, out, json) {
+                eprintln!("Error: {}", error);
+                std::process::exit(1);
+            }
+        }
+        Cli::SqliteImport {
+            bundle,
+            database,
+            json,
+        } => {
+            if let Err(error) = sqlite_import(bundle, database, json) {
+                eprintln!("Error: {}", error);
+                std::process::exit(1);
+            }
+        }
+        Cli::SqliteDoctor {
+            database,
+            authority_marker,
+            json,
+        } => {
+            if let Err(error) = sqlite_doctor(database, authority_marker, json) {
+                eprintln!("Error: {}", error);
+                std::process::exit(1);
+            }
+        }
+        Cli::SqliteBackup {
+            database,
+            out,
+            json,
+        } => {
+            if let Err(error) = sqlite_backup(database, out, json) {
+                eprintln!("Error: {}", error);
+                std::process::exit(1);
+            }
+        }
+        Cli::SqliteRestore {
+            backup,
+            database,
+            replace,
+            json,
+        } => {
+            if let Err(error) = sqlite_restore(backup, database, replace, json) {
+                eprintln!("Error: {}", error);
+                std::process::exit(1);
+            }
+        }
+
         Cli::Completions { shell } => {
             if let Err(e) = print_completions(&shell) {
                 eprintln!("Error: {}", e);

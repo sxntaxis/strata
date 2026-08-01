@@ -4,15 +4,44 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use thiserror::Error;
 
 mod legacy_import;
+mod maintenance;
 mod migration_command;
 mod repository;
 
+pub(crate) use maintenance::{
+    BackupOptions, BundleExportOptions, BundleImportOptions, DoctorOptions, RestoreOptions,
+    SqliteMaintenanceReport,
+};
 pub(crate) use migration_command::{ControlledMigrationOptions, ControlledMigrationReport};
 
 pub(crate) fn run_controlled_migration(
     options: ControlledMigrationOptions,
 ) -> Result<ControlledMigrationReport, String> {
     migration_command::run_controlled_migration(options).map_err(|error| error.to_string())
+}
+
+pub(crate) fn run_bundle_export(
+    options: BundleExportOptions,
+) -> Result<SqliteMaintenanceReport, String> {
+    maintenance::export_bundle(options).map_err(|error| error.to_string())
+}
+
+pub(crate) fn run_bundle_import(
+    options: BundleImportOptions,
+) -> Result<SqliteMaintenanceReport, String> {
+    maintenance::import_bundle(options).map_err(|error| error.to_string())
+}
+
+pub(crate) fn run_doctor(options: DoctorOptions) -> Result<SqliteMaintenanceReport, String> {
+    maintenance::doctor(options).map_err(|error| error.to_string())
+}
+
+pub(crate) fn run_backup(options: BackupOptions) -> Result<SqliteMaintenanceReport, String> {
+    maintenance::backup(options).map_err(|error| error.to_string())
+}
+
+pub(crate) fn run_restore(options: RestoreOptions) -> Result<SqliteMaintenanceReport, String> {
+    maintenance::restore(options).map_err(|error| error.to_string())
 }
 
 const CURRENT_SCHEMA_VERSION: i64 = 2;
