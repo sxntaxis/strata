@@ -16,8 +16,9 @@ The original issue descriptions predate the completed SQLite migration. Their ac
 | Issues | Disposition | Next owner |
 |---|---|---|
 | #8, #9, #11 | Completed and closed by the SQLite program. | none |
-| #21, #15 | Highest authority risk: invalid or partial configuration may select the wrong database/profile. | AUTHORITY-001 |
-| #25 | High-risk temporal correctness; requires explicit doctrine before report fixes. | TEMPORAL-001 |
+| #21 | Completed by AUTHORITY-001: CLI/TUI now share one fail-closed startup configuration gate with explicit `--ignore-config`. | none |
+| #15 | Complete profile identity, isolation, and deliberate runtime switching remain open; AUTHORITY-001 only prevents invalid startup fallback. | AUTHORITY-002 or a later profile unit |
+| #25 | Highest current correctness risk: explicit clock, duration, timezone, and historical-boundary doctrine. | TEMPORAL-001 |
 | #4, #23, #27 | Interval boundary, sunrise claim, and zero-duration policy. | TEMPORAL-002 |
 | #2, #12 | SQLite preserves project strings, but the complete project/classification product contract must be reconciled before closure. | DOMAIN-001 |
 | #1, #14, #17, #28, #3 | Reporting and export semantics/documentation. | REPORT-001 |
@@ -28,4 +29,4 @@ The original issue descriptions predate the completed SQLite migration. Their ac
 
 ## Immediate action
 
-Implement issue #21 first. A durable database is not safe if malformed configuration can silently redirect a command to another authority.
+Implement TEMPORAL-001 for issue #25. Durable storage and valid startup selection are not sufficient while backward clock jumps, timezone changes, or inconsistent elapsed authorities can corrupt interval meaning.
