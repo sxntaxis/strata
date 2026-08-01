@@ -7,10 +7,10 @@ use serde::{Deserialize, Serialize};
 use crate::{
     constants::COLORS,
     domain::{
-        CategoryId, DRIFT_CATEGORY_CONFIG_NAME, ReportPeriod, Session, build_period_report,
-        operational_day_key_for_local,
+        CategoryId, DRIFT_CATEGORY_CONFIG_NAME, DayBoundaryMode, ReportPeriod, Session,
+        build_period_report, operational_day_key_for_local, runtime_settings,
     },
-    storage,
+    sqlite, storage,
 };
 
 #[derive(Parser, Debug)]
@@ -63,6 +63,56 @@ pub enum Cli {
 
         #[arg(long, short, help = "Output path")]
         out: Option<PathBuf>,
+    },
+
+    #[command(about = "Validate and publish a verified SQLite migration candidate")]
+    MigrateSqlite {
+        #[arg(
+            long,
+            help = "Validate without creating backups, reports, markers, or a database"
+        )]
+        dry_run: bool,
+
+        #[arg(
+            long,
+            help = "Explicitly include an active or detached recovery interval"
+        )]
+        include_active_recovery: bool,
+
+        #[arg(long, value_name = "PATH", help = "SQLite candidate output path")]
+        database: Option<PathBuf>,
+
+        #[arg(
+            long,
+            value_name = "PATH",
+            help = "Machine-readable migration report path"
+        )]
+        report_out: Option<PathBuf>,
+
+        #[arg(
+            long,
+            value_name = "SECONDS",
+            help = "Fixed UTC offset used to reconstruct legacy wall-clock timestamps"
+        )]
+        utc_offset_seconds: Option<i32>,
+
+        #[arg(
+            long,
+            value_name = "MINUTES",
+            help = "Operational-day start as minutes after midnight"
+        )]
+        day_start_minutes: Option<u16>,
+
+        #[arg(
+            long,
+            default_value_t = 1,
+            value_name = "SECONDS",
+            help = "Seconds represented by one sediment quantum"
+        )]
+        quantum_seconds: i64,
+
+        #[arg(long, help = "Print the migration result as JSON")]
+        json: bool,
     },
 
     #[command(about = "Generate shell completions")]
@@ -366,6 +416,66 @@ fn format_ics_timestamp(dt: DateTime<Utc>) -> String {
     dt.format("%Y%m%dT%H%M%SZ").to_string()
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn migrate_sqlite(
+    dry_run: bool,
+    include_active_recovery: bool,
+    database: Option<PathBuf>,
+    report_out: Option<PathBuf>,
+    utc_offset_seconds: Option<i32>,
+    day_start_minutes: Option<u16>,
+    quantum_seconds: i64,
+    json: bool,
+) -> Result<(), String> {
+    if dry_run && report_out.is_some() {
+        return Err(
+            "--report-out cannot be used with --dry-run; use --json for a machine-readable preview"
+                .to_string(),
+        );
+    }
+
+    let settings = runtime_settings();
+    let resolved_day_start = match day_start_minutes {
+        Some(value) => value,
+        None => match settings.day_boundary.mode {
+            DayBoundaryMode::FixedHour => {
+                let minutes = settings
+                    .day_boundary
+                    .fixed_hour
+                    .checked_mul(60)
+                    .and_then(|value| value.checked_add(settings.day_boundary.fixed_minute))
+                    .ok_or_else(|| "Configured operational-day boundary overflows".to_string())?;
+                u16::try_from(minutes)
+                    .map_err(|_| "Configured operational-day boundary is invalid".to_string())?
+            }
+            DayBoundaryMode::Sunrise => {
+                return Err(
+                    "Sunrise day boundaries require explicit --day-start-minutes for migration"
+                        .to_string(),
+                );
+            }
+        },
+    };
+
+    let report = sqlite::run_controlled_migration(sqlite::ControlledMigrationOptions {
+        dry_run,
+        include_active_recovery,
+        database_path: database,
+        report_path: report_out,
+        utc_offset_seconds: utc_offset_seconds.unwrap_or(settings.day_boundary.utc_offset_seconds),
+        operational_day_start_minutes: resolved_day_start,
+        quantum_seconds,
+    })
+    .map_err(|error| error.to_string())?;
+
+    if json {
+        println!("{}", report.to_pretty_json()?);
+    } else {
+        report.print_human();
+    }
+    Ok(())
+}
+
 pub fn print_completions(shell: &str) -> Result<(), String> {
     use clap_complete::Shell;
     match shell {
@@ -433,6 +543,30 @@ pub fn run_cli() {
         }
         Cli::Export { format, out } => {
             if let Err(e) = export_data(format, out) {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        Cli::MigrateSqlite {
+            dry_run,
+            include_active_recovery,
+            database,
+            report_out,
+            utc_offset_seconds,
+            day_start_minutes,
+            quantum_seconds,
+            json,
+        } => {
+            if let Err(e) = migrate_sqlite(
+                dry_run,
+                include_active_recovery,
+                database,
+                report_out,
+                utc_offset_seconds,
+                day_start_minutes,
+                quantum_seconds,
+                json,
+            ) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
