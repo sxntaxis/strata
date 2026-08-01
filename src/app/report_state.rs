@@ -9,10 +9,7 @@ use crate::domain::{
     build_period_karma_report_with_live_and_offset, operational_day_key_now,
     report_period_date_bounds_with_offset,
 };
-use crate::{
-    sand::{SandEngine, SandState, SandStateGrain},
-    storage,
-};
+use crate::sand::{SandEngine, SandState, SandStateGrain};
 
 use super::App;
 
@@ -27,14 +24,26 @@ impl App {
         self.clamp_report_selection(summary.entries.len());
     }
 
+    fn report_categories(&self) -> Vec<Category> {
+        let mut categories = self.time_tracker.categories_for_storage();
+        categories.extend(self.archived_categories.iter().cloned());
+        categories
+    }
+
     pub(super) fn category_color_for_id(&self, category_id: CategoryId) -> Color {
         self.time_tracker
             .category_color_by_id(category_id)
+            .or_else(|| {
+                self.archived_categories
+                    .iter()
+                    .find(|category| category.id == category_id)
+                    .map(|category| category.color)
+            })
             .unwrap_or(Color::White)
     }
 
     pub(super) fn report_rows(&self) -> KarmaReportSummary {
-        let categories = self.time_tracker.categories_for_storage();
+        let categories = self.report_categories();
         let live_preview = self.live_session_preview();
 
         build_period_karma_report_with_live_and_offset(
@@ -50,7 +59,7 @@ impl App {
         &self,
         category_id: CategoryId,
     ) -> Vec<CategoryLogEntry> {
-        let categories = self.time_tracker.categories_for_storage();
+        let categories = self.report_categories();
         let live_preview = self.live_session_preview();
 
         build_category_logs_for_period_with_offset(
@@ -117,11 +126,12 @@ impl App {
         &mut self,
         width: u16,
         height: u16,
-        categories: &[Category],
+        _categories: &[Category],
     ) -> Option<Vec<Line<'static>>> {
         self.refresh_report_snapshot_cache();
         let state = self.report_snapshot_state.clone()?;
 
+        let categories = self.report_categories();
         let valid_category_ids: HashSet<CategoryId> =
             categories.iter().map(|category| category.id).collect();
 
@@ -149,7 +159,7 @@ impl App {
 
         let preview_engine = self.report_snapshot_preview_engine.as_mut()?;
         preview_engine.update();
-        Some(preview_engine.render(categories))
+        Some(preview_engine.render(&categories))
     }
 
     pub(super) fn clear_report_snapshot_cache(&mut self) {
@@ -263,8 +273,8 @@ impl App {
         }
 
         self.report_snapshot_end_day = Some(key);
-        let path = storage::get_sand_history_path_for_day(end_day);
-        self.report_snapshot_state = storage::load_sand_state(&path)
+        self.report_snapshot_state = self
+            .load_daily_sand_snapshot(end_day)
             .or_else(|| self.synthetic_snapshot_from_time_log(end_day));
         self.report_snapshot_preview_key = None;
         self.report_snapshot_preview_engine = None;
@@ -273,13 +283,11 @@ impl App {
     pub(super) fn rebuild_report_snapshot_for_interval_end_day(&mut self) {
         let end_day = self.report_interval_end_day();
         let key = end_day.format("%Y-%m-%d").to_string();
-        let path = storage::get_sand_history_path_for_day(end_day);
-
         if let Some(state) = self.synthetic_snapshot_from_time_log(end_day) {
-            let _ = storage::save_sand_state(&path, &state);
+            self.save_daily_sand_snapshot(end_day, &state);
             self.report_snapshot_state = Some(state);
         } else {
-            let _ = storage::delete_file_if_exists(&path);
+            self.delete_daily_sand_snapshot(end_day);
             self.report_snapshot_state = None;
         }
 

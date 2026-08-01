@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    path::{Path, PathBuf},
+    path::Path,
     process,
 };
 
@@ -16,11 +16,9 @@ use crate::{
 };
 
 use super::{
-    NewActiveSession, SessionCompletion, SqliteRepository,
+    NewActiveSession, SessionCompletion,
     authority::open_cli_repository,
-    repository::{
-        CheckpointRecord, CheckpointStatus, NewSandSnapshotRecord, SandStateRecord, SnapshotKind,
-    },
+    repository::{CheckpointRecord, CheckpointStatus, SandStateRecord},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,7 +119,7 @@ pub(crate) fn load_state(database_path: &Path) -> Result<SqliteTuiState, String>
             let started_at_utc = DateTime::parse_from_rfc3339(&row.started_at_utc)
                 .map_err(|error| format!("Invalid active-session timestamp: {error}"))?
                 .with_timezone(&Utc);
-            Ok(SqliteTuiActiveSession {
+            Ok::<SqliteTuiActiveSession, String>(SqliteTuiActiveSession {
                 category_id: CategoryId::new(category_id),
                 description: row.description,
                 started_at_utc,
@@ -340,7 +338,10 @@ pub(crate) fn sync_categories(
                 )
                 .map_err(|error| error.to_string())?;
             transaction
-                .execute("DELETE FROM category_tags WHERE category_id = ?1", params![id])
+                .execute(
+                    "DELETE FROM category_tags WHERE category_id = ?1",
+                    params![id],
+                )
                 .map_err(|error| error.to_string())?;
         }
     }
@@ -402,9 +403,11 @@ pub(crate) fn sync_sessions(database_path: &Path, sessions: &[Session]) -> Resul
         .query_map([], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)?,
+                (
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                ),
             ))
         })
         .map_err(|error| error.to_string())?
@@ -551,7 +554,7 @@ pub(crate) fn delete_daily_snapshot(
     database_path: &Path,
     operational_day: &str,
 ) -> Result<(), String> {
-    let mut repository = open_cli_repository(database_path)?;
+    let repository = open_cli_repository(database_path)?;
     repository
         .connection
         .execute(
@@ -597,7 +600,7 @@ pub(crate) fn load_checkpoint<T: DeserializeOwned>(
 }
 
 pub(crate) fn clear_checkpoint(database_path: &Path) -> Result<(), String> {
-    let mut repository = open_cli_repository(database_path)?;
+    let repository = open_cli_repository(database_path)?;
     repository
         .connection
         .execute("DELETE FROM runtime_checkpoint WHERE singleton = 1", [])
@@ -672,6 +675,8 @@ fn as_i64(value: u64, label: &str) -> Result<i64, String> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
     use crate::sqlite::{SqliteRepository, repository::NewCategoryRecord};
 
@@ -798,11 +803,18 @@ mod tests {
         )
         .unwrap();
         assert_eq!(load_sand_state(&path).unwrap(), Some(state.clone()));
-        assert_eq!(load_daily_snapshot(&path, "2026-08-01").unwrap(), Some(state));
+        assert_eq!(
+            load_daily_snapshot(&path, "2026-08-01").unwrap(),
+            Some(state)
+        );
         let checkpoint: Option<BTreeMap<String, String>> = load_checkpoint(&path).unwrap();
         assert_eq!(checkpoint.unwrap().get("status").unwrap(), "detached");
         clear_checkpoint(&path).unwrap();
-        assert!(load_checkpoint::<BTreeMap<String, String>>(&path).unwrap().is_none());
+        assert!(
+            load_checkpoint::<BTreeMap<String, String>>(&path)
+                .unwrap()
+                .is_none()
+        );
         std::fs::remove_file(path).ok();
     }
 }

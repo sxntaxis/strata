@@ -3,50 +3,93 @@ use ratatui::style::Color;
 use crate::{
     constants::{CATEGORY_SETTINGS, COLORS},
     domain::{CategoryId, DRIFT_CATEGORY_ID, is_drift_category_id, operational_day_key_now},
-    storage,
+    sqlite, storage,
 };
 
 use super::App;
+use chrono::NaiveDate;
 
 impl App {
-    pub(super) fn persist_categories(&self) {
+    pub(super) fn persist_categories(&mut self) {
         let categories = self.time_tracker.categories_for_storage();
-        let path = storage::get_categories_path();
-        let _ = storage::save_categories_to_csv(&path, &categories);
+        if let Some(database_path) = self.sqlite_database_path.clone() {
+            let result = sqlite::sync_tui_categories(
+                &database_path,
+                &categories,
+                self.time_tracker.active_category_id(),
+            );
+            if let Some(archived) = self.record_storage_result(result) {
+                self.archived_categories = archived;
+            }
+        } else {
+            let path = storage::get_categories_path();
+            if let Err(error) = storage::save_categories_to_csv(&path, &categories) {
+                self.record_storage_result::<()>(Err(error));
+            }
+        }
     }
 
-    pub(super) fn persist_sessions(&self) {
-        let categories = self.time_tracker.categories_for_storage();
-        let path = storage::get_time_log_path();
-        let _ = storage::save_sessions_to_csv(&path, &self.time_tracker.sessions, &categories);
+    pub(super) fn persist_sessions(&mut self) {
+        if let Some(database_path) = self.sqlite_database_path.clone() {
+            let result = sqlite::sync_tui_sessions(&database_path, &self.time_tracker.sessions);
+            self.record_storage_result(result);
+        } else {
+            let categories = self.time_tracker.categories_for_storage();
+            let path = storage::get_time_log_path();
+            if let Err(error) =
+                storage::save_sessions_to_csv(&path, &self.time_tracker.sessions, &categories)
+            {
+                self.record_storage_result::<()>(Err(error));
+            }
+        }
     }
 
-    pub(super) fn persist_sand_state(&self) {
+    pub(super) fn persist_sand_state(&mut self) {
         let state = self.sand_engine.snapshot_state();
-        let path = storage::get_sand_state_path();
-        let _ = storage::save_sand_state(&path, &state);
+        if let Some(database_path) = self.sqlite_database_path.clone() {
+            let result = sqlite::save_tui_sand_state(&database_path, &state);
+            self.record_storage_result(result);
+        } else {
+            let path = storage::get_sand_state_path();
+            if let Err(error) = storage::save_sand_state(&path, &state) {
+                self.record_storage_result::<()>(Err(error));
+            }
+        }
     }
 
-    pub(super) fn persist_daily_sand_snapshot(&self) {
+    pub(super) fn persist_daily_sand_snapshot(&mut self) {
         let mut state = self.sand_engine.snapshot_state();
-
         if is_drift_category_id(self.time_tracker.active_category_id()) {
             state.grains.retain(|grain| grain.category_id != 0);
         }
-
-        let day = operational_day_key_now();
-        let path = storage::get_sand_history_path_for_day(day);
-        let _ = storage::save_sand_state(&path, &state);
+        self.save_daily_sand_snapshot(operational_day_key_now(), &state);
     }
 
-    pub(super) fn persist_category_tags(&self) {
-        let path = storage::get_category_tags_path();
-        let _ = storage::save_category_tags(&path, &self.category_tags);
+    pub(super) fn persist_category_tags(&mut self) {
+        if let Some(database_path) = self.sqlite_database_path.clone() {
+            let result = sqlite::sync_tui_category_tags(&database_path, &self.category_tags);
+            self.record_storage_result(result);
+        } else {
+            let path = storage::get_category_tags_path();
+            if let Err(error) = storage::save_category_tags(&path, &self.category_tags) {
+                self.record_storage_result::<()>(Err(error));
+            }
+        }
     }
 
     pub(super) fn restore_sand_state(&mut self) {
-        let path = storage::get_sand_state_path();
-        let Some(state) = storage::load_sand_state(&path) else {
+        let state = if let Some(database_path) = self.sqlite_database_path.clone() {
+            match sqlite::load_tui_sand_state(&database_path) {
+                Ok(value) => value,
+                Err(error) => {
+                    self.record_storage_result::<()>(Err(error));
+                    return;
+                }
+            }
+        } else {
+            storage::load_sand_state(&storage::get_sand_state_path())
+        };
+        let Some(state) = state else {
             return;
         };
 
@@ -54,10 +97,58 @@ impl App {
             .time_tracker
             .categories_for_storage()
             .into_iter()
+            .chain(self.archived_categories.iter().cloned())
             .map(|category| category.id)
             .collect::<std::collections::HashSet<_>>();
-
         self.sand_engine.restore_state(&state, &valid_category_ids);
+    }
+
+    pub(super) fn load_daily_sand_snapshot(
+        &mut self,
+        day: NaiveDate,
+    ) -> Option<crate::sand::SandState> {
+        if let Some(database_path) = self.sqlite_database_path.clone() {
+            let day = day.format("%Y-%m-%d").to_string();
+            match sqlite::load_tui_daily_snapshot(&database_path, &day) {
+                Ok(value) => value,
+                Err(error) => {
+                    self.record_storage_result::<()>(Err(error));
+                    None
+                }
+            }
+        } else {
+            storage::load_sand_state(&storage::get_sand_history_path_for_day(day))
+        }
+    }
+
+    pub(super) fn save_daily_sand_snapshot(
+        &mut self,
+        day: NaiveDate,
+        state: &crate::sand::SandState,
+    ) {
+        if let Some(database_path) = self.sqlite_database_path.clone() {
+            let day = day.format("%Y-%m-%d").to_string();
+            let result = sqlite::save_tui_daily_snapshot(&database_path, &day, state);
+            self.record_storage_result(result);
+        } else {
+            let path = storage::get_sand_history_path_for_day(day);
+            if let Err(error) = storage::save_sand_state(&path, state) {
+                self.record_storage_result::<()>(Err(error));
+            }
+        }
+    }
+
+    pub(super) fn delete_daily_sand_snapshot(&mut self, day: NaiveDate) {
+        if let Some(database_path) = self.sqlite_database_path.clone() {
+            let day = day.format("%Y-%m-%d").to_string();
+            let result = sqlite::delete_tui_daily_snapshot(&database_path, &day);
+            self.record_storage_result(result);
+        } else {
+            let path = storage::get_sand_history_path_for_day(day);
+            if let Err(error) = storage::delete_file_if_exists(&path) {
+                self.record_storage_result::<()>(Err(error));
+            }
+        }
     }
 
     pub(super) fn sync_modal_description_from_selection(&mut self) {

@@ -204,7 +204,7 @@ fn interrupted_activation_is_recovered_idempotently() {
 }
 
 #[test]
-fn activated_cli_uses_sqlite_without_legacy_dual_writes_and_blocks_tui() {
+fn activated_cli_uses_sqlite_without_legacy_dual_writes() {
     let profile = TestProfile::new("cli-cutover");
     profile.migrate();
     let activation = profile.activate();
@@ -273,8 +273,4 @@ fn activated_cli_uses_sqlite_without_legacy_dual_writes_and_blocks_tui() {
     );
     let exported: Value = serde_json::from_slice(&export.stdout).expect("export should be JSON");
     assert_eq!(exported["sessions"][0]["project"], "sqlite-project");
-
-    let tui = profile.run(&[]);
-    assert!(!tui.status.success());
-    assert!(stderr(&tui).contains("legacy-backed TUI is disabled"));
 }
