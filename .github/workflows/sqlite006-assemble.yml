@@ -18,475 +18,83 @@ jobs:
           ref: storage/006-cli-authority-activation
           fetch-depth: 0
 
-      - name: Wire authority and CLI boundaries
+      - name: Recover and run wiring script
         run: |
+          git show HEAD^:.github/workflows/sqlite006-assemble.yml > /tmp/sqlite006-old.yml
           python3 - <<'PY'
           from pathlib import Path
 
-          def replace_once(text: str, old: str, new: str, label: str) -> str:
-              if old not in text:
-                  raise SystemExit(f"missing {label} anchor")
-              return text.replace(old, new, 1)
+          lines = Path('/tmp/sqlite006-old.yml').read_text().splitlines()
+          start = next(index for index, line in enumerate(lines) if "python3 - <<'PY'" in line) + 1
+          end = next(index for index in range(start, len(lines)) if lines[index].strip() == 'PY')
+          script = '\n'.join(
+              line[10:] if line.startswith('          ') else line
+              for line in lines[start:end]
+          ) + '\n'
 
-          sqlite = Path('src/sqlite.rs')
-          text = sqlite.read_text()
-          if 'mod authority;\n' not in text:
-              text = replace_once(
-                  text,
-                  'mod legacy_import;\n',
-                  'mod authority;\nmod cli_runtime;\nmod legacy_import;\n',
-                  'sqlite module',
-              )
-          exports = '''pub(crate) use authority::{
-              RuntimeAuthority, SqliteCliActivationOptions, SqliteCliActivationReport,
-              activate_sqlite_cli, ensure_tui_legacy_allowed, resolve_runtime_authority,
-          };
-          pub(crate) use cli_runtime::{
-              SqliteCliSnapshot, SqliteCliStartResult, SqliteCliStopResult,
-              read_snapshot as read_cli_snapshot, start_session as start_cli_session,
-              stop_session as stop_cli_session,
-          };
-          '''
-          if 'pub(crate) use authority::{' not in text:
-              text = replace_once(
-                  text,
-                  'pub(crate) use maintenance::{\n',
-                  exports + 'pub(crate) use maintenance::{\n',
-                  'sqlite exports',
-              )
-          error_anchor = '''    #[error("there is no active session to finish")]
-              NoActiveSession,
-          '''
-          error_replacement = error_anchor + '''    #[error("SQLite storage authority conflict: expected {expected}, found {found}")]
-              AuthorityConflict { expected: String, found: String },
-          '''
-          if 'AuthorityConflict {' not in text:
-              text = replace_once(text, error_anchor, error_replacement, 'authority error')
-          integrity_anchor = '''    pub fn integrity_check(&self) -> Result<String, SqliteStoreError> {
-              Ok(self
-                  .connection
-                  .query_row("PRAGMA integrity_check", [], |row| row.get(0))?)
-          }
+          block_start = script.index("integrity_anchor = '''")
+          block_end = script.index("sqlite.write_text(text)", block_start)
+          replacement = '''metadata_methods = r'''    pub fn metadata_value(&self, key: &str) -> Result<Option<String>, SqliteStoreError> {
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT value FROM database_metadata WHERE key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
 
-          '''
-          metadata_methods = integrity_anchor + '''    pub fn metadata_value(&self, key: &str) -> Result<Option<String>, SqliteStoreError> {
-              Ok(self
-                  .connection
-                  .query_row(
-                      "SELECT value FROM database_metadata WHERE key = ?1",
-                      params![key],
-                      |row| row.get(0),
-                  )
-                  .optional()?)
-          }
+    pub fn transition_storage_authority(
+        &mut self,
+        expected: &str,
+        next: &str,
+        activated_at_utc: &str,
+    ) -> Result<(), SqliteStoreError> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current: Option<String> = transaction
+            .query_row(
+                "SELECT value FROM database_metadata WHERE key = 'storage_authority'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let found = current.unwrap_or_else(|| "missing".to_string());
+        if found != expected {
+            return Err(SqliteStoreError::AuthorityConflict {
+                expected: expected.to_string(),
+                found,
+            });
+        }
+        transaction.execute(
+            "UPDATE database_metadata SET value = ?1 WHERE key = 'storage_authority'",
+            params![next],
+        )?;
+        transaction.execute(
+            "INSERT INTO database_metadata(key, value)
+             VALUES ('sqlite_cli_activated_at_utc', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![activated_at_utc],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
 
-              pub fn transition_storage_authority(
-                  &mut self,
-                  expected: &str,
-                  next: &str,
-                  activated_at_utc: &str,
-              ) -> Result<(), SqliteStoreError> {
-                  let transaction = self
-                      .connection
-                      .transaction_with_behavior(TransactionBehavior::Immediate)?;
-                  let current: Option<String> = transaction
-                      .query_row(
-                          "SELECT value FROM database_metadata WHERE key = 'storage_authority'",
-                          [],
-                          |row| row.get(0),
-                      )
-                      .optional()?;
-                  let found = current.unwrap_or_else(|| "missing".to_string());
-                  if found != expected {
-                      return Err(SqliteStoreError::AuthorityConflict {
-                          expected: expected.to_string(),
-                          found,
-                      });
-                  }
-                  transaction.execute(
-                      "UPDATE database_metadata SET value = ?1 WHERE key = 'storage_authority'",
-                      params![next],
-                  )?;
-                  transaction.execute(
-                      "INSERT INTO database_metadata(key, value)
-                       VALUES ('sqlite_cli_activated_at_utc', ?1)
-                       ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                      params![activated_at_utc],
-                  )?;
-                  transaction.commit()?;
-                  Ok(())
-              }
-
-          '''
-          if 'pub fn metadata_value(' not in text:
-              text = replace_once(text, integrity_anchor, metadata_methods, 'metadata methods')
-          sqlite.write_text(text)
-
-          migration = Path('src/sqlite/migration_command.rs')
-          text = migration.read_text()
-          helper = '''pub(super) fn verify_candidate_for_cli_activation(
-              database_path: &Path,
-              report: &ControlledMigrationReport,
-          ) -> Result<String, ControlledMigrationError> {
-              let controlled_options = ControlledMigrationOptions {
-                  dry_run: true,
-                  include_active_recovery: true,
-                  database_path: Some(database_path.to_path_buf()),
-                  report_path: None,
-                  utc_offset_seconds: report.utc_offset_seconds,
-                  operational_day_start_minutes: report.operational_day_start_minutes,
-                  quantum_seconds: report.quantum_seconds,
-              };
-              let layout = MigrationLayout::runtime(&controlled_options)?;
-              let import_options = LegacyImportOptions {
-                  utc_offset_seconds: report.utc_offset_seconds,
-                  operational_day_start_minutes: report.operational_day_start_minutes,
-                  quantum_seconds: report.quantum_seconds,
-              };
-              let plan = stable_plan(&layout.legacy_paths(), import_options)?;
-              if plan.summary().source_fingerprint != report.source_fingerprint {
-                  return Err(ControlledMigrationError::SourceChanged {
-                      before: report.source_fingerprint.clone(),
-                      after: plan.summary().source_fingerprint.clone(),
-                  });
-              }
-              let existing = inspect_existing_candidate(database_path, &report.source_fingerprint)?
-                  .ok_or_else(|| {
-                      ControlledMigrationError::PublicationMismatch(
-                          "verified SQLite candidate is missing".to_string(),
-                      )
-                  })?;
-              if existing.summary != *plan.summary() || existing.summary != report.source_summary {
-                  return Err(ControlledMigrationError::PublicationMismatch(
-                      "SQLite candidate no longer matches the live legacy authority".to_string(),
-                  ));
-              }
-              if existing.integrity_check != "ok" {
-                  return Err(ControlledMigrationError::PublicationMismatch(format!(
-                      "candidate integrity check returned {}",
-                      existing.integrity_check
-                  )));
-              }
-              Ok(existing.integrity_check)
-          }
-
-          '''
-          if 'verify_candidate_for_cli_activation' not in text:
-              text = replace_once(text, 'fn stable_plan(\n', helper + 'fn stable_plan(\n', 'activation verification')
-          migration.write_text(text)
-
-          cli = Path('src/cli.rs')
-          text = cli.read_text()
-          text = text.replace(
-              'use std::{io, path::PathBuf};',
-              'use std::{io, path::{Path, PathBuf}};',
-              1,
-          )
-          activation_variant = '''    #[command(about = "Activate a verified SQLite candidate for CLI runtime operations")]
-              ActivateSqlite {
-                  #[arg(long, value_name = "PATH", help = "Verified SQLite candidate path")]
-                  database: Option<PathBuf>,
-
-                  #[arg(long, help = "Confirm the one-way CLI authority switch")]
-                  confirm: bool,
-
-                  #[arg(long, help = "Print the activation result as JSON")]
-                  json: bool,
-              },
-
-          '''
-          if 'ActivateSqlite {' not in text:
-              text = replace_once(
-                  text,
-                  '    #[command(about = "Export a deterministic portable bundle from SQLite")]\n',
-                  activation_variant + '    #[command(about = "Export a deterministic portable bundle from SQLite")]\n',
-                  'activation CLI variant',
-              )
-
-          if 'fn start_session_legacy(' not in text:
-              text = replace_once(text, 'pub fn start_session(\n', 'fn start_session_legacy(\n', 'legacy start rename')
-              wrapper = '''pub fn start_session(
-                  project: String,
-                  description: Option<String>,
-                  category_name: Option<String>,
-              ) -> Result<(), String> {
-                  match sqlite::resolve_runtime_authority()? {
-                      sqlite::RuntimeAuthority::LegacyFiles => {
-                          start_session_legacy(project, description, category_name)
-                      }
-                      sqlite::RuntimeAuthority::SqliteCli { database_path } => {
-                          let started = sqlite::start_cli_session(
-                              &database_path,
-                              project,
-                              description,
-                              category_name,
-                          )?;
-                          println!(
-                              "Started session for project '{}' in category '{}'",
-                              started.project, started.category_name
-                          );
-                          Ok(())
-                      }
-                  }
-              }
-
-              '''
-              text = replace_once(text, 'fn start_session_legacy(\n', wrapper + 'fn start_session_legacy(\n', 'start wrapper')
-
-          if 'fn stop_session_legacy(' not in text:
-              text = replace_once(text, 'pub fn stop_session() -> Result<usize, String> {\n', 'fn stop_session_legacy() -> Result<usize, String> {\n', 'legacy stop rename')
-              wrapper = '''pub fn stop_session() -> Result<usize, String> {
-                  match sqlite::resolve_runtime_authority()? {
-                      sqlite::RuntimeAuthority::LegacyFiles => stop_session_legacy(),
-                      sqlite::RuntimeAuthority::SqliteCli { database_path } => {
-                          let stopped = sqlite::stop_cli_session(&database_path)?;
-                          let elapsed = stopped.elapsed_seconds;
-                          println!(
-                              "Stopped session. Elapsed time: {:02}:{:02}:{:02}",
-                              elapsed / 3600,
-                              (elapsed % 3600) / 60,
-                              elapsed % 60
-                          );
-                          Ok(elapsed)
-                      }
-                  }
-              }
-
-              '''
-              text = replace_once(text, 'fn stop_session_legacy() -> Result<usize, String> {\n', wrapper + 'fn stop_session_legacy() -> Result<usize, String> {\n', 'stop wrapper')
-
-          if 'fn report_legacy(' not in text:
-              text = replace_once(text, 'pub fn report(period: ReportPeriod) -> Result<(), String> {\n', 'fn report_legacy(period: ReportPeriod) -> Result<(), String> {\n', 'legacy report rename')
-              wrapper = '''pub fn report(period: ReportPeriod) -> Result<(), String> {
-                  match sqlite::resolve_runtime_authority()? {
-                      sqlite::RuntimeAuthority::LegacyFiles => report_legacy(period),
-                      sqlite::RuntimeAuthority::SqliteCli { database_path } => {
-                          let snapshot = sqlite::read_cli_snapshot(&database_path)?;
-                          let sessions = snapshot
-                              .sessions
-                              .iter()
-                              .map(|session| session.as_domain_session())
-                              .collect::<Vec<_>>();
-                          let summary = build_period_report(&sessions, &snapshot.categories, period);
-                          let title = match period {
-                              ReportPeriod::Today => "Today's Report",
-                              ReportPeriod::Week => "Weekly Report",
-                              ReportPeriod::Month => "Monthly Report",
-                          };
-                          println!("{} ({})", title, summary.date);
-                          println!("{}", "-".repeat(40));
-                          for entry in &summary.entries {
-                              println!(
-                                  "{:20} {:02}:{:02}:{:02}",
-                                  entry.category_name,
-                                  entry.elapsed_seconds / 3600,
-                                  (entry.elapsed_seconds % 3600) / 60,
-                                  entry.elapsed_seconds % 60
-                              );
-                          }
-                          println!("{}", "-".repeat(40));
-                          println!(
-                              "{:20} {:02}:{:02}:{:02}",
-                              "TOTAL",
-                              summary.total_seconds / 3600,
-                              (summary.total_seconds % 3600) / 60,
-                              summary.total_seconds % 60
-                          );
-                          Ok(())
-                      }
-                  }
-              }
-
-              '''
-              text = replace_once(text, 'fn report_legacy(period: ReportPeriod) -> Result<(), String> {\n', wrapper + 'fn report_legacy(period: ReportPeriod) -> Result<(), String> {\n', 'report wrapper')
-
-          if 'fn export_data_legacy(' not in text:
-              text = replace_once(
-                  text,
-                  'pub fn export_data(format: ExportFormat, out_path: Option<PathBuf>) -> Result<(), String> {\n',
-                  'fn export_data_legacy(format: ExportFormat, out_path: Option<PathBuf>) -> Result<(), String> {\n',
-                  'legacy export rename',
-              )
-              wrapper = '''pub fn export_data(format: ExportFormat, out_path: Option<PathBuf>) -> Result<(), String> {
-                  match sqlite::resolve_runtime_authority()? {
-                      sqlite::RuntimeAuthority::LegacyFiles => export_data_legacy(format, out_path),
-                      sqlite::RuntimeAuthority::SqliteCli { database_path } => {
-                          export_data_sqlite(&database_path, format, out_path)
-                      }
-                  }
-              }
-
-              fn export_data_sqlite(
-                  database_path: &Path,
-                  format: ExportFormat,
-                  out_path: Option<PathBuf>,
-              ) -> Result<(), String> {
-                  let snapshot = sqlite::read_cli_snapshot(database_path)?;
-                  let export = DataExport {
-                      schema_version: 1,
-                      exported_at: Utc::now(),
-                      categories: snapshot
-                          .categories
-                          .iter()
-                          .filter(|category| category.id.0 != 0)
-                          .map(|category| {
-                              let color_pos = COLORS
-                                  .iter()
-                                  .position(|&color| color == category.color)
-                                  .unwrap_or(0);
-                              CategoryExport {
-                                  id: category.id.0,
-                                  name: category.name.clone(),
-                                  description: category.description.clone(),
-                                  color_index: color_pos,
-                                  karma_effect: category.karma_effect,
-                              }
-                          })
-                          .collect(),
-                      sessions: snapshot
-                          .sessions
-                          .iter()
-                          .map(|session| SessionExport {
-                              id: session.id,
-                              date: session.date.clone(),
-                              category_id: session.category_id,
-                              category_name: session.category_name.clone(),
-                              project: (!session.project.is_empty()).then(|| session.project.clone()),
-                              description: session.description.clone(),
-                              start_time: session.start_time.clone(),
-                              end_time: session.end_time.clone(),
-                              elapsed_seconds: session.elapsed_seconds,
-                          })
-                          .collect(),
-                  };
-
-                  match format {
-                      ExportFormat::Json => {
-                          let json = serde_json::to_string_pretty(&export).map_err(|error| error.to_string())?;
-                          if let Some(path) = out_path {
-                              storage::write_text_file(&path, &json)?;
-                              println!("Exported to {}", path.display());
-                          } else {
-                              println!("{}", json);
-                          }
-                      }
-                      ExportFormat::Ics => {
-                          let mut ics = String::new();
-                          ics.push_str("BEGIN:VCALENDAR\\r\\n");
-                          ics.push_str("VERSION:2.0\\r\\n");
-                          ics.push_str("PRODID:-//strata//time tracking//EN\\r\\n");
-                          for session in &export.sessions {
-                              if session.category_name == DRIFT_CATEGORY_CONFIG_NAME
-                                  || session.elapsed_seconds == 0
-                              {
-                                  continue;
-                              }
-                              let dt_start = format_ics_datetime(&session.date, &session.start_time);
-                              let dt_end = format_ics_datetime(&session.date, &session.end_time);
-                              let uid = format!("strata-session-{}", session.id);
-                              ics.push_str("BEGIN:VEVENT\\r\\n");
-                              ics.push_str(&format!("UID:{}\\r\\n", uid));
-                              ics.push_str(&format!(
-                                  "DTSTAMP:{}\\r\\n",
-                                  format_ics_timestamp(Utc::now())
-                              ));
-                              ics.push_str(&format!("DTSTART:{}\\r\\n", dt_start));
-                              ics.push_str(&format!("DTEND:{}\\r\\n", dt_end));
-                              ics.push_str(&format!(
-                                  "SUMMARY:{} - {}\\r\\n",
-                                  session.project.as_deref().unwrap_or("Project"),
-                                  session.category_name
-                              ));
-                              if !session.description.is_empty() {
-                                  ics.push_str(&format!(
-                                      "DESCRIPTION:{}\\r\\n",
-                                      session.description
-                                  ));
-                              }
-                              ics.push_str(&format!(
-                                  "CATEGORIES:{}\\r\\n",
-                                  session.category_name
-                              ));
-                              ics.push_str("END:VEVENT\\r\\n");
-                          }
-                          ics.push_str("END:VCALENDAR\\r\\n");
-                          if let Some(path) = out_path {
-                              storage::write_text_file(&path, &ics)?;
-                              println!("Exported to {}", path.display());
-                          } else {
-                              println!("{}", ics);
-                          }
-                      }
-                  }
-                  Ok(())
-              }
-
-              '''
-              text = replace_once(
-                  text,
-                  'fn export_data_legacy(format: ExportFormat, out_path: Option<PathBuf>) -> Result<(), String> {\n',
-                  wrapper + 'fn export_data_legacy(format: ExportFormat, out_path: Option<PathBuf>) -> Result<(), String> {\n',
-                  'export wrapper',
-              )
-
-          activation_function = '''pub fn activate_sqlite(
-              database: Option<PathBuf>,
-              confirm: bool,
-              json: bool,
-          ) -> Result<(), String> {
-              let report = sqlite::activate_sqlite_cli(sqlite::SqliteCliActivationOptions {
-                  database_path: database,
-                  confirm,
-              })?;
-              if json {
-                  println!("{}", report.to_pretty_json()?);
-              } else {
-                  report.print_human();
-              }
-              Ok(())
-          }
-
-          '''
-          if 'pub fn activate_sqlite(' not in text:
-              text = replace_once(
-                  text,
-                  'fn default_sqlite_database_path() -> PathBuf {\n',
-                  activation_function + 'fn default_sqlite_database_path() -> PathBuf {\n',
-                  'activation function',
-              )
-
-          activation_arm = '''        Cli::ActivateSqlite {
-              database,
-              confirm,
-              json,
-          } => {
-              if let Err(error) = activate_sqlite(database, confirm, json) {
-                  eprintln!("Error: {}", error);
-                  std::process::exit(1);
-              }
-          }
-
-          '''
-          if 'Cli::ActivateSqlite {' not in text:
-              text = replace_once(
-                  text,
-                  '        Cli::SqliteExport {\n',
-                  activation_arm + '        Cli::SqliteExport {\n',
-                  'activation dispatch',
-              )
-          cli.write_text(text)
-
-          lib = Path('src/lib.rs')
-          text = lib.read_text()
-          if 'ensure_tui_legacy_allowed' not in text:
-              text = replace_once(
-                  text,
-                  '    app::run_ui()\n',
-                  '    sqlite::ensure_tui_legacy_allowed().map_err(io::Error::other)?;\n    app::run_ui()\n',
-                  'TUI authority interlock',
-              )
-          lib.write_text(text)
+'''
+if 'pub fn metadata_value(' not in text:
+    text = replace_once(
+        text,
+        "    pub fn start_session(&mut self, active: &NewActiveSession<'_>)",
+        metadata_methods + "    pub fn start_session(&mut self, active: &NewActiveSession<'_>)",
+        'metadata methods',
+    )
+'''
+          script = script[:block_start] + replacement + script[block_end:]
+          Path('/tmp/sqlite006-wire.py').write_text(script)
           PY
+          python3 /tmp/sqlite006-wire.py
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
