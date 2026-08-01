@@ -22,6 +22,7 @@ jobs:
         run: |
           cat .sqlite005/safe.* | base64 --decode | gzip --decompress > src/sqlite/maintenance.rs
           sed -i 's/existing_tables.contains(\*table)/existing_tables.contains(\*\*table)/' src/sqlite/maintenance.rs
+          sed -i 's/content.push_str("\\n");/content.push('"'"'\\n'"'"');/' src/sqlite/maintenance.rs
           test -s src/sqlite/maintenance.rs
 
       - name: Reuse checked-in wiring script
