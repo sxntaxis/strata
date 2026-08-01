@@ -24,6 +24,7 @@ jobs:
             python3 tools/sqlite008_schema_runtime.py
             python3 tools/sqlite008_tui_recovery.py
           fi
+          python3 tools/sqlite008_fix_compile.py
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
