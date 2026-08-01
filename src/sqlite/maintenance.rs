@@ -5,6 +5,7 @@ use std::{
     io::{ErrorKind, Read, Write},
     path::{Path, PathBuf},
     process,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use csv::{ReaderBuilder, StringRecord, Terminator, WriterBuilder};
@@ -50,6 +51,7 @@ pub(crate) struct BundleExportOptions {
 pub(crate) struct BundleImportOptions {
     pub bundle_directory: PathBuf,
     pub database_path: PathBuf,
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -375,14 +377,6 @@ pub(super) fn import_bundle(
             display_path(&bundle_directory)
         )));
     }
-    let database_path = absolute_output_path(&options.database_path)?;
-    if database_path.exists() {
-        return Err(MaintenanceError::TargetExists(display_path(&database_path)));
-    }
-    ensure_no_sidecars(&database_path)?;
-    ensure_parent(&database_path)?;
-
-    let _lock = MaintenanceLock::acquire(&database_path)?;
     let (manifest, snapshot) = read_bundle(&bundle_directory)?;
     if manifest.database_schema_version != CURRENT_SCHEMA_VERSION {
         return Err(MaintenanceError::InvalidBundle(format!(
@@ -391,6 +385,51 @@ pub(super) fn import_bundle(
         )));
     }
 
+    if options.dry_run {
+        let temporary_path = dry_run_import_path()?;
+        remove_database_artifacts(&temporary_path);
+        let result = (|| {
+            let schema_version = validate_import_candidate(
+                &temporary_path,
+                &snapshot,
+                &manifest.bundle_fingerprint,
+            )?;
+            Ok(SqliteMaintenanceReport {
+                schema_version: MAINTENANCE_REPORT_SCHEMA_VERSION,
+                operation: "sqlite-import".to_string(),
+                status: "validated".to_string(),
+                source_path: Some(display_path(&bundle_directory)),
+                target_path: None,
+                previous_database_path: None,
+                bundle_fingerprint: Some(manifest.bundle_fingerprint.clone()),
+                database_schema_version: Some(schema_version),
+                counts: Some(manifest.counts.clone()),
+                healthy: Some(true),
+                checks: vec![
+                    pass_check("manifest", "all file sizes and fingerprints matched"),
+                    pass_check(
+                        "validation-only",
+                        "the full import and repository reconciliation passed without publication",
+                    ),
+                    pass_check(
+                        "round-trip",
+                        "the disposable repository snapshot matched the bundle exactly",
+                    ),
+                ],
+            })
+        })();
+        remove_database_artifacts(&temporary_path);
+        return result;
+    }
+
+    let database_path = absolute_output_path(&options.database_path)?;
+    if database_path.exists() {
+        return Err(MaintenanceError::TargetExists(display_path(&database_path)));
+    }
+    ensure_no_sidecars(&database_path)?;
+    ensure_parent(&database_path)?;
+
+    let _lock = MaintenanceLock::acquire(&database_path)?;
     let temporary_path = suffixed_path(&database_path, ".import.tmp");
     if temporary_path.exists() {
         return Err(MaintenanceError::TemporaryArtifactExists(display_path(
@@ -400,16 +439,8 @@ pub(super) fn import_bundle(
     ensure_parent(&temporary_path)?;
 
     let result = (|| {
-        let mut repository = SqliteRepository::open(&temporary_path)?;
-        import_snapshot(&mut repository, &snapshot, &manifest.bundle_fingerprint)?;
-        checkpoint_database(&repository.connection)?;
-        let imported = repository.read_consistent_snapshot()?;
-        if imported != snapshot {
-            return Err(MaintenanceError::SnapshotMismatch);
-        }
-        let schema_version = repository.schema_version()?;
-        drop(repository);
-        require_healthy_database(&temporary_path)?;
+        let schema_version =
+            validate_import_candidate(&temporary_path, &snapshot, &manifest.bundle_fingerprint)?;
         sync_file(&temporary_path)?;
         fs::rename(&temporary_path, &database_path)
             .map_err(|error| io_error("publishing imported database", &database_path, error))?;
@@ -440,6 +471,35 @@ pub(super) fn import_bundle(
         remove_database_artifacts(&temporary_path);
     }
     result
+}
+
+fn validate_import_candidate(
+    temporary_path: &Path,
+    snapshot: &RepositorySnapshot,
+    bundle_fingerprint: &str,
+) -> Result<i64, MaintenanceError> {
+    let mut repository = SqliteRepository::open(temporary_path)?;
+    import_snapshot(&mut repository, snapshot, bundle_fingerprint)?;
+    checkpoint_database(&repository.connection)?;
+    let imported = repository.read_consistent_snapshot()?;
+    if imported != *snapshot {
+        return Err(MaintenanceError::SnapshotMismatch);
+    }
+    let schema_version = repository.schema_version()?;
+    drop(repository);
+    require_healthy_database(temporary_path)?;
+    Ok(schema_version)
+}
+
+fn dry_run_import_path() -> Result<PathBuf, MaintenanceError> {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| MaintenanceError::InvalidData(error.to_string()))?
+        .as_nanos();
+    Ok(std::env::temp_dir().join(format!(
+        "strata-sqlite-import-validation-{}-{nonce}.sqlite3",
+        process::id()
+    )))
 }
 
 pub(super) fn doctor(options: DoctorOptions) -> Result<SqliteMaintenanceReport, MaintenanceError> {
@@ -685,7 +745,7 @@ fn doctor_at(
     };
     let authority_ok = matches!(
         metadata_authority.as_deref(),
-        Some("sqlite-candidate" | "sqlite")
+        Some("sqlite-candidate" | "sqlite" | "sqlite-cli")
     );
     checks.push(check(
         "database-authority-metadata",
@@ -2245,6 +2305,7 @@ mod tests {
         import_bundle(BundleImportOptions {
             bundle_directory: bundle_a.clone(),
             database_path: imported.clone(),
+            dry_run: false,
         })
         .unwrap();
 
@@ -2275,6 +2336,7 @@ mod tests {
         let error = import_bundle(BundleImportOptions {
             bundle_directory: bundle,
             database_path: root.join("imported.sqlite3"),
+            dry_run: false,
         })
         .unwrap_err();
         assert!(

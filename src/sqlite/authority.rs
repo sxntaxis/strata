@@ -75,7 +75,7 @@ impl SqliteCliActivationReport {
         println!("Source fingerprint: {}", self.source_fingerprint);
         println!("Integrity check: {}", self.integrity_check);
         println!("Activated at: {}", self.activated_at_utc);
-        println!("TUI status: blocked until its SQLite cutover");
+        println!("TUI status: SQLite-backed");
     }
 }
 

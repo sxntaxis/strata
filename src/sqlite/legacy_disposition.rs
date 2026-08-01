@@ -81,7 +81,10 @@ impl LegacyEvidenceReport {
         if let Some(path) = &self.removal_ledger_path {
             println!("Removal ledger: {path}");
         }
-        println!("Evidence healthy: {}", if self.healthy { "yes" } else { "no" });
+        println!(
+            "Evidence healthy: {}",
+            if self.healthy { "yes" } else { "no" }
+        );
         for file in &self.files {
             println!(
                 "[{}] {} -> {} ({} bytes)",
@@ -252,7 +255,13 @@ fn inventory_inner(
     options: LegacyEvidenceInventoryOptions,
 ) -> Result<LegacyEvidenceReport, LegacyEvidenceError> {
     let context = load_context(&options.authority_marker_path)?;
-    Ok(build_report(&context, "sqlite-legacy-inventory", "inventoried", None, None))
+    Ok(build_report(
+        &context,
+        "sqlite-legacy-inventory",
+        "inventoried",
+        None,
+        None,
+    ))
 }
 
 pub(super) fn archive(
@@ -305,7 +314,7 @@ fn archive_inner(
     ensure_parent(&staging)?;
     fs::create_dir(&staging)
         .map_err(|error| io_error("creating archive staging directory", &staging, error))?;
-    let result = (|| {
+    let result: Result<(), LegacyEvidenceError> = (|| {
         let mut manifest_files = Vec::with_capacity(context.files.len());
         for file in &context.files {
             let destination = staging.join(&file.archive_relative_path);
@@ -358,9 +367,7 @@ fn archive_inner(
     ))
 }
 
-pub(super) fn remove(
-    options: LegacyEvidenceRemoveOptions,
-) -> Result<LegacyEvidenceReport, String> {
+pub(super) fn remove(options: LegacyEvidenceRemoveOptions) -> Result<LegacyEvidenceReport, String> {
     remove_with_hook(options, |_| Ok(())).map_err(|error| error.to_string())
 }
 
@@ -386,13 +393,18 @@ fn remove_with_hook(
     if let Some(ledger) = &existing_ledger {
         if ledger.schema_version != REMOVAL_SCHEMA_VERSION
             || ledger.source_fingerprint != context.source_fingerprint
-            || PathBuf::from(&ledger.archive_path) != archive_path
+            || Path::new(&ledger.archive_path) != archive_path
         {
             return Err(LegacyEvidenceError::RemovalLedgerConflict(display_path(
                 &ledger_path,
             )));
         }
-        if ledger.status == "removed" && context.files.iter().all(|file| !file.original_path.exists()) {
+        if ledger.status == "removed"
+            && context
+                .files
+                .iter()
+                .all(|file| !file.original_path.exists())
+        {
             return Ok(build_report(
                 &context,
                 "sqlite-legacy-remove",
@@ -430,7 +442,11 @@ fn remove_with_hook(
                     )));
                 }
                 let live = fs::read(&file.original_path).map_err(|error| {
-                    io_error("reading legacy evidence before removal", &file.original_path, error)
+                    io_error(
+                        "reading legacy evidence before removal",
+                        &file.original_path,
+                        error,
+                    )
                 })?;
                 let backup = read_regular_file(&file.backup_path, "reading migration backup")?;
                 if live != backup {
@@ -474,6 +490,25 @@ fn remove_with_hook(
         Some(&archive_path),
         Some(&ledger_path),
     ))
+}
+
+#[cfg(test)]
+pub(super) fn remove_with_test_failure(
+    options: LegacyEvidenceRemoveOptions,
+    fail_after: usize,
+) -> Result<LegacyEvidenceReport, String> {
+    remove_with_hook(options, |deleted| {
+        if deleted == fail_after {
+            Err(LegacyEvidenceError::Io {
+                operation: "injecting legacy-removal interruption",
+                path: "test".to_string(),
+                message: "injected interruption".to_string(),
+            })
+        } else {
+            Ok(())
+        }
+    })
+    .map_err(|error| error.to_string())
 }
 
 fn load_context(marker_path: &Path) -> Result<EvidenceContext, LegacyEvidenceError> {
@@ -717,8 +752,7 @@ fn build_report(
         migration_backup_path: display_path(&context.backup_path),
         archive_path: archive_path.map(display_path),
         removal_ledger_path: ledger_path.map(display_path),
-        healthy: files.iter().all(|file| file.live_status == "matches")
-            || status.contains("removed"),
+        healthy: files.iter().all(|file| file.live_status == "matches") || status.contains("remov"),
         files,
     }
 }
@@ -726,7 +760,9 @@ fn build_report(
 fn archive_relative_path(logical_name: &str) -> Result<PathBuf, LegacyEvidenceError> {
     if logical_name.is_empty()
         || logical_name.starts_with('/')
-        || logical_name.split('/').any(|component| component.is_empty() || component == "." || component == "..")
+        || logical_name
+            .split('/')
+            .any(|component| component.is_empty() || component == "." || component == "..")
     {
         return Err(LegacyEvidenceError::InvalidProvenance(format!(
             "invalid logical name {logical_name}"
@@ -739,7 +775,9 @@ fn archive_relative_path(logical_name: &str) -> Result<PathBuf, LegacyEvidenceEr
 }
 
 fn archive_staging_path(output: &Path, fingerprint: &str) -> Result<PathBuf, LegacyEvidenceError> {
-    let parent = output.parent().ok_or_else(|| LegacyEvidenceError::TargetConflict(display_path(output)))?;
+    let parent = output
+        .parent()
+        .ok_or_else(|| LegacyEvidenceError::TargetConflict(display_path(output)))?;
     let name = output
         .file_name()
         .and_then(|value| value.to_str())
@@ -789,10 +827,11 @@ fn write_new_file(path: &Path, bytes: &[u8]) -> Result<(), LegacyEvidenceError> 
 }
 
 fn write_new_json<T: Serialize>(path: &Path, value: &T) -> Result<(), LegacyEvidenceError> {
-    let mut bytes = serde_json::to_vec_pretty(value).map_err(|error| LegacyEvidenceError::Json {
-        path: display_path(path),
-        message: error.to_string(),
-    })?;
+    let mut bytes =
+        serde_json::to_vec_pretty(value).map_err(|error| LegacyEvidenceError::Json {
+            path: display_path(path),
+            message: error.to_string(),
+        })?;
     bytes.push(b'\n');
     write_new_file(path, &bytes)
 }
@@ -804,14 +843,14 @@ fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), LegacyE
         fs::remove_file(&temporary)
             .map_err(|error| io_error("removing stale temporary ledger", &temporary, error))?;
     }
-    let mut bytes = serde_json::to_vec_pretty(value).map_err(|error| LegacyEvidenceError::Json {
-        path: display_path(path),
-        message: error.to_string(),
-    })?;
+    let mut bytes =
+        serde_json::to_vec_pretty(value).map_err(|error| LegacyEvidenceError::Json {
+            path: display_path(path),
+            message: error.to_string(),
+        })?;
     bytes.push(b'\n');
     write_new_file(&temporary, &bytes)?;
-    fs::rename(&temporary, path)
-        .map_err(|error| io_error("publishing", path, error))?;
+    fs::rename(&temporary, path).map_err(|error| io_error("publishing", path, error))?;
     sync_parent(path)
 }
 
@@ -854,12 +893,12 @@ fn absolute_output_path(path: &Path) -> Result<PathBuf, LegacyEvidenceError> {
 }
 
 fn path_text(path: &Path) -> Result<String, LegacyEvidenceError> {
-    path.to_str()
-        .map(str::to_string)
-        .ok_or_else(|| LegacyEvidenceError::InvalidProvenance(format!(
+    path.to_str().map(str::to_string).ok_or_else(|| {
+        LegacyEvidenceError::InvalidProvenance(format!(
             "path is not UTF-8: {}",
             path.to_string_lossy()
-        )))
+        ))
+    })
 }
 
 fn display_path(path: &Path) -> String {

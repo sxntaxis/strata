@@ -147,6 +147,12 @@ pub enum Cli {
         #[arg(long, value_name = "DIRECTORY", help = "Portable bundle directory")]
         bundle: PathBuf,
 
+        #[arg(
+            long,
+            help = "Validate the complete import without publishing a database"
+        )]
+        dry_run: bool,
+
         #[arg(long, value_name = "PATH", help = "New SQLite database path")]
         database: Option<PathBuf>,
 
@@ -188,6 +194,53 @@ pub enum Cli {
 
         #[arg(long, help = "Preserve and replace an existing target database")]
         replace: bool,
+
+        #[arg(long, help = "Print the result as JSON")]
+        json: bool,
+    },
+
+    #[command(about = "Inventory verified legacy migration evidence")]
+    SqliteLegacyInventory {
+        #[arg(long, value_name = "PATH", help = "Storage authority marker path")]
+        authority_marker: Option<PathBuf>,
+
+        #[arg(long, help = "Print the result as JSON")]
+        json: bool,
+    },
+
+    #[command(about = "Archive verified legacy migration evidence")]
+    SqliteLegacyArchive {
+        #[arg(long, value_name = "DIRECTORY", help = "New archive directory")]
+        out: PathBuf,
+
+        #[arg(long, value_name = "PATH", help = "Storage authority marker path")]
+        authority_marker: Option<PathBuf>,
+
+        #[arg(long, help = "Confirm archive publication")]
+        confirm: bool,
+
+        #[arg(long, help = "Print the result as JSON")]
+        json: bool,
+    },
+
+    #[command(about = "Remove legacy files after a verified archive exists")]
+    SqliteLegacyRemove {
+        #[arg(
+            long,
+            value_name = "DIRECTORY",
+            help = "Verified legacy evidence archive"
+        )]
+        archive: PathBuf,
+
+        #[arg(long, value_name = "PATH", help = "Storage authority marker path")]
+        authority_marker: Option<PathBuf>,
+
+        #[arg(
+            long,
+            value_name = "FINGERPRINT",
+            help = "Exact migration fingerprint confirming irreversible removal"
+        )]
+        confirm_fingerprint: String,
 
         #[arg(long, help = "Print the result as JSON")]
         json: bool,
@@ -785,10 +838,16 @@ pub fn sqlite_export(database: Option<PathBuf>, out: PathBuf, json: bool) -> Res
     print_maintenance_report(report, json)
 }
 
-pub fn sqlite_import(bundle: PathBuf, database: Option<PathBuf>, json: bool) -> Result<(), String> {
+pub fn sqlite_import(
+    bundle: PathBuf,
+    database: Option<PathBuf>,
+    dry_run: bool,
+    json: bool,
+) -> Result<(), String> {
     let report = sqlite::run_bundle_import(sqlite::BundleImportOptions {
         bundle_directory: bundle,
         database_path: database.unwrap_or_else(default_sqlite_database_path),
+        dry_run,
     })?;
     print_maintenance_report(report, json)
 }
@@ -827,6 +886,61 @@ pub fn sqlite_restore(
         replace,
     })?;
     print_maintenance_report(report, json)
+}
+
+fn print_legacy_evidence_report(
+    report: sqlite::LegacyEvidenceReport,
+    json: bool,
+) -> Result<(), String> {
+    let healthy = report.is_healthy();
+    if json {
+        println!("{}", report.to_pretty_json()?);
+    } else {
+        report.print_human();
+    }
+    if healthy {
+        Ok(())
+    } else {
+        Err("legacy evidence differs from the verified migration backup".to_string())
+    }
+}
+
+pub fn sqlite_legacy_inventory(
+    authority_marker: Option<PathBuf>,
+    json: bool,
+) -> Result<(), String> {
+    let report = sqlite::run_legacy_evidence_inventory(sqlite::LegacyEvidenceInventoryOptions {
+        authority_marker_path: authority_marker.unwrap_or_else(default_authority_marker_path),
+    })?;
+    print_legacy_evidence_report(report, json)
+}
+
+pub fn sqlite_legacy_archive(
+    out: PathBuf,
+    authority_marker: Option<PathBuf>,
+    confirm: bool,
+    json: bool,
+) -> Result<(), String> {
+    let report = sqlite::run_legacy_evidence_archive(sqlite::LegacyEvidenceArchiveOptions {
+        authority_marker_path: authority_marker.unwrap_or_else(default_authority_marker_path),
+        output_directory: out,
+        confirm,
+    })?;
+    print_legacy_evidence_report(report, json)
+}
+
+pub fn sqlite_legacy_remove(
+    archive: PathBuf,
+    authority_marker: Option<PathBuf>,
+    confirm_fingerprint: String,
+    json: bool,
+) -> Result<(), String> {
+    let report = sqlite::run_legacy_evidence_remove(sqlite::LegacyEvidenceRemoveOptions {
+        authority_marker_path: authority_marker.unwrap_or_else(default_authority_marker_path),
+        archive_directory: archive,
+        confirm_fingerprint,
+    })?;
+    print_legacy_evidence_report(report, json)
 }
 
 pub fn print_completions(shell: &str) -> Result<(), String> {
@@ -948,10 +1062,11 @@ pub fn run_cli() {
         }
         Cli::SqliteImport {
             bundle,
+            dry_run,
             database,
             json,
         } => {
-            if let Err(error) = sqlite_import(bundle, database, json) {
+            if let Err(error) = sqlite_import(bundle, database, dry_run, json) {
                 eprintln!("Error: {}", error);
                 std::process::exit(1);
             }
@@ -983,6 +1098,40 @@ pub fn run_cli() {
             json,
         } => {
             if let Err(error) = sqlite_restore(backup, database, replace, json) {
+                eprintln!("Error: {}", error);
+                std::process::exit(1);
+            }
+        }
+
+        Cli::SqliteLegacyInventory {
+            authority_marker,
+            json,
+        } => {
+            if let Err(error) = sqlite_legacy_inventory(authority_marker, json) {
+                eprintln!("Error: {}", error);
+                std::process::exit(1);
+            }
+        }
+        Cli::SqliteLegacyArchive {
+            out,
+            authority_marker,
+            confirm,
+            json,
+        } => {
+            if let Err(error) = sqlite_legacy_archive(out, authority_marker, confirm, json) {
+                eprintln!("Error: {}", error);
+                std::process::exit(1);
+            }
+        }
+        Cli::SqliteLegacyRemove {
+            archive,
+            authority_marker,
+            confirm_fingerprint,
+            json,
+        } => {
+            if let Err(error) =
+                sqlite_legacy_remove(archive, authority_marker, confirm_fingerprint, json)
+            {
                 eprintln!("Error: {}", error);
                 std::process::exit(1);
             }

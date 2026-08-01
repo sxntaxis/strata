@@ -137,7 +137,8 @@ impl EvidenceFixture {
         let live_categories = data.join("categories.csv");
         let live_sessions = data.join("time_log.csv");
         let categories = b"id,name,description,color_index,karma_effect\n1,Work,,0,1\n";
-        let sessions = b"id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds\n";
+        let sessions =
+            b"id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds\n";
         fs::write(&live_categories, categories).unwrap();
         fs::write(&live_sessions, sessions).unwrap();
         fs::write(backup.join("data/categories.csv"), categories).unwrap();
@@ -250,7 +251,12 @@ fn legacy_evidence_archive_and_interrupted_removal_are_retry_safe() {
     })
     .unwrap();
     assert_eq!(archived.status, "archived");
-    assert!(fixture.archive.join("legacy_evidence_manifest.json").exists());
+    assert!(
+        fixture
+            .archive
+            .join("legacy_evidence_manifest.json")
+            .exists()
+    );
 
     let repeated = legacy_disposition::archive(LegacyEvidenceArchiveOptions {
         authority_marker_path: fixture.marker.clone(),
