@@ -354,6 +354,8 @@ pub(crate) fn sync_categories(
             ));
         }
     }
+    runtime_coordination::maybe_inject_test_fault("category-sync", "commit")
+        .map_err(|error| error.to_string())?;
     transaction.commit().map_err(|error| error.to_string())?;
 
     Ok(load_state(database_path)?.archived_categories)
@@ -363,19 +365,39 @@ pub(crate) fn archive_category(
     database_path: &Path,
     category_id: CategoryId,
 ) -> Result<(), String> {
+    runtime_coordination::maybe_inject_test_fault("category-archive", "before-write")
+        .map_err(|error| error.to_string())?;
     let mut repository = open_cli_repository(database_path)?;
     let category_id = as_i64(category_id.0, "category ID")?;
-    let active_category_id = repository
-        .active_session()
-        .map_err(|error| error.to_string())?
-        .map(|active| active.category_id);
+    let transaction = repository
+        .connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let active_category_id: Option<i64> = transaction
+        .query_row(
+            "SELECT category_id FROM active_session WHERE singleton = 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
     if active_category_id == Some(category_id) {
         return Err("the active category cannot be archived".to_string());
     }
-    repository
-        .archive_category(category_id, &timestamp(Utc::now()))
+    let changed = transaction
+        .execute(
+            "UPDATE categories
+             SET archived_at_utc = ?1
+             WHERE id = ?2 AND archived_at_utc IS NULL",
+            params![timestamp(Utc::now()), category_id],
+        )
         .map_err(|error| error.to_string())?;
-    Ok(())
+    if changed != 1 {
+        return Err(format!("active category {category_id} does not exist"));
+    }
+    runtime_coordination::maybe_inject_test_fault("category-archive", "commit")
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
 }
 
 pub(crate) fn sync_category_tags(
@@ -383,7 +405,13 @@ pub(crate) fn sync_category_tags(
     tags: &CategoryTagsState,
     category_ids: &[CategoryId],
 ) -> Result<(), String> {
+    runtime_coordination::maybe_inject_test_fault("category-tags", "before-write")
+        .map_err(|error| error.to_string())?;
     let mut repository = open_cli_repository(database_path)?;
+    let transaction = repository
+        .connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
     for category_id in category_ids {
         let category_id = as_i64(category_id.0, "category ID")?;
         let category_id_u64 = u64::try_from(category_id)
@@ -393,14 +421,56 @@ pub(crate) fn sync_category_tags(
             .get(&category_id_u64)
             .cloned()
             .unwrap_or_default();
-        repository
-            .replace_category_tags(category_id, &values)
+        let mut normalized = Vec::with_capacity(values.len());
+        let mut seen = BTreeSet::new();
+        for value in values {
+            let value = value.trim();
+            if value.is_empty() {
+                return Err("category tag is empty".to_string());
+            }
+            if !seen.insert(value.to_string()) {
+                return Err(format!("duplicate category tag '{value}'"));
+            }
+            normalized.push(value.to_string());
+        }
+        let exists: bool = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM categories WHERE id = ?1)",
+                params![category_id],
+                |row| row.get(0),
+            )
             .map_err(|error| error.to_string())?;
+        if !exists {
+            return Err(format!("category {category_id} does not exist"));
+        }
+        transaction
+            .execute(
+                "DELETE FROM category_tags WHERE category_id = ?1",
+                params![category_id],
+            )
+            .map_err(|error| error.to_string())?;
+        for (ordinal, tag) in normalized.iter().enumerate() {
+            transaction
+                .execute(
+                    "INSERT INTO category_tags(category_id, ordinal, tag)
+                     VALUES (?1, ?2, ?3)",
+                    params![
+                        category_id,
+                        i64::try_from(ordinal).map_err(|_| "too many category tags".to_string())?,
+                        tag,
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+        }
     }
-    Ok(())
+    runtime_coordination::maybe_inject_test_fault("category-tags", "commit")
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
 }
 
 pub(crate) fn sync_sessions(database_path: &Path, sessions: &[Session]) -> Result<(), String> {
+    runtime_coordination::maybe_inject_test_fault("session-sync", "before-write")
+        .map_err(|error| error.to_string())?;
     let mut repository = open_cli_repository(database_path)?;
     let transaction = repository
         .connection
@@ -448,6 +518,8 @@ pub(crate) fn sync_sessions(database_path: &Path, sessions: &[Session]) -> Resul
             )
             .map_err(|error| error.to_string())?;
     }
+    runtime_coordination::maybe_inject_test_fault("session-sync", "commit")
+        .map_err(|error| error.to_string())?;
     transaction.commit().map_err(|error| error.to_string())
 }
 
@@ -458,11 +530,14 @@ pub(crate) fn update_session_description(
 ) -> Result<(), String> {
     runtime_coordination::maybe_inject_test_fault("session-edit", "before-write")
         .map_err(|error| error.to_string())?;
-    let repository = open_cli_repository(database_path)?;
+    let mut repository = open_cli_repository(database_path)?;
     let session_id =
         i64::try_from(session_id).map_err(|_| "session ID is too large".to_string())?;
-    let changed = repository
+    let transaction = repository
         .connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let changed = transaction
         .execute(
             "UPDATE sessions SET description = ?1 WHERE id = ?2",
             params![description, session_id],
@@ -471,38 +546,52 @@ pub(crate) fn update_session_description(
     if changed != 1 {
         return Err(format!("SQLite session {session_id} does not exist"));
     }
-    Ok(())
+    runtime_coordination::maybe_inject_test_fault("session-edit", "commit")
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
 }
 
 pub(crate) fn delete_session(database_path: &Path, session_id: usize) -> Result<(), String> {
     runtime_coordination::maybe_inject_test_fault("session-delete", "before-write")
         .map_err(|error| error.to_string())?;
-    let repository = open_cli_repository(database_path)?;
+    let mut repository = open_cli_repository(database_path)?;
     let session_id =
         i64::try_from(session_id).map_err(|_| "session ID is too large".to_string())?;
-    let changed = repository
+    let transaction = repository
         .connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let changed = transaction
         .execute("DELETE FROM sessions WHERE id = ?1", params![session_id])
         .map_err(|error| error.to_string())?;
     if changed != 1 {
         return Err(format!("SQLite session {session_id} does not exist"));
     }
-    Ok(())
+    runtime_coordination::maybe_inject_test_fault("session-delete", "commit")
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
 }
 
 pub(crate) fn delete_drift_sessions_for_day(
     database_path: &Path,
     operational_day: &str,
 ) -> Result<(), String> {
-    let repository = open_cli_repository(database_path)?;
-    repository
+    runtime_coordination::maybe_inject_test_fault("drift-session-delete", "before-write")
+        .map_err(|error| error.to_string())?;
+    let mut repository = open_cli_repository(database_path)?;
+    let transaction = repository
         .connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    transaction
         .execute(
             "DELETE FROM sessions WHERE category_id = 0 AND operational_day = ?1",
             params![operational_day],
         )
         .map_err(|error| error.to_string())?;
-    Ok(())
+    runtime_coordination::maybe_inject_test_fault("drift-session-delete", "commit")
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
 }
 
 pub(crate) fn save_sand_state(database_path: &Path, state: &SandState) -> Result<(), String> {
@@ -519,18 +608,42 @@ pub(crate) fn save_sand_state(database_path: &Path, state: &SandState) -> Result
         .map(|record| record.quantum_seconds)
         .unwrap_or(1);
     let payload_json = serde_json::to_string(state).map_err(|error| error.to_string())?;
-    repository
-        .save_sand_state(&SandStateRecord {
-            formation_id: formation_id.to_string(),
-            quantum_seconds,
-            grid_width: i64::try_from(state.grid_width)
-                .map_err(|_| "sand width is too large".to_string())?,
-            grid_height: i64::try_from(state.grid_height)
-                .map_err(|_| "sand height is too large".to_string())?,
-            payload_json,
-            updated_at_utc: timestamp(Utc::now()),
-        })
-        .map_err(|error| error.to_string())
+    let grid_width =
+        i64::try_from(state.grid_width).map_err(|_| "sand width is too large".to_string())?;
+    let grid_height =
+        i64::try_from(state.grid_height).map_err(|_| "sand height is too large".to_string())?;
+    let updated_at_utc = timestamp(Utc::now());
+    let transaction = repository
+        .connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "INSERT INTO sand_state (
+                singleton, formation_id, quantum_seconds, grid_width, grid_height,
+                payload_json, updated_at_utc, legacy_import_id
+             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, NULL)
+             ON CONFLICT(singleton) DO UPDATE SET
+                formation_id = excluded.formation_id,
+                quantum_seconds = excluded.quantum_seconds,
+                grid_width = excluded.grid_width,
+                grid_height = excluded.grid_height,
+                payload_json = excluded.payload_json,
+                updated_at_utc = excluded.updated_at_utc,
+                legacy_import_id = NULL",
+            params![
+                formation_id,
+                quantum_seconds,
+                grid_width,
+                grid_height,
+                payload_json,
+                updated_at_utc,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    runtime_coordination::maybe_inject_test_fault("sand-state", "commit")
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
 }
 
 pub(crate) fn load_sand_state(database_path: &Path) -> Result<Option<SandState>, String> {
@@ -585,6 +698,8 @@ pub(crate) fn save_daily_snapshot(
             ],
         )
         .map_err(|error| error.to_string())?;
+    runtime_coordination::maybe_inject_test_fault("daily-snapshot", "commit")
+        .map_err(|error| error.to_string())?;
     transaction.commit().map_err(|error| error.to_string())
 }
 
@@ -613,15 +728,22 @@ pub(crate) fn delete_daily_snapshot(
     database_path: &Path,
     operational_day: &str,
 ) -> Result<(), String> {
-    let repository = open_cli_repository(database_path)?;
-    repository
+    runtime_coordination::maybe_inject_test_fault("daily-snapshot-delete", "before-write")
+        .map_err(|error| error.to_string())?;
+    let mut repository = open_cli_repository(database_path)?;
+    let transaction = repository
         .connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    transaction
         .execute(
             "DELETE FROM sand_snapshots WHERE snapshot_kind = 'daily' AND operational_day = ?1",
             params![operational_day],
         )
         .map_err(|error| error.to_string())?;
-    Ok(())
+    runtime_coordination::maybe_inject_test_fault("daily-snapshot-delete", "commit")
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
 }
 
 #[derive(Debug)]

@@ -5,6 +5,8 @@ use thiserror::Error;
 
 mod authority;
 mod cli_runtime;
+#[cfg(test)]
+mod fault_certification;
 mod legacy_import;
 mod maintenance;
 mod migration_command;

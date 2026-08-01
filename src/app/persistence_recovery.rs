@@ -871,5 +871,21 @@ mod tests {
             classify_failure("active session changed concurrently; expected a, found b"),
             PersistenceFailureClass::Conflict
         );
+        assert_eq!(
+            classify_failure("FOREIGN KEY constraint failed"),
+            PersistenceFailureClass::Constraint
+        );
+        assert_eq!(
+            classify_failure("database or disk is full"),
+            PersistenceFailureClass::Io
+        );
+        assert_eq!(
+            classify_failure("invalid runtime transition"),
+            PersistenceFailureClass::InvalidData
+        );
+        assert_eq!(
+            classify_failure("unrecognized persistence response"),
+            PersistenceFailureClass::Unknown
+        );
     }
 }
