@@ -11,6 +11,8 @@ mod domain;
 mod keybindings;
 #[allow(clippy::manual_checked_ops)]
 mod sand;
+#[allow(dead_code)]
+mod sqlite;
 mod storage;
 
 pub fn run() -> Result<(), io::Error> {
