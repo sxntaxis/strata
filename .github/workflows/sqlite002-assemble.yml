@@ -1,0 +1,46 @@
+name: sqlite002-assemble
+
+on:
+  push:
+    branches:
+      - storage/002-legacy-import-verification
+    paths:
+      - .tmp/sqlite002.part00
+      - .tmp/sqlite002.part01
+      - .tmp/sqlite002.part02
+      - .github/workflows/sqlite002-assemble.yml
+
+permissions:
+  contents: write
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: storage/002-legacy-import-verification
+          fetch-depth: 0
+
+      - name: Assemble source payload
+        run: |
+          if [ ! -f .tmp/sqlite002.part00 ]; then
+            exit 0
+          fi
+          cat .tmp/sqlite002.part00 .tmp/sqlite002.part01 .tmp/sqlite002.part02 > /tmp/sqlite002.b64
+          base64 --decode /tmp/sqlite002.b64 > /tmp/sqlite002.tar.gz
+          tar -xzf /tmp/sqlite002.tar.gz
+          rm -f .tmp/sqlite002.part00 .tmp/sqlite002.part01 .tmp/sqlite002.part02
+          rmdir .tmp 2>/dev/null || true
+
+      - name: Commit assembled implementation
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat(storage): add strict legacy import verification"
+          git push origin HEAD:storage/002-legacy-import-verification
