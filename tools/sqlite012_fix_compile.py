@@ -16,6 +16,12 @@ replace_once(
 )
 
 replace_once(
+    "src/sqlite/legacy_disposition.rs",
+    "            || PathBuf::from(&ledger.archive_path) != archive_path",
+    "            || Path::new(&ledger.archive_path) != archive_path",
+)
+
+replace_once(
     "src/sqlite/maintenance.rs",
     "        import_bundle(BundleImportOptions {\n            bundle_directory: bundle_a.clone(),\n            database_path: imported.clone(),\n        })",
     "        import_bundle(BundleImportOptions {\n            bundle_directory: bundle_a.clone(),\n            database_path: imported.clone(),\n            dry_run: false,\n        })",
