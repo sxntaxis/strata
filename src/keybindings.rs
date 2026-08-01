@@ -4,6 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use chrono::FixedOffset;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde::{Deserialize, Serialize};
 
@@ -673,6 +674,14 @@ pub(crate) fn default_runtime_settings() -> RuntimeSettings {
     RuntimeSettings::default()
 }
 
+pub(crate) fn default_loaded_keybindings() -> LoadedKeybindings {
+    LoadedKeybindings {
+        keymap: default_keymap(),
+        runtime_settings: default_runtime_settings(),
+        time_log_path: None,
+    }
+}
+
 fn parse_runtime_settings(config: &KeymapConfig, path: &Path) -> Result<RuntimeSettings, String> {
     let mut settings = default_runtime_settings();
 
@@ -713,6 +722,13 @@ fn parse_runtime_settings(config: &KeymapConfig, path: &Path) -> Result<RuntimeS
     }
 
     if let Some(offset) = config.utc_offset_seconds {
+        if FixedOffset::east_opt(offset).is_none() {
+            return Err(format!(
+                "Invalid utc_offset_seconds '{}' in {}. Expected an offset between -86399 and 86399",
+                offset,
+                path.display()
+            ));
+        }
         settings.day_boundary.utc_offset_seconds = offset;
     }
 
@@ -754,8 +770,51 @@ fn parse_unbound_actions(config: &KeymapConfig, path: &Path) -> Result<HashSet<A
     Ok(actions)
 }
 
-fn parse_time_log_path(config: &KeymapConfig) -> Option<PathBuf> {
-    crate::storage::normalize_time_log_path_input(config.time_log_path.as_deref()?)
+fn parse_time_log_path(
+    config: &KeymapConfig,
+    config_path: &Path,
+) -> Result<Option<PathBuf>, String> {
+    let Some(raw) = config.time_log_path.as_deref() else {
+        return Ok(None);
+    };
+    if raw.contains('\0') {
+        return Err(format!(
+            "Invalid time_log_path in {}: paths cannot contain NUL bytes",
+            config_path.display()
+        ));
+    }
+
+    let Some(path) = crate::storage::normalize_time_log_path_input(raw) else {
+        return Ok(None);
+    };
+    if path.file_name().is_none() {
+        return Err(format!(
+            "Invalid time_log_path '{}' in {}: expected a file or directory path",
+            raw,
+            config_path.display()
+        ));
+    }
+    if path.exists() && !path.is_file() {
+        return Err(format!(
+            "Invalid time_log_path '{}' in {}: resolved path {} is not a regular file",
+            raw,
+            config_path.display(),
+            path.display()
+        ));
+    }
+    if let Some(parent) = path.parent()
+        && parent.exists()
+        && !parent.is_dir()
+    {
+        return Err(format!(
+            "Invalid time_log_path '{}' in {}: parent {} is not a directory",
+            raw,
+            config_path.display(),
+            parent.display()
+        ));
+    }
+
+    Ok(Some(path))
 }
 
 fn load_config_or_default(path: &Path) -> Result<KeymapConfig, String> {
@@ -781,7 +840,7 @@ pub(crate) fn load_keybindings(path: &Path) -> Result<LoadedKeybindings, String>
     let config = load_config_or_default(path)?;
 
     let runtime_settings = parse_runtime_settings(&config, path)?;
-    let time_log_path = parse_time_log_path(&config);
+    let time_log_path = parse_time_log_path(&config, path)?;
     let mut unbound_actions = parse_unbound_actions(&config, path)?;
 
     let mut parsed_overrides: Vec<(KeyBinding, Option<Action>)> = Vec::new();
@@ -1179,5 +1238,50 @@ mod tests {
         );
 
         fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn test_load_keybindings_malformed_json_identifies_path() {
+        let path = unique_path("strata_keymap_malformed_json");
+        fs::write(&path, "{ not-json").expect("write config");
+
+        let err = load_keybindings(&path).expect_err("config should fail");
+        assert!(err.contains("Failed parsing keymap JSON"));
+        assert!(err.contains(&path.display().to_string()));
+
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn test_load_keybindings_invalid_utc_offset_returns_error() {
+        let path = unique_path("strata_keymap_invalid_offset");
+        fs::write(&path, r#"{"utc_offset_seconds": 86400}"#).expect("write config");
+
+        let err = load_keybindings(&path).expect_err("config should fail");
+        assert!(err.contains("Invalid utc_offset_seconds '86400'"));
+        assert!(err.contains(&path.display().to_string()));
+
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn test_load_keybindings_invalid_time_log_parent_returns_error() {
+        let path = unique_path("strata_keymap_invalid_profile");
+        let blocker = unique_path("strata_keymap_profile_blocker");
+        fs::write(&blocker, "not a directory").expect("write blocker");
+        let configured = blocker.join("history.csv");
+        fs::write(
+            &path,
+            serde_json::json!({"time_log_path": configured}).to_string(),
+        )
+        .expect("write config");
+
+        let err = load_keybindings(&path).expect_err("config should fail");
+        assert!(err.contains("Invalid time_log_path"));
+        assert!(err.contains("parent"));
+        assert!(err.contains(&path.display().to_string()));
+
+        fs::remove_file(path).ok();
+        fs::remove_file(blocker).ok();
     }
 }

@@ -187,31 +187,21 @@ struct App {
 }
 
 impl App {
-    fn new(width: u16, height: u16) -> Result<Self, String> {
+    fn new(
+        width: u16,
+        height: u16,
+        loaded: keybindings::LoadedKeybindings,
+    ) -> Result<Self, String> {
         let keymap_path = storage::get_keymap_path();
         let keymap_last_modified = std::fs::metadata(&keymap_path)
             .and_then(|metadata| metadata.modified())
             .ok();
-        let (keymap, runtime_settings, loaded_time_log_path, keymap_error) =
-            match keybindings::load_keybindings(&keymap_path) {
-                Ok(loaded) => (
-                    loaded.keymap,
-                    loaded.runtime_settings,
-                    loaded.time_log_path,
-                    None,
-                ),
-                Err(err) => (
-                    keybindings::default_keymap(),
-                    keybindings::default_runtime_settings(),
-                    None,
-                    Some(err),
-                ),
-            };
-
-        set_runtime_settings(runtime_settings);
-        storage::set_runtime_storage_settings(storage::RuntimeStorageSettings {
-            time_log_path: loaded_time_log_path.clone(),
-        });
+        let keybindings::LoadedKeybindings {
+            keymap,
+            runtime_settings,
+            time_log_path: _,
+        } = loaded;
+        let keymap_error = None;
 
         let mut tracker = TimeTracker::new();
         let authority = sqlite::resolve_runtime_authority()?;
@@ -1826,9 +1816,9 @@ impl App {
     }
 }
 
-pub fn run_ui() -> Result<(), io::Error> {
+pub fn run_ui(loaded: keybindings::LoadedKeybindings) -> Result<(), io::Error> {
     let (width, height) = crossterm::terminal::size()?;
-    let mut app = App::new(width, height).map_err(io::Error::other)?;
+    let mut app = App::new(width, height, loaded).map_err(io::Error::other)?;
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
