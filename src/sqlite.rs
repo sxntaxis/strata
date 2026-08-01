@@ -9,10 +9,10 @@ mod legacy_import;
 mod maintenance;
 mod migration_command;
 mod repository;
+mod tui_runtime;
 
 pub(crate) use authority::{
-    RuntimeAuthority, SqliteCliActivationOptions, activate_sqlite_cli, ensure_tui_legacy_allowed,
-    resolve_runtime_authority,
+    RuntimeAuthority, SqliteCliActivationOptions, activate_sqlite_cli, resolve_runtime_authority,
 };
 pub(crate) use cli_runtime::{
     read_snapshot as read_cli_snapshot, start_session as start_cli_session,
@@ -23,6 +23,20 @@ pub(crate) use maintenance::{
     SqliteMaintenanceReport,
 };
 pub(crate) use migration_command::{ControlledMigrationOptions, ControlledMigrationReport};
+pub(crate) use tui_runtime::{
+    archive_category as archive_tui_category, clear_checkpoint as clear_tui_checkpoint,
+    delete_daily_snapshot as delete_tui_daily_snapshot,
+    delete_drift_sessions_for_day as delete_tui_drift_sessions_for_day,
+    delete_session as delete_tui_session, ensure_active_session as ensure_tui_active_session,
+    finish_active_session as finish_tui_active_session, load_checkpoint as load_tui_checkpoint,
+    load_daily_snapshot as load_tui_daily_snapshot, load_sand_state as load_tui_sand_state,
+    load_state as load_tui_state, reset_active_session as reset_tui_active_session,
+    save_checkpoint as save_tui_checkpoint, save_daily_snapshot as save_tui_daily_snapshot,
+    save_sand_state as save_tui_sand_state, switch_active_session as switch_tui_active_session,
+    sync_categories as sync_tui_categories, sync_category_tags as sync_tui_category_tags,
+    sync_sessions as sync_tui_sessions,
+    update_session_description as update_tui_session_description,
+};
 
 pub(crate) fn run_controlled_migration(
     options: ControlledMigrationOptions,
@@ -54,7 +68,7 @@ pub(crate) fn run_restore(options: RestoreOptions) -> Result<SqliteMaintenanceRe
     maintenance::restore(options).map_err(|error| error.to_string())
 }
 
-const CURRENT_SCHEMA_VERSION: i64 = 2;
+const CURRENT_SCHEMA_VERSION: i64 = 3;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 const MIGRATION_1: &str = r#"
@@ -245,6 +259,21 @@ VALUES (2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
 PRAGMA user_version = 2;
 "#;
 
+const MIGRATION_3: &str = r#"
+ALTER TABLE categories
+    ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0 CHECK (sort_order >= 0);
+
+UPDATE categories SET sort_order = id;
+
+CREATE INDEX categories_active_order_index
+    ON categories(archived_at_utc, sort_order, id);
+
+INSERT INTO schema_migrations(version, applied_at_utc)
+VALUES (3, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+
+PRAGMA user_version = 3;
+"#;
+
 #[derive(Debug, Error)]
 pub(crate) enum SqliteStoreError {
     #[error("SQLite error: {0}")]
@@ -318,6 +347,14 @@ impl SqliteRepository {
             let transaction =
                 connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
             transaction.execute_batch(MIGRATION_2)?;
+            transaction.commit()?;
+            version = 2;
+        }
+
+        if version < 3 {
+            let transaction =
+                connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(MIGRATION_3)?;
             transaction.commit()?;
         }
 
@@ -512,7 +549,7 @@ mod tests {
     fn new_database_applies_schema_and_idle_category() {
         let repository = SqliteRepository::open_in_memory().expect("database should open");
 
-        assert_eq!(repository.schema_version().unwrap(), 2);
+        assert_eq!(repository.schema_version().unwrap(), 3);
         assert_eq!(repository.integrity_check().unwrap(), "ok");
         let idle: (String, i64) = repository
             .connection
@@ -579,7 +616,7 @@ mod tests {
         let repository =
             SqliteRepository::from_connection(connection).expect("migration should succeed");
 
-        assert_eq!(repository.schema_version().unwrap(), 2);
+        assert_eq!(repository.schema_version().unwrap(), 3);
         assert_eq!(repository.completed_session_count().unwrap(), 1);
         let legacy_import_id: Option<i64> = repository
             .connection

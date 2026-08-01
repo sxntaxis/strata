@@ -1,6 +1,7 @@
 use std::{
     collections::{HashSet, VecDeque},
     io,
+    path::PathBuf,
     time::{Duration, Instant, SystemTime},
 };
 
@@ -25,7 +26,7 @@ use crate::{
     },
     keybindings,
     sand::{SandEngine, SandState, SandStateGrain},
-    storage,
+    sqlite, storage,
 };
 
 mod category_modal_view;
@@ -173,10 +174,13 @@ struct App {
     keymap_last_modified: Option<SystemTime>,
     keymap_last_poll: Instant,
     render_needed: bool,
+    sqlite_database_path: Option<PathBuf>,
+    archived_categories: Vec<Category>,
+    storage_error: Option<String>,
 }
 
 impl App {
-    fn new(width: u16, height: u16) -> Self {
+    fn new(width: u16, height: u16) -> Result<Self, String> {
         let keymap_path = storage::get_keymap_path();
         let keymap_last_modified = std::fs::metadata(&keymap_path)
             .and_then(|metadata| metadata.modified())
@@ -203,12 +207,47 @@ impl App {
         });
 
         let mut tracker = TimeTracker::new();
-        let categories_path = storage::get_categories_path();
-        let sessions_path = storage::get_time_log_path();
-
-        let loaded_categories = storage::load_categories_from_csv(&categories_path);
-        let loaded_sessions =
-            storage::load_sessions_from_csv(&sessions_path, &loaded_categories.categories);
+        let authority = sqlite::resolve_runtime_authority()?;
+        let (
+            sqlite_database_path,
+            loaded_categories,
+            loaded_sessions,
+            mut category_tags,
+            archived_categories,
+            sqlite_active_session,
+        ) = match authority {
+            sqlite::RuntimeAuthority::LegacyFiles => {
+                let categories_path = storage::get_categories_path();
+                let sessions_path = storage::get_time_log_path();
+                let loaded_categories = storage::try_load_categories_from_csv(&categories_path)
+                    .map_err(|error| error.to_string())?;
+                let loaded_sessions = storage::try_load_sessions_from_csv(
+                    &sessions_path,
+                    &loaded_categories.categories,
+                )
+                .map_err(|error| error.to_string())?;
+                let tags = storage::load_category_tags(&storage::get_category_tags_path());
+                (
+                    None,
+                    loaded_categories,
+                    loaded_sessions,
+                    tags,
+                    Vec::new(),
+                    None,
+                )
+            }
+            sqlite::RuntimeAuthority::SqliteCli { database_path } => {
+                let state = sqlite::load_tui_state(&database_path)?;
+                (
+                    Some(database_path),
+                    state.loaded_categories,
+                    state.loaded_sessions,
+                    state.category_tags,
+                    state.archived_categories,
+                    state.active_session,
+                )
+            }
+        };
         tracker.apply_loaded_state(
             loaded_categories.categories,
             loaded_categories.next_category_id,
@@ -216,7 +255,6 @@ impl App {
             loaded_sessions.next_session_id,
         );
 
-        let mut category_tags = storage::load_category_tags(&storage::get_category_tags_path());
         let valid_category_ids: HashSet<u64> = tracker
             .categories_for_storage()
             .into_iter()
@@ -277,18 +315,103 @@ impl App {
             keymap_last_modified,
             keymap_last_poll: Instant::now(),
             render_needed: true,
+            sqlite_database_path,
+            archived_categories,
+            storage_error: None,
         };
 
         app.persist_category_tags();
 
         if !app.restore_from_detached_checkpoint() {
-            app.begin_active_session_now();
+            if let Some(active) = sqlite_active_session {
+                if !app
+                    .time_tracker
+                    .set_active_category_by_id(active.category_id)
+                {
+                    return Err(format!(
+                        "SQLite active session references unavailable category {}",
+                        active.category_id.0
+                    ));
+                }
+                let _ = app
+                    .time_tracker
+                    .set_category_description_by_id(active.category_id, active.description);
+                app.begin_active_session_at(active.started_at_utc);
+            } else {
+                app.begin_active_session_now();
+                app.persist_active_session_start();
+            }
             app.restore_sand_state();
         }
 
         app.sync_drift_idle_state();
+        if let Some(error) = app.storage_error.take() {
+            return Err(error);
+        }
 
-        app
+        Ok(app)
+    }
+
+    fn record_storage_result<T>(&mut self, result: Result<T, String>) -> Option<T> {
+        match result {
+            Ok(value) => Some(value),
+            Err(error) => {
+                if self.storage_error.is_none() {
+                    self.storage_error = Some(error);
+                }
+                None
+            }
+        }
+    }
+
+    fn persist_active_session_start(&mut self) {
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            return;
+        };
+        let category_id = self.time_tracker.active_category_id();
+        let description = self
+            .time_tracker
+            .category_description_by_id(category_id)
+            .unwrap_or_default()
+            .to_string();
+        let started_at = self
+            .session
+            .active_session_started_at_utc
+            .unwrap_or_else(Utc::now);
+        let result = sqlite::ensure_tui_active_session(
+            &database_path,
+            category_id,
+            &description,
+            started_at,
+        );
+        self.record_storage_result(result);
+    }
+
+    fn reload_sqlite_sessions(&mut self) -> bool {
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            return true;
+        };
+        let Some(state) = self.record_storage_result(sqlite::load_tui_state(&database_path)) else {
+            return false;
+        };
+        self.time_tracker.sessions = state.loaded_sessions.sessions;
+        self.time_tracker.session_id_counter = state.loaded_sessions.next_session_id;
+        self.archived_categories = state.archived_categories;
+        true
+    }
+
+    fn reset_active_session_at(&mut self, started_at_utc: DateTime<Utc>) {
+        if let Some(database_path) = self.sqlite_database_path.clone()
+            && self
+                .record_storage_result(sqlite::reset_tui_active_session(
+                    &database_path,
+                    started_at_utc,
+                ))
+                .is_none()
+        {
+            return;
+        }
+        self.begin_active_session_at(started_at_utc);
     }
 
     fn open_modal(&mut self) {
@@ -801,6 +924,28 @@ impl App {
             .unwrap_or(Duration::ZERO)
             .as_secs() as usize;
         let ended_local = clamped_end.with_timezone(&Local);
+
+        if let Some(database_path) = self.sqlite_database_path.clone() {
+            let operational_day = operational_day_key_for_local(&ended_local)
+                .format("%Y-%m-%d")
+                .to_string();
+            self.record_storage_result(sqlite::finish_tui_active_session(
+                &database_path,
+                clamped_end,
+                &operational_day,
+                elapsed,
+            ))?;
+            let active_category_id = self.time_tracker.active_category_id();
+            let _ = self
+                .time_tracker
+                .set_category_description_by_id(active_category_id, String::new());
+            self.time_tracker.current_session_start = None;
+            self.session.active_session_started_at_utc = None;
+            self.reload_sqlite_sessions();
+            self.persist_categories();
+            return Some(elapsed);
+        }
+
         let result = self
             .time_tracker
             .end_session_with_elapsed_at_local(elapsed, ended_local);
@@ -819,6 +964,51 @@ impl App {
 
         if self.time_tracker.category_by_id(category_id).is_none() {
             return false;
+        }
+
+        if let Some(database_path) = self.sqlite_database_path.clone() {
+            let start_utc = self
+                .session
+                .active_session_started_at_utc
+                .unwrap_or(switched_at_utc);
+            let elapsed = (switched_at_utc - start_utc)
+                .to_std()
+                .unwrap_or(Duration::ZERO)
+                .as_secs() as usize;
+            let switched_local = switched_at_utc.with_timezone(&Local);
+            let operational_day = operational_day_key_for_local(&switched_local)
+                .format("%Y-%m-%d")
+                .to_string();
+            let next_description = self
+                .time_tracker
+                .category_description_by_id(category_id)
+                .unwrap_or_default()
+                .to_string();
+            if self
+                .record_storage_result(sqlite::switch_tui_active_session(
+                    &database_path,
+                    category_id,
+                    &next_description,
+                    switched_at_utc,
+                    &operational_day,
+                    elapsed,
+                ))
+                .is_none()
+            {
+                return false;
+            }
+            let previous_category_id = self.time_tracker.active_category_id();
+            let _ = self
+                .time_tracker
+                .set_category_description_by_id(previous_category_id, String::new());
+            if !self.time_tracker.set_active_category_by_id(category_id) {
+                return false;
+            }
+            self.begin_active_session_at(switched_at_utc);
+            self.reload_sqlite_sessions();
+            self.persist_categories();
+            self.sync_drift_idle_state();
+            return true;
         }
 
         self.end_active_session_at(switched_at_utc);
@@ -899,11 +1089,18 @@ impl App {
 
                 let scheduled_local = scheduled_at_utc.with_timezone(&Local);
                 let scheduled_day = operational_day_key_for_local(&scheduled_local);
+                if let Some(database_path) = self.sqlite_database_path.clone() {
+                    let day = scheduled_day.format("%Y-%m-%d").to_string();
+                    let result = sqlite::delete_tui_drift_sessions_for_day(&database_path, &day);
+                    if self.record_storage_result(result).is_none() {
+                        return;
+                    }
+                }
                 self.time_tracker
                     .clear_drift_sessions_for_day(scheduled_day);
 
                 if is_drift_category_id(self.time_tracker.active_category_id()) {
-                    self.begin_active_session_at(scheduled_at_utc);
+                    self.reset_active_session_at(scheduled_at_utc);
                     self.sync_drift_idle_state();
                 }
 
@@ -1278,7 +1475,7 @@ impl App {
         Some(ratio.clamp(0.0, 1.0))
     }
 
-    fn persist_detached_checkpoint(&self) {
+    fn persist_detached_checkpoint(&mut self) {
         let active_category_id = self.time_tracker.active_category_id();
         let active_description = self
             .time_tracker
@@ -1323,31 +1520,64 @@ impl App {
                 .collect(),
         };
 
-        let path = storage::get_detached_runtime_path();
-        let _ = storage::write_json_atomic(&path, &checkpoint);
+        if let Some(database_path) = self.sqlite_database_path.clone() {
+            let result = sqlite::save_tui_checkpoint(
+                &database_path,
+                checkpoint.detached_at_utc,
+                checkpoint.simulation_time_utc,
+                &checkpoint,
+            );
+            self.record_storage_result(result);
+        } else {
+            let path = storage::get_detached_runtime_path();
+            if let Err(error) = storage::write_json_atomic(&path, &checkpoint) {
+                self.record_storage_result::<()>(Err(error));
+            }
+        }
     }
 
-    fn clear_detached_checkpoint(&self) {
-        let path = storage::get_detached_runtime_path();
-        let _ = storage::delete_file_if_exists(&path);
+    fn clear_detached_checkpoint(&mut self) {
+        if let Some(database_path) = self.sqlite_database_path.clone() {
+            let result = sqlite::clear_tui_checkpoint(&database_path);
+            self.record_storage_result(result);
+        } else {
+            let path = storage::get_detached_runtime_path();
+            if let Err(error) = storage::delete_file_if_exists(&path) {
+                self.record_storage_result::<()>(Err(error));
+            }
+        }
     }
 
     fn restore_from_detached_checkpoint(&mut self) -> bool {
-        let path = storage::get_detached_runtime_path();
-        if !storage::file_exists(&path) {
-            return false;
-        }
-
-        let checkpoint: DetachedRuntimeCheckpoint = match storage::read_json(&path) {
-            Ok(value) => value,
-            Err(_) => {
-                let _ = storage::delete_file_if_exists(&path);
-                return false;
-            }
-        };
+        let checkpoint: DetachedRuntimeCheckpoint =
+            if let Some(database_path) = self.sqlite_database_path.clone() {
+                match sqlite::load_tui_checkpoint(&database_path) {
+                    Ok(Some(value)) => value,
+                    Ok(None) => return false,
+                    Err(error) => {
+                        self.record_storage_result::<()>(Err(error));
+                        return false;
+                    }
+                }
+            } else {
+                let path = storage::get_detached_runtime_path();
+                if !storage::file_exists(&path) {
+                    return false;
+                }
+                match storage::read_json(&path) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        self.record_storage_result::<()>(Err(error));
+                        return false;
+                    }
+                }
+            };
 
         if checkpoint.schema_version != 1 {
-            let _ = storage::delete_file_if_exists(&path);
+            self.record_storage_result::<()>(Err(format!(
+                "unsupported detached checkpoint schema {}",
+                checkpoint.schema_version
+            )));
             return false;
         }
 
@@ -1417,15 +1647,15 @@ impl App {
 }
 
 pub fn run_ui() -> Result<(), io::Error> {
+    let (width, height) = crossterm::terminal::size()?;
+    let mut app = App::new(width, height).map_err(io::Error::other)?;
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-
-    let size = terminal.size()?;
-    let mut app = App::new(size.width, size.height);
 
     let physics_rate = Duration::from_millis(TIME_SETTINGS.physics_ms);
     let tick_rate = Duration::from_millis(TIME_SETTINGS.tick_ms);
@@ -1434,8 +1664,14 @@ pub fn run_ui() -> Result<(), io::Error> {
     let mut last_simulation_update = Instant::now();
     let mut last_render = Instant::now();
     let mut last_save = Instant::now();
+    let mut runtime_error = None;
 
     loop {
+        if let Some(error) = app.storage_error.take() {
+            runtime_error = Some(error);
+            break;
+        }
+
         let now = Instant::now();
         let wall_delta = now.saturating_duration_since(last_simulation_update);
         last_simulation_update = now;
@@ -1470,22 +1706,28 @@ pub fn run_ui() -> Result<(), io::Error> {
         }
     }
 
-    if app.detach_requested {
-        app.persist_sessions();
-        app.persist_sand_state();
-        app.persist_daily_sand_snapshot();
-        app.persist_detached_checkpoint();
-    } else {
-        app.end_active_session_now();
-        app.persist_sessions();
-        app.persist_sand_state();
-        app.persist_daily_sand_snapshot();
-        app.clear_detached_checkpoint();
+    if runtime_error.is_none() {
+        if app.detach_requested {
+            app.persist_sessions();
+            app.persist_sand_state();
+            app.persist_daily_sand_snapshot();
+            app.persist_detached_checkpoint();
+        } else {
+            app.end_active_session_now();
+            app.persist_sessions();
+            app.persist_sand_state();
+            app.persist_daily_sand_snapshot();
+            app.clear_detached_checkpoint();
+        }
+        runtime_error = app.storage_error.take();
     }
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
 
+    if let Some(error) = runtime_error {
+        return Err(io::Error::other(error));
+    }
     Ok(())
 }
