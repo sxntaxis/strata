@@ -1,4 +1,7 @@
-use std::{fs, path::{Path, PathBuf}};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
@@ -389,8 +392,7 @@ fn validate_marker(marker: &StorageAuthorityMarker) -> Result<(), AuthorityError
 
 fn read_marker(path: &Path) -> Result<StorageAuthorityMarker, AuthorityError> {
     let bytes = fs::read(path).map_err(|error| AuthorityError::Io(error.to_string()))?;
-    serde_json::from_slice(&bytes)
-        .map_err(|error| AuthorityError::InvalidMarker(error.to_string()))
+    serde_json::from_slice(&bytes).map_err(|error| AuthorityError::InvalidMarker(error.to_string()))
 }
 
 fn write_marker(path: &Path, marker: &StorageAuthorityMarker) -> Result<(), AuthorityError> {

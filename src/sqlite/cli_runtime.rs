@@ -80,9 +80,9 @@ pub(crate) fn start_session(
     let category = if is_drift_name(&requested) || requested == "0" {
         categories.iter().find(|category| category.id == 0)
     } else {
-        categories.iter().find(|category| {
-            category.name == requested || category.id.to_string() == requested
-        })
+        categories
+            .iter()
+            .find(|category| category.name == requested || category.id.to_string() == requested)
     }
     .ok_or_else(|| format!("Category '{requested}' not found"))?;
 

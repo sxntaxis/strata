@@ -23,8 +23,10 @@ impl TestProfile {
             .duration_since(UNIX_EPOCH)
             .expect("system clock should follow the Unix epoch")
             .as_nanos();
-        let root =
-            std::env::temp_dir().join(format!("strata-sqlite006-{name}-{}-{nonce}", std::process::id()));
+        let root = std::env::temp_dir().join(format!(
+            "strata-sqlite006-{name}-{}-{nonce}",
+            std::process::id()
+        ));
         let data_home = root.join("data");
         let state_home = root.join("state");
         let config_home = root.join("config");
@@ -83,7 +85,11 @@ impl TestProfile {
 
     fn migrate(&self) {
         let output = self.run(&["migrate-sqlite"]);
-        assert!(output.status.success(), "migration failed: {}", stderr(&output));
+        assert!(
+            output.status.success(),
+            "migration failed: {}",
+            stderr(&output)
+        );
     }
 
     fn activate(&self) -> Output {
@@ -178,14 +184,22 @@ fn interrupted_activation_is_recovered_idempotently() {
 
     let output = profile.activate();
 
-    assert!(output.status.success(), "activation failed: {}", stderr(&output));
+    assert!(
+        output.status.success(),
+        "activation failed: {}",
+        stderr(&output)
+    );
     assert!(stdout(&output).contains("recovered-activation"));
     let marker = read_marker(&profile);
     assert_eq!(marker["active_authority"], "sqlite-cli");
     assert_eq!(marker["sqlite_cli_activation"]["status"], "active");
 
     let repeated = profile.activate();
-    assert!(repeated.status.success(), "repeat failed: {}", stderr(&repeated));
+    assert!(
+        repeated.status.success(),
+        "repeat failed: {}",
+        stderr(&repeated)
+    );
     assert!(stdout(&repeated).contains("already-active"));
 }
 
@@ -244,11 +258,19 @@ fn activated_cli_uses_sqlite_without_legacy_dual_writes_and_blocks_tui() {
     drop(connection);
 
     let report = profile.run(&["report", "--today"]);
-    assert!(report.status.success(), "report failed: {}", stderr(&report));
+    assert!(
+        report.status.success(),
+        "report failed: {}",
+        stderr(&report)
+    );
     assert!(stdout(&report).contains("Work"));
 
     let export = profile.run(&["export", "--format", "json"]);
-    assert!(export.status.success(), "export failed: {}", stderr(&export));
+    assert!(
+        export.status.success(),
+        "export failed: {}",
+        stderr(&export)
+    );
     let exported: Value = serde_json::from_slice(&export.stdout).expect("export should be JSON");
     assert_eq!(exported["sessions"][0]["project"], "sqlite-project");
 

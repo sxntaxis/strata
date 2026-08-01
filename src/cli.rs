@@ -1,4 +1,7 @@
-use std::{io, path::PathBuf};
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
 
 use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
 use clap::{CommandFactory, Parser, ValueEnum};
@@ -112,6 +115,18 @@ pub enum Cli {
         quantum_seconds: i64,
 
         #[arg(long, help = "Print the migration result as JSON")]
+        json: bool,
+    },
+
+    #[command(about = "Activate a verified SQLite candidate for CLI runtime operations")]
+    ActivateSqlite {
+        #[arg(long, value_name = "PATH", help = "Verified SQLite candidate path")]
+        database: Option<PathBuf>,
+
+        #[arg(long, help = "Confirm the one-way CLI authority switch")]
+        confirm: bool,
+
+        #[arg(long, help = "Print the activation result as JSON")]
         json: bool,
     },
 
@@ -235,6 +250,27 @@ pub fn start_session(
     description: Option<String>,
     category_name: Option<String>,
 ) -> Result<(), String> {
+    match sqlite::resolve_runtime_authority()? {
+        sqlite::RuntimeAuthority::LegacyFiles => {
+            start_session_legacy(project, description, category_name)
+        }
+        sqlite::RuntimeAuthority::SqliteCli { database_path } => {
+            let started =
+                sqlite::start_cli_session(&database_path, project, description, category_name)?;
+            println!(
+                "Started session for project '{}' in category '{}'",
+                started.project, started.category_name
+            );
+            Ok(())
+        }
+    }
+}
+
+fn start_session_legacy(
+    project: String,
+    description: Option<String>,
+    category_name: Option<String>,
+) -> Result<(), String> {
     let categories_path = storage::get_categories_path();
     let categories = storage::try_load_categories_from_csv(&categories_path)
         .map_err(|error| error.to_string())?
@@ -271,6 +307,23 @@ pub fn start_session(
 }
 
 pub fn stop_session() -> Result<usize, String> {
+    match sqlite::resolve_runtime_authority()? {
+        sqlite::RuntimeAuthority::LegacyFiles => stop_session_legacy(),
+        sqlite::RuntimeAuthority::SqliteCli { database_path } => {
+            let stopped = sqlite::stop_cli_session(&database_path)?;
+            let elapsed = stopped.elapsed_seconds;
+            println!(
+                "Stopped session. Elapsed time: {:02}:{:02}:{:02}",
+                elapsed / 3600,
+                (elapsed % 3600) / 60,
+                elapsed % 60
+            );
+            Ok(elapsed)
+        }
+    }
+}
+
+fn stop_session_legacy() -> Result<usize, String> {
     let session_path = storage::get_active_session_path();
     if !storage::file_exists(&session_path) {
         return Err("No active session to stop".to_string());
@@ -321,6 +374,46 @@ pub fn stop_session() -> Result<usize, String> {
 }
 
 pub fn report(period: ReportPeriod) -> Result<(), String> {
+    match sqlite::resolve_runtime_authority()? {
+        sqlite::RuntimeAuthority::LegacyFiles => report_legacy(period),
+        sqlite::RuntimeAuthority::SqliteCli { database_path } => {
+            let snapshot = sqlite::read_cli_snapshot(&database_path)?;
+            let sessions = snapshot
+                .sessions
+                .iter()
+                .map(|session| session.as_domain_session())
+                .collect::<Vec<_>>();
+            let summary = build_period_report(&sessions, &snapshot.categories, period);
+            let title = match period {
+                ReportPeriod::Today => "Today's Report",
+                ReportPeriod::Week => "Weekly Report",
+                ReportPeriod::Month => "Monthly Report",
+            };
+            println!("{} ({})", title, summary.date);
+            println!("{}", "-".repeat(40));
+            for entry in &summary.entries {
+                println!(
+                    "{:20} {:02}:{:02}:{:02}",
+                    entry.category_name,
+                    entry.elapsed_seconds / 3600,
+                    (entry.elapsed_seconds % 3600) / 60,
+                    entry.elapsed_seconds % 60
+                );
+            }
+            println!("{}", "-".repeat(40));
+            println!(
+                "{:20} {:02}:{:02}:{:02}",
+                "TOTAL",
+                summary.total_seconds / 3600,
+                (summary.total_seconds % 3600) / 60,
+                summary.total_seconds % 60
+            );
+            Ok(())
+        }
+    }
+}
+
+fn report_legacy(period: ReportPeriod) -> Result<(), String> {
     let sessions_path = storage::get_time_log_path();
     let categories_path = storage::get_categories_path();
 
@@ -363,6 +456,111 @@ pub fn report(period: ReportPeriod) -> Result<(), String> {
 }
 
 pub fn export_data(format: ExportFormat, out_path: Option<PathBuf>) -> Result<(), String> {
+    match sqlite::resolve_runtime_authority()? {
+        sqlite::RuntimeAuthority::LegacyFiles => export_data_legacy(format, out_path),
+        sqlite::RuntimeAuthority::SqliteCli { database_path } => {
+            export_data_sqlite(&database_path, format, out_path)
+        }
+    }
+}
+
+fn export_data_sqlite(
+    database_path: &Path,
+    format: ExportFormat,
+    out_path: Option<PathBuf>,
+) -> Result<(), String> {
+    let snapshot = sqlite::read_cli_snapshot(database_path)?;
+    let export = DataExport {
+        schema_version: 1,
+        exported_at: Utc::now(),
+        categories: snapshot
+            .categories
+            .iter()
+            .filter(|category| category.id.0 != 0)
+            .map(|category| {
+                let color_pos = COLORS
+                    .iter()
+                    .position(|&color| color == category.color)
+                    .unwrap_or(0);
+                CategoryExport {
+                    id: category.id.0,
+                    name: category.name.clone(),
+                    description: category.description.clone(),
+                    color_index: color_pos,
+                    karma_effect: category.karma_effect,
+                }
+            })
+            .collect(),
+        sessions: snapshot
+            .sessions
+            .iter()
+            .map(|session| SessionExport {
+                id: session.id,
+                date: session.date.clone(),
+                category_id: session.category_id,
+                category_name: session.category_name.clone(),
+                project: (!session.project.is_empty()).then(|| session.project.clone()),
+                description: session.description.clone(),
+                start_time: session.start_time.clone(),
+                end_time: session.end_time.clone(),
+                elapsed_seconds: session.elapsed_seconds,
+            })
+            .collect(),
+    };
+
+    match format {
+        ExportFormat::Json => {
+            let json = serde_json::to_string_pretty(&export).map_err(|error| error.to_string())?;
+            if let Some(path) = out_path {
+                storage::write_text_file(&path, &json)?;
+                println!("Exported to {}", path.display());
+            } else {
+                println!("{}", json);
+            }
+        }
+        ExportFormat::Ics => {
+            let mut ics = String::new();
+            ics.push_str("BEGIN:VCALENDAR\r\n");
+            ics.push_str("VERSION:2.0\r\n");
+            ics.push_str("PRODID:-//strata//time tracking//EN\r\n");
+            for session in &export.sessions {
+                if session.category_name == DRIFT_CATEGORY_CONFIG_NAME
+                    || session.elapsed_seconds == 0
+                {
+                    continue;
+                }
+                let dt_start = format_ics_datetime(&session.date, &session.start_time);
+                let dt_end = format_ics_datetime(&session.date, &session.end_time);
+                let uid = format!("strata-session-{}", session.id);
+                ics.push_str("BEGIN:VEVENT\r\n");
+                ics.push_str(&format!("UID:{}\r\n", uid));
+                ics.push_str(&format!("DTSTAMP:{}\r\n", format_ics_timestamp(Utc::now())));
+                ics.push_str(&format!("DTSTART:{}\r\n", dt_start));
+                ics.push_str(&format!("DTEND:{}\r\n", dt_end));
+                ics.push_str(&format!(
+                    "SUMMARY:{} - {}\r\n",
+                    session.project.as_deref().unwrap_or("Project"),
+                    session.category_name
+                ));
+                if !session.description.is_empty() {
+                    ics.push_str(&format!("DESCRIPTION:{}\r\n", session.description));
+                }
+                ics.push_str(&format!("CATEGORIES:{}\r\n", session.category_name));
+                ics.push_str("END:VEVENT\r\n");
+            }
+            ics.push_str("END:VCALENDAR\r\n");
+            if let Some(path) = out_path {
+                storage::write_text_file(&path, &ics)?;
+                println!("Exported to {}", path.display());
+            } else {
+                println!("{}", ics);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn export_data_legacy(format: ExportFormat, out_path: Option<PathBuf>) -> Result<(), String> {
     let sessions_path = storage::get_time_log_path();
     let categories_path = storage::get_categories_path();
 
@@ -531,6 +729,19 @@ pub fn migrate_sqlite(
     })
     .map_err(|error| error.to_string())?;
 
+    if json {
+        println!("{}", report.to_pretty_json()?);
+    } else {
+        report.print_human();
+    }
+    Ok(())
+}
+
+pub fn activate_sqlite(database: Option<PathBuf>, confirm: bool, json: bool) -> Result<(), String> {
+    let report = sqlite::activate_sqlite_cli(sqlite::SqliteCliActivationOptions {
+        database_path: database,
+        confirm,
+    })?;
     if json {
         println!("{}", report.to_pretty_json()?);
     } else {
@@ -708,6 +919,17 @@ pub fn run_cli() {
                 json,
             ) {
                 eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+
+        Cli::ActivateSqlite {
+            database,
+            confirm,
+            json,
+        } => {
+            if let Err(error) = activate_sqlite(database, confirm, json) {
+                eprintln!("Error: {}", error);
                 std::process::exit(1);
             }
         }

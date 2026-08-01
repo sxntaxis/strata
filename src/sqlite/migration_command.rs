@@ -432,6 +432,52 @@ fn execute_controlled_migration(
     ))
 }
 
+pub(super) fn verify_candidate_for_cli_activation(
+    database_path: &Path,
+    report: &ControlledMigrationReport,
+) -> Result<String, ControlledMigrationError> {
+    let controlled_options = ControlledMigrationOptions {
+        dry_run: true,
+        include_active_recovery: true,
+        database_path: Some(database_path.to_path_buf()),
+        report_path: None,
+        utc_offset_seconds: report.utc_offset_seconds,
+        operational_day_start_minutes: report.operational_day_start_minutes,
+        quantum_seconds: report.quantum_seconds,
+    };
+    let layout = MigrationLayout::runtime(&controlled_options)?;
+    let import_options = LegacyImportOptions {
+        utc_offset_seconds: report.utc_offset_seconds,
+        operational_day_start_minutes: report.operational_day_start_minutes,
+        quantum_seconds: report.quantum_seconds,
+    };
+    let plan = stable_plan(&layout.legacy_paths(), import_options)?;
+    if plan.summary().source_fingerprint != report.source_fingerprint {
+        return Err(ControlledMigrationError::SourceChanged {
+            before: report.source_fingerprint.clone(),
+            after: plan.summary().source_fingerprint.clone(),
+        });
+    }
+    let existing = inspect_existing_candidate(database_path, &report.source_fingerprint)?
+        .ok_or_else(|| {
+            ControlledMigrationError::PublicationMismatch(
+                "verified SQLite candidate is missing".to_string(),
+            )
+        })?;
+    if existing.summary != *plan.summary() || existing.summary != report.source_summary {
+        return Err(ControlledMigrationError::PublicationMismatch(
+            "SQLite candidate no longer matches the live legacy authority".to_string(),
+        ));
+    }
+    if existing.integrity_check != "ok" {
+        return Err(ControlledMigrationError::PublicationMismatch(format!(
+            "candidate integrity check returned {}",
+            existing.integrity_check
+        )));
+    }
+    Ok(existing.integrity_check)
+}
+
 fn stable_plan(
     paths: &LegacyImportPaths,
     options: LegacyImportOptions,
