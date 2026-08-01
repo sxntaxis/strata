@@ -19,3 +19,13 @@ replace_once(
     "        let start_time = end_local - ChronoDuration::seconds(elapsed as i64);\n        let today = operational_day_key_for_utc(end_local.with_timezone(&Utc))",
     "        let end_utc = end_local.with_timezone(&Utc);\n        let start_time = end_local.clone() - ChronoDuration::seconds(elapsed as i64);\n        let today = operational_day_key_for_utc(end_utc)",
 )
+replace_once(
+    "src/domain.rs",
+    "pub fn operational_day_key_for_local(local: &DateTime<Local>) -> NaiveDate {\n    operational_day_key_from_utc(local.with_timezone(&Utc), &day_boundary_config())\n}\n\n",
+    "",
+)
+replace_once(
+    "src/domain.rs",
+    "    DateTime, Datelike, Duration as ChronoDuration, FixedOffset, Local, NaiveDate, Utc,",
+    "    DateTime, Datelike, Duration as ChronoDuration, FixedOffset, NaiveDate, Utc,",
+)
