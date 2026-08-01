@@ -62,6 +62,28 @@ strata --ignore-config
 
 The override uses built-in settings intentionally; normal XDG and `STRATA_DATA_DIR` environment selection still applies. During a running TUI session, a failed configuration reload keeps the last valid settings and displays the error instead of applying a partial configuration.
 
+
+## Time authority
+
+Strata uses distinct clocks for distinct truths:
+
+- **Live elapsed duration** uses the process monotonic clock.
+- **Persisted timestamps** use UTC.
+- **Civil start/end rendering and operational-day allocation** use the validated fixed UTC offset from `keymap.json`.
+- **Historical report grouping** uses the operational-day key persisted with each completed session; later offset changes do not regroup old history.
+
+At a live finish or layer switch, Strata reconciles monotonic elapsed time against observed UTC wall time. A divergence greater than five seconds is treated as a clock discontinuity: the transition fails visibly and active state remains available for recovery rather than being converted into ordinary work.
+
+CLI stops and recovered sessions cannot reconstruct a cross-process monotonic clock, so they use a checked UTC wall interval. Future starts are rejected. An unattended interval above seven days requires explicit confirmation:
+
+```bash
+strata stop --accept-clock-jump
+```
+
+Use that override only after inspecting the active timestamp and system clock; it accepts the recorded wall interval rather than guessing a correction.
+
+The current policy is a **fixed offset**, not an IANA timezone. It is deterministic across travel and seasonal clock changes but does not automatically apply daylight-saving transitions. Sunrise semantics remain separate work. The full contract is recorded in [`docs/TEMPORAL_AUTHORITY.md`](docs/TEMPORAL_AUTHORITY.md).
+
 ## Persistence authority
 
 Strata has two explicit authority phases:

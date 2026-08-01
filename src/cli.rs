@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 
@@ -11,9 +11,9 @@ use crate::{
     constants::COLORS,
     domain::{
         CategoryId, DRIFT_CATEGORY_CONFIG_NAME, DayBoundaryMode, ReportPeriod, Session,
-        build_period_report, operational_day_key_for_local, runtime_settings,
+        build_period_report, civil_time_for_utc, operational_day_key_for_utc, runtime_settings,
     },
-    sqlite, storage,
+    sqlite, storage, temporal,
 };
 
 #[derive(Parser, Debug)]
@@ -46,7 +46,13 @@ pub enum Cli {
     },
 
     #[command(about = "Stop the current tracking session")]
-    Stop,
+    Stop {
+        #[arg(
+            long,
+            help = "Explicitly accept a wall-clock interval above the unattended safety limit"
+        )]
+        accept_clock_jump: bool,
+    },
 
     #[command(about = "Show a time report")]
     Report {
@@ -372,11 +378,11 @@ fn start_session_legacy(
     Ok(())
 }
 
-pub fn stop_session() -> Result<usize, String> {
+pub fn stop_session(accept_clock_jump: bool) -> Result<usize, String> {
     match sqlite::resolve_runtime_authority()? {
-        sqlite::RuntimeAuthority::LegacyFiles => stop_session_legacy(),
+        sqlite::RuntimeAuthority::LegacyFiles => stop_session_legacy(accept_clock_jump),
         sqlite::RuntimeAuthority::SqliteCli { database_path } => {
-            let stopped = sqlite::stop_cli_session(&database_path)?;
+            let stopped = sqlite::stop_cli_session(&database_path, accept_clock_jump)?;
             let elapsed = stopped.elapsed_seconds;
             println!(
                 "Stopped session. Elapsed time: {:02}:{:02}:{:02}",
@@ -391,7 +397,7 @@ pub fn stop_session() -> Result<usize, String> {
     }
 }
 
-fn stop_session_legacy() -> Result<usize, String> {
+fn stop_session_legacy(accept_clock_jump: bool) -> Result<usize, String> {
     let session_path = storage::get_active_session_path();
     if !storage::file_exists(&session_path) {
         return Err("No active session to stop".to_string());
@@ -399,7 +405,10 @@ fn stop_session_legacy() -> Result<usize, String> {
 
     let active_session: ActiveSession = storage::read_json(&session_path)?;
 
-    let elapsed = (Utc::now() - active_session.start_time).num_seconds() as usize;
+    let now_utc = Utc::now();
+    let interval =
+        temporal::checked_wall_interval(active_session.start_time, now_utc, accept_clock_jump)?;
+    let elapsed = interval.elapsed_seconds;
 
     let sessions_path = storage::get_time_log_path();
     let categories_path = storage::get_categories_path();
@@ -411,8 +420,8 @@ fn stop_session_legacy() -> Result<usize, String> {
         .map_err(|error| error.to_string())?
         .sessions;
 
-    let now = Local::now();
-    let today = operational_day_key_for_local(&now)
+    let now = civil_time_for_utc(interval.ended_at_utc);
+    let today = operational_day_key_for_utc(interval.ended_at_utc)
         .format("%Y-%m-%d")
         .to_string();
     let start_time = now - ChronoDuration::seconds(elapsed as i64);
@@ -1014,8 +1023,8 @@ pub fn run_command(cli: Cli) {
                 std::process::exit(1);
             }
         }
-        Cli::Stop => {
-            if let Err(e) = stop_session() {
+        Cli::Stop { accept_clock_jump } => {
+            if let Err(e) = stop_session(accept_clock_jump) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }

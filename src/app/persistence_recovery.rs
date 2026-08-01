@@ -397,7 +397,7 @@ impl App {
                     .time_tracker
                     .set_category_description_by_id(active.category_id, active.description);
                 self.session.active_session_stable_id = Some(active.stable_id);
-                self.begin_active_session_at(active.started_at_utc);
+                self.begin_active_session_at(active.started_at_utc, false)?;
             } else {
                 let _ = self
                     .time_tracker

@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-use chrono::{DateTime, Duration as ChronoDuration, Local, SecondsFormat, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, SecondsFormat, Utc};
 use crossterm::{
     event::{self, Event},
     execute,
@@ -21,12 +21,12 @@ use crate::{
     },
     domain::{
         Category, CategoryId, DRIFT_CATEGORY_DISPLAY_NAME, DRIFT_CATEGORY_ID, FirstDayOfWeek,
-        ReportPeriod, RuntimeSettings, TimeTracker, is_drift_category_id,
-        operational_day_key_for_local, set_runtime_settings,
+        ReportPeriod, RuntimeSettings, TimeTracker, civil_time_for_utc, is_drift_category_id,
+        operational_day_key_for_utc, set_runtime_settings,
     },
     keybindings,
     sand::{SandEngine, SandState, SandStateGrain},
-    sqlite, storage,
+    sqlite, storage, temporal,
 };
 
 mod category_modal_view;
@@ -49,6 +49,12 @@ enum UiMode {
     Main,
     CategoryModal,
     KarmaModal,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SessionClockMode {
+    LiveMonotonic,
+    HistoricalWall,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -338,7 +344,7 @@ impl App {
                     .time_tracker
                     .set_category_description_by_id(active.category_id, active.description);
                 app.session.active_session_stable_id = Some(active.stable_id);
-                app.begin_active_session_at(active.started_at_utc);
+                app.begin_active_session_at(active.started_at_utc, false)?;
             } else {
                 app.begin_active_session_now();
                 app.persist_active_session_start();
@@ -403,7 +409,22 @@ impl App {
         true
     }
 
-    fn reset_active_session_at(&mut self, started_at_utc: DateTime<Utc>) {
+    fn reset_active_session_at(
+        &mut self,
+        started_at_utc: DateTime<Utc>,
+        accept_large_wall_interval: bool,
+    ) {
+        if let Err(error) =
+            temporal::checked_wall_interval(started_at_utc, Utc::now(), accept_large_wall_interval)
+        {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::ActiveStart,
+                RecoveryAction::ReloadAuthority,
+                Err(error),
+            );
+            return;
+        }
+
         if let Some(database_path) = self.sqlite_database_path.clone() {
             let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
                 self.record_storage_result_for::<()>(
@@ -436,7 +457,14 @@ impl App {
             };
             self.session.active_session_stable_id = receipt.resulting_active_stable_id;
         }
-        self.begin_active_session_at(started_at_utc);
+        if let Err(error) = self.begin_active_session_at(started_at_utc, accept_large_wall_interval)
+        {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::ActiveStart,
+                RecoveryAction::ReloadAuthority,
+                Err(error),
+            );
+        }
     }
 
     fn open_modal(&mut self) {
@@ -504,13 +532,7 @@ impl App {
     fn sync_drift_idle_state(&mut self) {
         if is_drift_category_id(self.time_tracker.active_category_id()) {
             self.session.blink_state = self.next_blink_interval();
-            self.session.none_entry_time =
-                self.session
-                    .active_session_started_at_utc
-                    .map(|started_at| {
-                        let elapsed = (Utc::now() - started_at).to_std().unwrap_or(Duration::ZERO);
-                        Instant::now() - elapsed
-                    });
+            self.session.none_entry_time = self.time_tracker.current_session_start;
         } else {
             self.session.none_entry_time = None;
         }
@@ -908,47 +930,80 @@ impl App {
         self.session.active_session_started_at_utc = Some(now);
     }
 
-    fn begin_active_session_at(&mut self, started_at_utc: DateTime<Utc>) {
-        let now = Utc::now();
-        let clamped_start = if started_at_utc > now {
-            now
-        } else {
-            started_at_utc
-        };
-        let elapsed = (now - clamped_start).to_std().unwrap_or(Duration::ZERO);
+    fn begin_active_session_at(
+        &mut self,
+        started_at_utc: DateTime<Utc>,
+        accept_large_wall_interval: bool,
+    ) -> Result<(), String> {
+        let interval = temporal::checked_wall_interval(
+            started_at_utc,
+            Utc::now(),
+            accept_large_wall_interval,
+        )?;
         self.time_tracker
-            .start_session_with_elapsed(elapsed.as_secs() as usize);
-        self.session.active_session_started_at_utc = Some(clamped_start);
+            .start_session_with_elapsed(interval.elapsed_seconds)?;
+        self.session.active_session_started_at_utc = Some(started_at_utc);
+        Ok(())
+    }
+
+    fn begin_transition_session(
+        &mut self,
+        started_at_utc: DateTime<Utc>,
+        clock_mode: SessionClockMode,
+    ) -> Result<(), String> {
+        match clock_mode {
+            SessionClockMode::LiveMonotonic => {
+                self.time_tracker.start_session();
+                self.session.active_session_started_at_utc = Some(started_at_utc);
+                Ok(())
+            }
+            SessionClockMode::HistoricalWall => self.begin_active_session_at(started_at_utc, true),
+        }
+    }
+
+    fn reconciled_active_interval(
+        &self,
+        observed_end_utc: DateTime<Utc>,
+        clock_mode: SessionClockMode,
+    ) -> Result<temporal::ReconciledInterval, String> {
+        let started_at_utc = self
+            .session
+            .active_session_started_at_utc
+            .ok_or_else(|| "active session is missing its UTC start timestamp".to_string())?;
+        match clock_mode {
+            SessionClockMode::LiveMonotonic => temporal::reconcile_live_interval(
+                started_at_utc,
+                observed_end_utc,
+                self.time_tracker.current_elapsed().unwrap_or_default(),
+            ),
+            SessionClockMode::HistoricalWall => {
+                temporal::checked_wall_interval(started_at_utc, observed_end_utc, true)
+            }
+        }
     }
 
     fn end_active_session_now(&mut self) -> Option<usize> {
-        self.end_active_session_at(Utc::now())
+        self.end_active_session_at(Utc::now(), SessionClockMode::LiveMonotonic)
     }
 
-    fn end_active_session_at(&mut self, ended_at_utc: DateTime<Utc>) -> Option<usize> {
-        let start_utc = self
-            .session
-            .active_session_started_at_utc
-            .or_else(|| {
-                self.time_tracker.current_session_start.map(|start| {
-                    Utc::now()
-                        - ChronoDuration::from_std(start.elapsed())
-                            .unwrap_or(ChronoDuration::zero())
-                })
-            })
-            .unwrap_or(ended_at_utc);
-
-        let clamped_end = if ended_at_utc < start_utc {
-            start_utc
-        } else {
-            ended_at_utc
+    fn end_active_session_at(
+        &mut self,
+        observed_end_utc: DateTime<Utc>,
+        clock_mode: SessionClockMode,
+    ) -> Option<usize> {
+        let interval = match self.reconciled_active_interval(observed_end_utc, clock_mode) {
+            Ok(interval) => interval,
+            Err(error) => {
+                self.record_storage_result_for::<()>(
+                    PersistenceOperation::ActiveFinish,
+                    RecoveryAction::ReloadAuthority,
+                    Err(error),
+                );
+                return None;
+            }
         };
-
-        let elapsed = (clamped_end - start_utc)
-            .to_std()
-            .unwrap_or(Duration::ZERO)
-            .as_secs() as usize;
-        let ended_local = clamped_end.with_timezone(&Local);
+        let elapsed = interval.elapsed_seconds;
+        let ended_civil = civil_time_for_utc(interval.ended_at_utc);
 
         if let Some(database_path) = self.sqlite_database_path.clone() {
             let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
@@ -959,7 +1014,7 @@ impl App {
                 );
                 return None;
             };
-            let operational_day = operational_day_key_for_local(&ended_local)
+            let operational_day = operational_day_key_for_utc(interval.ended_at_utc)
                 .format("%Y-%m-%d")
                 .to_string();
             let operation_id = format!("finish:{expected_stable_id}");
@@ -970,7 +1025,7 @@ impl App {
                     &database_path,
                     &expected_stable_id,
                     &operation_id,
-                    clamped_end,
+                    interval.ended_at_utc,
                     &operational_day,
                     elapsed,
                 ),
@@ -989,7 +1044,7 @@ impl App {
 
         let result = self
             .time_tracker
-            .end_session_with_elapsed_at_local(elapsed, ended_local);
+            .end_session_with_elapsed_at_local(elapsed, ended_civil);
         self.session.active_session_started_at_utc = None;
         result
     }
@@ -998,6 +1053,7 @@ impl App {
         &mut self,
         category_id: CategoryId,
         switched_at_utc: DateTime<Utc>,
+        clock_mode: SessionClockMode,
     ) -> bool {
         if self.time_tracker.active_category_id() == category_id {
             return false;
@@ -1016,16 +1072,19 @@ impl App {
                 );
                 return false;
             };
-            let start_utc = self
-                .session
-                .active_session_started_at_utc
-                .unwrap_or(switched_at_utc);
-            let elapsed = (switched_at_utc - start_utc)
-                .to_std()
-                .unwrap_or(Duration::ZERO)
-                .as_secs() as usize;
-            let switched_local = switched_at_utc.with_timezone(&Local);
-            let operational_day = operational_day_key_for_local(&switched_local)
+            let interval = match self.reconciled_active_interval(switched_at_utc, clock_mode) {
+                Ok(interval) => interval,
+                Err(error) => {
+                    self.record_storage_result_for::<()>(
+                        PersistenceOperation::ActiveSwitch,
+                        RecoveryAction::ReloadAuthority,
+                        Err(error),
+                    );
+                    return false;
+                }
+            };
+            let elapsed = interval.elapsed_seconds;
+            let operational_day = operational_day_key_for_utc(interval.ended_at_utc)
                 .format("%Y-%m-%d")
                 .to_string();
             let next_description = self
@@ -1036,7 +1095,7 @@ impl App {
             let operation_id = self.transition_operation_id(
                 "switch",
                 &expected_stable_id,
-                switched_at_utc,
+                interval.ended_at_utc,
                 &category_id.0.to_string(),
             );
             let next_stable_id = format!("tui-active:{operation_id}");
@@ -1047,7 +1106,7 @@ impl App {
                 &next_stable_id,
                 category_id,
                 &next_description,
-                switched_at_utc,
+                interval.ended_at_utc,
                 &operational_day,
                 elapsed,
             );
@@ -1066,21 +1125,40 @@ impl App {
                 return false;
             }
             self.session.active_session_stable_id = receipt.resulting_active_stable_id;
-            self.begin_active_session_at(switched_at_utc);
+            if let Err(error) = self.begin_transition_session(interval.ended_at_utc, clock_mode) {
+                self.record_storage_result_for::<()>(
+                    PersistenceOperation::ActiveStart,
+                    RecoveryAction::ReloadAuthority,
+                    Err(error),
+                );
+                return false;
+            }
             self.reload_sqlite_sessions();
             self.persist_categories();
             self.sync_drift_idle_state();
             return true;
         }
 
-        self.end_active_session_at(switched_at_utc);
+        if self
+            .end_active_session_at(switched_at_utc, clock_mode)
+            .is_none()
+        {
+            return false;
+        }
         self.persist_sessions();
 
         if !self.time_tracker.set_active_category_by_id(category_id) {
             return false;
         }
 
-        self.begin_active_session_at(switched_at_utc);
+        if let Err(error) = self.begin_transition_session(switched_at_utc, clock_mode) {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::ActiveStart,
+                RecoveryAction::ReloadAuthority,
+                Err(error),
+            );
+            return false;
+        }
         self.sync_drift_idle_state();
 
         true
@@ -1152,21 +1230,25 @@ impl App {
                     mutation,
                 });
         } else {
-            self.apply_mutation_at(mutation, Utc::now());
+            self.apply_mutation_at(mutation, Utc::now(), SessionClockMode::LiveMonotonic);
         }
         self.render_needed = true;
     }
 
-    fn apply_mutation_at(&mut self, mutation: QueuedMutation, scheduled_at_utc: DateTime<Utc>) {
+    fn apply_mutation_at(
+        &mut self,
+        mutation: QueuedMutation,
+        scheduled_at_utc: DateTime<Utc>,
+        clock_mode: SessionClockMode,
+    ) {
         match mutation {
             QueuedMutation::SwitchLayer(category_id) => {
-                self.apply_switch_layer_at(category_id, scheduled_at_utc);
+                self.apply_switch_layer_at(category_id, scheduled_at_utc, clock_mode);
             }
             QueuedMutation::ClearAllSand => {
                 self.sand_engine.clear();
 
-                let scheduled_local = scheduled_at_utc.with_timezone(&Local);
-                let scheduled_day = operational_day_key_for_local(&scheduled_local);
+                let scheduled_day = operational_day_key_for_utc(scheduled_at_utc);
                 if let Some(database_path) = self.sqlite_database_path.clone() {
                     let day = scheduled_day.format("%Y-%m-%d").to_string();
                     let result = sqlite::delete_tui_drift_sessions_for_day(&database_path, &day);
@@ -1185,7 +1267,10 @@ impl App {
                     .clear_drift_sessions_for_day(scheduled_day);
 
                 if is_drift_category_id(self.time_tracker.active_category_id()) {
-                    self.reset_active_session_at(scheduled_at_utc);
+                    self.reset_active_session_at(
+                        scheduled_at_utc,
+                        clock_mode == SessionClockMode::HistoricalWall,
+                    );
                     self.sync_drift_idle_state();
                 }
 
@@ -1201,8 +1286,13 @@ impl App {
         }
     }
 
-    fn apply_switch_layer_at(&mut self, category_id: CategoryId, scheduled_at_utc: DateTime<Utc>) {
-        self.switch_active_category_at(category_id, scheduled_at_utc);
+    fn apply_switch_layer_at(
+        &mut self,
+        category_id: CategoryId,
+        scheduled_at_utc: DateTime<Utc>,
+        clock_mode: SessionClockMode,
+    ) {
+        self.switch_active_category_at(category_id, scheduled_at_utc, clock_mode);
     }
 
     fn advance_runtime(
@@ -1438,7 +1528,11 @@ impl App {
             self.process_simulation_delta(pre_delta, tick_rate, physics_rate);
             self.simulation.simulation_time_utc = next.execute_at_utc;
             self.simulation.pending_mutations.pop_front();
-            self.apply_mutation_at(next.mutation, next.execute_at_utc);
+            self.apply_mutation_at(
+                next.mutation,
+                next.execute_at_utc,
+                SessionClockMode::HistoricalWall,
+            );
         }
 
         if delta.is_zero() {
@@ -1725,7 +1819,10 @@ impl App {
             .set_category_description_by_id(active_id, checkpoint.active_description);
 
         if let Some(started_at) = checkpoint.active_session_started_at_utc {
-            self.begin_active_session_at(started_at);
+            if let Err(error) = self.begin_active_session_at(started_at, false) {
+                self.record_storage_result::<()>(Err(error));
+                return false;
+            }
         } else {
             self.begin_active_session_now();
         }

@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 
-use chrono::{Duration as ChronoDuration, Local, NaiveDate};
+use chrono::{Duration as ChronoDuration, NaiveDate, Utc};
 use ratatui::{prelude::Line, style::Color};
 
 use crate::domain::{
     Category, CategoryId, CategoryLogEntry, DRIFT_CATEGORY_ID, KarmaReportSummary,
     LiveSessionPreview, ReportPeriod, build_category_logs_for_period_with_offset,
-    build_period_karma_report_with_live_and_offset, operational_day_key_now,
+    build_period_karma_report_with_live_and_offset, civil_time_for_utc, operational_day_key_now,
     report_period_date_bounds_with_offset,
 };
 use crate::sand::{SandEngine, SandState, SandStateGrain};
@@ -97,7 +97,7 @@ impl App {
             category_id,
             description,
             elapsed_seconds,
-            now_local: Local::now(),
+            now_civil: civil_time_for_utc(Utc::now()),
         })
     }
 
@@ -351,11 +351,11 @@ impl App {
         if day == operational_day_key_now()
             && let Some(live) = self.live_session_preview()
         {
-            let start_time = (live.now_local
+            let start_time = (live.now_civil
                 - ChronoDuration::seconds(live.elapsed_seconds as i64))
             .format("%H:%M:%S")
             .to_string();
-            let end_time = live.now_local.format("%H:%M:%S").to_string();
+            let end_time = live.now_civil.format("%H:%M:%S").to_string();
             day_sessions.push((
                 live.category_id.0,
                 live.elapsed_seconds,
