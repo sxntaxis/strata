@@ -1,0 +1,62 @@
+schema_version = 1
+name = "Strata Notebook"
+root = "notebook"
+privacy = "public"
+
+[orientation]
+entry = "notebook/README.md"
+
+[frontier]
+entry = "notebook/NOW.md"
+mode = "authored"
+requires_next = true
+
+[authority]
+working = "working"
+conflict_order = ["owner", "accepted", "reality", "working", "source", "projection"]
+
+[[authority.classes]]
+name = "owner"
+kind = "owner"
+anchors = ["human:sxntaxis"]
+record = "notebook/system/AUTHORITY.md"
+
+[[authority.classes]]
+name = "accepted"
+kind = "accepted"
+anchors = ["repo:docs"]
+record = "docs/PROJECT.md"
+
+[[authority.classes]]
+name = "reality"
+kind = "reality"
+anchors = ["repo:src", "repo:tests", "runtime:strata"]
+record = "docs/ARCHITECTURE.md"
+
+[[authority.classes]]
+name = "working"
+kind = "working"
+anchors = ["repo:notebook"]
+record = "notebook/README.md"
+
+[[authority.classes]]
+name = "source"
+kind = "source"
+anchors = ["external:github-issues", "repo:README.md"]
+record = "notebook/evidence/KNOWN-FACTS-AND-UNKNOWNS.md"
+
+[[authority.classes]]
+name = "projection"
+kind = "projection"
+anchors = ["logical:reports-and-sediment"]
+
+[promotion]
+
+[[promotion.routes]]
+from = "working"
+to = "accepted"
+review = "Explicit product-owner approval followed by a reviewed repository change"
+canonical_pointer = true
+
+[capabilities]
+enabled = ["epistemic_records", "research", "promotion", "concurrency"]
