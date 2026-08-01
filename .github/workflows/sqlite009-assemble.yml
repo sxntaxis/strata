@@ -1,0 +1,49 @@
+name: sqlite009-assemble
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: storage/009-persistence-failure-recovery
+          fetch-depth: 0
+
+      - name: Apply persistence recovery surface
+        run: |
+          if ! test -f src/app/persistence_recovery.rs; then
+            python3 tools/sqlite009_app_recovery.py
+            python3 tools/sqlite009_mutation_context.py
+            python3 tools/sqlite009_fault_contracts.py
+          fi
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Format and certify
+        run: |
+          cargo fmt --all
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test --all-features
+
+      - name: Commit certified implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src tests
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "SQLITE-009: surface persistence recovery controls"
+          git push origin HEAD:storage/009-persistence-failure-recovery
