@@ -20,6 +20,16 @@ wire_script = "\n".join(
     line[10:] if line.startswith("          ") else line
     for line in lines[start:end]
 ) + "\n"
+wire_script = wire_script.replace(
+    "RuntimeAuthority, SqliteCliActivationOptions, SqliteCliActivationReport,\n",
+    "RuntimeAuthority, SqliteCliActivationOptions,\n",
+    1,
+)
+wire_script = wire_script.replace(
+    "    SqliteCliSnapshot, SqliteCliStartResult, SqliteCliStopResult,\n",
+    "",
+    1,
+)
 
 block_start = wire_script.index("integrity_anchor = " + chr(39) * 3)
 block_end = wire_script.index("sqlite.write_text(text)", block_start)
