@@ -1,0 +1,41 @@
+name: sqlite007-assemble
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: storage/007-tui-repository-cutover
+          fetch-depth: 0
+
+      - name: Apply TUI repository cutover
+        run: python3 tools/sqlite007_apply.py
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Format and certify
+        run: |
+          cargo fmt --all
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test --all-features
+
+      - name: Commit certified implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src tests
+          git commit -m "SQLITE-007: cut TUI over to SQLite authority"
+          git push origin HEAD:storage/007-tui-repository-cutover
