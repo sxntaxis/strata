@@ -25,8 +25,11 @@ jobs:
             python3 tools/sqlite007_fix_compile.py
             python3 tools/sqlite007_fix_clippy.py
           fi
-          python3 tools/sqlite007_refine.py
-          python3 tools/sqlite007_fix_dead_code.py
+          if ! grep -q "pub(crate) fn update_session_description" src/sqlite/tui_runtime.rs; then
+            python3 tools/sqlite007_refine.py
+            python3 tools/sqlite007_fix_dead_code.py
+          fi
+          python3 tools/sqlite007_add_tui_smoke.py
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -47,5 +50,5 @@ jobs:
           if git diff --cached --quiet; then
             exit 0
           fi
-          git commit -m "SQLITE-007: harden explicit TUI mutation boundaries"
+          git commit -m "SQLITE-007: certify activated TUI runtime"
           git push origin HEAD:storage/007-tui-repository-cutover
