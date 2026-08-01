@@ -21,17 +21,30 @@ The persistence migration is complete:
 - validation-only import and legacy-evidence custody;
 - final 9/9 closure audit and issue #8 closure.
 
-SQLite work must not continue merely because the prefix existed. New units should be named for the domain risk they resolve.
+SQLite work must not continue merely because the prefix existed. New units are named for the domain risk they resolve.
 
-## Post-migration order
+## Completed post-migration authority unit
 
-1. **AUTHORITY-001** — issue #21 and profile-isolation foundations from #15.
-2. **TEMPORAL-001** — issue #25.
-3. **TEMPORAL-002** — issues #4, #23, #27.
-4. **DOMAIN-001** — issues #2 and #12 residuals.
-5. **REPORT-001** — issues #1, #14, #17, #28.
-6. **SEDIMENT-001** — issues #6, #7, #16, #18, #26.
-7. **INTERACTION-001** — issues #19, #20, #24.
+### AUTHORITY-001 — issue #21
+
+- one top-level invocation chooses CLI or TUI;
+- startup configuration is parsed once and shared by both interfaces;
+- invalid JSON, bindings, actions, day settings, weekdays, UTC offsets, and configured legacy paths fail before authority resolution;
+- errors identify the configuration path and invalid value;
+- `--ignore-config` is the explicit deliberate-default bypass;
+- TUI hot-reload failure retains the last valid settings;
+- process tests prove configuration failure creates no active state, database, or authority marker.
+
+Profile switching and complete profile identity remain separate work under issue #15.
+
+## Remaining post-migration order
+
+1. **TEMPORAL-001** — issue #25.
+2. **TEMPORAL-002** — issues #4, #23, #27.
+3. **DOMAIN-001** — issues #2 and #12 residuals.
+4. **REPORT-001** — issues #1, #14, #17, #28.
+5. **SEDIMENT-001** — issues #6, #7, #16, #18, #26.
+6. **INTERACTION-001** — issues #19, #20, #24.
 
 ## Closure discipline
 

@@ -4,7 +4,7 @@ use std::{
 };
 
 use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
-use clap::{CommandFactory, Parser, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -19,6 +19,19 @@ use crate::{
 #[derive(Parser, Debug)]
 #[command(name = "strata")]
 #[command(about = "Time tracking with falling sand", long_about = None)]
+pub struct Invocation {
+    #[arg(
+        long,
+        global = true,
+        help = "Deliberately ignore keymap.json and use built-in defaults"
+    )]
+    pub ignore_config: bool,
+
+    #[command(subcommand)]
+    pub command: Option<Cli>,
+}
+
+#[derive(Subcommand, Debug)]
 pub enum Cli {
     #[command(about = "Start a new tracking session")]
     Start {
@@ -948,24 +961,33 @@ pub fn sqlite_legacy_remove(
     print_legacy_evidence_report(report, json)
 }
 
+pub fn parse_invocation() -> Invocation {
+    Invocation::parse()
+}
+
 pub fn print_completions(shell: &str) -> Result<(), String> {
     use clap_complete::Shell;
     match shell {
         "bash" => {
             clap_complete::generate(
                 Shell::Bash,
-                &mut Cli::command(),
+                &mut Invocation::command(),
                 "strata",
                 &mut io::stdout(),
             );
         }
         "zsh" => {
-            clap_complete::generate(Shell::Zsh, &mut Cli::command(), "strata", &mut io::stdout());
+            clap_complete::generate(
+                Shell::Zsh,
+                &mut Invocation::command(),
+                "strata",
+                &mut io::stdout(),
+            );
         }
         "fish" => {
             clap_complete::generate(
                 Shell::Fish,
-                &mut Cli::command(),
+                &mut Invocation::command(),
                 "strata",
                 &mut io::stdout(),
             );
@@ -980,8 +1002,7 @@ pub fn print_completions(shell: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn run_cli() {
-    let cli = Cli::parse();
+pub fn run_command(cli: Cli) {
     match cli {
         Cli::Start {
             project,

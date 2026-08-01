@@ -19,6 +19,7 @@ Detailed rationale and unresolved implications live in `notebook/decisions/DECIS
 | STRATA-D010 | Migration and activation are explicit commands rather than automatic startup mutation. | implemented and certified |
 | STRATA-D011 | Authority failures fail closed; no writable empty fallback or activated legacy fallback is permitted. | implemented and certified |
 | STRATA-D012 | Legacy sources remain evidence until archive-first, provenance-verified, separately confirmed removal. | implemented and certified |
+| STRATA-D013 | CLI and TUI share one validated startup configuration; invalid configuration blocks authority resolution unless `--ignore-config` is explicitly supplied. | implemented and certified |
 
 ## Explicitly unresolved
 
@@ -30,4 +31,5 @@ The following are not accepted decisions:
 - clearing and formation lifecycle;
 - user-facing crash uncertainty beyond current recovery mechanics;
 - configurable quantum migration rules;
-- timezone/profile and historical operational-day policy to be established by TEMPORAL-001.
+- complete profile switching and isolation semantics under issue #15;
+- timezone and historical operational-day policy to be established by TEMPORAL-001.

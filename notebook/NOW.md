@@ -5,17 +5,17 @@ state: active
 created: 2026-08-01
 updated: 2026-08-01
 authority: working
-summary: SQLite authority migration is complete; Strata is entering post-migration authority, temporal, reporting, and sediment correctness work.
-next: Implement AUTHORITY-001 for issue #21 so invalid configuration cannot redirect CLI or TUI operations to a default database or time policy.
+summary: SQLite authority and fail-closed startup configuration are complete; Strata is entering temporal, reporting, and sediment correctness work.
+next: Implement TEMPORAL-001 for issue #25 so elapsed duration, wall-clock timestamps, timezone, clock jumps, and historical operational-day interpretation obey one explicit contract.
 ---
 
 # NOW — Strata
 
 ## Current phase
 
-The SQLite migration program is complete at 9/9 acceptance criteria. After explicit activation, CLI and TUI share one transactional SQLite authority with deterministic interchange, maintenance, recovery, and legacy-evidence custody.
+The SQLite migration program is complete at 9/9 acceptance criteria. AUTHORITY-001 now prevents invalid configuration from silently redirecting either interface to default storage or time settings.
 
-The project is moving from **persistence architecture** to **product correctness on top of that authority**.
+The project is moving from **persistence and startup authority** to **temporal correctness on top of that authority**.
 
 ## Accepted product baseline
 
@@ -37,29 +37,37 @@ The project is moving from **persistence architecture** to **product correctness
 - Persistence failure freezes mutation and provides retry, reload, emergency export, safe exit, or explicit unsafe exit.
 - Deterministic CSV bundle export/import, dry-run validation, doctor, backup, restore, and legacy custody are implemented.
 - Legacy CSV/JSON is pre-activation authority or post-activation evidence; it is never dual-written after activation.
+- AUTHORITY-001 loads one validated startup configuration before choosing CLI/TUI or resolving data authority.
+- Invalid JSON, key/action data, operational settings, UTC offsets, and configured legacy paths fail visibly before writable authority is opened.
+- `--ignore-config` is the explicit deliberate-default bypass; TUI hot reload retains the last valid settings on failure.
+
+## Completed post-migration unit
+
+- **AUTHORITY-001** — issue #21: shared validated settings and fail-closed CLI/TUI startup configuration.
+
+Complete profile isolation and runtime switching remain open under issue #15; they were not hidden inside the startup-validation unit.
 
 ## Active sequence
 
-1. **AUTHORITY-001** — issue #21: shared validated settings, fail-closed CLI/TUI configuration, explicit bypass/profile selection.
-2. **TEMPORAL-001** — issue #25: monotonic/wall-clock reconciliation, timezone authority, future/negative interval handling, reproducible historical boundaries.
-3. **TEMPORAL-002** — issues #4, #23, #27: overlap allocation, honest sunrise policy, zero-duration transitions.
-4. **DOMAIN-001** — issues #2 and #12 residuals: project/classification model and explicit idle semantics.
-5. **REPORT-001** — issues #1, #14, #17, #28: custom ranges, provisional active time, valid ICS, deterministic ordering.
-6. **SEDIMENT-001** — issues #6, #7, #16, #18, #26: conserved logical sediment independent of viewport and mutable previews.
-7. **INTERACTION-001** — issues #19, #20, #24: explicit edit modes, terminal lifecycle guard, truthful keybinding policy.
+1. **TEMPORAL-001** — issue #25: monotonic/wall-clock reconciliation, timezone authority, future/negative interval handling, reproducible historical boundaries.
+2. **TEMPORAL-002** — issues #4, #23, #27: overlap allocation, honest sunrise policy, zero-duration transitions.
+3. **DOMAIN-001** — issues #2 and #12 residuals: project/classification model and explicit idle semantics.
+4. **REPORT-001** — issues #1, #14, #17, #28: custom ranges, provisional active time, valid ICS, deterministic ordering.
+5. **SEDIMENT-001** — issues #6, #7, #16, #18, #26: conserved logical sediment independent of viewport and mutable previews.
+6. **INTERACTION-001** — issues #19, #20, #24: explicit edit modes, terminal lifecycle guard, truthful keybinding policy.
 
 ## Issue reconciliation state
 
-The pre-SQLite issue queue must be read against current code, not its original premises. Some issues are fully or partly satisfied by SQLITE-001 through SQLITE-012; none should be closed solely because their storage premise changed. `work/ISSUE-RECONCILIATION-001.md` records the current disposition.
+The pre-SQLite issue queue must be read against current code, not its original premises. Some issues are fully or partly satisfied by the SQLite and authority programs; none should be closed solely because their storage premise changed. `work/ISSUE-RECONCILIATION-001.md` records the current disposition.
 
 ## Current risks
 
-- Invalid configuration may silently select a default database/time policy.
-- Timekeeping still lacks one explicit authority under clock and timezone changes.
+- Timekeeping lacks one explicit authority under clock jumps, suspend, and timezone changes.
+- Historical operational-day reports may not remain reproducible after settings changes.
 - Reports and exports may remain semantically inconsistent despite durable storage.
 - Sediment rendering, resize, catch-up, and snapshots still lack one conservation model.
 - The accepted idle rename is not yet reflected consistently in runtime vocabulary.
 
 ## Next
 
-Implement **AUTHORITY-001** on issue #21. No command may open or mutate a database until authority-critical configuration is validated or an explicit bypass/profile override is selected.
+Implement **TEMPORAL-001** on issue #25. Negative or future wall-clock intervals must never become ordinary work, invalid temporal settings must remain fail-closed, and live/committed duration must follow one documented reconciliation policy.

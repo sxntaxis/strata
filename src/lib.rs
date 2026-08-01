@@ -15,19 +15,42 @@ mod sand;
 mod sqlite;
 mod storage;
 
+fn load_startup_configuration(
+    ignore_config: bool,
+) -> Result<keybindings::LoadedKeybindings, io::Error> {
+    if ignore_config {
+        return Ok(keybindings::default_loaded_keybindings());
+    }
+
+    let path = storage::get_keymap_path();
+    keybindings::load_keybindings(&path).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "Configuration error: {error}. Fix {} or rerun with --ignore-config to deliberately use built-in defaults",
+                path.display()
+            ),
+        )
+    })
+}
+
+fn apply_startup_configuration(loaded: &keybindings::LoadedKeybindings) {
+    domain::set_runtime_settings(loaded.runtime_settings);
+    storage::set_runtime_storage_settings(storage::RuntimeStorageSettings {
+        time_log_path: loaded.time_log_path.clone(),
+    });
+}
+
 pub fn run() -> Result<(), io::Error> {
-    if let Ok(loaded) = keybindings::load_keybindings(&storage::get_keymap_path()) {
-        domain::set_runtime_settings(loaded.runtime_settings);
-        storage::set_runtime_storage_settings(storage::RuntimeStorageSettings {
-            time_log_path: loaded.time_log_path,
-        });
-    }
+    let invocation = cli::parse_invocation();
+    let loaded = load_startup_configuration(invocation.ignore_config)?;
+    apply_startup_configuration(&loaded);
 
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() > 1 {
-        cli::run_cli();
-        return Ok(());
+    match invocation.command {
+        Some(command) => {
+            cli::run_command(command);
+            Ok(())
+        }
+        None => app::run_ui(loaded),
     }
-
-    app::run_ui()
 }
