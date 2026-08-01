@@ -22,6 +22,7 @@ jobs:
         run: |
           python3 tools/sqlite010_fault_matrix.py
           python3 tools/sqlite010_fix_compile.py
+          python3 tools/sqlite010_fix_full.py
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
