@@ -48,6 +48,20 @@ You can override the data directory with `STRATA_DATA_DIR=/your/path`.
 
 The normal SQLite database is stored under the Strata data directory. Migration reports, authority metadata, immutable source backups, removal ledgers, recovery exports, and runtime state use the corresponding data/state roots. Repo-local runtime artifacts are intentionally ignored by Git.
 
+## Configuration authority
+
+Strata loads and validates `~/.config/strata/keymap.json` once before choosing the CLI or TUI and before resolving a writable data authority. Malformed JSON, unknown keys or actions, invalid operational-day settings, unsupported UTC offsets, and invalid configured legacy paths stop startup with a non-zero error that identifies the file and invalid value.
+
+Strata does not silently replace a broken configuration with defaults. To deliberately ignore the file for one invocation, use the global override:
+
+```bash
+strata --ignore-config report --today
+strata --ignore-config start project-a --category Work
+strata --ignore-config
+```
+
+The override uses built-in settings intentionally; normal XDG and `STRATA_DATA_DIR` environment selection still applies. During a running TUI session, a failed configuration reload keeps the last valid settings and displays the error instead of applying a partial configuration.
+
 ## Persistence authority
 
 Strata has two explicit authority phases:
