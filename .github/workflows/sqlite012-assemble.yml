@@ -1,16 +1,18 @@
 name: sqlite012-assemble
 
 on:
-  push:
+  pull_request:
     branches:
-      - storage/012-interchange-validation-legacy-disposition
+      - main
+    types:
+      - opened
 
 permissions:
   contents: write
 
 jobs:
   assemble:
-    if: github.event.head_commit.message == 'SQLITE-012: stage assembler'
+    if: github.event.pull_request.head.ref == 'storage/012-interchange-validation-legacy-disposition'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -44,5 +46,3 @@ jobs:
           git add src/cli.rs src/sqlite.rs src/sqlite/authority.rs src/sqlite/maintenance.rs src/sqlite/legacy_disposition.rs src/sqlite/closure_tests.rs
           git commit -m 'SQLITE-012: implement migration closure controls'
           git push origin HEAD:storage/012-interchange-validation-legacy-disposition
-
-# Trigger revision: 2
