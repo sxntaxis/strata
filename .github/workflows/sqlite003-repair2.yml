@@ -1,0 +1,126 @@
+name: sqlite003-repair2
+
+on:
+  push:
+    branches:
+      - storage/003-controlled-migration-command
+    paths:
+      - .github/workflows/sqlite003-repair2.yml
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: storage/003-controlled-migration-command
+          fetch-depth: 0
+
+      - name: Reassemble controlled migration module
+        run: |
+          cat \
+            .tmp/sqlite003.partaa1 \
+            .tmp/sqlite003.partaa2 \
+            .tmp/sqlite003.partab \
+            .tmp/sqlite003.partac \
+            .tmp/sqlite003.partad \
+            .tmp/sqlite003.partae \
+            > /tmp/sqlite003.b64
+          base64 --decode /tmp/sqlite003.b64 > src/sqlite/migration_command.rs
+
+      - name: Reuse prior repairs and close visibility boundaries
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path('.github/workflows/sqlite003-repair.yml').read_text()
+          marker = "          python3 - <<'PY'\n"
+          start = workflow.index(marker) + len(marker)
+          end = workflow.index("\n          PY", start)
+          script = textwrap.dedent(workflow[start:end])
+          namespace = {'__name__': '__main__'}
+          exec(compile(script, '<sqlite003-repair>', 'exec'), namespace, namespace)
+
+          sqlite = Path('src/sqlite.rs')
+          text = sqlite.read_text()
+          old = '''pub(crate) use migration_command::{
+              ControlledMigrationOptions, run_controlled_migration,
+          };
+          '''
+          new = '''pub(crate) use migration_command::{
+              ControlledMigrationOptions, ControlledMigrationReport,
+          };
+
+          pub(crate) fn run_controlled_migration(
+              options: ControlledMigrationOptions,
+          ) -> Result<ControlledMigrationReport, String> {
+              migration_command::run_controlled_migration(options)
+                  .map_err(|error| error.to_string())
+          }
+          '''
+          if old not in text:
+              raise SystemExit('sqlite migration re-export block not found')
+          sqlite.write_text(text.replace(old, new, 1))
+
+          module = Path('src/sqlite/migration_command.rs')
+          text = module.read_text()
+          text = text.replace(
+              '    pub source_summary: LegacyImportSummary,',
+              '    source_summary: LegacyImportSummary,',
+              1,
+          )
+          text = text.replace(
+              'pub(crate) enum ControlledMigrationError {',
+              'pub(super) enum ControlledMigrationError {',
+              1,
+          )
+          text = text.replace(
+              'pub(crate) fn run_controlled_migration(',
+              'pub(super) fn run_controlled_migration(',
+              1,
+          )
+          module.write_text(text)
+          PY
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Format and certify
+        run: |
+          cargo fmt --all
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test --all-features
+
+      - name: Remove transport files
+        run: |
+          rm -f \
+            .tmp/sqlite003.partaa \
+            .tmp/sqlite003.partaa1 \
+            .tmp/sqlite003.partaa2 \
+            .tmp/sqlite003.partab \
+            .tmp/sqlite003.partac \
+            .tmp/sqlite003.partad \
+            .tmp/sqlite003.partae
+          rmdir .tmp 2>/dev/null || true
+          rm -f \
+            .github/workflows/sqlite003-assemble.yml \
+            .github/workflows/sqlite003-repair.yml \
+            .github/workflows/sqlite003-repair2.yml
+
+      - name: Commit implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat(storage): add controlled SQLite migration command"
+          git push origin HEAD:storage/003-controlled-migration-command
