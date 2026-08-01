@@ -1,0 +1,50 @@
+name: sqlite002-fix-error-fields
+
+on:
+  push:
+    branches:
+      - storage/002-legacy-import-verification
+    paths:
+      - .github/workflows/sqlite002-fix-error-fields.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: storage/002-legacy-import-verification
+          fetch-depth: 0
+
+      - name: Rename textual source fields
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('src/sqlite/legacy_import.rs')
+          text = path.read_text()
+          text = text.replace('I/O error while reading {source}: {message}', 'I/O error while reading {path}: {message}')
+          text = text.replace('CSV error in {source}: {message}', 'CSV error in {path}: {message}')
+          text = text.replace('JSON error in {source}: {message}', 'JSON error in {path}: {message}')
+          text = text.replace('invalid legacy source {source}: {message}', 'invalid legacy source {path}: {message}')
+          text = text.replace('Io { source: String, message: String }', 'Io { path: String, message: String }')
+          text = text.replace('Csv { source: String, message: String }', 'Csv { path: String, message: String }')
+          text = text.replace('Json { source: String, message: String }', 'Json { path: String, message: String }')
+          text = re.sub(r'(InvalidSource\s*\{\s*)source:', r'\1path:', text)
+          text = re.sub(r'(LegacyImportError::(?:Io|Csv|Json)\s*\{\s*)source:', r'\1path:', text)
+          path.write_text(text)
+          PY
+          cargo fmt --all
+
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/sqlite/legacy_import.rs
+          git commit -m "fix(storage): distinguish import paths from error sources"
+          git push origin HEAD:storage/002-legacy-import-verification
