@@ -1,4 +1,10 @@
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
+
+#[cfg(debug_assertions)]
+use std::{
+    collections::HashSet,
+    sync::{Mutex, OnceLock},
+};
 use thiserror::Error;
 
 use super::repository::{ActiveSessionRecord, SandStateRecord};
@@ -566,11 +572,27 @@ pub(crate) fn maybe_inject_test_fault(
     #[cfg(debug_assertions)]
     {
         if let Ok(specification) = std::env::var("STRATA_TEST_SQLITE_FAULT") {
-            let mut parts = specification.splitn(3, ':');
+            let mut parts = specification.splitn(4, ':');
             let requested_operation = parts.next().unwrap_or_default();
             let requested_phase = parts.next().unwrap_or_default();
             let class = parts.next().unwrap_or("unknown");
+            let mode = parts.next().unwrap_or("always");
             if requested_operation == operation && requested_phase == phase {
+                if mode == "once" {
+                    static FIRED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+                    let key = format!("{operation}:{phase}:{class}");
+                    let mut fired = FIRED
+                        .get_or_init(|| Mutex::new(HashSet::new()))
+                        .lock()
+                        .map_err(|_| {
+                            CoordinationError::InvalidInput(
+                                "test fault registry is poisoned".to_string(),
+                            )
+                        })?;
+                    if !fired.insert(key) {
+                        return Ok(());
+                    }
+                }
                 return Err(CoordinationError::InjectedFailure {
                     operation: operation.to_string(),
                     phase: phase.to_string(),
@@ -970,6 +992,37 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+        drop(repository);
+        remove_database(&path);
+    }
+
+    #[test]
+    fn pending_checkpoint_retry_replaces_payload_for_same_active_identity() {
+        let path = database_path("checkpoint-save-retry");
+        seed(&path, "active-a");
+        let mut repository = SqliteRepository::open(&path).unwrap();
+        save_checkpoint(
+            &mut repository,
+            "active-a",
+            "2026-08-01T11:00:00Z",
+            "2026-08-01T10:59:00Z",
+            "{\"attempt\":1}",
+        )
+        .unwrap();
+        save_checkpoint(
+            &mut repository,
+            "active-a",
+            "2026-08-01T11:00:01Z",
+            "2026-08-01T11:00:00Z",
+            "{\"attempt\":2}",
+        )
+        .unwrap();
+        let claimed = claim_checkpoint(&mut repository).unwrap().unwrap();
+        assert_eq!(
+            claimed.active_session_stable_id.as_deref(),
+            Some("active-a")
+        );
+        assert_eq!(claimed.payload_json, "{\"attempt\":2}");
         drop(repository);
         remove_database(&path);
     }

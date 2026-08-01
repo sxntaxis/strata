@@ -3,6 +3,7 @@
 use std::{
     fs,
     io::Write,
+    os::unix::fs::PermissionsExt,
     path::PathBuf,
     process::{Command, Output, Stdio},
     time::{SystemTime, UNIX_EPOCH},
@@ -447,6 +448,12 @@ fn unacknowledged_cli_stop_is_recovered_without_duplicate_session() {
 fn recovery_bundle(profile: &TestProfile) -> Value {
     let files = profile.recovery_files();
     assert_eq!(files.len(), 1, "exactly one emergency export is expected");
+    let metadata = fs::metadata(&files[0]).expect("emergency export metadata should exist");
+    assert_eq!(
+        metadata.permissions().mode() & 0o077,
+        0,
+        "emergency export must not be readable by group or other users"
+    );
     let bytes = fs::read(&files[0]).expect("emergency export should be readable");
     serde_json::from_slice(&bytes).expect("emergency export should be valid JSON")
 }
@@ -553,4 +560,44 @@ fn corrupt_state_load_fails_visible_without_empty_fallback() {
         category_count >= 2,
         "startup failure must not replace authority with an empty database"
     );
+}
+
+#[test]
+fn post_commit_reload_retry_preserves_committed_history_before_exit() {
+    let profile = TestProfile::new("post-commit-reload-retry");
+    profile.migrate();
+    assert!(profile.activate().status.success());
+
+    let tui = profile.run_tui_with_input(b"qRq", Some("session-reload:before-read:busy:once"));
+    assert!(
+        tui.status.success(),
+        "post-commit reload retry failed: stdout={} stderr={}",
+        stdout(&tui),
+        stderr(&tui)
+    );
+
+    let connection = Connection::open(profile.database_path()).expect("database should open");
+    let active_count: i64 = connection
+        .query_row("SELECT count(*) FROM active_session", [], |row| row.get(0))
+        .unwrap();
+    let session_count: i64 = connection
+        .query_row("SELECT count(*) FROM sessions", [], |row| row.get(0))
+        .unwrap();
+    let distinct_stable_ids: i64 = connection
+        .query_row(
+            "SELECT count(DISTINCT stable_id) FROM sessions",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(active_count, 0);
+    assert_eq!(
+        session_count, 2,
+        "both committed intervals must survive reload retry"
+    );
+    assert_eq!(
+        distinct_stable_ids, 2,
+        "reload retry must not duplicate an interval"
+    );
+    assert!(profile.recovery_files().is_empty());
 }

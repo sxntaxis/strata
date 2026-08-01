@@ -398,10 +398,12 @@ impl App {
         let Some(database_path) = self.sqlite_database_path.clone() else {
             return true;
         };
+        let reload_result = sqlite::inject_tui_test_fault("session-reload", "before-read")
+            .and_then(|()| sqlite::load_tui_state(&database_path));
         let Some(state) = self.record_storage_result_for(
             PersistenceOperation::StateReload,
             RecoveryAction::ReloadAuthority,
-            sqlite::load_tui_state(&database_path),
+            reload_result,
         ) else {
             return false;
         };
@@ -414,9 +416,11 @@ impl App {
     fn reset_active_session_at(&mut self, started_at_utc: DateTime<Utc>) {
         if let Some(database_path) = self.sqlite_database_path.clone() {
             let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
-                self.record_storage_result::<()>(Err(
-                    "SQLite runtime has no active stable identity to reset".to_string(),
-                ));
+                self.record_storage_result_for::<()>(
+                    PersistenceOperation::ActiveReset,
+                    RecoveryAction::ReloadAuthority,
+                    Err("SQLite runtime has no active stable identity to reset".to_string()),
+                );
                 return;
             };
             let operation_id = self.transition_operation_id(
@@ -958,9 +962,11 @@ impl App {
 
         if let Some(database_path) = self.sqlite_database_path.clone() {
             let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
-                self.record_storage_result::<()>(Err(
-                    "SQLite runtime has no active stable identity to finish".to_string(),
-                ));
+                self.record_storage_result_for::<()>(
+                    PersistenceOperation::ActiveFinish,
+                    RecoveryAction::ReloadAuthority,
+                    Err("SQLite runtime has no active stable identity to finish".to_string()),
+                );
                 return None;
             };
             let operational_day = operational_day_key_for_local(&ended_local)
@@ -1013,9 +1019,11 @@ impl App {
 
         if let Some(database_path) = self.sqlite_database_path.clone() {
             let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
-                self.record_storage_result::<()>(Err(
-                    "SQLite runtime has no active stable identity to switch".to_string(),
-                ));
+                self.record_storage_result_for::<()>(
+                    PersistenceOperation::ActiveSwitch,
+                    RecoveryAction::ReloadAuthority,
+                    Err("SQLite runtime has no active stable identity to switch".to_string()),
+                );
                 return false;
             };
             let start_utc = self
@@ -1800,7 +1808,11 @@ impl App {
             return;
         }
         if self
-            .record_storage_result(sqlite::clear_tui_checkpoint(&database_path))
+            .record_storage_result_for(
+                PersistenceOperation::CheckpointClear,
+                RecoveryAction::FlushCurrentState,
+                sqlite::clear_tui_checkpoint(&database_path),
+            )
             .is_some()
         {
             self.checkpoint_recovery_active = false;

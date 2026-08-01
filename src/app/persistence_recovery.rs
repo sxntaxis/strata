@@ -1,4 +1,9 @@
-use std::{fmt, fs, path::PathBuf};
+use std::{
+    fmt, fs,
+    fs::OpenOptions,
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 use chrono::{SecondsFormat, Utc};
 use crossterm::event::{KeyCode, KeyEvent};
@@ -218,7 +223,17 @@ impl App {
 
     pub(super) fn promote_recovery_action(&mut self, action: RecoveryAction) {
         if let Some(recovery) = self.persistence_recovery.as_mut() {
-            recovery.action = action;
+            let retryable_finish = recovery.failure.operation == PersistenceOperation::ActiveFinish
+                && !matches!(
+                    recovery.failure.class,
+                    PersistenceFailureClass::Conflict
+                        | PersistenceFailureClass::Constraint
+                        | PersistenceFailureClass::Corrupt
+                        | PersistenceFailureClass::InvalidData
+                );
+            if recovery.action == RecoveryAction::FlushCurrentState || retryable_finish {
+                recovery.action = action;
+            }
         }
     }
 
@@ -275,6 +290,16 @@ impl App {
             RecoveryAction::DetachAndExit => self.try_detach_and_exit(),
             RecoveryAction::CommitCheckpointRecovery => self.try_commit_checkpoint_recovery(),
         };
+
+        if let Some(recovery) = self.persistence_recovery.as_mut() {
+            if recovery.exported_path.is_none() {
+                recovery.exported_path = exported_path;
+            }
+            recovery.export_error = None;
+            recovery.exit_without_saving_armed = false;
+            self.render_needed = true;
+            return;
+        }
 
         match result {
             Ok(()) => {
@@ -444,7 +469,7 @@ impl App {
         }
         if self.session.active_session_stable_id.is_some() {
             self.end_active_session_now();
-            if let Some(recovery) = self.persistence_recovery.take() {
+            if let Some(recovery) = self.persistence_recovery.as_ref() {
                 return Err(recovery.failure.summary());
             }
         }
@@ -460,7 +485,7 @@ impl App {
     fn try_detach_and_exit(&mut self) -> Result<(), String> {
         self.try_flush_current_state()?;
         self.persist_detached_checkpoint();
-        if let Some(recovery) = self.persistence_recovery.take() {
+        if let Some(recovery) = self.persistence_recovery.as_ref() {
             return Err(recovery.failure.summary());
         }
         Ok(())
@@ -468,7 +493,7 @@ impl App {
 
     fn try_commit_checkpoint_recovery(&mut self) -> Result<(), String> {
         self.commit_checkpoint_recovery_if_ready();
-        if let Some(recovery) = self.persistence_recovery.take() {
+        if let Some(recovery) = self.persistence_recovery.as_ref() {
             return Err(recovery.failure.summary());
         }
         if self.checkpoint_recovery_active {
@@ -595,7 +620,7 @@ impl App {
             pending_mutations,
             checkpoint_recovery_active: self.checkpoint_recovery_active,
         };
-        storage::write_json_atomic(&path, &bundle)?;
+        write_private_json_atomic(&path, &bundle)?;
         Ok(path)
     }
 
@@ -678,6 +703,37 @@ impl App {
     }
 }
 
+fn write_private_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
+    let json = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
+    let temporary = path.with_extension("json.tmp");
+    if temporary.exists() {
+        fs::remove_file(&temporary).map_err(|error| error.to_string())?;
+    }
+
+    let result = (|| {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options
+            .open(&temporary)
+            .map_err(|error| error.to_string())?;
+        file.write_all(&json).map_err(|error| error.to_string())?;
+        file.write_all(b"\n").map_err(|error| error.to_string())?;
+        file.sync_all().map_err(|error| error.to_string())?;
+        fs::rename(&temporary, path).map_err(|error| error.to_string())?;
+        Ok(())
+    })();
+
+    if result.is_err() {
+        fs::remove_file(&temporary).ok();
+    }
+    result
+}
+
 fn classify_failure(detail: &str) -> PersistenceFailureClass {
     let normalized = detail.to_ascii_lowercase();
     if normalized.contains("locked") || normalized.contains("busy") {
@@ -710,6 +766,7 @@ fn classify_failure(detail: &str) -> PersistenceFailureClass {
     } else if normalized.contains("invalid")
         || normalized.contains("unsupported")
         || normalized.contains("outside")
+        || normalized.contains("no active stable identity")
     {
         PersistenceFailureClass::InvalidData
     } else {
