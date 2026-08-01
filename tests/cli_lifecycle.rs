@@ -20,10 +20,8 @@ impl TestProfile {
             .duration_since(UNIX_EPOCH)
             .expect("system clock should follow the Unix epoch")
             .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "strata-{name}-{}-{nonce}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("strata-{name}-{}-{nonce}", std::process::id()));
         let data_home = root.join("data");
         let state_home = root.join("state");
         let config_home = root.join("config");
@@ -127,7 +125,11 @@ fn second_start_is_rejected_without_replacing_the_active_session() {
     let profile = TestProfile::new("duplicate-start");
 
     let first = profile.run(&["start", "first-project", "--category", "Work"]);
-    assert!(first.status.success(), "first start failed: {}", stderr(&first));
+    assert!(
+        first.status.success(),
+        "first start failed: {}",
+        stderr(&first)
+    );
 
     let active_path = profile.active_session_path();
     let before = fs::read_to_string(&active_path).expect("active session should be readable");
@@ -161,6 +163,7 @@ fn repeated_stop_fails_without_adding_a_duplicate_session() {
     assert!(!second_stop.status.success());
     assert!(stderr(&second_stop).contains("No active session to stop"));
 
-    let after = fs::read_to_string(profile.time_log_path()).expect("time log should remain readable");
+    let after =
+        fs::read_to_string(profile.time_log_path()).expect("time log should remain readable");
     assert_eq!(after, before);
 }
