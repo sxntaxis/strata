@@ -21,6 +21,7 @@ jobs:
       - name: Apply SQLITE-010 certification matrix
         run: |
           python3 tools/sqlite010_fault_matrix.py
+          python3 tools/sqlite010_fix_compile.py
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
