@@ -1,0 +1,46 @@
+name: sqlite012-assemble
+
+on:
+  push:
+    branches:
+      - storage/012-interchange-validation-legacy-disposition
+
+permissions:
+  contents: write
+
+jobs:
+  assemble:
+    if: github.event.head_commit.message == 'SQLITE-012: stage assembler'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: storage/012-interchange-validation-legacy-disposition
+          fetch-depth: 0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Apply bounded source patch
+        run: python tools/sqlite012_apply.py
+
+      - name: Format
+        run: cargo fmt --all
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run strict Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test --all-features
+
+      - name: Commit certified source
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/cli.rs src/sqlite.rs src/sqlite/authority.rs src/sqlite/maintenance.rs src/sqlite/legacy_disposition.rs src/sqlite/closure_tests.rs
+          git commit -m 'SQLITE-012: implement migration closure controls'
+          git push origin HEAD:storage/012-interchange-validation-legacy-disposition
