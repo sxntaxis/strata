@@ -26,6 +26,7 @@ Current responsibility map:
 - `src/cli.rs` — command parsing, non-interactive lifecycle, reports, exports, migration, and maintenance commands.
 - `src/keybindings.rs` — shared keymap and authority/time-setting parsing and validation.
 - `src/domain.rs` — categories, sessions, operational-day logic, and report aggregation.
+- `src/temporal.rs` — checked wall intervals, monotonic/wall reconciliation, fixed-offset civil projection, and operational-day allocation.
 - `src/sqlite.rs` and `src/sqlite/**` — schema migration, authoritative repositories, CLI/TUI adapters, runtime coordination, failure certification, deterministic interchange, backup/restore, and legacy-evidence custody.
 - `src/storage.rs` — XDG paths, pre-activation legacy compatibility, migration input, and atomic file helpers.
 - `src/app.rs` and `src/app/**` — TUI orchestration, interaction, rendering, reports, modals, and persistence-recovery controls.
@@ -52,6 +53,21 @@ AUTHORITY-001 adds a shared startup gate before either interface resolves or ope
 - `--ignore-config` is the only deliberate built-in-default bypass;
 - TUI hot-reload failures retain the last valid settings rather than applying a partial configuration.
 
+
+TEMPORAL-001 establishes one explicit temporal authority:
+
+- live elapsed duration is owned by the process monotonic clock;
+- UTC owns persisted absolute timestamps;
+- a live transition compares observed UTC with the UTC endpoint implied by monotonic elapsed time;
+- divergence above five seconds fails closed and preserves active state;
+- cross-process recovery uses checked UTC wall intervals because monotonic state cannot survive process death;
+- future starts are rejected, and unattended intervals above seven days require explicit CLI confirmation;
+- the validated fixed UTC offset owns civil display and new operational-day allocation;
+- the operational-day key persisted with a session owns historical report grouping after later setting changes;
+- the fixed-offset policy is deliberately not an IANA/DST policy.
+
+The detailed contract and failure matrix are `docs/TEMPORAL_AUTHORITY.md`.
+
 The SQLite closure evidence is `docs/SQLITE_MIGRATION_CLOSURE_AUDIT.md`.
 
 ## Truth boundaries
@@ -74,12 +90,11 @@ TUI and CLI translate user intent and present state. Neither may maintain an ind
 
 ## Current architectural frontier
 
-Persistence structure and startup configuration fallback are no longer the primary risks. The next program is temporal correctness:
+Persistence structure, startup configuration fallback, and clock authority are no longer the primary risks. The next program begins with remaining interval semantics:
 
-1. establish one explicit time authority and wall-clock-jump policy;
-2. define timezone and historical operational-day reproducibility;
-3. correct interval allocation, reporting, export, and classification semantics;
-4. establish a conserved sediment model independent of viewport and mutable previews.
+1. define overlap allocation, honest sunrise behavior, and zero-duration transitions;
+2. correct reporting, export, and classification semantics;
+3. establish a conserved sediment model independent of viewport and mutable previews.
 
 Complete profile isolation and deliberate runtime profile switching remain separate work under issue #15.
 

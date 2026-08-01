@@ -16,10 +16,10 @@ The original issue descriptions predate the completed SQLite migration. Their ac
 | Issues | Disposition | Next owner |
 |---|---|---|
 | #8, #9, #11 | Completed and closed by the SQLite program. | none |
-| #21 | Completed by AUTHORITY-001: CLI/TUI now share one fail-closed startup configuration gate with explicit `--ignore-config`. | none |
-| #15 | Complete profile identity, isolation, and deliberate runtime switching remain open; AUTHORITY-001 only prevents invalid startup fallback. | AUTHORITY-002 or a later profile unit |
-| #25 | Highest current correctness risk: explicit clock, duration, timezone, and historical-boundary doctrine. | TEMPORAL-001 |
-| #4, #23, #27 | Interval boundary, sunrise claim, and zero-duration policy. | TEMPORAL-002 |
+| #21 | Completed by AUTHORITY-001: CLI/TUI share one fail-closed startup configuration gate with explicit `--ignore-config`. | none |
+| #25 | Completed by TEMPORAL-001: monotonic live duration, checked UTC recovery, fixed-offset civil authority, clock-jump refusal, and persisted historical day grouping. | none |
+| #15 | Complete profile identity, isolation, and deliberate runtime switching remain open. | AUTHORITY-002 or a later profile unit |
+| #4, #23, #27 | Interval-boundary allocation, misleading sunrise semantics, and zero-duration policy are the next coupled temporal risks. | TEMPORAL-002 |
 | #2, #12 | SQLite preserves project strings, but the complete project/classification product contract must be reconciled before closure. | DOMAIN-001 |
 | #1, #14, #17, #28, #3 | Reporting and export semantics/documentation. | REPORT-001 |
 | #5, #10, #13 | SQLite integrity, active authority, and category archival likely satisfy substantial portions; verify every criterion before closing or rewriting. | reconciliation audit |
@@ -29,4 +29,4 @@ The original issue descriptions predate the completed SQLite migration. Their ac
 
 ## Immediate action
 
-Implement TEMPORAL-001 for issue #25. Durable storage and valid startup selection are not sufficient while backward clock jumps, timezone changes, or inconsistent elapsed authorities can corrupt interval meaning.
+Implement TEMPORAL-002 for issues #4, #23, and #27. Clock authority is now explicit; the remaining question is how truthful intervals are divided at boundaries, named, and represented when their duration is zero.
