@@ -4,6 +4,15 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use thiserror::Error;
 
 mod legacy_import;
+mod migration_command;
+
+pub(crate) use migration_command::{ControlledMigrationOptions, ControlledMigrationReport};
+
+pub(crate) fn run_controlled_migration(
+    options: ControlledMigrationOptions,
+) -> Result<ControlledMigrationReport, String> {
+    migration_command::run_controlled_migration(options).map_err(|error| error.to_string())
+}
 
 const CURRENT_SCHEMA_VERSION: i64 = 2;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
