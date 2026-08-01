@@ -1,0 +1,123 @@
+# SQLITE-003 final certification
+name: sqlite003-finalize
+
+on:
+  push:
+    branches:
+      - storage/003-controlled-migration-command
+    paths:
+      - .github/workflows/sqlite003-finalize.yml
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: storage/003-controlled-migration-command
+          fetch-depth: 0
+
+      - name: Gate detached checkpoints and add regression coverage
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/sqlite/migration_command.rs')
+          text = path.read_text()
+          text = text.replace(
+              'if self.source_summary.active_session_present {',
+              'if self.source_summary.active_session_present || self.source_summary.checkpoint_present {',
+              1,
+          )
+          text = text.replace(
+              'if plan.summary().active_session_present && !options.include_active_recovery {',
+              'if (plan.summary().active_session_present || plan.summary().checkpoint_present)\n        && !options.include_active_recovery\n    {',
+              1,
+          )
+
+          anchor = '''    #[test]
+              fn repeated_run_is_idempotent() {
+          '''
+          test = '''    #[test]
+              fn detached_checkpoint_requires_explicit_opt_in() {
+                  let fixture = Fixture::new("detached_checkpoint");
+                  let sand = r#"{
+                      "version": 1,
+                      "grid_width": 1,
+                      "grid_height": 1,
+                      "grains": [],
+                      "frame_count": 0,
+                      "sweep_left_to_right": true,
+                      "rng_state": 42
+                  }"#;
+                  fs::write(
+                      fixture.state.join("detached_runtime.json"),
+                      format!(
+                          r#"{{
+                              "schema_version": 1,
+                              "detached_at_utc": "2026-08-01T16:00:00Z",
+                              "simulation_time_utc": "2026-08-01T16:00:00Z",
+                              "spawn_accumulator_nanos": 0,
+                              "physics_accumulator_nanos": 0,
+                              "active_category_id": 0,
+                              "active_description": "",
+                              "active_session_started_at_utc": null,
+                              "sand_state": {sand},
+                              "pending_mutations": []
+                          }}"#
+                      ),
+                  )
+                  .unwrap();
+
+                  let error = execute_controlled_migration(&fixture.layout(), &options(false))
+                      .expect_err("detached checkpoint should require opt in");
+                  assert!(matches!(
+                      error,
+                      ControlledMigrationError::ActiveRecoveryRequiresOptIn
+                  ));
+                  assert!(!fixture.database.exists());
+
+                  let mut allowed = options(false);
+                  allowed.include_active_recovery = true;
+                  let report = execute_controlled_migration(&fixture.layout(), &allowed).unwrap();
+                  assert_eq!(report.status, ControlledMigrationStatus::Published);
+                  assert!(report.source_summary.checkpoint_present);
+                  assert!(!report.source_summary.active_session_present);
+              }
+
+              #[test]
+              fn repeated_run_is_idempotent() {
+          '''
+          if anchor not in text:
+              raise SystemExit('test insertion point not found')
+          path.write_text(text.replace(anchor, test, 1))
+          PY
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Format and certify
+        run: |
+          cargo fmt --all
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test --all-features
+
+      - name: Remove temporary workflow
+        run: rm -f .github/workflows/sqlite003-finalize.yml
+
+      - name: Commit certified fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(storage): gate detached recovery migration"
+          git push origin HEAD:storage/003-controlled-migration-command
