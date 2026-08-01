@@ -6,6 +6,7 @@ on:
       - main
     types:
       - opened
+      - synchronize
 
 permissions:
   contents: write
@@ -25,7 +26,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Apply bounded source patch
-        run: python tools/sqlite012_apply.py
+        run: |
+          python tools/sqlite012_apply.py
+          python tools/sqlite012_fix_compile.py
 
       - name: Format
         run: cargo fmt --all
