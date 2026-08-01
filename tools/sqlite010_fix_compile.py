@@ -11,6 +11,10 @@ text = text.replace(
     "fn sand_state(frame_count: u64) -> SandState {",
     "fn sand_state(frame_count: usize) -> SandState {",
 )
+text = text.replace(
+    "        rng_state: frame_count,",
+    "        rng_state: u64::try_from(frame_count).unwrap(),",
+)
 
 replacements = {
     '''assert_eq!(
