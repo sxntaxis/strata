@@ -26,6 +26,9 @@ jobs:
             python3 tools/sqlite009_fault_contracts.py
           fi
           python3 tools/sqlite009_fix_lints.py
+          if ! grep -q 'write_private_json_atomic' src/app/persistence_recovery.rs; then
+            python3 tools/sqlite009_audit_corrections.py
+          fi
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -46,5 +49,5 @@ jobs:
           if git diff --cached --quiet; then
             exit 0
           fi
-          git commit -m "SQLITE-009: surface persistence recovery controls"
+          git commit -m "SQLITE-009: preserve post-commit recovery authority"
           git push origin HEAD:storage/009-persistence-failure-recovery
