@@ -295,12 +295,7 @@ impl LegacyImportPlan {
         let category_ids: BTreeSet<i64> = category_names.keys().copied().collect();
 
         let sessions = match sources.bytes.get("time_log.csv") {
-            Some(bytes) => parse_sessions(
-                bytes,
-                &category_names,
-                options,
-                &sources.fingerprint,
-            )?,
+            Some(bytes) => parse_sessions(bytes, &category_names, options, &sources.fingerprint)?,
             None => Vec::new(),
         };
 
@@ -335,11 +330,7 @@ impl LegacyImportPlan {
         let checkpoint = detached.as_ref().map(|parsed| parsed.checkpoint.clone());
 
         let standalone_sand = match sources.bytes.get("sand_state.json") {
-            Some(bytes) => Some(parse_sand_state(
-                "sand_state.json",
-                bytes,
-                &category_ids,
-            )?),
+            Some(bytes) => Some(parse_sand_state("sand_state.json", bytes, &category_ids)?),
             None => None,
         };
         let detached_sand = detached.as_ref().map(|parsed| parsed.sand_state.clone());
@@ -367,39 +358,38 @@ impl LegacyImportPlan {
 
         let summary = LegacyImportSummary {
             source_fingerprint: sources.fingerprint.clone(),
-            category_count: i64::try_from(categories.len()).map_err(|_| invalid(
-                "categories.csv",
-                None,
-                "category count exceeds SQLite limits",
-            ))?,
-            session_count: i64::try_from(sessions.len()).map_err(|_| invalid(
-                "time_log.csv",
-                None,
-                "session count exceeds SQLite limits",
-            ))?,
+            category_count: i64::try_from(categories.len()).map_err(|_| {
+                invalid(
+                    "categories.csv",
+                    None,
+                    "category count exceeds SQLite limits",
+                )
+            })?,
+            session_count: i64::try_from(sessions.len()).map_err(|_| {
+                invalid("time_log.csv", None, "session count exceeds SQLite limits")
+            })?,
             total_elapsed_seconds,
             category_totals,
             active_session_present: active_session.is_some(),
             checkpoint_present: checkpoint.is_some(),
             sand_state_present: sand_state.is_some(),
-            snapshot_count: i64::try_from(snapshots.len()).map_err(|_| invalid(
-                "sand_history",
-                None,
-                "snapshot count exceeds SQLite limits",
-            ))?,
-            tag_count: i64::try_from(tags.len()).map_err(|_| invalid(
-                "category_tags.json",
-                None,
-                "tag count exceeds SQLite limits",
-            ))?,
+            snapshot_count: i64::try_from(snapshots.len()).map_err(|_| {
+                invalid("sand_history", None, "snapshot count exceeds SQLite limits")
+            })?,
+            tag_count: i64::try_from(tags.len()).map_err(|_| {
+                invalid(
+                    "category_tags.json",
+                    None,
+                    "tag count exceeds SQLite limits",
+                )
+            })?,
         };
 
-        let source_manifest_json = serde_json::to_string(&sources.manifest).map_err(|error| {
-            LegacyImportError::Json {
+        let source_manifest_json =
+            serde_json::to_string(&sources.manifest).map_err(|error| LegacyImportError::Json {
                 source: "source manifest".to_string(),
                 message: error.to_string(),
-            }
-        })?;
+            })?;
 
         Ok(Self {
             options,
@@ -586,12 +576,11 @@ impl SqliteRepository {
         }
 
         if let Some(sand_state) = &plan.sand_state {
-            let payload_json = serde_json::to_string(sand_state).map_err(|error| {
-                LegacyImportError::Json {
+            let payload_json =
+                serde_json::to_string(sand_state).map_err(|error| LegacyImportError::Json {
                     source: "sand state".to_string(),
                     message: error.to_string(),
-                }
-            })?;
+                })?;
             let updated_at = plan
                 .checkpoint
                 .as_ref()
@@ -643,12 +632,11 @@ impl SqliteRepository {
         }
 
         verify_import(&transaction, plan, import_id)?;
-        let verification_json = serde_json::to_string(&plan.summary).map_err(|error| {
-            LegacyImportError::Json {
+        let verification_json =
+            serde_json::to_string(&plan.summary).map_err(|error| LegacyImportError::Json {
                 source: "verification summary".to_string(),
                 message: error.to_string(),
-            }
-        })?;
+            })?;
         let completed_at_utc = now_utc();
         transaction.execute(
             "UPDATE legacy_imports
@@ -778,7 +766,8 @@ fn collect_sources(paths: &LegacyImportPaths) -> Result<SourceCollection, Legacy
             .map_err(|error| io_error("sand_history", error))?;
         history_paths.sort();
         for path in history_paths {
-            if !path.is_file() || path.extension().and_then(|value| value.to_str()) != Some("json") {
+            if !path.is_file() || path.extension().and_then(|value| value.to_str()) != Some("json")
+            {
                 continue;
             }
             let filename = path
@@ -844,7 +833,11 @@ fn parse_categories(bytes: &[u8]) -> Result<Vec<LegacyCategory>, LegacyImportErr
         .has_headers(true)
         .flexible(false)
         .from_reader(Cursor::new(bytes));
-    validate_header(source, reader.headers().map_err(|error| csv_error(source, error))?, &CATEGORIES_HEADER)?;
+    validate_header(
+        source,
+        reader.headers().map_err(|error| csv_error(source, error))?,
+        &CATEGORIES_HEADER,
+    )?;
 
     let mut categories = Vec::new();
     let mut ids = HashSet::new();
@@ -854,14 +847,26 @@ fn parse_categories(bytes: &[u8]) -> Result<Vec<LegacyCategory>, LegacyImportErr
         let record = record.map_err(|error| csv_error(source, error))?;
         let id = parse_i64(source, row, &record, 0, "category ID")?;
         if id <= 0 {
-            return Err(invalid(source, Some(row), "category ID must be greater than zero"));
+            return Err(invalid(
+                source,
+                Some(row),
+                "category ID must be greater than zero",
+            ));
         }
         if !ids.insert(id) {
-            return Err(invalid(source, Some(row), format!("duplicate category ID {id}")));
+            return Err(invalid(
+                source,
+                Some(row),
+                format!("duplicate category ID {id}"),
+            ));
         }
 
-        let name = required_field(source, row, &record, 1, "category name")?.trim().to_string();
-        if name.eq_ignore_ascii_case(DRIFT_CATEGORY_CONFIG_NAME) || name.eq_ignore_ascii_case("idle") {
+        let name = required_field(source, row, &record, 1, "category name")?
+            .trim()
+            .to_string();
+        if name.eq_ignore_ascii_case(DRIFT_CATEGORY_CONFIG_NAME)
+            || name.eq_ignore_ascii_case("idle")
+        {
             return Err(invalid(
                 source,
                 Some(row),
@@ -870,7 +875,11 @@ fn parse_categories(bytes: &[u8]) -> Result<Vec<LegacyCategory>, LegacyImportErr
         }
         let normalized_name = name.to_lowercase();
         if !names.insert(normalized_name) {
-            return Err(invalid(source, Some(row), format!("duplicate category name '{name}'")));
+            return Err(invalid(
+                source,
+                Some(row),
+                format!("duplicate category name '{name}'"),
+            ));
         }
 
         let color_index = parse_i64(source, row, &record, 3, "color index")?;
@@ -878,7 +887,10 @@ fn parse_categories(bytes: &[u8]) -> Result<Vec<LegacyCategory>, LegacyImportErr
             return Err(invalid(
                 source,
                 Some(row),
-                format!("color index {color_index} is outside 0..{}", COLORS.len() - 1),
+                format!(
+                    "color index {color_index} is outside 0..{}",
+                    COLORS.len() - 1
+                ),
             ));
         }
         let balance_effect = parse_i64(source, row, &record, 4, "karma effect")?;
@@ -918,14 +930,17 @@ fn parse_sessions(
     fingerprint: &str,
 ) -> Result<Vec<LegacySession>, LegacyImportError> {
     let source = "time_log.csv";
-    let offset = FixedOffset::east_opt(options.utc_offset_seconds).ok_or_else(|| {
-        LegacyImportError::InvalidOptions("invalid fixed UTC offset".to_string())
-    })?;
+    let offset = FixedOffset::east_opt(options.utc_offset_seconds)
+        .ok_or_else(|| LegacyImportError::InvalidOptions("invalid fixed UTC offset".to_string()))?;
     let mut reader = ReaderBuilder::new()
         .has_headers(true)
         .flexible(false)
         .from_reader(Cursor::new(bytes));
-    validate_header(source, reader.headers().map_err(|error| csv_error(source, error))?, &SESSIONS_HEADER)?;
+    validate_header(
+        source,
+        reader.headers().map_err(|error| csv_error(source, error))?,
+        &SESSIONS_HEADER,
+    )?;
 
     let mut sessions = Vec::new();
     let mut ids = HashSet::new();
@@ -935,15 +950,29 @@ fn parse_sessions(
         let record = record.map_err(|error| csv_error(source, error))?;
         let id = parse_i64(source, row, &record, 0, "session ID")?;
         if id <= 0 {
-            return Err(invalid(source, Some(row), "session ID must be greater than zero"));
+            return Err(invalid(
+                source,
+                Some(row),
+                "session ID must be greater than zero",
+            ));
         }
         if !ids.insert(id) {
-            return Err(invalid(source, Some(row), format!("duplicate session ID {id}")));
+            return Err(invalid(
+                source,
+                Some(row),
+                format!("duplicate session ID {id}"),
+            ));
         }
 
         let operational_day_raw = required_field(source, row, &record, 1, "operational day")?;
-        let operational_day = NaiveDate::parse_from_str(operational_day_raw, "%Y-%m-%d")
-            .map_err(|error| invalid(source, Some(row), format!("invalid operational day: {error}")))?;
+        let operational_day =
+            NaiveDate::parse_from_str(operational_day_raw, "%Y-%m-%d").map_err(|error| {
+                invalid(
+                    source,
+                    Some(row),
+                    format!("invalid operational day: {error}"),
+                )
+            })?;
         let category_id = parse_i64(source, row, &record, 2, "category ID")?;
         let expected_category_name = category_names.get(&category_id).ok_or_else(|| {
             invalid(
@@ -967,7 +996,11 @@ fn parse_sessions(
         let end_time = parse_time(source, row, &record, 6, "end time")?;
         let elapsed_seconds = parse_i64(source, row, &record, 7, "elapsed seconds")?;
         if elapsed_seconds < 0 {
-            return Err(invalid(source, Some(row), "elapsed seconds cannot be negative"));
+            return Err(invalid(
+                source,
+                Some(row),
+                "elapsed seconds cannot be negative",
+            ));
         }
         let (started_at_utc, ended_at_utc) = reconstruct_absolute_times(
             operational_day,
@@ -1000,13 +1033,13 @@ fn parse_active_session(
     fingerprint: &str,
 ) -> Result<LegacyActiveSession, LegacyImportError> {
     let source = "active_session.json";
-    let active: ActiveSessionJson = serde_json::from_slice(bytes).map_err(|error| json_error(source, error))?;
-    let category_id = i64::try_from(active.category_id).map_err(|_| {
-        invalid(source, None, "category ID exceeds SQLite integer range")
-    })?;
-    let expected_name = category_names.get(&category_id).ok_or_else(|| {
-        invalid(source, None, format!("unknown category ID {category_id}"))
-    })?;
+    let active: ActiveSessionJson =
+        serde_json::from_slice(bytes).map_err(|error| json_error(source, error))?;
+    let category_id = i64::try_from(active.category_id)
+        .map_err(|_| invalid(source, None, "category ID exceeds SQLite integer range"))?;
+    let expected_name = category_names
+        .get(&category_id)
+        .ok_or_else(|| invalid(source, None, format!("unknown category ID {category_id}")))?;
     if !active.category_name.eq_ignore_ascii_case(expected_name) {
         return Err(invalid(
             source,
@@ -1040,11 +1073,19 @@ fn parse_detached_checkpoint(
         return Err(invalid(
             source,
             None,
-            format!("unsupported checkpoint schema version {}", checkpoint.schema_version),
+            format!(
+                "unsupported checkpoint schema version {}",
+                checkpoint.schema_version
+            ),
         ));
     }
-    let active_category_id = i64::try_from(checkpoint.active_category_id)
-        .map_err(|_| invalid(source, None, "active category ID exceeds SQLite integer range"))?;
+    let active_category_id = i64::try_from(checkpoint.active_category_id).map_err(|_| {
+        invalid(
+            source,
+            None,
+            "active category ID exceeds SQLite integer range",
+        )
+    })?;
     if !category_ids.contains(&active_category_id) {
         return Err(invalid(
             source,
@@ -1055,7 +1096,11 @@ fn parse_detached_checkpoint(
     for mutation in &checkpoint.pending_mutations {
         if let QueuedMutationRecord::SwitchLayer { category_id } = &mutation.mutation {
             let category_id = i64::try_from(*category_id).map_err(|_| {
-                invalid(source, None, "queued category ID exceeds SQLite integer range")
+                invalid(
+                    source,
+                    None,
+                    "queued category ID exceeds SQLite integer range",
+                )
             })?;
             if !category_ids.contains(&category_id) {
                 return Err(invalid(
@@ -1069,19 +1114,19 @@ fn parse_detached_checkpoint(
     validate_sand_state(source, &checkpoint.sand_state, category_ids)?;
 
     let stable_id = format!("legacy-{}-active", &fingerprint[..16]);
-    let active_session = checkpoint.active_session_started_at_utc.as_ref().map(|started_at| {
-        LegacyActiveSession {
+    let active_session = checkpoint
+        .active_session_started_at_utc
+        .as_ref()
+        .map(|started_at| LegacyActiveSession {
             stable_id: stable_id.clone(),
             project: String::new(),
             category_id: active_category_id,
             description: checkpoint.active_description.clone(),
             started_at_utc: format_utc(*started_at),
             recovery_kind: "detached".to_string(),
-        }
-    });
-    let payload_json = String::from_utf8(bytes.to_vec()).map_err(|error| {
-        invalid(source, None, format!("checkpoint is not UTF-8: {error}"))
-    })?;
+        });
+    let payload_json = String::from_utf8(bytes.to_vec())
+        .map_err(|error| invalid(source, None, format!("checkpoint is not UTF-8: {error}")))?;
 
     Ok(ParsedDetachedCheckpoint {
         active_session,
@@ -1121,9 +1166,16 @@ fn validate_sand_state(
             format!("unsupported sand-state version {}", state.version),
         ));
     }
-    state.grid_width.checked_mul(state.grid_height).ok_or_else(|| {
-        invalid(source, None, "sand-state dimensions overflow addressable space")
-    })?;
+    state
+        .grid_width
+        .checked_mul(state.grid_height)
+        .ok_or_else(|| {
+            invalid(
+                source,
+                None,
+                "sand-state dimensions overflow addressable space",
+            )
+        })?;
     let mut coordinates = HashSet::new();
     for grain in &state.grains {
         if grain.x >= state.grid_width || grain.y >= state.grid_height {
@@ -1137,7 +1189,11 @@ fn validate_sand_state(
             ));
         }
         let category_id = i64::try_from(grain.category_id).map_err(|_| {
-            invalid(source, None, "grain category ID exceeds SQLite integer range")
+            invalid(
+                source,
+                None,
+                "grain category ID exceeds SQLite integer range",
+            )
         })?;
         if !category_ids.contains(&category_id) {
             return Err(invalid(
@@ -1162,9 +1218,8 @@ fn parse_snapshots(
     category_ids: &BTreeSet<i64>,
     options: LegacyImportOptions,
 ) -> Result<Vec<LegacySnapshot>, LegacyImportError> {
-    let offset = FixedOffset::east_opt(options.utc_offset_seconds).ok_or_else(|| {
-        LegacyImportError::InvalidOptions("invalid fixed UTC offset".to_string())
-    })?;
+    let offset = FixedOffset::east_opt(options.utc_offset_seconds)
+        .ok_or_else(|| LegacyImportError::InvalidOptions("invalid fixed UTC offset".to_string()))?;
     let mut snapshots = Vec::new();
     for (logical_name, bytes) in &sources.bytes {
         let Some(filename) = logical_name.strip_prefix("sand_history/") else {
@@ -1181,12 +1236,11 @@ fn parse_snapshots(
             )
         })?;
         let state = parse_sand_state(logical_name, bytes, category_ids)?;
-        let payload_json = serde_json::to_string(&state).map_err(|error| {
-            LegacyImportError::Json {
+        let payload_json =
+            serde_json::to_string(&state).map_err(|error| LegacyImportError::Json {
                 source: logical_name.clone(),
                 message: error.to_string(),
-            }
-        })?;
+            })?;
         snapshots.push(LegacySnapshot {
             operational_day: day_raw.to_string(),
             captured_at_utc: operational_day_end_boundary(
@@ -1263,11 +1317,9 @@ fn reconstruct_absolute_times(
     day_start_minutes: u16,
     offset: FixedOffset,
 ) -> Result<(String, String), String> {
-    let cutoff = NaiveTime::from_num_seconds_from_midnight_opt(
-        u32::from(day_start_minutes) * 60,
-        0,
-    )
-    .ok_or_else(|| "invalid operational-day cutoff".to_string())?;
+    let cutoff =
+        NaiveTime::from_num_seconds_from_midnight_opt(u32::from(day_start_minutes) * 60, 0)
+            .ok_or_else(|| "invalid operational-day cutoff".to_string())?;
     let start_date = if start_time < cutoff {
         operational_day
             .checked_add_signed(ChronoDuration::days(1))
@@ -1307,11 +1359,9 @@ fn operational_day_end_boundary(
     let next_day = operational_day
         .checked_add_signed(ChronoDuration::days(1))
         .ok_or_else(|| invalid("sand_history", None, "snapshot boundary date overflow"))?;
-    let cutoff = NaiveTime::from_num_seconds_from_midnight_opt(
-        u32::from(day_start_minutes) * 60,
-        0,
-    )
-    .ok_or_else(|| invalid("sand_history", None, "invalid snapshot cutoff"))?;
+    let cutoff =
+        NaiveTime::from_num_seconds_from_midnight_opt(u32::from(day_start_minutes) * 60, 0)
+            .ok_or_else(|| invalid("sand_history", None, "invalid snapshot cutoff"))?;
     let local = NaiveDateTime::new(next_day, cutoff);
     let utc = offset
         .from_local_datetime(&local)
@@ -1351,9 +1401,14 @@ fn verify_import(
         "SELECT id FROM categories WHERE id <> 0 ORDER BY id",
         [],
     )?;
-    let expected_category_ids: Vec<i64> = plan.categories.iter().map(|category| category.id).collect();
+    let expected_category_ids: Vec<i64> =
+        plan.categories.iter().map(|category| category.id).collect();
     if category_ids != expected_category_ids {
-        return Err(mismatch("category IDs", &expected_category_ids, &category_ids));
+        return Err(mismatch(
+            "category IDs",
+            &expected_category_ids,
+            &category_ids,
+        ));
     }
 
     let session_ids = query_i64_values(
@@ -1602,12 +1657,10 @@ fn bool_i64(value: bool) -> i64 {
 }
 
 fn usize_to_i64(value: usize, label: &str) -> Result<i64, LegacyImportError> {
-    i64::try_from(value).map_err(|_| {
-        LegacyImportError::InvalidSource {
-            source: "sand state".to_string(),
-            row: None,
-            message: format!("{label} exceeds SQLite integer range"),
-        }
+    i64::try_from(value).map_err(|_| LegacyImportError::InvalidSource {
+        source: "sand state".to_string(),
+        row: None,
+        message: format!("{label} exceeds SQLite integer range"),
     })
 }
 
@@ -1615,11 +1668,7 @@ fn now_utc() -> String {
     format_utc(Utc::now())
 }
 
-fn mismatch<T: std::fmt::Debug>(
-    label: &str,
-    expected: &T,
-    actual: &T,
-) -> LegacyImportError {
+fn mismatch<T: std::fmt::Debug>(label: &str, expected: &T, actual: &T) -> LegacyImportError {
     LegacyImportError::VerificationMismatch(format!(
         "{label}: expected {expected:?}, found {actual:?}"
     ))
@@ -1710,11 +1759,7 @@ mod tests {
             let state = root.join("state");
             fs::create_dir_all(&data).unwrap();
             fs::create_dir_all(state.join("sand_history")).unwrap();
-            let paths = LegacyImportPaths::from_roots(
-                &data,
-                &state,
-                data.join("time_log.csv"),
-            );
+            let paths = LegacyImportPaths::from_roots(&data, &state, data.join("time_log.csv"));
             Self {
                 root,
                 data,
@@ -1846,7 +1891,10 @@ mod tests {
 
         let mut repository = SqliteRepository::open_in_memory().unwrap();
         let outcome = repository.import_legacy(&plan).unwrap();
-        assert_eq!(outcome, LegacyImportOutcome::Imported(plan.summary().clone()));
+        assert_eq!(
+            outcome,
+            LegacyImportOutcome::Imported(plan.summary().clone())
+        );
         assert_eq!(fixture.source_bytes(), before);
 
         let first: (String, String) = repository
@@ -1955,7 +2003,9 @@ mod tests {
         assert!(matches!(error, LegacyImportError::Sqlite(_)));
         let categories: i64 = repository
             .connection
-            .query_row("SELECT count(*) FROM categories WHERE id <> 0", [], |row| row.get(0))
+            .query_row("SELECT count(*) FROM categories WHERE id <> 0", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         let imports: i64 = repository
             .connection
