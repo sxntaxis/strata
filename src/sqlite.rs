@@ -40,6 +40,11 @@ pub(crate) use tui_runtime::{
     update_session_description as update_tui_session_description,
 };
 
+pub(crate) fn inject_tui_test_fault(operation: &str, phase: &str) -> Result<(), String> {
+    runtime_coordination::maybe_inject_test_fault(operation, phase)
+        .map_err(|error| error.to_string())
+}
+
 pub(crate) fn run_controlled_migration(
     options: ControlledMigrationOptions,
 ) -> Result<ControlledMigrationReport, String> {

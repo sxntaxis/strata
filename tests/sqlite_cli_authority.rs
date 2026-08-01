@@ -3,6 +3,7 @@
 use std::{
     fs,
     io::Write,
+    os::unix::fs::PermissionsExt,
     path::PathBuf,
     process::{Command, Output, Stdio},
     time::{SystemTime, UNIX_EPOCH},
@@ -65,8 +66,12 @@ impl TestProfile {
     }
 
     fn run_tui(&self) -> Output {
-        let mut child = Command::new("timeout");
-        child
+        self.run_tui_with_input(b"q", None)
+    }
+
+    fn run_tui_with_input(&self, input: &[u8], fault: Option<&str>) -> Output {
+        let mut command = Command::new("timeout");
+        command
             .args([
                 "10s",
                 "script",
@@ -78,17 +83,35 @@ impl TestProfile {
             .env("XDG_STATE_HOME", &self.state_home)
             .env("XDG_CONFIG_HOME", &self.config_home)
             .env_remove("STRATA_DATA_DIR")
+            .env_remove("STRATA_TEST_SQLITE_FAULT")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = child.spawn().expect("pseudo-terminal TUI should start");
+        if let Some(fault) = fault {
+            command.env("STRATA_TEST_SQLITE_FAULT", fault);
+        }
+        let mut child = command.spawn().expect("pseudo-terminal TUI should start");
         child
             .stdin
             .take()
             .expect("TUI stdin should exist")
-            .write_all(b"q")
-            .expect("quit key should be written");
+            .write_all(input)
+            .expect("TUI input should be written");
         child.wait_with_output().expect("TUI process should finish")
+    }
+
+    fn recovery_files(&self) -> Vec<PathBuf> {
+        let directory = self.state_home.join("strata/recovery");
+        let mut files: Vec<PathBuf> = fs::read_dir(directory)
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .map(|entry| entry.path())
+                    .collect()
+            })
+            .unwrap_or_default();
+        files.sort();
+        files
     }
 
     fn database_path(&self) -> PathBuf {
@@ -420,4 +443,161 @@ fn unacknowledged_cli_stop_is_recovered_without_duplicate_session() {
     let repeated = profile.run(&["stop"]);
     assert!(!repeated.status.success());
     assert!(stderr(&repeated).contains("No active session"));
+}
+
+fn recovery_bundle(profile: &TestProfile) -> Value {
+    let files = profile.recovery_files();
+    assert_eq!(files.len(), 1, "exactly one emergency export is expected");
+    let metadata = fs::metadata(&files[0]).expect("emergency export metadata should exist");
+    assert_eq!(
+        metadata.permissions().mode() & 0o077,
+        0,
+        "emergency export must not be readable by group or other users"
+    );
+    let bytes = fs::read(&files[0]).expect("emergency export should be readable");
+    serde_json::from_slice(&bytes).expect("emergency export should be valid JSON")
+}
+
+#[test]
+fn tui_finish_commit_failure_exports_without_consuming_active_session() {
+    let profile = TestProfile::new("finish-commit-recovery");
+    profile.migrate();
+    assert!(profile.activate().status.success());
+
+    let tui = profile.run_tui_with_input(b"qq", Some("finish:commit:commit"));
+    assert!(
+        tui.status.success(),
+        "recovery export exit failed: stdout={} stderr={}",
+        stdout(&tui),
+        stderr(&tui)
+    );
+
+    let connection = Connection::open(profile.database_path()).expect("database should open");
+    let active_count: i64 = connection
+        .query_row("SELECT count(*) FROM active_session", [], |row| row.get(0))
+        .unwrap();
+    let session_count: i64 = connection
+        .query_row("SELECT count(*) FROM sessions", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(active_count, 1, "failed commit must retain the active row");
+    assert_eq!(
+        session_count, 0,
+        "failed commit must not create completed time"
+    );
+    drop(connection);
+
+    let bundle = recovery_bundle(&profile);
+    assert_eq!(bundle["failure"]["class"], "commit");
+    assert!(bundle["active_session"].is_object());
+}
+
+#[test]
+fn tui_busy_category_sync_exports_committed_finish_and_failure_context() {
+    let profile = TestProfile::new("busy-category-recovery");
+    profile.migrate();
+    assert!(profile.activate().status.success());
+
+    let tui = profile.run_tui_with_input(b"qq", Some("category-sync:before-write:busy"));
+    assert!(
+        tui.status.success(),
+        "busy recovery exit failed: {}",
+        stderr(&tui)
+    );
+
+    let connection = Connection::open(profile.database_path()).expect("database should open");
+    let active_count: i64 = connection
+        .query_row("SELECT count(*) FROM active_session", [], |row| row.get(0))
+        .unwrap();
+    let session_count: i64 = connection
+        .query_row("SELECT count(*) FROM sessions", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(active_count, 0);
+    assert_eq!(
+        session_count, 1,
+        "finish must remain committed before later failure"
+    );
+    drop(connection);
+
+    let bundle = recovery_bundle(&profile);
+    assert_eq!(bundle["failure"]["class"], "busy");
+    assert_eq!(bundle["failure"]["operation"], "category synchronization");
+}
+
+#[test]
+fn tui_readonly_sand_failure_exports_in_memory_recovery_state() {
+    let profile = TestProfile::new("readonly-sand-recovery");
+    profile.migrate();
+    assert!(profile.activate().status.success());
+
+    let tui = profile.run_tui_with_input(b"qq", Some("sand-state:before-write:readonly"));
+    assert!(
+        tui.status.success(),
+        "read-only recovery exit failed: {}",
+        stderr(&tui)
+    );
+    let bundle = recovery_bundle(&profile);
+    assert_eq!(bundle["failure"]["class"], "read-only");
+    assert_eq!(bundle["failure"]["operation"], "sediment-state save");
+    assert!(bundle["sand_state"].is_object());
+}
+
+#[test]
+fn corrupt_state_load_fails_visible_without_empty_fallback() {
+    let profile = TestProfile::new("corrupt-state-load");
+    profile.migrate();
+    assert!(profile.activate().status.success());
+
+    let tui = profile.run_tui_with_input(b"q", Some("state-load:before-read:corrupt"));
+    assert!(!tui.status.success());
+    let combined = format!("{}{}", stdout(&tui), stderr(&tui));
+    assert!(combined.contains("injected corrupt failure"));
+
+    let connection = Connection::open(profile.database_path()).expect("database should open");
+    let category_count: i64 = connection
+        .query_row("SELECT count(*) FROM categories", [], |row| row.get(0))
+        .unwrap();
+    assert!(
+        category_count >= 2,
+        "startup failure must not replace authority with an empty database"
+    );
+}
+
+#[test]
+fn post_commit_reload_retry_preserves_committed_history_before_exit() {
+    let profile = TestProfile::new("post-commit-reload-retry");
+    profile.migrate();
+    assert!(profile.activate().status.success());
+
+    let tui = profile.run_tui_with_input(b"qRq", Some("session-reload:before-read:busy:once"));
+    assert!(
+        tui.status.success(),
+        "post-commit reload retry failed: stdout={} stderr={}",
+        stdout(&tui),
+        stderr(&tui)
+    );
+
+    let connection = Connection::open(profile.database_path()).expect("database should open");
+    let active_count: i64 = connection
+        .query_row("SELECT count(*) FROM active_session", [], |row| row.get(0))
+        .unwrap();
+    let session_count: i64 = connection
+        .query_row("SELECT count(*) FROM sessions", [], |row| row.get(0))
+        .unwrap();
+    let distinct_stable_ids: i64 = connection
+        .query_row(
+            "SELECT count(DISTINCT stable_id) FROM sessions",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(active_count, 0);
+    assert_eq!(
+        session_count, 2,
+        "both committed intervals must survive reload retry"
+    );
+    assert_eq!(
+        distinct_stable_ids, 2,
+        "reload retry must not duplicate an interval"
+    );
+    assert!(profile.recovery_files().is_empty());
 }

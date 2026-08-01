@@ -175,5 +175,9 @@ impl App {
         if self.show_command_palette {
             self.render_command_palette(f, size);
         }
+
+        if self.has_persistence_recovery() {
+            self.render_persistence_recovery(f, size);
+        }
     }
 }
