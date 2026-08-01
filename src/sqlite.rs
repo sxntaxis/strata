@@ -3,11 +3,21 @@ use std::{path::Path, time::Duration};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use thiserror::Error;
 
+mod authority;
+mod cli_runtime;
 mod legacy_import;
 mod maintenance;
 mod migration_command;
 mod repository;
 
+pub(crate) use authority::{
+    RuntimeAuthority, SqliteCliActivationOptions, activate_sqlite_cli, ensure_tui_legacy_allowed,
+    resolve_runtime_authority,
+};
+pub(crate) use cli_runtime::{
+    read_snapshot as read_cli_snapshot, start_session as start_cli_session,
+    stop_session as stop_cli_session,
+};
 pub(crate) use maintenance::{
     BackupOptions, BundleExportOptions, BundleImportOptions, DoctorOptions, RestoreOptions,
     SqliteMaintenanceReport,
@@ -243,6 +253,8 @@ pub(crate) enum SqliteStoreError {
     UnsupportedSchema { found: i64, supported: i64 },
     #[error("there is no active session to finish")]
     NoActiveSession,
+    #[error("SQLite storage authority conflict: expected {expected}, found {found}")]
+    AuthorityConflict { expected: String, found: String },
 }
 
 #[derive(Debug)]
@@ -322,6 +334,54 @@ impl SqliteRepository {
         Ok(self
             .connection
             .query_row("PRAGMA integrity_check", [], |row| row.get(0))?)
+    }
+
+    pub fn metadata_value(&self, key: &str) -> Result<Option<String>, SqliteStoreError> {
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT value FROM database_metadata WHERE key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    pub fn transition_storage_authority(
+        &mut self,
+        expected: &str,
+        next: &str,
+        activated_at_utc: &str,
+    ) -> Result<(), SqliteStoreError> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current: Option<String> = transaction
+            .query_row(
+                "SELECT value FROM database_metadata WHERE key = 'storage_authority'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let found = current.unwrap_or_else(|| "missing".to_string());
+        if found != expected {
+            return Err(SqliteStoreError::AuthorityConflict {
+                expected: expected.to_string(),
+                found,
+            });
+        }
+        transaction.execute(
+            "UPDATE database_metadata SET value = ?1 WHERE key = 'storage_authority'",
+            params![next],
+        )?;
+        transaction.execute(
+            "INSERT INTO database_metadata(key, value)
+             VALUES ('sqlite_cli_activated_at_utc', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![activated_at_utc],
+        )?;
+        transaction.commit()?;
+        Ok(())
     }
 
     pub fn start_session(&mut self, active: &NewActiveSession<'_>) -> Result<(), SqliteStoreError> {

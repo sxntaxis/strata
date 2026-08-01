@@ -29,5 +29,6 @@ pub fn run() -> Result<(), io::Error> {
         return Ok(());
     }
 
+    sqlite::ensure_tui_legacy_allowed().map_err(io::Error::other)?;
     app::run_ui()
 }
