@@ -24,8 +24,10 @@ pub(crate) use maintenance::{
 };
 pub(crate) use migration_command::{ControlledMigrationOptions, ControlledMigrationReport};
 pub(crate) use tui_runtime::{
-    clear_checkpoint as clear_tui_checkpoint, delete_daily_snapshot as delete_tui_daily_snapshot,
-    ensure_active_session as ensure_tui_active_session,
+    archive_category as archive_tui_category, clear_checkpoint as clear_tui_checkpoint,
+    delete_daily_snapshot as delete_tui_daily_snapshot,
+    delete_drift_sessions_for_day as delete_tui_drift_sessions_for_day,
+    delete_session as delete_tui_session, ensure_active_session as ensure_tui_active_session,
     finish_active_session as finish_tui_active_session, load_checkpoint as load_tui_checkpoint,
     load_daily_snapshot as load_tui_daily_snapshot, load_sand_state as load_tui_sand_state,
     load_state as load_tui_state, reset_active_session as reset_tui_active_session,
@@ -33,6 +35,7 @@ pub(crate) use tui_runtime::{
     save_sand_state as save_tui_sand_state, switch_active_session as switch_tui_active_session,
     sync_categories as sync_tui_categories, sync_category_tags as sync_tui_category_tags,
     sync_sessions as sync_tui_sessions,
+    update_session_description as update_tui_session_description,
 };
 
 pub(crate) fn run_controlled_migration(

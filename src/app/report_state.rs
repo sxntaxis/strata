@@ -195,6 +195,12 @@ impl App {
             return false;
         };
 
+        if let Some(database_path) = self.sqlite_database_path.clone() {
+            let result = crate::sqlite::delete_tui_session(&database_path, session_id);
+            if self.record_storage_result(result).is_none() {
+                return false;
+            }
+        }
         if !self.time_tracker.delete_session_by_id(session_id) {
             return false;
         }
@@ -204,7 +210,9 @@ impl App {
                 .remove_category_grains(category_id, removed_seconds);
         }
 
-        self.persist_sessions();
+        if self.sqlite_database_path.is_none() {
+            self.persist_sessions();
+        }
         self.rebuild_report_snapshot_for_interval_end_day();
 
         let refreshed = self.report_current_logs();
@@ -242,6 +250,16 @@ impl App {
         let mut description = row.description.clone();
         mutator(&mut description);
 
+        if let Some(database_path) = self.sqlite_database_path.clone() {
+            let result = crate::sqlite::update_tui_session_description(
+                &database_path,
+                session_id,
+                &description,
+            );
+            if self.record_storage_result(result).is_none() {
+                return false;
+            }
+        }
         if !self
             .time_tracker
             .set_session_description_by_id(session_id, description)
@@ -249,7 +267,9 @@ impl App {
             return false;
         }
 
-        self.persist_sessions();
+        if self.sqlite_database_path.is_none() {
+            self.persist_sessions();
+        }
         true
     }
 

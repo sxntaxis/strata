@@ -219,9 +219,13 @@ impl App {
             sqlite::RuntimeAuthority::LegacyFiles => {
                 let categories_path = storage::get_categories_path();
                 let sessions_path = storage::get_time_log_path();
-                let loaded_categories = storage::load_categories_from_csv(&categories_path);
-                let loaded_sessions =
-                    storage::load_sessions_from_csv(&sessions_path, &loaded_categories.categories);
+                let loaded_categories = storage::try_load_categories_from_csv(&categories_path)
+                    .map_err(|error| error.to_string())?;
+                let loaded_sessions = storage::try_load_sessions_from_csv(
+                    &sessions_path,
+                    &loaded_categories.categories,
+                )
+                .map_err(|error| error.to_string())?;
                 let tags = storage::load_category_tags(&storage::get_category_tags_path());
                 (
                     None,
@@ -1085,6 +1089,13 @@ impl App {
 
                 let scheduled_local = scheduled_at_utc.with_timezone(&Local);
                 let scheduled_day = operational_day_key_for_local(&scheduled_local);
+                if let Some(database_path) = self.sqlite_database_path.clone() {
+                    let day = scheduled_day.format("%Y-%m-%d").to_string();
+                    let result = sqlite::delete_tui_drift_sessions_for_day(&database_path, &day);
+                    if self.record_storage_result(result).is_none() {
+                        return;
+                    }
+                }
                 self.time_tracker
                     .clear_drift_sessions_for_day(scheduled_day);
 

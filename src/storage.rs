@@ -132,6 +132,7 @@ fn csv_header_string(headers: &StringRecord) -> String {
     headers.iter().collect::<Vec<_>>().join(",")
 }
 
+#[cfg(test)]
 pub fn load_categories_from_csv(path: &Path) -> LoadedCategories {
     match try_load_categories_from_csv(path) {
         Ok(loaded) => loaded,
@@ -206,6 +207,7 @@ pub fn try_load_categories_from_csv(path: &Path) -> Result<LoadedCategories, Sto
     Ok(loaded)
 }
 
+#[cfg(test)]
 pub fn load_sessions_from_csv(path: &Path, categories: &[Category]) -> LoadedSessions {
     match try_load_sessions_from_csv(path, categories) {
         Ok(loaded) => loaded,

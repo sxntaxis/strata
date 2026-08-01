@@ -319,33 +319,6 @@ pub(crate) fn sync_categories(
             .map_err(|error| error.to_string())?;
     }
 
-    let now = timestamp(Utc::now());
-    let mut statement = transaction
-        .prepare("SELECT id FROM categories WHERE id <> 0 AND archived_at_utc IS NULL")
-        .map_err(|error| error.to_string())?;
-    let existing_ids = statement
-        .query_map([], |row| row.get::<_, i64>(0))
-        .map_err(|error| error.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
-    drop(statement);
-    for id in existing_ids {
-        if !current_ids.contains(&id) {
-            transaction
-                .execute(
-                    "UPDATE categories SET archived_at_utc = ?1 WHERE id = ?2",
-                    params![now, id],
-                )
-                .map_err(|error| error.to_string())?;
-            transaction
-                .execute(
-                    "DELETE FROM category_tags WHERE category_id = ?1",
-                    params![id],
-                )
-                .map_err(|error| error.to_string())?;
-        }
-    }
-
     let active_description = categories
         .iter()
         .find(|category| category.id == active_category_id)
@@ -362,18 +335,33 @@ pub(crate) fn sync_categories(
     Ok(load_state(database_path)?.archived_categories)
 }
 
+pub(crate) fn archive_category(
+    database_path: &Path,
+    category_id: CategoryId,
+) -> Result<(), String> {
+    let mut repository = open_cli_repository(database_path)?;
+    let category_id = as_i64(category_id.0, "category ID")?;
+    let active_category_id = repository
+        .active_session()
+        .map_err(|error| error.to_string())?
+        .map(|active| active.category_id);
+    if active_category_id == Some(category_id) {
+        return Err("the active category cannot be archived".to_string());
+    }
+    repository
+        .archive_category(category_id, &timestamp(Utc::now()))
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 pub(crate) fn sync_category_tags(
     database_path: &Path,
     tags: &CategoryTagsState,
+    category_ids: &[CategoryId],
 ) -> Result<(), String> {
     let mut repository = open_cli_repository(database_path)?;
-    let active_ids = repository
-        .list_categories(false)
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .map(|category| category.id)
-        .collect::<BTreeSet<_>>();
-    for category_id in active_ids {
+    for category_id in category_ids {
+        let category_id = as_i64(category_id.0, "category ID")?;
         let category_id_u64 = u64::try_from(category_id)
             .map_err(|_| format!("Category ID {category_id} is invalid"))?;
         let values = tags
@@ -415,10 +403,6 @@ pub(crate) fn sync_sessions(database_path: &Path, sessions: &[Session]) -> Resul
         .map_err(|error| error.to_string())?;
     drop(statement);
 
-    let desired_ids = sessions
-        .iter()
-        .map(|session| i64::try_from(session.id).map_err(|_| "session ID is too large".to_string()))
-        .collect::<Result<BTreeSet<_>, _>>()?;
     for session in sessions {
         let id = i64::try_from(session.id).map_err(|_| "session ID is too large".to_string())?;
         let expected = stored.get(&id).ok_or_else(|| {
@@ -440,14 +424,57 @@ pub(crate) fn sync_sessions(database_path: &Path, sessions: &[Session]) -> Resul
             )
             .map_err(|error| error.to_string())?;
     }
-    for id in stored.keys() {
-        if !desired_ids.contains(id) {
-            transaction
-                .execute("DELETE FROM sessions WHERE id = ?1", params![id])
-                .map_err(|error| error.to_string())?;
-        }
-    }
     transaction.commit().map_err(|error| error.to_string())
+}
+
+pub(crate) fn update_session_description(
+    database_path: &Path,
+    session_id: usize,
+    description: &str,
+) -> Result<(), String> {
+    let repository = open_cli_repository(database_path)?;
+    let session_id =
+        i64::try_from(session_id).map_err(|_| "session ID is too large".to_string())?;
+    let changed = repository
+        .connection
+        .execute(
+            "UPDATE sessions SET description = ?1 WHERE id = ?2",
+            params![description, session_id],
+        )
+        .map_err(|error| error.to_string())?;
+    if changed != 1 {
+        return Err(format!("SQLite session {session_id} does not exist"));
+    }
+    Ok(())
+}
+
+pub(crate) fn delete_session(database_path: &Path, session_id: usize) -> Result<(), String> {
+    let repository = open_cli_repository(database_path)?;
+    let session_id =
+        i64::try_from(session_id).map_err(|_| "session ID is too large".to_string())?;
+    let changed = repository
+        .connection
+        .execute("DELETE FROM sessions WHERE id = ?1", params![session_id])
+        .map_err(|error| error.to_string())?;
+    if changed != 1 {
+        return Err(format!("SQLite session {session_id} does not exist"));
+    }
+    Ok(())
+}
+
+pub(crate) fn delete_drift_sessions_for_day(
+    database_path: &Path,
+    operational_day: &str,
+) -> Result<(), String> {
+    let repository = open_cli_repository(database_path)?;
+    repository
+        .connection
+        .execute(
+            "DELETE FROM sessions WHERE category_id = 0 AND operational_day = ?1",
+            params![operational_day],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 pub(crate) fn save_sand_state(database_path: &Path, state: &SandState) -> Result<(), String> {
@@ -722,10 +749,25 @@ mod tests {
             CategoryId::new(0),
         )
         .unwrap();
-        assert_eq!(archived.len(), 1);
-        let reloaded = load_state(&path).unwrap();
+        assert_eq!(archived.len(), 0, "sync alone must not archive absent rows");
+        archive_category(&path, CategoryId::new(1)).unwrap();
+        let mut reloaded = load_state(&path).unwrap();
         assert_eq!(reloaded.loaded_categories.categories[1].name, "Rest");
         assert_eq!(reloaded.archived_categories[0].name, "Work");
+        let restored = reloaded.archived_categories.remove(0);
+        reloaded.loaded_categories.categories.push(restored);
+        sync_categories(
+            &path,
+            &reloaded.loaded_categories.categories,
+            CategoryId::new(0),
+        )
+        .unwrap();
+        let restored = load_state(&path).unwrap();
+        assert_eq!(
+            restored.loaded_categories.categories[2].id,
+            CategoryId::new(1)
+        );
+        assert!(restored.archived_categories.is_empty());
         std::fs::remove_file(path).ok();
     }
 
@@ -773,6 +815,53 @@ mod tests {
         assert_eq!(row.0, "preserved-project");
         assert_eq!(row.1, "edited");
         assert_eq!(row.2, "2026-08-01T12:00:00Z");
+
+        repository
+            .connection
+            .execute(
+                "INSERT INTO sessions (
+                    id, stable_id, project, category_id, description, started_at_utc,
+                    ended_at_utc, operational_day, elapsed_seconds, source
+                 ) VALUES (8, 'concurrent', 'external-project', 1, 'external',
+                    '2026-08-01T14:00:00Z', '2026-08-01T15:00:00Z',
+                    '2026-08-01', 3600, 'cli-runtime')",
+                [],
+            )
+            .unwrap();
+        drop(repository);
+        sync_sessions(&path, &state.loaded_sessions.sessions).unwrap();
+        update_session_description(&path, 7, "explicit-edit").unwrap();
+        let repository = open_cli_repository(&path).unwrap();
+        let preserved: (String, String, String, String) = repository
+            .connection
+            .query_row(
+                "SELECT project, description, started_at_utc, source FROM sessions WHERE id = 7",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(preserved.0, "preserved-project");
+        assert_eq!(preserved.1, "explicit-edit");
+        assert_eq!(preserved.2, "2026-08-01T12:00:00Z");
+        assert_eq!(preserved.3, "cli-runtime");
+        let concurrent_count: i64 = repository
+            .connection
+            .query_row("SELECT count(*) FROM sessions WHERE id = 8", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(concurrent_count, 1);
+        drop(repository);
+        delete_session(&path, 7).unwrap();
+        let repository = open_cli_repository(&path).unwrap();
+        let remaining: i64 = repository
+            .connection
+            .query_row("SELECT count(*) FROM sessions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            remaining, 1,
+            "explicit deletion must not remove concurrent rows"
+        );
         std::fs::remove_file(path).ok();
     }
 

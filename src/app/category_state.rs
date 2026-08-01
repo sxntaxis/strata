@@ -67,7 +67,14 @@ impl App {
 
     pub(super) fn persist_category_tags(&mut self) {
         if let Some(database_path) = self.sqlite_database_path.clone() {
-            let result = sqlite::sync_tui_category_tags(&database_path, &self.category_tags);
+            let category_ids = self
+                .time_tracker
+                .categories_for_storage()
+                .into_iter()
+                .map(|category| category.id)
+                .collect::<Vec<_>>();
+            let result =
+                sqlite::sync_tui_category_tags(&database_path, &self.category_tags, &category_ids);
             self.record_storage_result(result);
         } else {
             let path = storage::get_category_tags_path();
@@ -246,17 +253,39 @@ impl App {
     }
 
     pub(super) fn add_category(&mut self) {
-        if !self.new_category_name.is_empty() {
-            let added = self.time_tracker.add_category(
-                self.new_category_name.clone(),
+        let requested_name = self.new_category_name.trim();
+        if requested_name.is_empty() {
+            return;
+        }
+
+        let restored = self
+            .archived_categories
+            .iter()
+            .position(|category| category.name.eq_ignore_ascii_case(requested_name))
+            .and_then(|index| {
+                let mut category = self.archived_categories[index].clone();
+                category.color = COLORS[self.color_index % COLORS.len()];
+                category.description.clear();
+                self.time_tracker
+                    .restore_category(category)
+                    .then_some((index, self.archived_categories[index].id))
+            });
+
+        let added_id = if let Some((archived_index, category_id)) = restored {
+            self.archived_categories.remove(archived_index);
+            Some(category_id)
+        } else {
+            self.time_tracker.add_category(
+                requested_name.to_string(),
                 String::new(),
                 Some(self.color_index),
-            );
-            if let Some(added_id) = added {
-                self.persist_categories();
-                self.switch_active_category_at(added_id, chrono::Utc::now());
-                self.sync_modal_description_from_selection();
-            }
+            )
+        };
+
+        if let Some(added_id) = added_id {
+            self.persist_categories();
+            self.switch_active_category_at(added_id, chrono::Utc::now());
+            self.sync_modal_description_from_selection();
         }
     }
 
@@ -276,6 +305,15 @@ impl App {
 
             if was_active {
                 self.switch_active_category_at(DRIFT_CATEGORY_ID, chrono::Utc::now());
+            }
+
+            if let Some(category_id) = removed_id
+                && let Some(database_path) = self.sqlite_database_path.clone()
+            {
+                let result = sqlite::archive_tui_category(&database_path, category_id);
+                if self.record_storage_result(result).is_none() {
+                    return;
+                }
             }
 
             if self.time_tracker.delete_category(self.selected_index) {

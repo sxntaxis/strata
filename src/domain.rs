@@ -402,6 +402,28 @@ impl CategoryStore {
         Some(id)
     }
 
+    pub fn restore_category(&mut self, mut category: Category) -> bool {
+        let trimmed = category.name.trim();
+        if category.id == DRIFT_CATEGORY_ID || trimmed.is_empty() {
+            return false;
+        }
+        if self.by_id.contains_key(&category.id)
+            || self
+                .order
+                .iter()
+                .filter_map(|id| self.by_id.get(id))
+                .any(|existing| existing.name.eq_ignore_ascii_case(trimmed))
+        {
+            return false;
+        }
+
+        category.name = trimmed.to_string();
+        self.next_id = self.next_id.max(category.id.0.saturating_add(1));
+        self.order.push(category.id);
+        self.by_id.insert(category.id, category);
+        true
+    }
+
     pub fn delete_by_index(&mut self, index: usize) -> Option<CategoryId> {
         if index == 0 || index >= self.order.len() {
             return None;
@@ -612,6 +634,10 @@ impl TimeTracker {
     ) -> Option<CategoryId> {
         self.category_store
             .add_category(name, description, color_index)
+    }
+
+    pub fn restore_category(&mut self, category: Category) -> bool {
+        self.category_store.restore_category(category)
     }
 
     pub fn delete_category(&mut self, index: usize) -> bool {
@@ -1207,6 +1233,21 @@ mod tests {
             Some(CategoryId::new(0))
         );
         assert_eq!(ordered.len(), 2, "none + one deduped category");
+    }
+
+    #[test]
+    fn test_restore_category_reuses_stable_identity() {
+        let mut tracker = TimeTracker::new();
+        let id = tracker
+            .add_category("Work".to_string(), "focus".to_string(), Some(0))
+            .expect("category should be added");
+        let archived = tracker
+            .category_by_id(id)
+            .cloned()
+            .expect("category should exist");
+        assert!(tracker.delete_category(1));
+        assert!(tracker.restore_category(archived));
+        assert_eq!(tracker.category_id_by_name("Work"), Some(id));
     }
 
     #[test]
