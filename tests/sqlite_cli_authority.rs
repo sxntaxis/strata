@@ -359,3 +359,65 @@ fn activated_tui_runs_and_persists_only_sqlite() {
         "TUI should persist sediment state to SQLite"
     );
 }
+
+#[test]
+fn unacknowledged_cli_stop_is_recovered_without_duplicate_session() {
+    let profile = TestProfile::new("stop-receipt-recovery");
+    profile.migrate();
+    let activation = profile.activate();
+    assert!(
+        activation.status.success(),
+        "activation failed: {}",
+        stderr(&activation)
+    );
+
+    let start = profile.run(&["start", "receipt-project", "--category", "Work"]);
+    assert!(start.status.success(), "start failed: {}", stderr(&start));
+    let first_stop = profile.run(&["stop"]);
+    assert!(
+        first_stop.status.success(),
+        "initial stop failed: {}",
+        stderr(&first_stop)
+    );
+
+    {
+        let connection = Connection::open(profile.database_path()).expect("database should open");
+        let changed = connection
+            .execute(
+                "UPDATE runtime_transitions
+                 SET acknowledged_at_utc = NULL
+                 WHERE operation_kind = 'finish' AND source = 'cli-runtime'",
+                [],
+            )
+            .expect("receipt acknowledgement should be cleared");
+        assert_eq!(changed, 1);
+    }
+
+    let recovered = profile.run(&["stop"]);
+    assert!(
+        recovered.status.success(),
+        "receipt recovery failed: {}",
+        stderr(&recovered)
+    );
+    assert!(stdout(&recovered).contains("Stopped session"));
+
+    let connection = Connection::open(profile.database_path()).expect("database should open");
+    let session_count: i64 = connection
+        .query_row("SELECT count(*) FROM sessions", [], |row| row.get(0))
+        .expect("session count should be readable");
+    let unacknowledged: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM runtime_transitions
+             WHERE operation_kind = 'finish' AND acknowledged_at_utc IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .expect("receipt count should be readable");
+    assert_eq!(session_count, 1, "recovery must not duplicate time");
+    assert_eq!(unacknowledged, 0, "recovered receipt must be acknowledged");
+    drop(connection);
+
+    let repeated = profile.run(&["stop"]);
+    assert!(!repeated.status.success());
+    assert!(stderr(&repeated).contains("No active session"));
+}

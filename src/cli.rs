@@ -1,5 +1,5 @@
 use std::{
-    io,
+    io::{self, Write},
     path::{Path, PathBuf},
 };
 
@@ -318,6 +318,8 @@ pub fn stop_session() -> Result<usize, String> {
                 (elapsed % 3600) / 60,
                 elapsed % 60
             );
+            io::stdout().flush().map_err(|error| error.to_string())?;
+            sqlite::acknowledge_cli_stop(&database_path, &stopped.operation_id)?;
             Ok(elapsed)
         }
     }

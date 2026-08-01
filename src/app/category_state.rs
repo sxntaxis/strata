@@ -17,6 +17,7 @@ impl App {
                 &database_path,
                 &categories,
                 self.time_tracker.active_category_id(),
+                self.session.active_session_stable_id.as_deref(),
             );
             if let Some(archived) = self.record_storage_result(result) {
                 self.archived_categories = archived;

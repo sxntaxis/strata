@@ -10,7 +10,9 @@ use crate::{
     },
 };
 
-use super::{NewActiveSession, SessionCompletion, authority::open_cli_repository};
+use super::{
+    NewActiveSession, SessionCompletion, authority::open_cli_repository, runtime_coordination,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SqliteCliStartResult {
@@ -21,6 +23,7 @@ pub(crate) struct SqliteCliStartResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SqliteCliStopResult {
     pub elapsed_seconds: usize,
+    pub operation_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,15 +66,6 @@ pub(crate) fn start_session(
     category_name: Option<String>,
 ) -> Result<SqliteCliStartResult, String> {
     let mut repository = open_cli_repository(database_path)?;
-    if repository
-        .active_session()
-        .map_err(|error| error.to_string())?
-        .is_some()
-    {
-        return Err(
-            "An active session is already running; stop it before starting another".to_string(),
-        );
-    }
 
     let categories = repository
         .list_categories(false)
@@ -95,16 +89,18 @@ pub(crate) fn start_session(
     let started_at_utc = now.to_rfc3339_opts(SecondsFormat::Millis, true);
     let description = description.unwrap_or_default();
 
-    repository
-        .start_session(&NewActiveSession {
+    runtime_coordination::start_active_session(
+        &mut repository,
+        &NewActiveSession {
             stable_id: &stable_id,
             project: &project,
             category_id: category.id,
             description: &description,
             started_at_utc: &started_at_utc,
             recovery_kind: "live",
-        })
-        .map_err(|error| error.to_string())?;
+        },
+    )
+    .map_err(|error| error.to_string())?;
 
     Ok(SqliteCliStartResult {
         project,
@@ -116,31 +112,51 @@ pub(crate) fn stop_session(database_path: &Path) -> Result<SqliteCliStopResult, 
     let mut repository = open_cli_repository(database_path)?;
     let active = repository
         .active_session()
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "No active session to stop".to_string())?;
-
-    let started_at = DateTime::parse_from_rfc3339(&active.started_at_utc)
-        .map_err(|error| format!("Active session has an invalid start timestamp: {error}"))?
-        .with_timezone(&Utc);
-    let ended_at = Utc::now();
-    let elapsed_i64 = (ended_at - started_at).num_seconds().max(0);
-    let elapsed_seconds = usize::try_from(elapsed_i64)
-        .map_err(|_| "Active session duration exceeds this platform's limits".to_string())?;
-    let operational_day = operational_day_key_for_local(&Local::now())
-        .format("%Y-%m-%d")
-        .to_string();
-    let ended_at_utc = ended_at.to_rfc3339_opts(SecondsFormat::Millis, true);
-
-    repository
-        .finish_active_session(&SessionCompletion {
-            ended_at_utc: &ended_at_utc,
-            operational_day: &operational_day,
-            elapsed_seconds: elapsed_i64,
-            source: "cli-runtime",
-        })
         .map_err(|error| error.to_string())?;
 
-    Ok(SqliteCliStopResult { elapsed_seconds })
+    let receipt = if let Some(active) = active {
+        let started_at = DateTime::parse_from_rfc3339(&active.started_at_utc)
+            .map_err(|error| format!("Active session has an invalid start timestamp: {error}"))?
+            .with_timezone(&Utc);
+        let ended_at = Utc::now();
+        let elapsed_i64 = (ended_at - started_at).num_seconds().max(0);
+        let operational_day = operational_day_key_for_local(&Local::now())
+            .format("%Y-%m-%d")
+            .to_string();
+        let ended_at_utc = ended_at.to_rfc3339_opts(SecondsFormat::Millis, true);
+        let operation_id = format!("finish:{}", active.stable_id);
+        runtime_coordination::finish_active_session(
+            &mut repository,
+            &active.stable_id,
+            &operation_id,
+            &SessionCompletion {
+                ended_at_utc: &ended_at_utc,
+                operational_day: &operational_day,
+                elapsed_seconds: elapsed_i64,
+                source: "cli-runtime",
+            },
+            false,
+        )
+        .map_err(|error| error.to_string())?
+    } else {
+        runtime_coordination::latest_unacknowledged_finish(&repository, "cli-runtime")
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "No active session to stop".to_string())?
+    };
+
+    let elapsed_seconds = usize::try_from(receipt.elapsed_seconds)
+        .map_err(|_| "Active session duration exceeds this platform's limits".to_string())?;
+    Ok(SqliteCliStopResult {
+        elapsed_seconds,
+        operation_id: receipt.operation_id,
+    })
+}
+
+pub(crate) fn acknowledge_stop(database_path: &Path, operation_id: &str) -> Result<(), String> {
+    let mut repository = open_cli_repository(database_path)?;
+    let acknowledged_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+    runtime_coordination::acknowledge_transition(&mut repository, operation_id, &acknowledged_at)
+        .map_err(|error| error.to_string())
 }
 
 pub(crate) fn read_snapshot(database_path: &Path) -> Result<SqliteCliSnapshot, String> {
