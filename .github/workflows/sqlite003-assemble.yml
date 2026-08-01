@@ -11,6 +11,9 @@ on:
       - .tmp/sqlite003.partad
       - .tmp/sqlite003.partae
       - .github/workflows/sqlite003-assemble.yml
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
