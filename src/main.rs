@@ -2,13 +2,7 @@
 
 use std::io;
 
-mod app;
-mod cli;
-mod constants;
-mod domain;
-mod keybindings;
-mod sand;
-mod storage;
+use strata::{app, cli, domain, keybindings, storage};
 
 fn main() -> Result<(), io::Error> {
     if let Ok(loaded) = keybindings::load_keybindings(&storage::get_keymap_path()) {
