@@ -28,7 +28,9 @@ jobs:
           components: rustfmt, clippy
 
       - name: Apply implementation
-        run: python tools/authority001_apply.py
+        run: |
+          python tools/authority001_apply.py
+          python tools/authority001_fix_compile.py
 
       - name: Format
         run: cargo fmt --all
