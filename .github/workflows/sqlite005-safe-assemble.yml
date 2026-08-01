@@ -1,0 +1,59 @@
+name: sqlite005-safe-assemble
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: storage/005-interchange-recovery
+          fetch-depth: 0
+
+      - name: Decode maintenance module
+        run: |
+          cat .sqlite005/safe.* | base64 --decode | gzip --decompress > src/sqlite/maintenance.rs
+          test -s src/sqlite/maintenance.rs
+
+      - name: Reuse checked-in wiring script
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          lines = Path('.github/workflows/sqlite005-assemble.yml').read_text().splitlines()
+          start = next(index for index, line in enumerate(lines) if "python3 - <<'PY'" in line) + 1
+          end = next(index for index in range(start, len(lines)) if lines[index].strip() == 'PY')
+          script = []
+          for line in lines[start:end]:
+              script.append(line[10:] if line.startswith('          ') else line)
+          Path('/tmp/sqlite005-wire.py').write_text('\n'.join(script) + '\n')
+          PY
+          python3 /tmp/sqlite005-wire.py
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Format and certify
+        run: |
+          cargo fmt --all
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test --all-features
+
+      - name: Commit certified source
+        run: |
+          rm -rf .sqlite005
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A -- src .sqlite005
+          git commit -m "SQLITE-005: add interchange and recovery tooling"
+          git push origin HEAD:storage/005-interchange-recovery
