@@ -17,5 +17,5 @@ replace_once(
 replace_once(
     "src/domain.rs",
     "        let start_time = end_local - ChronoDuration::seconds(elapsed as i64);\n        let today = operational_day_key_for_utc(end_local.with_timezone(&Utc))",
-    "        let end_utc = end_local.with_timezone(&Utc);\n        let start_time = end_local - ChronoDuration::seconds(elapsed as i64);\n        let today = operational_day_key_for_utc(end_utc)",
+    "        let end_utc = end_local.with_timezone(&Utc);\n        let start_time = end_local.clone() - ChronoDuration::seconds(elapsed as i64);\n        let today = operational_day_key_for_utc(end_utc)",
 )
