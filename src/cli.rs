@@ -131,6 +131,13 @@ pub fn start_session(
         .find(|c| c.name == cat_name || c.id.0.to_string() == cat_name)
         .ok_or_else(|| format!("Category '{}' not found", cat_name))?;
 
+    let session_path = storage::get_active_session_path();
+    if storage::file_exists(&session_path) {
+        return Err(
+            "An active session is already running; stop it before starting another".to_string(),
+        );
+    }
+
     let session = ActiveSession {
         project: project.clone(),
         description: description.unwrap_or_default(),
@@ -139,7 +146,6 @@ pub fn start_session(
         start_time: Utc::now(),
     };
 
-    let session_path = storage::get_active_session_path();
     storage::write_json_atomic(&session_path, &session)?;
 
     println!(
