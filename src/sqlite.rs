@@ -3,7 +3,9 @@ use std::{path::Path, time::Duration};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use thiserror::Error;
 
-const CURRENT_SCHEMA_VERSION: i64 = 1;
+mod legacy_import;
+
+const CURRENT_SCHEMA_VERSION: i64 = 2;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 const MIGRATION_1: &str = r#"
@@ -127,6 +129,73 @@ VALUES ('storage_authority', 'sqlite-candidate');
 PRAGMA user_version = 1;
 "#;
 
+const MIGRATION_2: &str = r#"
+CREATE TABLE legacy_imports (
+    id INTEGER PRIMARY KEY,
+    source_fingerprint TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'verified')),
+    source_manifest_json TEXT NOT NULL,
+    utc_offset_seconds INTEGER NOT NULL
+        CHECK (utc_offset_seconds BETWEEN -86399 AND 86399),
+    operational_day_start_minutes INTEGER NOT NULL
+        CHECK (operational_day_start_minutes BETWEEN 0 AND 1439),
+    quantum_seconds INTEGER NOT NULL CHECK (quantum_seconds > 0),
+    category_count INTEGER NOT NULL CHECK (category_count >= 0),
+    session_count INTEGER NOT NULL CHECK (session_count >= 0),
+    total_elapsed_seconds INTEGER NOT NULL CHECK (total_elapsed_seconds >= 0),
+    active_session_present INTEGER NOT NULL
+        CHECK (active_session_present IN (0, 1)),
+    checkpoint_present INTEGER NOT NULL
+        CHECK (checkpoint_present IN (0, 1)),
+    sand_state_present INTEGER NOT NULL
+        CHECK (sand_state_present IN (0, 1)),
+    snapshot_count INTEGER NOT NULL CHECK (snapshot_count >= 0),
+    verification_json TEXT,
+    started_at_utc TEXT NOT NULL,
+    completed_at_utc TEXT
+) STRICT;
+
+CREATE TABLE category_tags (
+    category_id INTEGER NOT NULL,
+    ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+    tag TEXT NOT NULL CHECK (length(trim(tag)) > 0),
+    legacy_import_id INTEGER,
+    PRIMARY KEY (category_id, ordinal),
+    UNIQUE (category_id, tag),
+    FOREIGN KEY (category_id) REFERENCES categories(id)
+        ON UPDATE RESTRICT
+        ON DELETE CASCADE,
+    FOREIGN KEY (legacy_import_id) REFERENCES legacy_imports(id)
+        ON DELETE RESTRICT
+) STRICT;
+
+ALTER TABLE sessions
+    ADD COLUMN legacy_import_id INTEGER
+        REFERENCES legacy_imports(id) ON DELETE RESTRICT;
+ALTER TABLE active_session
+    ADD COLUMN legacy_import_id INTEGER
+        REFERENCES legacy_imports(id) ON DELETE RESTRICT;
+ALTER TABLE runtime_checkpoint
+    ADD COLUMN legacy_import_id INTEGER
+        REFERENCES legacy_imports(id) ON DELETE RESTRICT;
+ALTER TABLE sand_state
+    ADD COLUMN legacy_import_id INTEGER
+        REFERENCES legacy_imports(id) ON DELETE RESTRICT;
+ALTER TABLE sand_snapshots
+    ADD COLUMN legacy_import_id INTEGER
+        REFERENCES legacy_imports(id) ON DELETE RESTRICT;
+
+CREATE INDEX sessions_legacy_import_index
+    ON sessions(legacy_import_id, id);
+CREATE INDEX sand_snapshots_legacy_import_index
+    ON sand_snapshots(legacy_import_id, id);
+
+INSERT INTO schema_migrations(version, applied_at_utc)
+VALUES (2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+
+PRAGMA user_version = 2;
+"#;
+
 #[derive(Debug, Error)]
 pub(crate) enum SqliteStoreError {
     #[error("SQLite error: {0}")]
@@ -177,7 +246,8 @@ impl SqliteRepository {
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "synchronous", "NORMAL")?;
 
-        let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        let mut version: i64 =
+            connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
         if version > CURRENT_SCHEMA_VERSION {
             return Err(SqliteStoreError::UnsupportedSchema {
                 found: version,
@@ -189,6 +259,14 @@ impl SqliteRepository {
             let transaction =
                 connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
             transaction.execute_batch(MIGRATION_1)?;
+            transaction.commit()?;
+            version = 1;
+        }
+
+        if version < 2 {
+            let transaction =
+                connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(MIGRATION_2)?;
             transaction.commit()?;
         }
 
@@ -335,7 +413,7 @@ mod tests {
     fn new_database_applies_schema_and_idle_category() {
         let repository = SqliteRepository::open_in_memory().expect("database should open");
 
-        assert_eq!(repository.schema_version().unwrap(), 1);
+        assert_eq!(repository.schema_version().unwrap(), 2);
         assert_eq!(repository.integrity_check().unwrap(), "ok");
         let idle: (String, i64) = repository
             .connection
@@ -346,6 +424,73 @@ mod tests {
             )
             .unwrap();
         assert_eq!(idle, ("idle".to_string(), 0));
+
+        let import_table: String = repository
+            .connection
+            .query_row(
+                "SELECT name FROM sqlite_schema
+                 WHERE type = 'table' AND name = 'legacy_imports'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(import_table, "legacy_imports");
+    }
+
+    #[test]
+    fn version_one_database_is_upgraded_without_losing_history() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(MIGRATION_1).unwrap();
+        connection
+            .execute(
+                "INSERT INTO categories(id, name, color_index, balance_effect)
+                 VALUES (1, 'Study', 1, 1)",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO sessions (
+                    id,
+                    stable_id,
+                    project,
+                    category_id,
+                    description,
+                    started_at_utc,
+                    ended_at_utc,
+                    operational_day,
+                    elapsed_seconds,
+                    source
+                ) VALUES (
+                    7,
+                    'existing-session',
+                    '',
+                    1,
+                    '',
+                    '2026-08-01T10:00:00Z',
+                    '2026-08-01T11:00:00Z',
+                    '2026-08-01',
+                    3600,
+                    'runtime'
+                )",
+                [],
+            )
+            .unwrap();
+
+        let repository =
+            SqliteRepository::from_connection(connection).expect("migration should succeed");
+
+        assert_eq!(repository.schema_version().unwrap(), 2);
+        assert_eq!(repository.completed_session_count().unwrap(), 1);
+        let legacy_import_id: Option<i64> = repository
+            .connection
+            .query_row(
+                "SELECT legacy_import_id FROM sessions WHERE id = 7",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(legacy_import_id, None);
     }
 
     #[test]
