@@ -8,7 +8,7 @@ interfaces = ["tui", "cli"]
 storage = ["csv", "files"]
 
 [authority]
-canonical = "Accepted docs, Rust source, tests, and verified runtime behavior"
+canonical = "Accepted docs, Rust source, embedded tests, CI, and verified runtime behavior"
 projections = ["terminal UI", "CLI reports", "CSV/JSON/ICS exports", "sediment visualization"]
 
 [commands]
@@ -20,14 +20,14 @@ smoke = "cargo run -- --help"
 max_lines = 220
 
 [architecture]
-source_roots = ["src", "tests"]
+source_roots = ["src"]
 warn_file_lines = 500
 
 [[components]]
 name = "runtime"
 path = "src"
 status = "supported"
-rationale = "Rust application containing the TUI, CLI, domain, storage, and sediment simulation"
+rationale = "Rust application containing the TUI, CLI, domain, storage, sediment simulation, and embedded tests"
 remove_by = ""
 
 [[components]]
