@@ -26,6 +26,6 @@ replace_once(
 )
 replace_once(
     "src/domain.rs",
-    "    DateTime, Datelike, Duration as ChronoDuration, FixedOffset, Local, NaiveDate, Utc,",
-    "    DateTime, Datelike, Duration as ChronoDuration, FixedOffset, NaiveDate, Utc,",
+    "    DateTime, Datelike, Duration as ChronoDuration, FixedOffset, Local, NaiveDate, Utc,\n};\nuse ratatui::style::Color;",
+    "    DateTime, Datelike, Duration as ChronoDuration, FixedOffset, NaiveDate, Utc,\n};\n#[cfg(test)]\nuse chrono::Local;\nuse ratatui::style::Color;",
 )
