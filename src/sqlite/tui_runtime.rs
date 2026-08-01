@@ -16,13 +16,13 @@ use crate::{
 };
 
 use super::{
-    NewActiveSession, SessionCompletion,
-    authority::open_cli_repository,
-    repository::{CheckpointRecord, CheckpointStatus, SandStateRecord},
+    NewActiveSession, SessionCompletion, authority::open_cli_repository,
+    repository::SandStateRecord, runtime_coordination,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SqliteTuiActiveSession {
+    pub stable_id: String,
     pub category_id: CategoryId,
     pub description: String,
     pub started_at_utc: DateTime<Utc>,
@@ -120,6 +120,7 @@ pub(crate) fn load_state(database_path: &Path) -> Result<SqliteTuiState, String>
                 .map_err(|error| format!("Invalid active-session timestamp: {error}"))?
                 .with_timezone(&Utc);
             Ok::<SqliteTuiActiveSession, String>(SqliteTuiActiveSession {
+                stable_id: row.stable_id,
                 category_id: CategoryId::new(category_id),
                 description: row.description,
                 started_at_utc,
@@ -150,121 +151,122 @@ pub(crate) fn ensure_active_session(
     category_id: CategoryId,
     description: &str,
     started_at_utc: DateTime<Utc>,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let mut repository = open_cli_repository(database_path)?;
-    if repository
-        .active_session()
-        .map_err(|error| error.to_string())?
-        .is_some()
-    {
-        return Ok(());
-    }
     let stable_id = stable_id("tui", started_at_utc);
     let started = timestamp(started_at_utc);
-    repository
-        .start_session(&NewActiveSession {
+    runtime_coordination::start_active_session(
+        &mut repository,
+        &NewActiveSession {
             stable_id: &stable_id,
             project: "",
             category_id: as_i64(category_id.0, "category ID")?,
             description,
             started_at_utc: &started,
             recovery_kind: "live",
-        })
-        .map_err(|error| error.to_string())
+        },
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(stable_id)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn switch_active_session(
     database_path: &Path,
+    expected_active_stable_id: &str,
+    operation_id: &str,
+    next_stable_id: &str,
     next_category_id: CategoryId,
     next_description: &str,
     switched_at_utc: DateTime<Utc>,
     operational_day: &str,
     elapsed_seconds: usize,
-) -> Result<i64, String> {
+) -> Result<runtime_coordination::RuntimeTransitionReceipt, String> {
     let mut repository = open_cli_repository(database_path)?;
     let switched = timestamp(switched_at_utc);
-    let stable_id = stable_id("tui", switched_at_utc);
-    repository
-        .switch_active_session(
-            &SessionCompletion {
-                ended_at_utc: &switched,
-                operational_day,
-                elapsed_seconds: as_i64(elapsed_seconds as u64, "elapsed seconds")?,
-                source: "tui-runtime",
-            },
-            &NewActiveSession {
-                stable_id: &stable_id,
-                project: "",
-                category_id: as_i64(next_category_id.0, "category ID")?,
-                description: next_description,
-                started_at_utc: &switched,
-                recovery_kind: "live",
-            },
-        )
-        .map_err(|error| error.to_string())
+    runtime_coordination::switch_active_session(
+        &mut repository,
+        expected_active_stable_id,
+        operation_id,
+        &SessionCompletion {
+            ended_at_utc: &switched,
+            operational_day,
+            elapsed_seconds: as_i64(elapsed_seconds as u64, "elapsed seconds")?,
+            source: "tui-runtime",
+        },
+        &NewActiveSession {
+            stable_id: next_stable_id,
+            project: "",
+            category_id: as_i64(next_category_id.0, "category ID")?,
+            description: next_description,
+            started_at_utc: &switched,
+            recovery_kind: "live",
+        },
+    )
+    .map_err(|error| error.to_string())
 }
 
 pub(crate) fn finish_active_session(
     database_path: &Path,
+    expected_active_stable_id: &str,
+    operation_id: &str,
     ended_at_utc: DateTime<Utc>,
     operational_day: &str,
     elapsed_seconds: usize,
-) -> Result<i64, String> {
+) -> Result<runtime_coordination::RuntimeTransitionReceipt, String> {
     let mut repository = open_cli_repository(database_path)?;
     let ended = timestamp(ended_at_utc);
-    repository
-        .finish_active_session(&SessionCompletion {
+    runtime_coordination::finish_active_session(
+        &mut repository,
+        expected_active_stable_id,
+        operation_id,
+        &SessionCompletion {
             ended_at_utc: &ended,
             operational_day,
             elapsed_seconds: as_i64(elapsed_seconds as u64, "elapsed seconds")?,
             source: "tui-runtime",
-        })
-        .map_err(|error| error.to_string())
+        },
+        true,
+    )
+    .map_err(|error| error.to_string())
 }
 
 pub(crate) fn reset_active_session(
     database_path: &Path,
+    expected_active_stable_id: &str,
+    operation_id: &str,
+    next_stable_id: &str,
     started_at_utc: DateTime<Utc>,
-) -> Result<(), String> {
+) -> Result<runtime_coordination::RuntimeTransitionReceipt, String> {
     let mut repository = open_cli_repository(database_path)?;
-    let transaction = repository
-        .connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(|error| error.to_string())?;
-    let active = transaction
-        .query_row(
-            "SELECT project, category_id, description FROM active_session WHERE singleton = 1",
-            [],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            },
-        )
-        .optional()
+    let active = repository
+        .active_session()
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "there is no active TUI session to reset".to_string())?;
-    transaction
-        .execute("DELETE FROM active_session WHERE singleton = 1", [])
-        .map_err(|error| error.to_string())?;
-    let stable_id = stable_id("tui-reset", started_at_utc);
-    transaction
-        .execute(
-            "INSERT INTO active_session (
-                singleton, stable_id, project, category_id, description, started_at_utc, recovery_kind
-             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, 'live')",
-            params![stable_id, active.0, active.1, active.2, timestamp(started_at_utc)],
-        )
-        .map_err(|error| error.to_string())?;
-    transaction.commit().map_err(|error| error.to_string())
+    let started = timestamp(started_at_utc);
+    runtime_coordination::reset_active_session(
+        &mut repository,
+        expected_active_stable_id,
+        operation_id,
+        &NewActiveSession {
+            stable_id: next_stable_id,
+            project: &active.project,
+            category_id: active.category_id,
+            description: &active.description,
+            started_at_utc: &started,
+            recovery_kind: "live",
+        },
+        &started,
+        "tui-runtime",
+    )
+    .map_err(|error| error.to_string())
 }
 
 pub(crate) fn sync_categories(
     database_path: &Path,
     categories: &[Category],
     active_category_id: CategoryId,
+    expected_active_stable_id: Option<&str>,
 ) -> Result<Vec<Category>, String> {
     let mut repository = open_cli_repository(database_path)?;
     let transaction = repository
@@ -319,17 +321,35 @@ pub(crate) fn sync_categories(
             .map_err(|error| error.to_string())?;
     }
 
-    let active_description = categories
-        .iter()
-        .find(|category| category.id == active_category_id)
-        .map(|category| category.description.as_str())
-        .unwrap_or_default();
-    transaction
-        .execute(
-            "UPDATE active_session SET description = ?1 WHERE singleton = 1 AND category_id = ?2",
-            params![active_description, active_id],
-        )
-        .map_err(|error| error.to_string())?;
+    if let Some(expected_active_stable_id) = expected_active_stable_id {
+        let active_description = categories
+            .iter()
+            .find(|category| category.id == active_category_id)
+            .map(|category| category.description.as_str())
+            .unwrap_or_default();
+        let changed = transaction
+            .execute(
+                "UPDATE active_session SET description = ?1
+                 WHERE singleton = 1 AND category_id = ?2 AND stable_id = ?3",
+                params![active_description, active_id, expected_active_stable_id],
+            )
+            .map_err(|error| error.to_string())?;
+        if changed != 1 {
+            let actual: Option<String> = transaction
+                .query_row(
+                    "SELECT stable_id FROM active_session WHERE singleton = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|error| error.to_string())?;
+            return Err(format!(
+                "active session changed concurrently; expected {}, found {}",
+                expected_active_stable_id,
+                actual.unwrap_or_else(|| "no active session".to_string())
+            ));
+        }
+    }
     transaction.commit().map_err(|error| error.to_string())?;
 
     Ok(load_state(database_path)?.archived_categories)
@@ -592,47 +612,99 @@ pub(crate) fn delete_daily_snapshot(
     Ok(())
 }
 
+#[derive(Debug)]
+pub(crate) struct SqliteClaimedCheckpoint<T> {
+    pub active_session_stable_id: Option<String>,
+    pub payload: T,
+}
+
 pub(crate) fn save_checkpoint<T: Serialize>(
     database_path: &Path,
+    expected_active_stable_id: &str,
     detached_at_utc: DateTime<Utc>,
     simulation_time_utc: DateTime<Utc>,
     payload: &T,
 ) -> Result<(), String> {
     let mut repository = open_cli_repository(database_path)?;
-    let active_stable_id = repository
-        .active_session()
-        .map_err(|error| error.to_string())?
-        .map(|active| active.stable_id);
     let payload_json = serde_json::to_string(payload).map_err(|error| error.to_string())?;
-    repository
-        .save_checkpoint(&CheckpointRecord {
-            status: CheckpointStatus::Pending,
-            detached_at_utc: timestamp(detached_at_utc),
-            simulation_time_utc: timestamp(simulation_time_utc),
-            active_session_stable_id: active_stable_id,
-            payload_json,
-        })
-        .map_err(|error| error.to_string())
+    runtime_coordination::save_checkpoint(
+        &mut repository,
+        expected_active_stable_id,
+        &timestamp(detached_at_utc),
+        &timestamp(simulation_time_utc),
+        &payload_json,
+    )
+    .map_err(|error| error.to_string())
 }
 
 pub(crate) fn load_checkpoint<T: DeserializeOwned>(
     database_path: &Path,
-) -> Result<Option<T>, String> {
-    let repository = open_cli_repository(database_path)?;
-    repository
-        .checkpoint()
+) -> Result<Option<SqliteClaimedCheckpoint<T>>, String> {
+    let mut repository = open_cli_repository(database_path)?;
+    let Some(claimed) = runtime_coordination::claim_checkpoint(&mut repository)
         .map_err(|error| error.to_string())?
-        .map(|record| serde_json::from_str(&record.payload_json).map_err(|error| error.to_string()))
-        .transpose()
+    else {
+        return Ok(None);
+    };
+    match serde_json::from_str(&claimed.payload_json) {
+        Ok(payload) => Ok(Some(SqliteClaimedCheckpoint {
+            active_session_stable_id: claimed.active_session_stable_id,
+            payload,
+        })),
+        Err(error) => {
+            runtime_coordination::quarantine_checkpoint(&mut repository)
+                .map_err(|quarantine_error| quarantine_error.to_string())?;
+            Err(format!("Invalid runtime checkpoint payload: {error}"))
+        }
+    }
+}
+
+pub(crate) fn quarantine_checkpoint(database_path: &Path) -> Result<(), String> {
+    let mut repository = open_cli_repository(database_path)?;
+    runtime_coordination::quarantine_checkpoint(&mut repository).map_err(|error| error.to_string())
+}
+
+pub(crate) fn commit_checkpoint_recovery(
+    database_path: &Path,
+    expected_active_stable_id: &str,
+    operational_day: &str,
+    state: &SandState,
+) -> Result<(), String> {
+    let mut repository = open_cli_repository(database_path)?;
+    let existing = repository.sand_state().map_err(|error| error.to_string())?;
+    let formation_id = existing
+        .as_ref()
+        .map(|record| record.formation_id.as_str())
+        .unwrap_or("default");
+    let quantum_seconds = existing
+        .as_ref()
+        .map(|record| record.quantum_seconds)
+        .unwrap_or(1);
+    let now = timestamp(Utc::now());
+    let payload_json = serde_json::to_string(state).map_err(|error| error.to_string())?;
+    runtime_coordination::commit_checkpoint_recovery(
+        &mut repository,
+        expected_active_stable_id,
+        operational_day,
+        &SandStateRecord {
+            formation_id: formation_id.to_string(),
+            quantum_seconds,
+            grid_width: i64::try_from(state.grid_width)
+                .map_err(|_| "sand width is too large".to_string())?,
+            grid_height: i64::try_from(state.grid_height)
+                .map_err(|_| "sand height is too large".to_string())?,
+            payload_json,
+            updated_at_utc: now.clone(),
+        },
+        &now,
+    )
+    .map_err(|error| error.to_string())
 }
 
 pub(crate) fn clear_checkpoint(database_path: &Path) -> Result<(), String> {
-    let repository = open_cli_repository(database_path)?;
-    repository
-        .connection
-        .execute("DELETE FROM runtime_checkpoint WHERE singleton = 1", [])
-        .map_err(|error| error.to_string())?;
-    Ok(())
+    let mut repository = open_cli_repository(database_path)?;
+    runtime_coordination::clear_committed_checkpoint(&mut repository)
+        .map_err(|error| error.to_string())
 }
 
 fn category_from_row(
@@ -747,6 +819,7 @@ mod tests {
             &path,
             &state.loaded_categories.categories,
             CategoryId::new(0),
+            None,
         )
         .unwrap();
         assert_eq!(archived.len(), 0, "sync alone must not archive absent rows");
@@ -760,6 +833,7 @@ mod tests {
             &path,
             &reloaded.loaded_categories.categories,
             CategoryId::new(0),
+            None,
         )
         .unwrap();
         let restored = load_state(&path).unwrap();
@@ -872,6 +946,16 @@ mod tests {
         repository
             .transition_storage_authority("sqlite-candidate", "sqlite-cli", "2026-08-01T12:00:00Z")
             .unwrap();
+        repository
+            .start_session(&NewActiveSession {
+                stable_id: "checkpoint-active",
+                project: "",
+                category_id: 0,
+                description: "",
+                started_at_utc: "2026-08-01T12:00:00Z",
+                recovery_kind: "live",
+            })
+            .unwrap();
         drop(repository);
         let state = SandState {
             version: SandState::VERSION,
@@ -886,6 +970,7 @@ mod tests {
         save_daily_snapshot(&path, "2026-08-01", &state).unwrap();
         save_checkpoint(
             &path,
+            "checkpoint-active",
             Utc::now(),
             Utc::now(),
             &BTreeMap::from([("status", "detached")]),
@@ -894,10 +979,15 @@ mod tests {
         assert_eq!(load_sand_state(&path).unwrap(), Some(state.clone()));
         assert_eq!(
             load_daily_snapshot(&path, "2026-08-01").unwrap(),
-            Some(state)
+            Some(state.clone())
         );
-        let checkpoint: Option<BTreeMap<String, String>> = load_checkpoint(&path).unwrap();
-        assert_eq!(checkpoint.unwrap().get("status").unwrap(), "detached");
+        let checkpoint: Option<SqliteClaimedCheckpoint<BTreeMap<String, String>>> =
+            load_checkpoint(&path).unwrap();
+        assert_eq!(
+            checkpoint.unwrap().payload.get("status").unwrap(),
+            "detached"
+        );
+        commit_checkpoint_recovery(&path, "checkpoint-active", "2026-08-01", &state).unwrap();
         clear_checkpoint(&path).unwrap();
         assert!(
             load_checkpoint::<BTreeMap<String, String>>(&path)

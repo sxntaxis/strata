@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Local, SecondsFormat, Utc};
 use crossterm::{
     event::{self, Event},
     execute,
@@ -121,6 +121,7 @@ struct DetachedRuntimeCheckpoint {
 
 struct SessionState {
     blink_state: i32,
+    active_session_stable_id: Option<String>,
     active_session_started_at_utc: Option<DateTime<Utc>>,
     none_entry_time: Option<Instant>,
 }
@@ -176,6 +177,7 @@ struct App {
     render_needed: bool,
     sqlite_database_path: Option<PathBuf>,
     archived_categories: Vec<Category>,
+    checkpoint_recovery_active: bool,
     storage_error: Option<String>,
 }
 
@@ -269,6 +271,7 @@ impl App {
             sand_engine: SandEngine::new(width, height),
             session: SessionState {
                 blink_state: 0,
+                active_session_stable_id: None,
                 active_session_started_at_utc: None,
                 none_entry_time: None,
             },
@@ -317,6 +320,7 @@ impl App {
             render_needed: true,
             sqlite_database_path,
             archived_categories,
+            checkpoint_recovery_active: false,
             storage_error: None,
         };
 
@@ -336,6 +340,7 @@ impl App {
                 let _ = app
                     .time_tracker
                     .set_category_description_by_id(active.category_id, active.description);
+                app.session.active_session_stable_id = Some(active.stable_id);
                 app.begin_active_session_at(active.started_at_utc);
             } else {
                 app.begin_active_session_now();
@@ -345,6 +350,7 @@ impl App {
         }
 
         app.sync_drift_idle_state();
+        app.commit_checkpoint_recovery_if_ready();
         if let Some(error) = app.storage_error.take() {
             return Err(error);
         }
@@ -384,7 +390,9 @@ impl App {
             &description,
             started_at,
         );
-        self.record_storage_result(result);
+        if let Some(stable_id) = self.record_storage_result(result) {
+            self.session.active_session_stable_id = Some(stable_id);
+        }
     }
 
     fn reload_sqlite_sessions(&mut self) -> bool {
@@ -401,15 +409,31 @@ impl App {
     }
 
     fn reset_active_session_at(&mut self, started_at_utc: DateTime<Utc>) {
-        if let Some(database_path) = self.sqlite_database_path.clone()
-            && self
-                .record_storage_result(sqlite::reset_tui_active_session(
-                    &database_path,
-                    started_at_utc,
-                ))
-                .is_none()
-        {
-            return;
+        if let Some(database_path) = self.sqlite_database_path.clone() {
+            let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
+                self.record_storage_result::<()>(Err(
+                    "SQLite runtime has no active stable identity to reset".to_string(),
+                ));
+                return;
+            };
+            let operation_id = self.transition_operation_id(
+                "reset",
+                &expected_stable_id,
+                started_at_utc,
+                "active",
+            );
+            let next_stable_id = format!("tui-active:{operation_id}");
+            let result = sqlite::reset_tui_active_session(
+                &database_path,
+                &expected_stable_id,
+                &operation_id,
+                &next_stable_id,
+                started_at_utc,
+            );
+            let Some(receipt) = self.record_storage_result(result) else {
+                return;
+            };
+            self.session.active_session_stable_id = receipt.resulting_active_stable_id;
         }
         self.begin_active_session_at(started_at_utc);
     }
@@ -926,11 +950,20 @@ impl App {
         let ended_local = clamped_end.with_timezone(&Local);
 
         if let Some(database_path) = self.sqlite_database_path.clone() {
+            let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
+                self.record_storage_result::<()>(Err(
+                    "SQLite runtime has no active stable identity to finish".to_string(),
+                ));
+                return None;
+            };
             let operational_day = operational_day_key_for_local(&ended_local)
                 .format("%Y-%m-%d")
                 .to_string();
+            let operation_id = format!("finish:{expected_stable_id}");
             self.record_storage_result(sqlite::finish_tui_active_session(
                 &database_path,
+                &expected_stable_id,
+                &operation_id,
                 clamped_end,
                 &operational_day,
                 elapsed,
@@ -940,6 +973,7 @@ impl App {
                 .time_tracker
                 .set_category_description_by_id(active_category_id, String::new());
             self.time_tracker.current_session_start = None;
+            self.session.active_session_stable_id = None;
             self.session.active_session_started_at_utc = None;
             self.reload_sqlite_sessions();
             self.persist_categories();
@@ -967,6 +1001,12 @@ impl App {
         }
 
         if let Some(database_path) = self.sqlite_database_path.clone() {
+            let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
+                self.record_storage_result::<()>(Err(
+                    "SQLite runtime has no active stable identity to switch".to_string(),
+                ));
+                return false;
+            };
             let start_utc = self
                 .session
                 .active_session_started_at_utc
@@ -984,19 +1024,27 @@ impl App {
                 .category_description_by_id(category_id)
                 .unwrap_or_default()
                 .to_string();
-            if self
-                .record_storage_result(sqlite::switch_tui_active_session(
-                    &database_path,
-                    category_id,
-                    &next_description,
-                    switched_at_utc,
-                    &operational_day,
-                    elapsed,
-                ))
-                .is_none()
-            {
+            let operation_id = self.transition_operation_id(
+                "switch",
+                &expected_stable_id,
+                switched_at_utc,
+                &category_id.0.to_string(),
+            );
+            let next_stable_id = format!("tui-active:{operation_id}");
+            let result = sqlite::switch_tui_active_session(
+                &database_path,
+                &expected_stable_id,
+                &operation_id,
+                &next_stable_id,
+                category_id,
+                &next_description,
+                switched_at_utc,
+                &operational_day,
+                elapsed,
+            );
+            let Some(receipt) = self.record_storage_result(result) else {
                 return false;
-            }
+            };
             let previous_category_id = self.time_tracker.active_category_id();
             let _ = self
                 .time_tracker
@@ -1004,6 +1052,7 @@ impl App {
             if !self.time_tracker.set_active_category_by_id(category_id) {
                 return false;
             }
+            self.session.active_session_stable_id = receipt.resulting_active_stable_id;
             self.begin_active_session_at(switched_at_utc);
             self.reload_sqlite_sessions();
             self.persist_categories();
@@ -1022,6 +1071,22 @@ impl App {
         self.sync_drift_idle_state();
 
         true
+    }
+
+    fn transition_operation_id(
+        &self,
+        kind: &str,
+        expected_stable_id: &str,
+        at_utc: DateTime<Utc>,
+        discriminator: &str,
+    ) -> String {
+        format!(
+            "{}:{}:{}:{}",
+            kind,
+            expected_stable_id,
+            at_utc.to_rfc3339_opts(SecondsFormat::Nanos, true),
+            discriminator
+        )
     }
 
     fn simulation_backlog_duration_at(&self, now_utc: DateTime<Utc>) -> Duration {
@@ -1173,6 +1238,7 @@ impl App {
                 Some(Instant::now() + Duration::from_millis(CATCHUP_SETTINGS.gauge_hold_ms));
         }
         self.simulation.catchup_was_active = now_catching;
+        self.commit_checkpoint_recovery_if_ready();
     }
 
     fn finalize_catchup_transition(&mut self) {
@@ -1476,6 +1542,9 @@ impl App {
     }
 
     fn persist_detached_checkpoint(&mut self) {
+        if self.checkpoint_recovery_active {
+            return;
+        }
         let active_category_id = self.time_tracker.active_category_id();
         let active_description = self
             .time_tracker
@@ -1521,8 +1590,15 @@ impl App {
         };
 
         if let Some(database_path) = self.sqlite_database_path.clone() {
+            let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
+                self.record_storage_result::<()>(Err(
+                    "SQLite runtime has no active stable identity to checkpoint".to_string(),
+                ));
+                return;
+            };
             let result = sqlite::save_tui_checkpoint(
                 &database_path,
+                &expected_stable_id,
                 checkpoint.detached_at_utc,
                 checkpoint.simulation_time_utc,
                 &checkpoint,
@@ -1549,31 +1625,47 @@ impl App {
     }
 
     fn restore_from_detached_checkpoint(&mut self) -> bool {
-        let checkpoint: DetachedRuntimeCheckpoint =
-            if let Some(database_path) = self.sqlite_database_path.clone() {
-                match sqlite::load_tui_checkpoint(&database_path) {
-                    Ok(Some(value)) => value,
-                    Ok(None) => return false,
-                    Err(error) => {
-                        self.record_storage_result::<()>(Err(error));
+        let checkpoint: DetachedRuntimeCheckpoint = if let Some(database_path) =
+            self.sqlite_database_path.clone()
+        {
+            match sqlite::load_tui_checkpoint(&database_path) {
+                Ok(Some(claimed)) => {
+                    let Some(active_stable_id) = claimed.active_session_stable_id else {
+                        let _ = sqlite::quarantine_tui_checkpoint(&database_path);
+                        self.record_storage_result::<()>(Err(
+                            "SQLite recovery checkpoint has no active stable identity".to_string(),
+                        ));
                         return false;
-                    }
+                    };
+                    self.session.active_session_stable_id = Some(active_stable_id);
+                    self.checkpoint_recovery_active = true;
+                    claimed.payload
                 }
-            } else {
-                let path = storage::get_detached_runtime_path();
-                if !storage::file_exists(&path) {
+                Ok(None) => return false,
+                Err(error) => {
+                    self.record_storage_result::<()>(Err(error));
                     return false;
                 }
-                match storage::read_json(&path) {
-                    Ok(value) => value,
-                    Err(error) => {
-                        self.record_storage_result::<()>(Err(error));
-                        return false;
-                    }
+            }
+        } else {
+            let path = storage::get_detached_runtime_path();
+            if !storage::file_exists(&path) {
+                return false;
+            }
+            match storage::read_json(&path) {
+                Ok(value) => value,
+                Err(error) => {
+                    self.record_storage_result::<()>(Err(error));
+                    return false;
                 }
-            };
+            }
+        };
 
         if checkpoint.schema_version != 1 {
+            if let Some(database_path) = self.sqlite_database_path.clone() {
+                let _ = sqlite::quarantine_tui_checkpoint(&database_path);
+                self.checkpoint_recovery_active = false;
+            }
             self.record_storage_result::<()>(Err(format!(
                 "unsupported detached checkpoint schema {}",
                 checkpoint.schema_version
@@ -1635,8 +1727,50 @@ impl App {
             .make_contiguous()
             .sort_by(|a, b| a.execute_at_utc.cmp(&b.execute_at_utc));
 
-        self.clear_detached_checkpoint();
+        if self.sqlite_database_path.is_none() {
+            self.clear_detached_checkpoint();
+        }
         true
+    }
+
+    fn commit_checkpoint_recovery_if_ready(&mut self) {
+        if !self.checkpoint_recovery_active
+            || self.is_catching_up()
+            || !self.simulation.pending_mutations.is_empty()
+        {
+            return;
+        }
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            self.checkpoint_recovery_active = false;
+            return;
+        };
+        let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
+            self.record_storage_result::<()>(Err(
+                "SQLite recovery has no active stable identity to commit".to_string(),
+            ));
+            return;
+        };
+        let state = self.sand_engine.snapshot_state();
+        let operational_day = crate::domain::operational_day_key_now()
+            .format("%Y-%m-%d")
+            .to_string();
+        if self
+            .record_storage_result(sqlite::commit_tui_checkpoint_recovery(
+                &database_path,
+                &expected_stable_id,
+                &operational_day,
+                &state,
+            ))
+            .is_none()
+        {
+            return;
+        }
+        if self
+            .record_storage_result(sqlite::clear_tui_checkpoint(&database_path))
+            .is_some()
+        {
+            self.checkpoint_recovery_active = false;
+        }
     }
 
     fn next_blink_interval(&self) -> i32 {
@@ -1707,7 +1841,13 @@ pub fn run_ui() -> Result<(), io::Error> {
     }
 
     if runtime_error.is_none() {
-        if app.detach_requested {
+        if app.checkpoint_recovery_active {
+            if !app.detach_requested {
+                runtime_error = Some(
+                    "recovery catch-up is not durably committed; checkpoint retained".to_string(),
+                );
+            }
+        } else if app.detach_requested {
             app.persist_sessions();
             app.persist_sand_state();
             app.persist_daily_sand_snapshot();
@@ -1719,7 +1859,9 @@ pub fn run_ui() -> Result<(), io::Error> {
             app.persist_daily_sand_snapshot();
             app.clear_detached_checkpoint();
         }
-        runtime_error = app.storage_error.take();
+        if runtime_error.is_none() {
+            runtime_error = app.storage_error.take();
+        }
     }
 
     disable_raw_mode()?;

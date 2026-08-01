@@ -9,14 +9,15 @@ mod legacy_import;
 mod maintenance;
 mod migration_command;
 mod repository;
+mod runtime_coordination;
 mod tui_runtime;
 
 pub(crate) use authority::{
     RuntimeAuthority, SqliteCliActivationOptions, activate_sqlite_cli, resolve_runtime_authority,
 };
 pub(crate) use cli_runtime::{
-    read_snapshot as read_cli_snapshot, start_session as start_cli_session,
-    stop_session as stop_cli_session,
+    acknowledge_stop as acknowledge_cli_stop, read_snapshot as read_cli_snapshot,
+    start_session as start_cli_session, stop_session as stop_cli_session,
 };
 pub(crate) use maintenance::{
     BackupOptions, BundleExportOptions, BundleImportOptions, DoctorOptions, RestoreOptions,
@@ -25,16 +26,17 @@ pub(crate) use maintenance::{
 pub(crate) use migration_command::{ControlledMigrationOptions, ControlledMigrationReport};
 pub(crate) use tui_runtime::{
     archive_category as archive_tui_category, clear_checkpoint as clear_tui_checkpoint,
+    commit_checkpoint_recovery as commit_tui_checkpoint_recovery,
     delete_daily_snapshot as delete_tui_daily_snapshot,
     delete_drift_sessions_for_day as delete_tui_drift_sessions_for_day,
     delete_session as delete_tui_session, ensure_active_session as ensure_tui_active_session,
     finish_active_session as finish_tui_active_session, load_checkpoint as load_tui_checkpoint,
     load_daily_snapshot as load_tui_daily_snapshot, load_sand_state as load_tui_sand_state,
-    load_state as load_tui_state, reset_active_session as reset_tui_active_session,
-    save_checkpoint as save_tui_checkpoint, save_daily_snapshot as save_tui_daily_snapshot,
-    save_sand_state as save_tui_sand_state, switch_active_session as switch_tui_active_session,
-    sync_categories as sync_tui_categories, sync_category_tags as sync_tui_category_tags,
-    sync_sessions as sync_tui_sessions,
+    load_state as load_tui_state, quarantine_checkpoint as quarantine_tui_checkpoint,
+    reset_active_session as reset_tui_active_session, save_checkpoint as save_tui_checkpoint,
+    save_daily_snapshot as save_tui_daily_snapshot, save_sand_state as save_tui_sand_state,
+    switch_active_session as switch_tui_active_session, sync_categories as sync_tui_categories,
+    sync_category_tags as sync_tui_category_tags, sync_sessions as sync_tui_sessions,
     update_session_description as update_tui_session_description,
 };
 
@@ -68,7 +70,7 @@ pub(crate) fn run_restore(options: RestoreOptions) -> Result<SqliteMaintenanceRe
     maintenance::restore(options).map_err(|error| error.to_string())
 }
 
-const CURRENT_SCHEMA_VERSION: i64 = 3;
+const CURRENT_SCHEMA_VERSION: i64 = 4;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 const MIGRATION_1: &str = r#"
@@ -274,6 +276,34 @@ VALUES (3, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
 PRAGMA user_version = 3;
 "#;
 
+const MIGRATION_4: &str = r#"
+CREATE TABLE runtime_transitions (
+    operation_id TEXT PRIMARY KEY,
+    operation_kind TEXT NOT NULL
+        CHECK (operation_kind IN ('finish', 'switch', 'reset')),
+    expected_active_stable_id TEXT NOT NULL,
+    resulting_active_stable_id TEXT,
+    completed_session_id INTEGER,
+    elapsed_seconds INTEGER NOT NULL CHECK (elapsed_seconds >= 0),
+    source TEXT NOT NULL,
+    applied_at_utc TEXT NOT NULL,
+    acknowledged_at_utc TEXT,
+    FOREIGN KEY (completed_session_id) REFERENCES sessions(id)
+        ON UPDATE RESTRICT
+        ON DELETE RESTRICT
+) STRICT;
+
+CREATE INDEX runtime_transitions_unacknowledged_index
+    ON runtime_transitions(operation_kind, source, acknowledged_at_utc, applied_at_utc);
+CREATE INDEX runtime_transitions_expected_active_index
+    ON runtime_transitions(expected_active_stable_id, applied_at_utc);
+
+INSERT INTO schema_migrations(version, applied_at_utc)
+VALUES (4, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+
+PRAGMA user_version = 4;
+"#;
+
 #[derive(Debug, Error)]
 pub(crate) enum SqliteStoreError {
     #[error("SQLite error: {0}")]
@@ -355,6 +385,14 @@ impl SqliteRepository {
             let transaction =
                 connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
             transaction.execute_batch(MIGRATION_3)?;
+            transaction.commit()?;
+            version = 3;
+        }
+
+        if version < 4 {
+            let transaction =
+                connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(MIGRATION_4)?;
             transaction.commit()?;
         }
 
@@ -549,7 +587,7 @@ mod tests {
     fn new_database_applies_schema_and_idle_category() {
         let repository = SqliteRepository::open_in_memory().expect("database should open");
 
-        assert_eq!(repository.schema_version().unwrap(), 3);
+        assert_eq!(repository.schema_version().unwrap(), 4);
         assert_eq!(repository.integrity_check().unwrap(), "ok");
         let idle: (String, i64) = repository
             .connection
@@ -616,7 +654,7 @@ mod tests {
         let repository =
             SqliteRepository::from_connection(connection).expect("migration should succeed");
 
-        assert_eq!(repository.schema_version().unwrap(), 3);
+        assert_eq!(repository.schema_version().unwrap(), 4);
         assert_eq!(repository.completed_session_count().unwrap(), 1);
         let legacy_import_id: Option<i64> = repository
             .connection
