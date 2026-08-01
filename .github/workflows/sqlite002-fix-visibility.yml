@@ -1,0 +1,43 @@
+name: sqlite002-fix-visibility
+
+on:
+  push:
+    branches:
+      - storage/002-legacy-import-verification
+    paths:
+      - .github/workflows/sqlite002-fix-visibility.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: storage/002-legacy-import-verification
+          fetch-depth: 0
+
+      - name: Align importer visibility
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/sqlite/legacy_import.rs')
+          text = path.read_text()
+          old = '    pub fn import_legacy(\n'
+          new = '    pub(super) fn import_legacy(\n'
+          if old not in text:
+              raise SystemExit('import_legacy signature not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          cargo fmt --all
+
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/sqlite/legacy_import.rs
+          git commit -m "fix(storage): confine legacy importer API"
+          git push origin HEAD:storage/002-legacy-import-verification
