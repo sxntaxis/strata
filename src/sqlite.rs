@@ -290,7 +290,7 @@ CREATE TABLE runtime_transitions (
     acknowledged_at_utc TEXT,
     FOREIGN KEY (completed_session_id) REFERENCES sessions(id)
         ON UPDATE RESTRICT
-        ON DELETE RESTRICT
+        ON DELETE SET NULL
 ) STRICT;
 
 CREATE INDEX runtime_transitions_unacknowledged_index

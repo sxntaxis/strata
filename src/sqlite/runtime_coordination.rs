@@ -1009,4 +1009,34 @@ mod tests {
         drop(repository);
         remove_database(&path);
     }
+
+    #[test]
+    fn completed_session_deletion_retains_receipt_without_dangling_reference() {
+        let path = database_path("receipt-session-delete");
+        seed(&path, "active-a");
+        let mut repository = SqliteRepository::open(&path).unwrap();
+        let receipt = finish_active_session(
+            &mut repository,
+            "active-a",
+            "finish:active-a",
+            &completion("tui-runtime"),
+            true,
+        )
+        .unwrap();
+        let completed_id = receipt.completed_session_id.unwrap();
+        repository.delete_session(completed_id).unwrap();
+        let retained: (i64, Option<i64>) = repository
+            .connection
+            .query_row(
+                "SELECT count(*), max(completed_session_id)
+                 FROM runtime_transitions WHERE operation_id = 'finish:active-a'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(retained.0, 1);
+        assert_eq!(retained.1, None);
+        drop(repository);
+        remove_database(&path);
+    }
 }
