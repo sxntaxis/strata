@@ -24,7 +24,10 @@ jobs:
             python3 tools/sqlite008_schema_runtime.py
             python3 tools/sqlite008_tui_recovery.py
           fi
-          python3 tools/sqlite008_fix_compile.py
+          if grep -q 'Some(state)' src/sqlite/tui_runtime.rs; then
+            python3 tools/sqlite008_fix_compile.py
+          fi
+          python3 tools/sqlite008_refine.py
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -45,5 +48,5 @@ jobs:
           if git diff --cached --quiet; then
             exit 0
           fi
-          git commit -m "SQLITE-008: coordinate runtime transitions and recovery"
+          git commit -m "SQLITE-008: preserve session deletion and retry receipts"
           git push origin HEAD:storage/008-runtime-coordination-recovery
