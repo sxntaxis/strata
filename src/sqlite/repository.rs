@@ -330,9 +330,8 @@ impl SqliteRepository {
             params![category_id],
         )?;
         for (ordinal, tag) in normalized.iter().enumerate() {
-            let ordinal = i64::try_from(ordinal).map_err(|_| {
-                RepositoryError::InvalidInput("too many category tags".to_string())
-            })?;
+            let ordinal = i64::try_from(ordinal)
+                .map_err(|_| RepositoryError::InvalidInput("too many category tags".to_string()))?;
             transaction.execute(
                 "INSERT INTO category_tags(category_id, ordinal, tag)
                  VALUES (?1, ?2, ?3)",
@@ -363,11 +362,7 @@ impl SqliteRepository {
                 "start operational day is after end operational day".to_string(),
             ));
         }
-        query_sessions_between(
-            &self.connection,
-            start_operational_day,
-            end_operational_day,
-        )
+        query_sessions_between(&self.connection, start_operational_day, end_operational_day)
     }
 
     pub fn insert_session(
@@ -427,10 +422,8 @@ impl SqliteRepository {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let changed = transaction.execute(
-            "DELETE FROM sessions WHERE id = ?1",
-            params![session_id],
-        )?;
+        let changed =
+            transaction.execute("DELETE FROM sessions WHERE id = ?1", params![session_id])?;
         ensure_changed(changed, "session", session_id)?;
         transaction.commit()?;
         Ok(())
@@ -454,8 +447,7 @@ impl SqliteRepository {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let active = query_active_session(&transaction)?
-            .ok_or(RepositoryError::NoActiveSession)?;
+        let active = query_active_session(&transaction)?.ok_or(RepositoryError::NoActiveSession)?;
         if active.stable_id == next.stable_id {
             return Err(RepositoryError::InvalidInput(
                 "the next active session must have a new stable identity".to_string(),
@@ -492,10 +484,7 @@ impl SqliteRepository {
         Ok(completed_id)
     }
 
-    pub fn update_active_description(
-        &mut self,
-        description: &str,
-    ) -> Result<(), RepositoryError> {
+    pub fn update_active_description(&mut self, description: &str) -> Result<(), RepositoryError> {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -515,10 +504,7 @@ impl SqliteRepository {
         checkpoint: &CheckpointRecord,
     ) -> Result<(), RepositoryError> {
         require_non_empty(&checkpoint.detached_at_utc, "detached timestamp")?;
-        require_non_empty(
-            &checkpoint.simulation_time_utc,
-            "simulation timestamp",
-        )?;
+        require_non_empty(&checkpoint.simulation_time_utc, "simulation timestamp")?;
         require_non_empty(&checkpoint.payload_json, "checkpoint payload")?;
         let transaction = self
             .connection
@@ -595,10 +581,7 @@ impl SqliteRepository {
         Ok(())
     }
 
-    pub fn clear_checkpoint(
-        &mut self,
-        expected: CheckpointStatus,
-    ) -> Result<(), RepositoryError> {
+    pub fn clear_checkpoint(&mut self, expected: CheckpointStatus) -> Result<(), RepositoryError> {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -613,10 +596,7 @@ impl SqliteRepository {
         Ok(())
     }
 
-    pub fn save_sand_state(
-        &mut self,
-        state: &SandStateRecord,
-    ) -> Result<(), RepositoryError> {
+    pub fn save_sand_state(&mut self, state: &SandStateRecord) -> Result<(), RepositoryError> {
         validate_sand_state(state)?;
         let transaction = self
             .connection
@@ -972,9 +952,7 @@ fn query_active_session(
         .optional()?)
 }
 
-fn query_checkpoint(
-    connection: &Connection,
-) -> Result<Option<CheckpointRecord>, RepositoryError> {
+fn query_checkpoint(connection: &Connection) -> Result<Option<CheckpointRecord>, RepositoryError> {
     let raw = connection
         .query_row(
             "SELECT status, detached_at_utc, simulation_time_utc,
@@ -992,21 +970,21 @@ fn query_checkpoint(
             },
         )
         .optional()?;
-    raw.map(|(status, detached_at_utc, simulation_time_utc, active_id, payload_json)| {
-        Ok(CheckpointRecord {
-            status: CheckpointStatus::parse(&status)?,
-            detached_at_utc,
-            simulation_time_utc,
-            active_session_stable_id: active_id,
-            payload_json,
-        })
-    })
+    raw.map(
+        |(status, detached_at_utc, simulation_time_utc, active_id, payload_json)| {
+            Ok(CheckpointRecord {
+                status: CheckpointStatus::parse(&status)?,
+                detached_at_utc,
+                simulation_time_utc,
+                active_session_stable_id: active_id,
+                payload_json,
+            })
+        },
+    )
     .transpose()
 }
 
-fn query_sand_state(
-    connection: &Connection,
-) -> Result<Option<SandStateRecord>, RepositoryError> {
+fn query_sand_state(connection: &Connection) -> Result<Option<SandStateRecord>, RepositoryError> {
     Ok(connection
         .query_row(
             "SELECT formation_id, quantum_seconds, grid_width, grid_height,
@@ -1096,9 +1074,7 @@ mod tests {
     use crate::{constants::COLORS, storage};
 
     use super::*;
-    use crate::sqlite::legacy_import::{
-        LegacyImportOptions, LegacyImportPaths, LegacyImportPlan,
-    };
+    use crate::sqlite::legacy_import::{LegacyImportOptions, LegacyImportPaths, LegacyImportPlan};
 
     fn category(name: &str) -> NewCategoryRecord<'_> {
         NewCategoryRecord {
@@ -1109,11 +1085,7 @@ mod tests {
         }
     }
 
-    fn session<'a>(
-        stable_id: &'a str,
-        category_id: i64,
-        day: &'a str,
-    ) -> NewSessionRecord<'a> {
+    fn session<'a>(stable_id: &'a str, category_id: i64, day: &'a str) -> NewSessionRecord<'a> {
         NewSessionRecord {
             stable_id,
             project: "Study",
@@ -1143,10 +1115,7 @@ mod tests {
         let mut repository = SqliteRepository::open_in_memory().unwrap();
         let category_id = repository.create_category(&category("Study")).unwrap();
         repository
-            .replace_category_tags(
-                category_id,
-                &["focus".to_string(), "reading".to_string()],
-            )
+            .replace_category_tags(category_id, &["focus".to_string(), "reading".to_string()])
             .unwrap();
         repository
             .insert_session(&session("session-1", category_id, "2026-08-01"))
@@ -1158,12 +1127,18 @@ mod tests {
         assert_eq!(repository.list_categories(false).unwrap().len(), 1);
         let all = repository.list_categories(true).unwrap();
         assert_eq!(all.len(), 2);
-        assert_eq!(all[1].archived_at_utc.as_deref(), Some("2026-08-02T00:00:00Z"));
+        assert_eq!(
+            all[1].archived_at_utc.as_deref(),
+            Some("2026-08-02T00:00:00Z")
+        );
         assert_eq!(
             repository.category_tags().unwrap().get(&category_id),
             Some(&vec!["focus".to_string(), "reading".to_string()])
         );
-        assert_eq!(repository.list_sessions().unwrap()[0].category_id, category_id);
+        assert_eq!(
+            repository.list_sessions().unwrap()[0].category_id,
+            category_id
+        );
 
         repository.restore_category(category_id).unwrap();
         assert_eq!(repository.list_categories(false).unwrap().len(), 2);
@@ -1199,7 +1174,9 @@ mod tests {
     fn active_switch_is_atomic_and_preserves_old_active_on_failure() {
         let mut repository = SqliteRepository::open_in_memory().unwrap();
         let category_id = repository.create_category(&category("Study")).unwrap();
-        repository.start_session(&active("active-1", category_id)).unwrap();
+        repository
+            .start_session(&active("active-1", category_id))
+            .unwrap();
         let completion = SessionCompletion {
             ended_at_utc: "2026-08-01T18:00:00Z",
             operational_day: "2026-08-01",
@@ -1298,19 +1275,13 @@ mod tests {
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let root = std::env::temp_dir().join(format!(
-                "strata-sqlite004-{}-{nonce}",
-                std::process::id()
-            ));
+            let root = std::env::temp_dir()
+                .join(format!("strata-sqlite004-{}-{nonce}", std::process::id()));
             let data = root.join("data");
             let state = root.join("state");
             fs::create_dir_all(&data).unwrap();
             fs::create_dir_all(state.join("sand_history")).unwrap();
-            let paths = LegacyImportPaths::from_roots(
-                &data,
-                &state,
-                data.join("time_log.csv"),
-            );
+            let paths = LegacyImportPaths::from_roots(&data, &state, data.join("time_log.csv"));
             Self { root, paths }
         }
 
@@ -1416,12 +1387,19 @@ mod tests {
             assert_eq!(sqlite.balance_effect, i64::from(legacy.karma_effect));
             assert_eq!(
                 sqlite.color_index as usize,
-                COLORS.iter().position(|color| *color == legacy.color).unwrap()
+                COLORS
+                    .iter()
+                    .position(|color| *color == legacy.color)
+                    .unwrap()
             );
         }
 
         assert_eq!(snapshot.sessions.len(), legacy_sessions.sessions.len());
-        for (sqlite, legacy) in snapshot.sessions.iter().zip(legacy_sessions.sessions.iter()) {
+        for (sqlite, legacy) in snapshot
+            .sessions
+            .iter()
+            .zip(legacy_sessions.sessions.iter())
+        {
             assert_eq!(sqlite.id, legacy.id as i64);
             assert_eq!(sqlite.operational_day, legacy.date);
             assert_eq!(sqlite.category_id, legacy.category_id.0 as i64);

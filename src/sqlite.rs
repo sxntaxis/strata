@@ -5,6 +5,7 @@ use thiserror::Error;
 
 mod legacy_import;
 mod migration_command;
+mod repository;
 
 pub(crate) use migration_command::{ControlledMigrationOptions, ControlledMigrationReport};
 
