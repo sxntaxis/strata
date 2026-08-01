@@ -206,7 +206,8 @@ fn corrupt_time_log_fails_stop_without_erasing_source_or_active_state() {
     assert!(start.status.success(), "start failed: {}", stderr(&start));
 
     let active_path = profile.active_session_path();
-    let active_before = fs::read_to_string(&active_path).expect("active session should be readable");
+    let active_before =
+        fs::read_to_string(&active_path).expect("active session should be readable");
     let corrupt = "date,category,elapsed\n2026-08-01,Work,120\n";
     fs::write(profile.time_log_path(), corrupt).expect("corrupt time log should be written");
 
@@ -252,7 +253,8 @@ fn unwritable_time_log_fails_stop_without_consuming_active_state() {
 
     fs::write(profile.time_log_path(), EMPTY_TIME_LOG).expect("time log should be initialized");
     let active_path = profile.active_session_path();
-    let active_before = fs::read_to_string(&active_path).expect("active session should be readable");
+    let active_before =
+        fs::read_to_string(&active_path).expect("active session should be readable");
     let log_before =
         fs::read_to_string(profile.time_log_path()).expect("time log should be readable");
 
