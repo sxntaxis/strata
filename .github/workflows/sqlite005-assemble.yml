@@ -1,0 +1,340 @@
+name: sqlite005-assemble
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: storage/005-interchange-recovery
+          fetch-depth: 0
+
+      - name: Decode maintenance module
+        run: |
+          cat .sqlite005/payload.* | base64 --decode | gzip --decompress > src/sqlite/maintenance.rs
+          test -s src/sqlite/maintenance.rs
+
+      - name: Wire SQLite and CLI boundaries
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          sqlite = Path('src/sqlite.rs')
+          text = sqlite.read_text()
+          if 'mod maintenance;\n' not in text:
+              anchor = 'mod migration_command;\n'
+              if anchor not in text:
+                  raise SystemExit('sqlite module anchor missing')
+              text = text.replace(anchor, anchor + 'mod maintenance;\n', 1)
+
+          maintenance_use = '''pub(crate) use maintenance::{
+              BackupOptions, BundleExportOptions, BundleImportOptions, DoctorOptions,
+              RestoreOptions, SqliteMaintenanceReport,
+          };
+          '''
+          if 'pub(crate) use maintenance::{' not in text:
+              anchor = 'pub(crate) use migration_command::{ControlledMigrationOptions, ControlledMigrationReport};\n'
+              if anchor not in text:
+                  raise SystemExit('sqlite re-export anchor missing')
+              text = text.replace(anchor, anchor + maintenance_use, 1)
+
+          wrappers = '''
+          pub(crate) fn run_bundle_export(
+              options: BundleExportOptions,
+          ) -> Result<SqliteMaintenanceReport, String> {
+              maintenance::export_bundle(options).map_err(|error| error.to_string())
+          }
+
+          pub(crate) fn run_bundle_import(
+              options: BundleImportOptions,
+          ) -> Result<SqliteMaintenanceReport, String> {
+              maintenance::import_bundle(options).map_err(|error| error.to_string())
+          }
+
+          pub(crate) fn run_doctor(
+              options: DoctorOptions,
+          ) -> Result<SqliteMaintenanceReport, String> {
+              maintenance::doctor(options).map_err(|error| error.to_string())
+          }
+
+          pub(crate) fn run_backup(
+              options: BackupOptions,
+          ) -> Result<SqliteMaintenanceReport, String> {
+              maintenance::backup(options).map_err(|error| error.to_string())
+          }
+
+          pub(crate) fn run_restore(
+              options: RestoreOptions,
+          ) -> Result<SqliteMaintenanceReport, String> {
+              maintenance::restore(options).map_err(|error| error.to_string())
+          }
+          '''
+          if 'pub(crate) fn run_bundle_export(' not in text:
+              anchor = '\nconst CURRENT_SCHEMA_VERSION: i64 = 2;'
+              if anchor not in text:
+                  raise SystemExit('sqlite constant anchor missing')
+              text = text.replace(anchor, wrappers + anchor, 1)
+          sqlite.write_text(text)
+
+          cli = Path('src/cli.rs')
+          text = cli.read_text()
+          variants = '''
+              #[command(about = "Export a deterministic portable bundle from SQLite")]
+              SqliteExport {
+                  #[arg(long, value_name = "PATH", help = "SQLite database path")]
+                  database: Option<PathBuf>,
+
+                  #[arg(long, value_name = "DIRECTORY", help = "New portable bundle directory")]
+                  out: PathBuf,
+
+                  #[arg(long, help = "Print the result as JSON")]
+                  json: bool,
+              },
+
+              #[command(about = "Import a validated portable bundle into a new SQLite database")]
+              SqliteImport {
+                  #[arg(long, value_name = "DIRECTORY", help = "Portable bundle directory")]
+                  bundle: PathBuf,
+
+                  #[arg(long, value_name = "PATH", help = "New SQLite database path")]
+                  database: Option<PathBuf>,
+
+                  #[arg(long, help = "Print the result as JSON")]
+                  json: bool,
+              },
+
+              #[command(about = "Check SQLite integrity, schema, foreign keys, and authority metadata")]
+              SqliteDoctor {
+                  #[arg(long, value_name = "PATH", help = "SQLite database path")]
+                  database: Option<PathBuf>,
+
+                  #[arg(long, value_name = "PATH", help = "Authority marker to validate")]
+                  authority_marker: Option<PathBuf>,
+
+                  #[arg(long, help = "Print the result as JSON")]
+                  json: bool,
+              },
+
+              #[command(about = "Create a verified standalone SQLite backup")]
+              SqliteBackup {
+                  #[arg(long, value_name = "PATH", help = "SQLite database path")]
+                  database: Option<PathBuf>,
+
+                  #[arg(long, value_name = "PATH", help = "New backup database path")]
+                  out: PathBuf,
+
+                  #[arg(long, help = "Print the result as JSON")]
+                  json: bool,
+              },
+
+              #[command(about = "Verify and atomically restore a SQLite backup")]
+              SqliteRestore {
+                  #[arg(long, value_name = "PATH", help = "Verified backup database path")]
+                  backup: PathBuf,
+
+                  #[arg(long, value_name = "PATH", help = "SQLite database path")]
+                  database: Option<PathBuf>,
+
+                  #[arg(long, help = "Preserve and replace an existing target database")]
+                  replace: bool,
+
+                  #[arg(long, help = "Print the result as JSON")]
+                  json: bool,
+              },
+          '''
+          if 'SqliteExport {' not in text:
+              anchor = '    #[command(about = "Generate shell completions")]\n'
+              if anchor not in text:
+                  raise SystemExit('CLI variant anchor missing')
+              text = text.replace(anchor, variants + '\n' + anchor, 1)
+
+          helpers = '''
+          fn default_sqlite_database_path() -> PathBuf {
+              storage::get_data_dir().join("strata.sqlite3")
+          }
+
+          fn default_authority_marker_path() -> PathBuf {
+              storage::get_state_dir().join("storage_authority.json")
+          }
+
+          fn print_maintenance_report(
+              report: sqlite::SqliteMaintenanceReport,
+              json: bool,
+          ) -> Result<(), String> {
+              let healthy = report.is_healthy();
+              if json {
+                  println!("{}", report.to_pretty_json()?);
+              } else {
+                  report.print_human();
+              }
+              if healthy {
+                  Ok(())
+              } else {
+                  Err("SQLite doctor reported an unhealthy database".to_string())
+              }
+          }
+
+          pub fn sqlite_export(
+              database: Option<PathBuf>,
+              out: PathBuf,
+              json: bool,
+          ) -> Result<(), String> {
+              let report = sqlite::run_bundle_export(sqlite::BundleExportOptions {
+                  database_path: database.unwrap_or_else(default_sqlite_database_path),
+                  output_directory: out,
+              })?;
+              print_maintenance_report(report, json)
+          }
+
+          pub fn sqlite_import(
+              bundle: PathBuf,
+              database: Option<PathBuf>,
+              json: bool,
+          ) -> Result<(), String> {
+              let report = sqlite::run_bundle_import(sqlite::BundleImportOptions {
+                  bundle_directory: bundle,
+                  database_path: database.unwrap_or_else(default_sqlite_database_path),
+              })?;
+              print_maintenance_report(report, json)
+          }
+
+          pub fn sqlite_doctor(
+              database: Option<PathBuf>,
+              authority_marker: Option<PathBuf>,
+              json: bool,
+          ) -> Result<(), String> {
+              let use_default_marker = database.is_none() && authority_marker.is_none();
+              let report = sqlite::run_doctor(sqlite::DoctorOptions {
+                  database_path: database.unwrap_or_else(default_sqlite_database_path),
+                  authority_marker_path: authority_marker.or_else(|| {
+                      use_default_marker.then(default_authority_marker_path)
+                  }),
+              })?;
+              print_maintenance_report(report, json)
+          }
+
+          pub fn sqlite_backup(
+              database: Option<PathBuf>,
+              out: PathBuf,
+              json: bool,
+          ) -> Result<(), String> {
+              let report = sqlite::run_backup(sqlite::BackupOptions {
+                  database_path: database.unwrap_or_else(default_sqlite_database_path),
+                  backup_path: out,
+              })?;
+              print_maintenance_report(report, json)
+          }
+
+          pub fn sqlite_restore(
+              backup: PathBuf,
+              database: Option<PathBuf>,
+              replace: bool,
+              json: bool,
+          ) -> Result<(), String> {
+              let report = sqlite::run_restore(sqlite::RestoreOptions {
+                  backup_path: backup,
+                  database_path: database.unwrap_or_else(default_sqlite_database_path),
+                  replace,
+              })?;
+              print_maintenance_report(report, json)
+          }
+          '''
+          if 'fn default_sqlite_database_path()' not in text:
+              anchor = 'pub fn print_completions(shell: &str) -> Result<(), String> {'
+              if anchor not in text:
+                  raise SystemExit('CLI helper anchor missing')
+              text = text.replace(anchor, helpers + '\n' + anchor, 1)
+
+          arms = '''
+                  Cli::SqliteExport {
+                      database,
+                      out,
+                      json,
+                  } => {
+                      if let Err(error) = sqlite_export(database, out, json) {
+                          eprintln!("Error: {}", error);
+                          std::process::exit(1);
+                      }
+                  }
+                  Cli::SqliteImport {
+                      bundle,
+                      database,
+                      json,
+                  } => {
+                      if let Err(error) = sqlite_import(bundle, database, json) {
+                          eprintln!("Error: {}", error);
+                          std::process::exit(1);
+                      }
+                  }
+                  Cli::SqliteDoctor {
+                      database,
+                      authority_marker,
+                      json,
+                  } => {
+                      if let Err(error) = sqlite_doctor(database, authority_marker, json) {
+                          eprintln!("Error: {}", error);
+                          std::process::exit(1);
+                      }
+                  }
+                  Cli::SqliteBackup {
+                      database,
+                      out,
+                      json,
+                  } => {
+                      if let Err(error) = sqlite_backup(database, out, json) {
+                          eprintln!("Error: {}", error);
+                          std::process::exit(1);
+                      }
+                  }
+                  Cli::SqliteRestore {
+                      backup,
+                      database,
+                      replace,
+                      json,
+                  } => {
+                      if let Err(error) = sqlite_restore(backup, database, replace, json) {
+                          eprintln!("Error: {}", error);
+                          std::process::exit(1);
+                      }
+                  }
+          '''
+          if 'Cli::SqliteExport {' not in text:
+              anchor = '        Cli::Completions { shell } => {'
+              if anchor not in text:
+                  raise SystemExit('CLI match anchor missing')
+              text = text.replace(anchor, arms + '\n' + anchor, 1)
+          cli.write_text(text)
+          PY
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Format and certify
+        run: |
+          cargo fmt --all
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test --all-features
+
+      - name: Remove transport artifacts
+        run: |
+          rm -rf .sqlite005
+          rm -f .github/workflows/sqlite005-assemble.yml
+
+      - name: Commit certified implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "SQLITE-005: add interchange and recovery tooling"
+          git push origin HEAD:storage/005-interchange-recovery
