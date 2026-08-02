@@ -1,7 +1,7 @@
 # Strata project authority
 
 Status: accepted product direction
-Last reviewed: 2026-08-01
+Last reviewed: 2026-08-02
 
 ## Purpose
 
@@ -18,7 +18,18 @@ Time does not stop when the user is not actively classifying it. Strata continuo
 - Active use functions as a timer without suspending the continuous-ledger model.
 - Idle time remains part of the sedimentary history while being omitted from ordinary active-time accounting.
 
-The runtime still uses some `drift`/`none` terminology. That vocabulary migration is pending and must not be conflated with persistence authority.
+The user-facing runtime term is **idle**. Historical `drift` and `none` inputs and internal identifiers may remain as compatibility vocabulary, but they do not define the product concept.
+
+## Session identity
+
+Project and category are independent axes of chronological truth.
+
+- **Project** identifies the subject, client, effort, or context of a session. It is persisted exactly when supplied and may be empty for general TUI-created intervals.
+- **Category/layer** identifies the kind of activity, color, and balance direction. CLI starts require an explicit category.
+- Neither axis substitutes for the other. A project must not be encoded as a category merely to survive persistence, and an omitted category must not be inferred as idle.
+- Idle is category ID `0`, selected deliberately, represented in sediment, and excluded from ordinary active-time totals.
+
+The CLI positional project remains required by the current command surface. Project management, project CRUD, and project-filtered report UI are separate future product questions; preserving project identity does not imply those features already exist.
 
 ## Historical truth
 

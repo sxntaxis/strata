@@ -25,7 +25,7 @@ Current responsibility map:
 - `src/lib.rs` — shared CLI/TUI invocation, startup configuration validation, and entry-point selection.
 - `src/cli.rs` — command parsing, non-interactive lifecycle, reports, exports, migration, and maintenance commands.
 - `src/keybindings.rs` — shared keymap and authority/time-setting parsing and validation.
-- `src/domain.rs` — categories, sessions, operational-day logic, and report aggregation.
+- `src/domain.rs` — canonical session identity, project/category rules, operational-day logic, and report aggregation.
 - `src/temporal.rs` — checked wall intervals, monotonic/wall reconciliation, fixed-clock civil policy, operational-day windows, and exact overlap slicing.
 - `src/sqlite.rs` and `src/sqlite/**` — schema migration, authoritative repositories, CLI/TUI adapters, runtime coordination, failure certification, deterministic interchange, backup/restore, and legacy-evidence custody.
 - `src/storage.rs` — XDG paths, pre-activation legacy compatibility, migration input, and atomic file helpers.
@@ -81,6 +81,18 @@ TEMPORAL-002 completes the remaining interval semantics:
 
 The SQLite closure evidence is `docs/SQLITE_MIGRATION_CLOSURE_AUDIT.md`.
 
+
+DOMAIN-001 establishes session-classification authority:
+
+- project identity and category identity are independent canonical session fields;
+- CLI starts require an explicit category and cannot silently become idle;
+- idle is the user-facing baseline name, explicitly selectable and excluded from ordinary active-time totals;
+- historical `none`/`drift` spellings remain compatibility aliases only;
+- project survives legacy and SQLite lifecycle paths, TUI synchronization, custody export, JSON, and ICS;
+- legacy 8- and 12-column session CSV remains compatible while new 13-column rows preserve project.
+
+The detailed contract is `docs/DOMAIN_AUTHORITY.md`.
+
 ## Truth boundaries
 
 ### Chronological ledger
@@ -101,11 +113,11 @@ TUI and CLI translate user intent and present state. Neither may maintain an ind
 
 ## Current architectural frontier
 
-Persistence structure, startup configuration fallback, clock authority, and interval-boundary semantics are no longer the primary risks. The next program is domain and projection correctness:
+Persistence structure, startup configuration fallback, clock authority, interval boundaries, and session classification are no longer the primary risks. The next program is projection correctness:
 
-1. reconcile project/classification and explicit idle semantics;
-2. correct reporting and export semantics;
-3. establish a conserved sediment model independent of viewport and mutable previews.
+1. correct reporting ranges, provisional active time, ICS validity, and deterministic ordering;
+2. establish a conserved sediment model independent of viewport and mutable previews;
+3. complete interaction-mode and terminal-lifecycle contracts.
 
 Complete profile isolation and deliberate runtime profile switching remain separate work under issue #15.
 

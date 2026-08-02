@@ -363,6 +363,7 @@ impl App {
                 id: usize::MAX,
                 date: day.format("%Y-%m-%d").to_string(),
                 category_id: live.category_id,
+                project: String::new(),
                 description: live.description,
                 start_time: String::new(),
                 end_time: String::new(),

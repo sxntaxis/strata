@@ -10,7 +10,7 @@ Last reconciled: 2026-08-01
 - Runtime transitions are fenced and receipt-backed; persistence failures have explicit recovery.
 - The complete CI baseline after SQLITE-012 is 119 unit tests, 7 legacy lifecycle process tests, 11 SQLite authority/TUI process tests, strict Clippy, formatting, and doc tests.
 - Deterministic CSV bundle dry-run/import and provenance-verified legacy archive/removal are implemented.
-- Runtime vocabulary still contains `drift`/`none` despite the accepted product term `idle`.
+- User-facing runtime vocabulary uses `idle`; historical `drift`/`none` spellings remain compatibility aliases and some internal identifiers retain legacy names.
 - PR #29 was based before the SQLite campaign and is stale/non-mergeable; this adoption supersedes it.
 
 ## Material unknowns

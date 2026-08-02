@@ -45,12 +45,20 @@ Profile switching remains separate under issue #15.
 - zero-whole-second finishes and switches create transactional receipts without completed work rows;
 - SQLite schema version 5, bundle schema version 2, and backward-compatible legacy CSV preserve the policy.
 
+### DOMAIN-001 — issues #2 and #12
+
+- project identity is independent from category and persists through legacy and SQLite lifecycle paths;
+- shared domain sessions, TUI synchronization, custody export, JSON, and ICS retain project;
+- CLI starts require explicit category classification before mutation;
+- idle is the user-facing category-0 name and remains excluded from ordinary active totals;
+- old `none`/`drift` names remain compatibility aliases rather than product vocabulary;
+- legacy 8-, 12-, and 13-column CSV generations are handled explicitly.
+
 ## Remaining order
 
-1. **DOMAIN-001** — issues #2 and #12 residuals.
-2. **REPORT-001** — issues #1, #14, #17, #28.
-3. **SEDIMENT-001** — issues #6, #7, #16, #18, #26.
-4. **INTERACTION-001** — issues #19, #20, #24.
+1. **REPORT-001** — issues #1, #14, #17, #28.
+2. **SEDIMENT-001** — issues #6, #7, #16, #18, #26.
+3. **INTERACTION-001** — issues #19, #20, #24.
 
 ## Closure discipline
 

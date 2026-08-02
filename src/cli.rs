@@ -42,8 +42,12 @@ pub enum Cli {
         #[arg(long, help = "Session description")]
         desc: Option<String>,
 
-        #[arg(long, short, help = "Category name or ID")]
-        category: Option<String>,
+        #[arg(
+            long,
+            short,
+            help = "Required category name or ID; use 'idle' explicitly for baseline time"
+        )]
+        category: String,
     },
 
     #[command(about = "Stop the current tracking session")]
@@ -321,8 +325,14 @@ pub struct DataExport {
 pub fn start_session(
     project: String,
     description: Option<String>,
-    category_name: Option<String>,
+    category_name: String,
 ) -> Result<(), String> {
+    if project.trim().is_empty() {
+        return Err("Project name cannot be empty".to_string());
+    }
+    if category_name.trim().is_empty() {
+        return Err("Category is required; use --category idle for baseline time".to_string());
+    }
     match sqlite::resolve_runtime_authority()? {
         sqlite::RuntimeAuthority::LegacyFiles => {
             start_session_legacy(project, description, category_name)
@@ -342,18 +352,24 @@ pub fn start_session(
 fn start_session_legacy(
     project: String,
     description: Option<String>,
-    category_name: Option<String>,
+    category_name: String,
 ) -> Result<(), String> {
     let categories_path = storage::get_categories_path();
     let categories = storage::try_load_categories_from_csv(&categories_path)
         .map_err(|error| error.to_string())?
         .categories;
 
-    let cat_name = category_name.unwrap_or_else(|| DRIFT_CATEGORY_CONFIG_NAME.to_string());
-    let category = categories
-        .iter()
-        .find(|c| c.name == cat_name || c.id.0.to_string() == cat_name)
-        .ok_or_else(|| format!("Category '{}' not found", cat_name))?;
+    let requested = category_name.trim();
+    let category = if crate::domain::is_drift_name(requested) || requested == "0" {
+        categories
+            .iter()
+            .find(|category| category.id == CategoryId::new(0))
+    } else {
+        categories.iter().find(|category| {
+            category.name.eq_ignore_ascii_case(requested) || category.id.0.to_string() == requested
+        })
+    }
+    .ok_or_else(|| format!("Category '{requested}' not found"))?;
 
     let session_path = storage::get_active_session_path();
     if storage::file_exists(&session_path) {
@@ -433,6 +449,7 @@ fn stop_session_legacy(accept_clock_jump: bool) -> Result<usize, String> {
             id: new_id,
             date: today,
             category_id: CategoryId::new(active_session.category_id),
+            project: active_session.project.clone(),
             description: active_session.description.clone(),
             start_time: start_time.format("%H:%M:%S").to_string(),
             end_time: now.format("%H:%M:%S").to_string(),
@@ -684,7 +701,7 @@ fn export_data_legacy(format: ExportFormat, out_path: Option<PathBuf>) -> Result
                     date: s.date.clone(),
                     category_id: s.category_id.0,
                     category_name: cat_name,
-                    project: None,
+                    project: (!s.project.is_empty()).then(|| s.project.clone()),
                     description: s.description.clone(),
                     start_time: s.start_time.clone(),
                     end_time: s.end_time.clone(),
