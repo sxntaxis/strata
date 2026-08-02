@@ -3,19 +3,19 @@ id: NOW-001
 kind: status
 state: active
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-08-02
 authority: working
-summary: SQLite, fail-closed configuration, and explicit temporal authority are complete; remaining interval semantics now lead the frontier.
-next: Implement TEMPORAL-002 for issues #4, #23, and #27: overlap allocation, honest sunrise behavior, and zero-duration transitions.
+summary: Persistence, configuration, clock authority, and interval-boundary semantics are complete; domain reconciliation now leads the frontier.
+next: Implement DOMAIN-001 for issues #2 and #12 residuals: project/classification authority and explicit idle semantics.
 ---
 
 # NOW — Strata
 
 ## Current phase
 
-The SQLite migration program, AUTHORITY-001, and TEMPORAL-001 are complete. Strata now has durable persistence, fail-closed startup selection, and one documented contract for monotonic duration, UTC timestamps, fixed-offset civil time, clock discontinuities, and historical operational-day grouping.
+The SQLite migration program, AUTHORITY-001, TEMPORAL-001, and TEMPORAL-002 are complete. Strata now has durable authority, fail-closed configuration, explicit clock roles, reproducible fixed-clock boundaries, exact overlap allocation, and truthful zero-transition semantics.
 
-The project is moving from **authority foundations** to **remaining interval semantics and product correctness**.
+The project is moving from **temporal foundations** to **domain and projection correctness**.
 
 ## Accepted product baseline
 
@@ -30,42 +30,41 @@ The project is moving from **authority foundations** to **remaining interval sem
 
 ## Verified technical baseline
 
-- SQLite schema version 4 is authoritative after explicit activation.
+- SQLite schema version 5 is authoritative after explicit activation.
 - CLI and TUI share repository, runtime-coordination, configuration, and temporal boundaries.
-- Invalid configuration fails before writable authority; `--ignore-config` is explicit.
-- Live duration uses monotonic elapsed time; persisted absolute timestamps use UTC.
-- Live wall/monotonic divergence above five seconds blocks the transition and preserves active state.
-- Future persisted starts are rejected rather than clamped or cast.
-- Cross-process intervals above seven days require explicit `stop --accept-clock-jump` confirmation.
-- New civil labels and operational days use the validated fixed UTC offset, not the host machine timezone.
-- Historical reports use persisted operational-day keys and remain grouped after later offset changes.
-- The current fixed-offset policy is deterministic but does not claim IANA/DST behavior.
+- Live duration is monotonic; persisted absolute timestamps are UTC.
+- Clock discontinuities fail closed; future starts and unsafe unattended intervals require explicit handling.
+- The only supported operational-day policy is a fixed clock under a fixed UTC offset.
+- New sessions capture offset and boundary-minute provenance.
+- Canonical sessions remain single identities while reports allocate exact overlap slices across operational days.
+- Exact-boundary endpoints create no empty fragments and allocated seconds are conserved.
+- Existing `sunrise` configuration is migrated visibly to fixed policy; no solar behavior is claimed.
+- Zero-whole-second finishes and switches retain transactional receipts but create no work rows.
+- Old legacy rows remain readable without invented chronology; new CSV and bundle formats preserve temporal provenance.
 - Persistence failure freezes mutation and offers retry, reload, emergency export, safe exit, or explicit unsafe exit.
 
 ## Completed post-migration units
 
 - **AUTHORITY-001** — issue #21: shared validated settings and fail-closed CLI/TUI startup configuration.
-- **TEMPORAL-001** — issue #25: explicit clock roles, discontinuity handling, fixed-offset civil authority, and reproducible historical grouping.
+- **TEMPORAL-001** — issue #25: clock roles, discontinuity handling, fixed-offset civil authority, and reproducible history.
+- **TEMPORAL-002** — issues #4, #23, #27: overlap allocation, removal of false sunrise semantics, and zero-transition policy.
 
-Complete profile isolation remains open under issue #15. IANA timezone/DST adoption is not implied by TEMPORAL-001.
+Complete profile isolation remains open under issue #15. IANA timezone/DST adoption remains a separate future decision.
 
 ## Active sequence
 
-1. **TEMPORAL-002** — issues #4, #23, #27: overlap allocation, honest sunrise policy, zero-duration transitions.
-2. **DOMAIN-001** — issues #2 and #12 residuals: project/classification model and explicit idle semantics.
-3. **REPORT-001** — issues #1, #14, #17, #28: custom ranges, provisional active time, valid ICS, deterministic ordering.
-4. **SEDIMENT-001** — issues #6, #7, #16, #18, #26: conserved logical sediment independent of viewport and mutable previews.
-5. **INTERACTION-001** — issues #19, #20, #24: explicit edit modes, terminal lifecycle guard, truthful keybinding policy.
+1. **DOMAIN-001** — issues #2 and #12 residuals: project/classification model and explicit idle semantics.
+2. **REPORT-001** — issues #1, #14, #17, #28: custom ranges, provisional active time, valid ICS, deterministic ordering.
+3. **SEDIMENT-001** — issues #6, #7, #16, #18, #26: conserved logical sediment independent of viewport and mutable previews.
+4. **INTERACTION-001** — issues #19, #20, #24: explicit edit modes, terminal lifecycle guard, truthful keybinding policy.
 
 ## Current risks
 
-- Intervals spanning operational-day boundaries still need one allocation rule.
-- `sunrise` currently names fixed-cutoff behavior and must become honest.
-- Zero-duration switches need an explicit storage and sediment policy.
-- Reports and exports may remain semantically inconsistent despite durable storage.
+- Project strings are preserved but do not yet have one complete product/domain authority.
+- The accepted idle rename is not yet reflected consistently in runtime vocabulary and classification rules.
+- Reports and exports still need custom ranges, provisional active-time policy, valid ICS, and deterministic ordering.
 - Sediment rendering, resize, catch-up, and snapshots still lack one conservation model.
-- The accepted idle rename is not yet reflected consistently in runtime vocabulary.
 
 ## Next
 
-Implement **TEMPORAL-002**. Do not broaden it into report UI, project taxonomy, or sediment topology; establish the remaining interval rules first so later projections inherit one truthful chronology.
+Implement **DOMAIN-001**. Reconcile issues #2 and #12 against current SQLite and temporal behavior before changing schema or terminology; preserve canonical interval identity and overlap semantics.

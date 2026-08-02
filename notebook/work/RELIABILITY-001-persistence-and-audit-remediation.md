@@ -4,7 +4,7 @@ kind: work
 state: active
 authority: working
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-08-02
 ---
 
 # RELIABILITY-001 — persistence and audit remediation
@@ -35,13 +35,22 @@ SQLITE-001 through SQLITE-012 completed schema, strict legacy import, explicit a
 
 Profile switching remains separate under issue #15.
 
+
+### TEMPORAL-002 — issues #4, #23, #27
+
+- canonical sessions remain single ledger identities;
+- reports allocate exact overlap slices using fixed-offset boundary provenance captured per session;
+- cross-boundary seconds are conserved and exact-boundary endpoints create no empty fragments;
+- the false sunrise mode is removed and existing configuration migrates visibly to fixed-clock policy;
+- zero-whole-second finishes and switches create transactional receipts without completed work rows;
+- SQLite schema version 5, bundle schema version 2, and backward-compatible legacy CSV preserve the policy.
+
 ## Remaining order
 
-1. **TEMPORAL-002** — issues #4, #23, #27.
-2. **DOMAIN-001** — issues #2 and #12 residuals.
-3. **REPORT-001** — issues #1, #14, #17, #28.
-4. **SEDIMENT-001** — issues #6, #7, #16, #18, #26.
-5. **INTERACTION-001** — issues #19, #20, #24.
+1. **DOMAIN-001** — issues #2 and #12 residuals.
+2. **REPORT-001** — issues #1, #14, #17, #28.
+3. **SEDIMENT-001** — issues #6, #7, #16, #18, #26.
+4. **INTERACTION-001** — issues #19, #20, #24.
 
 ## Closure discipline
 

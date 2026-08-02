@@ -70,7 +70,7 @@ Strata uses distinct clocks for distinct truths:
 - **Live elapsed duration** uses the process monotonic clock.
 - **Persisted timestamps** use UTC.
 - **Civil start/end rendering and operational-day allocation** use the validated fixed UTC offset from `keymap.json`.
-- **Historical report grouping** uses the operational-day key persisted with each completed session; later offset changes do not regroup old history.
+- **Historical allocation** uses each completed session's persisted fixed-offset boundary policy and absolute interval; later setting changes do not redivide old history.
 
 At a live finish or layer switch, Strata reconciles monotonic elapsed time against observed UTC wall time. A divergence greater than five seconds is treated as a clock discontinuity: the transition fails visibly and active state remains available for recovery rather than being converted into ordinary work.
 
@@ -82,7 +82,9 @@ strata stop --accept-clock-jump
 
 Use that override only after inspecting the active timestamp and system clock; it accepts the recorded wall interval rather than guessing a correction.
 
-The current policy is a **fixed offset**, not an IANA timezone. It is deterministic across travel and seasonal clock changes but does not automatically apply daylight-saving transitions. Sunrise semantics remain separate work. The full contract is recorded in [`docs/TEMPORAL_AUTHORITY.md`](docs/TEMPORAL_AUTHORITY.md).
+The current policy is a **fixed clock under a fixed UTC offset**, not an IANA timezone. It is deterministic across travel and seasonal clock changes but does not automatically apply daylight-saving transitions. The former `sunrise` option never performed solar calculation and has been removed; an existing `day_start_mode: "sunrise"` setting is rewritten visibly to `fixed` while preserving its configured hour and minute.
+
+A completed session remains one canonical ledger row. Reports project exact overlap slices at operational-day boundaries using the policy stored with that session, so a cross-boundary interval contributes only its overlapping seconds to each day without losing identity or creating empty exact-boundary fragments. Transitions whose whole-second duration is zero still complete or switch active state transactionally, but they do not create ordinary work rows. The full contract is recorded in [`docs/TEMPORAL_AUTHORITY.md`](docs/TEMPORAL_AUTHORITY.md).
 
 ## Persistence authority
 
@@ -240,7 +242,7 @@ Example:
 {
   "keymap_inherit": true,
   "time_log_path": "/home/user/.local/share/strata/time_log.csv",
-  "day_start_mode": "sunrise",
+  "day_start_mode": "fixed",
   "day_start_hour": 6,
   "day_start_minute": 0,
   "first_day_of_week": "monday",
@@ -260,13 +262,15 @@ Notes:
 - `unbind_actions` disables specific actions by name.
 - Setting `keymap_inherit: false` starts from an empty keymap.
 - `time_log_path` configures the legacy CSV source before SQLite activation and is migration provenance afterward.
-- `day_start_mode` accepts `fixed` or `sunrise`.
+- `day_start_mode` accepts only `fixed`. Existing `sunrise` values are migrated visibly to `fixed`; Strata never implemented solar sunrise calculation.
 - `first_day_of_week` accepts `monday` through `sunday`.
 - `toggle_command_palette` is the action name for rebinding palette open/close.
 
 Karma interval notes:
 
 - `month` uses calendar months: current month-to-date, then complete prior calendar months.
+- Day, week, and month totals allocate canonical sessions by exact overlap with their persisted operational-day boundary policy.
+- A zero-whole-second finish or switch is a transition event, not a completed work row.
 - Daily sediment snapshots are authoritative SQLite records after activation.
 - If a historical snapshot is missing, Strata reconstructs an approximation from that day's completed sessions.
 

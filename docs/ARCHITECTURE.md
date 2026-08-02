@@ -1,7 +1,7 @@
 # Strata architecture authority
 
 Status: current implementation map
-Last reviewed: 2026-08-01
+Last reviewed: 2026-08-02
 
 ## Current system
 
@@ -26,7 +26,7 @@ Current responsibility map:
 - `src/cli.rs` — command parsing, non-interactive lifecycle, reports, exports, migration, and maintenance commands.
 - `src/keybindings.rs` — shared keymap and authority/time-setting parsing and validation.
 - `src/domain.rs` — categories, sessions, operational-day logic, and report aggregation.
-- `src/temporal.rs` — checked wall intervals, monotonic/wall reconciliation, fixed-offset civil projection, and operational-day allocation.
+- `src/temporal.rs` — checked wall intervals, monotonic/wall reconciliation, fixed-clock civil policy, operational-day windows, and exact overlap slicing.
 - `src/sqlite.rs` and `src/sqlite/**` — schema migration, authoritative repositories, CLI/TUI adapters, runtime coordination, failure certification, deterministic interchange, backup/restore, and legacy-evidence custody.
 - `src/storage.rs` — XDG paths, pre-activation legacy compatibility, migration input, and atomic file helpers.
 - `src/app.rs` and `src/app/**` — TUI orchestration, interaction, rendering, reports, modals, and persistence-recovery controls.
@@ -68,6 +68,17 @@ TEMPORAL-001 establishes one explicit temporal authority:
 
 The detailed contract and failure matrix are `docs/TEMPORAL_AUTHORITY.md`.
 
+
+TEMPORAL-002 completes the remaining interval semantics:
+
+- one canonical session identity owns chronology, editing, deletion, and provenance;
+- each new session captures its fixed UTC offset and fixed boundary minute;
+- reports derive exact overlap slices instead of assigning an entire cross-boundary row to its ending day;
+- exact-boundary endpoints create no empty fragments and allocated seconds are conserved;
+- the false `sunrise` mode is removed and existing configuration is migrated visibly to fixed-clock policy;
+- zero-whole-second finishes and switches create transactional receipts and state transitions but no completed work rows;
+- SQLite schema version 5 and bundle schema version 2 preserve the new policy fields.
+
 The SQLite closure evidence is `docs/SQLITE_MIGRATION_CLOSURE_AUDIT.md`.
 
 ## Truth boundaries
@@ -90,10 +101,10 @@ TUI and CLI translate user intent and present state. Neither may maintain an ind
 
 ## Current architectural frontier
 
-Persistence structure, startup configuration fallback, and clock authority are no longer the primary risks. The next program begins with remaining interval semantics:
+Persistence structure, startup configuration fallback, clock authority, and interval-boundary semantics are no longer the primary risks. The next program is domain and projection correctness:
 
-1. define overlap allocation, honest sunrise behavior, and zero-duration transitions;
-2. correct reporting, export, and classification semantics;
+1. reconcile project/classification and explicit idle semantics;
+2. correct reporting and export semantics;
 3. establish a conserved sediment model independent of viewport and mutable previews.
 
 Complete profile isolation and deliberate runtime profile switching remain separate work under issue #15.
