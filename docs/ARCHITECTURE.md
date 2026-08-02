@@ -14,7 +14,7 @@ terminal lifecycle + application orchestration + explicit interaction modes
     ↓
 domain time, category, session, report, recovery, and snapshot rules
     ↓
-SQLite repository/runtime coordination + sediment simulation
+SQLite repository/runtime coordination + legacy catalog custody + sediment simulation
 ```
 
 Current responsibility map:
@@ -25,9 +25,9 @@ Current responsibility map:
 - `src/keybindings.rs` — validated runtime/time settings plus configured Bound/Unbound/Disabled action state, mandatory key policy, contextual aliases, and the shared input resolver.
 - `src/domain.rs` — canonical sessions, project/category identity, operational-day allocation, and reports.
 - `src/temporal.rs` — monotonic/wall reconciliation, fixed-offset civil policy, and exact overlap slicing.
-- `src/sqlite.rs` and `src/sqlite/**` — schema migrations, repositories, runtime transactions, checkpoint custody, deterministic interchange, backup/restore, and fault certification.
-- `src/storage.rs` — XDG paths, legacy-file authority, atomic file helpers, and custody-separated contribution files.
-- `src/app.rs` and `src/app/**` — TUI orchestration, explicit modal/edit state, persistence reconciliation, bounded recovery, historical artifact selection, context selection, resolver execution, palette/atlas projection, and rendering.
+- `src/sqlite.rs` and `src/sqlite/**` — schema migrations, category archival, repositories, runtime transactions, checkpoint custody, deterministic interchange, backup/restore, and fault certification.
+- `src/storage.rs` — XDG paths, strict legacy active/archived category catalog, session-reference validation, atomic file helpers, and custody-separated contribution files.
+- `src/app.rs` and `src/app/**` — TUI orchestration, active/archived category projections, explicit modal/edit state, persistence reconciliation, bounded recovery, historical artifact selection, context selection, resolver execution, palette/atlas projection, and rendering.
 - `src/app/terminal_lifecycle.rs` — raw-mode/alternate-screen RAII, process-wide panic restoration, exactly-once cleanup, runtime failure composition, and debug fault certification.
 - `src/sand/engine.rs` — canonical logical grains, compressed pending mass, physics, viewport projection, and Braille rendering.
 - `src/sand/recovery.rs` — bounded recovery arithmetic and topology-preserving detached contribution.
@@ -50,6 +50,22 @@ Current responsibility map:
 - Canonical sessions remain singular while exact overlap slices allocate report and daily-contribution mass across operational days.
 - Project and category are independent canonical axes.
 - Idle is explicit, continues producing sediment, and remains excluded from ordinary active-time totals.
+
+### Category identity and archival
+
+Category retirement changes availability, not identity or historical meaning.
+
+- Active and archived categories share one stable ID space.
+- Reports, exports, session serialization, karma, sand, snapshots, daily contributions, and tags resolve both active and archived metadata.
+- SQLite persists archival state through `archived_at_utc` and restricts referenced destructive deletion.
+- Legacy `categories.csv` accepts the historical five-column active-only schema and writes a six-column active/archived catalog.
+- Legacy catalog parsing rejects malformed, duplicate, reserved, or out-of-range identity and metadata.
+- Session category references must resolve to active or archived metadata; malformed or unknown IDs fail closed with the original value preserved.
+- Explicit ID 0 remains intentional idle; unresolved references are never converted to idle.
+- Archive and restore preserve stable ID, name, description, color, karma effect, and tags.
+- Legacy-to-SQLite migration retains archived state and original session foreign keys.
+
+The detailed category contract is `docs/CATEGORY_AUTHORITY.md`.
 
 ### Reports and exports
 
@@ -123,6 +139,10 @@ The complete interaction contract is `docs/INTERACTION_AUTHORITY.md`.
 
 Owns exact elapsed intervals, timestamps, categories, projects, descriptions, operational-day policy, and reportable totals.
 
+### Category catalog
+
+Owns stable category identity, active/archived state, historical display metadata, and reference validation. Retirement may hide an identity from new selection but may not erase, relabel, or redirect existing sessions, sediment, snapshots, or tags.
+
 ### Sediment formation
 
 Owns accountable visual history and canonical topology. It must conserve mass and category identity while remaining independent of the current viewport.
@@ -145,15 +165,16 @@ The terminal guard owns host-terminal acquisition and restoration. The applicati
 
 ### Interface
 
-TUI and CLI translate user intent and present state. Neither may own an independent ledger, reinterpret authority, mutate canonical sediment to fit the terminal, advance historical artifacts while viewing them, mutate history through ambiguous focus, invent fallback input routes, mislabel unreachable commands, or leave the host terminal in application mode after control exits Strata.
+TUI and CLI translate user intent and present state. Neither may own an independent ledger, reinterpret authority, mutate canonical sediment to fit the terminal, advance historical artifacts while viewing them, mutate history through ambiguous focus, invent fallback input routes, mislabel unreachable commands, silently convert unresolved categories to idle, or leave the host terminal in application mode after control exits Strata.
 
 ## Current architectural frontier
 
-Persistence, temporal, domain, report, sediment, and interaction authority are complete. The next priorities are:
+Persistence, temporal, domain, report, sediment, interaction, and cross-authority category integrity are complete. The next priorities are:
 
-1. criterion-by-criterion reconciliation of partially satisfied issues #5, #10, and #13;
-2. later domain/UI distinction work under issue #22;
-3. later profile authority, including complete isolation and deliberate switching under issue #15.
+1. reconcile active-session crash recovery issue #10 against the merged checkpoint and runtime-coordination authority;
+2. design the explicit merge/reassignment and permanent-deletion remainder of issue #13;
+3. later domain/UI distinction work under issue #22;
+4. later profile authority, including complete isolation and deliberate switching under issue #15.
 
 ## Non-authority
 
@@ -166,4 +187,6 @@ Persistence, temporal, domain, report, sediment, and interaction authority are c
 - A panic cleanup is not evidence of successful application persistence.
 - A contextual alias is not a direct physical binding.
 - An unbound action is not a disabled action.
+- An archived category is not deleted history.
+- An unresolved category reference is not idle.
 - CSV, JSON, and ICS are external adapters, not canonical domain models.
