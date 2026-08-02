@@ -1481,6 +1481,73 @@ mod tests {
     }
 
     #[test]
+    fn custom_range_is_inclusive_and_tied_rows_are_deterministic() {
+        let categories = vec![
+            Category {
+                id: CategoryId::new(1),
+                name: "beta".to_string(),
+                color: COLORS[0],
+                description: String::new(),
+                karma_effect: 1,
+            },
+            Category {
+                id: CategoryId::new(2),
+                name: "Alpha".to_string(),
+                color: COLORS[1],
+                description: String::new(),
+                karma_effect: 1,
+            },
+        ];
+        let make_session = |id, date: &str, category_id, elapsed_seconds| Session {
+            id,
+            date: date.to_string(),
+            category_id: CategoryId::new(category_id),
+            project: String::new(),
+            description: String::new(),
+            start_time: "09:00:00".to_string(),
+            end_time: "10:00:00".to_string(),
+            elapsed_seconds,
+            started_at_utc: None,
+            ended_at_utc: None,
+            operational_day_policy: None,
+        };
+        let sessions = vec![
+            make_session(1, "2026-07-01", 1, 60),
+            make_session(2, "2026-07-15", 2, 60),
+            make_session(3, "2026-07-16", 1, 999),
+        ];
+        let start = NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
+        let end = NaiveDate::from_ymd_opt(2026, 7, 15).unwrap();
+        for _ in 0..20 {
+            let report = build_report_for_date_range(
+                &sessions,
+                &categories,
+                start,
+                end,
+                "custom".to_string(),
+            );
+            assert_eq!(report.total_seconds, 120);
+            assert_eq!(
+                report
+                    .entries
+                    .iter()
+                    .map(|entry| entry.category_name.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["Alpha", "beta"]
+            );
+        }
+        let empty = build_report_for_date_range(
+            &sessions,
+            &categories,
+            NaiveDate::from_ymd_opt(2026, 7, 20).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 7, 20).unwrap(),
+            "empty".to_string(),
+        );
+        assert_eq!(empty.total_seconds, 0);
+        assert!(empty.entries.is_empty());
+    }
+
+    #[test]
     fn test_build_report_for_date_excludes_none_and_sorts() {
         let categories = vec![
             Category {

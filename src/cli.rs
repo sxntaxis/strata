@@ -1429,3 +1429,99 @@ pub fn run_command(cli: Cli) {
         }
     }
 }
+
+#[cfg(test)]
+mod report_export_tests {
+    use super::*;
+
+    fn sample_export() -> DataExport {
+        DataExport {
+            schema_version: 2,
+            exported_at: DateTime::parse_from_rfc3339("2026-08-02T03:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+            categories: vec![],
+            sessions: vec![SessionExport {
+                id: Some(7),
+                uid: "session-7@strata".to_string(),
+                provisional: true,
+                date: "2026-08-01".to_string(),
+                category_id: 1,
+                category_name: "Work, Deep; Focus".to_string(),
+                project: None,
+                description: "line one\\line two\nthird line with a long Unicode description café música 日本語 that must fold safely without splitting UTF-8".to_string(),
+                start_time: "20:30:00".to_string(),
+                end_time: "21:30:00".to_string(),
+                elapsed_seconds: 3600,
+                started_at_utc: Some(
+                    DateTime::parse_from_rfc3339("2026-08-02T02:30:00Z")
+                        .unwrap()
+                        .with_timezone(&Utc),
+                ),
+                ended_at_utc: Some(
+                    DateTime::parse_from_rfc3339("2026-08-02T03:30:00Z")
+                        .unwrap()
+                        .with_timezone(&Utc),
+                ),
+            }],
+        }
+    }
+
+    #[test]
+    fn ics_uses_authoritative_utc_and_escapes_text() {
+        let ics = render_ics(&sample_export()).expect("ICS should render");
+        assert!(ics.starts_with("BEGIN:VCALENDAR\r\n"));
+        assert!(ics.ends_with("END:VCALENDAR\r\n"));
+        assert!(ics.contains("DTSTART:20260802T023000Z\r\n"));
+        assert!(ics.contains("DTEND:20260802T033000Z\r\n"));
+        assert!(ics.contains("SUMMARY:Work\\, Deep\\; Focus\r\n"));
+        assert!(ics.contains("DESCRIPTION:line one\\\\line two\\nthird line"));
+        assert!(ics.contains("X-STRATA-PROVISIONAL:TRUE\r\n"));
+        assert!(!ics.contains("SUMMARY:Project"));
+        for physical in ics.split("\r\n").filter(|line| !line.is_empty()) {
+            assert!(
+                physical.len() <= 75,
+                "unfolded line exceeds 75 octets: {physical}"
+            );
+        }
+    }
+
+    #[test]
+    fn deterministic_export_sort_has_complete_tie_breakers() {
+        let mut categories = vec![
+            CategoryExport {
+                id: 2,
+                name: "beta".into(),
+                description: String::new(),
+                color_index: 0,
+                karma_effect: 1,
+            },
+            CategoryExport {
+                id: 1,
+                name: "Alpha".into(),
+                description: String::new(),
+                color_index: 0,
+                karma_effect: 1,
+            },
+        ];
+        let mut sessions = vec![
+            SessionExport {
+                uid: "b@strata".into(),
+                ..sample_export().sessions[0].clone()
+            },
+            SessionExport {
+                uid: "a@strata".into(),
+                ..sample_export().sessions[0].clone()
+            },
+        ];
+        sort_exports(&mut categories, &mut sessions);
+        assert_eq!(
+            categories.iter().map(|c| c.id).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(
+            sessions.iter().map(|s| s.uid.as_str()).collect::<Vec<_>>(),
+            vec!["a@strata", "b@strata"]
+        );
+    }
+}
