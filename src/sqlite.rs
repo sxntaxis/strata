@@ -102,7 +102,7 @@ pub(crate) fn run_restore(options: RestoreOptions) -> Result<SqliteMaintenanceRe
     maintenance::restore(options).map_err(|error| error.to_string())
 }
 
-const CURRENT_SCHEMA_VERSION: i64 = 4;
+const CURRENT_SCHEMA_VERSION: i64 = 5;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 const MIGRATION_1: &str = r#"
@@ -336,6 +336,36 @@ VALUES (4, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
 PRAGMA user_version = 4;
 "#;
 
+const MIGRATION_5: &str = r#"
+ALTER TABLE sessions
+    ADD COLUMN boundary_utc_offset_seconds INTEGER
+        CHECK (boundary_utc_offset_seconds BETWEEN -86399 AND 86399);
+ALTER TABLE sessions
+    ADD COLUMN boundary_start_minutes INTEGER
+        CHECK (boundary_start_minutes BETWEEN 0 AND 1439);
+
+CREATE TRIGGER sessions_temporal_insert_guard
+BEFORE INSERT ON sessions
+WHEN NEW.elapsed_seconds <= 0
+   OR ((NEW.boundary_utc_offset_seconds IS NULL) != (NEW.boundary_start_minutes IS NULL))
+BEGIN
+    SELECT RAISE(ABORT, 'completed sessions require positive elapsed time and complete boundary provenance');
+END;
+
+CREATE TRIGGER sessions_temporal_update_guard
+BEFORE UPDATE OF elapsed_seconds, boundary_utc_offset_seconds, boundary_start_minutes ON sessions
+WHEN NEW.elapsed_seconds <= 0
+   OR ((NEW.boundary_utc_offset_seconds IS NULL) != (NEW.boundary_start_minutes IS NULL))
+BEGIN
+    SELECT RAISE(ABORT, 'completed sessions require positive elapsed time and complete boundary provenance');
+END;
+
+INSERT INTO schema_migrations(version, applied_at_utc)
+VALUES (5, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+
+PRAGMA user_version = 5;
+"#;
+
 #[derive(Debug, Error)]
 pub(crate) enum SqliteStoreError {
     #[error("SQLite error: {0}")]
@@ -346,6 +376,8 @@ pub(crate) enum SqliteStoreError {
     NoActiveSession,
     #[error("SQLite storage authority conflict: expected {expected}, found {found}")]
     AuthorityConflict { expected: String, found: String },
+    #[error("completed sessions must have positive elapsed time")]
+    InvalidSessionDuration,
 }
 
 #[derive(Debug)]
@@ -363,6 +395,8 @@ pub(crate) struct SessionCompletion<'a> {
     pub ended_at_utc: &'a str,
     pub operational_day: &'a str,
     pub elapsed_seconds: i64,
+    pub boundary_utc_offset_seconds: i32,
+    pub boundary_start_minutes: u16,
     pub source: &'a str,
 }
 
@@ -425,6 +459,14 @@ impl SqliteRepository {
             let transaction =
                 connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
             transaction.execute_batch(MIGRATION_4)?;
+            transaction.commit()?;
+            version = 4;
+        }
+
+        if version < 5 {
+            let transaction =
+                connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(MIGRATION_5)?;
             transaction.commit()?;
         }
 
@@ -522,6 +564,9 @@ impl SqliteRepository {
         &mut self,
         completion: &SessionCompletion<'_>,
     ) -> Result<i64, SqliteStoreError> {
+        if completion.elapsed_seconds <= 0 {
+            return Err(SqliteStoreError::InvalidSessionDuration);
+        }
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -555,8 +600,10 @@ impl SqliteRepository {
                 ended_at_utc,
                 operational_day,
                 elapsed_seconds,
+                boundary_utc_offset_seconds,
+                boundary_start_minutes,
                 source
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 active.0,
                 active.1,
@@ -566,6 +613,8 @@ impl SqliteRepository {
                 completion.ended_at_utc,
                 completion.operational_day,
                 completion.elapsed_seconds,
+                completion.boundary_utc_offset_seconds,
+                completion.boundary_start_minutes,
                 completion.source,
             ],
         )?;
@@ -611,6 +660,8 @@ mod tests {
             ended_at_utc: "2026-08-01T11:00:00Z",
             operational_day: "2026-08-01",
             elapsed_seconds: 3600,
+            boundary_utc_offset_seconds: -21600,
+            boundary_start_minutes: 360,
             source: "runtime",
         }
     }
@@ -619,7 +670,7 @@ mod tests {
     fn new_database_applies_schema_and_idle_category() {
         let repository = SqliteRepository::open_in_memory().expect("database should open");
 
-        assert_eq!(repository.schema_version().unwrap(), 4);
+        assert_eq!(repository.schema_version().unwrap(), 5);
         assert_eq!(repository.integrity_check().unwrap(), "ok");
         let idle: (String, i64) = repository
             .connection
@@ -686,7 +737,7 @@ mod tests {
         let repository =
             SqliteRepository::from_connection(connection).expect("migration should succeed");
 
-        assert_eq!(repository.schema_version().unwrap(), 4);
+        assert_eq!(repository.schema_version().unwrap(), 5);
         assert_eq!(repository.completed_session_count().unwrap(), 1);
         let legacy_import_id: Option<i64> = repository
             .connection

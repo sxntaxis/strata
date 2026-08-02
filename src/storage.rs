@@ -6,7 +6,7 @@ use std::{
     sync::{OnceLock, RwLock},
 };
 
-use chrono::{Local, NaiveDate};
+use chrono::{DateTime, Local, NaiveDate, Utc};
 use csv::{ReaderBuilder, StringRecord, WriterBuilder};
 use directories::ProjectDirs;
 use ratatui::style::Color;
@@ -15,7 +15,10 @@ use thiserror::Error;
 
 use crate::{
     constants::COLORS,
-    domain::{Category, CategoryId, DRIFT_CATEGORY_CONFIG_NAME, DRIFT_CATEGORY_ID, Session},
+    domain::{
+        Category, CategoryId, DRIFT_CATEGORY_CONFIG_NAME, DRIFT_CATEGORY_ID, OperationalDayPolicy,
+        Session,
+    },
     sand::SandState,
 };
 
@@ -32,7 +35,7 @@ pub struct LoadedSessions {
 }
 
 const CATEGORIES_HEADER: [&str; 5] = ["id", "name", "description", "color_index", "karma_effect"];
-const SESSIONS_HEADER: [&str; 8] = [
+const LEGACY_SESSIONS_HEADER: [&str; 8] = [
     "id",
     "date",
     "category_id",
@@ -41,6 +44,20 @@ const SESSIONS_HEADER: [&str; 8] = [
     "start_time",
     "end_time",
     "elapsed_seconds",
+];
+const SESSIONS_HEADER: [&str; 12] = [
+    "id",
+    "date",
+    "category_id",
+    "category_name",
+    "description",
+    "start_time",
+    "end_time",
+    "elapsed_seconds",
+    "started_at_utc",
+    "ended_at_utc",
+    "boundary_utc_offset_seconds",
+    "boundary_start_minutes",
 ];
 const BACKUP_RETENTION_MAX_FILES: usize = 10;
 
@@ -55,6 +72,12 @@ pub enum StorageError {
         file: &'static str,
         expected: String,
         found: String,
+    },
+    #[error("Invalid CSV data for {file} row {row}: {message}")]
+    InvalidCsvData {
+        file: &'static str,
+        row: usize,
+        message: String,
     },
 }
 
@@ -233,17 +256,23 @@ pub fn try_load_sessions_from_csv(
 
     let mut reader = ReaderBuilder::new().has_headers(true).from_path(path)?;
     let headers = reader.headers()?.clone();
-    if !csv_header_matches(&headers, &SESSIONS_HEADER) {
+    let has_temporal_provenance = csv_header_matches(&headers, &SESSIONS_HEADER);
+    if !has_temporal_provenance && !csv_header_matches(&headers, &LEGACY_SESSIONS_HEADER) {
         return Err(StorageError::InvalidCsvSchema {
             file: "time_log.csv",
-            expected: SESSIONS_HEADER.join(","),
+            expected: format!(
+                "{} or {}",
+                LEGACY_SESSIONS_HEADER.join(","),
+                SESSIONS_HEADER.join(",")
+            ),
             found: csv_header_string(&headers),
         });
     }
 
     let mut loaded = default_sessions_loaded();
 
-    for record in reader.records() {
+    for (index, record) in reader.records().enumerate() {
+        let row = index + 2;
         let record = record?;
 
         let Some(id_raw) = record.get(0) else {
@@ -263,6 +292,72 @@ pub fn try_load_sessions_from_csv(
             .and_then(|raw| category_by_id.get(&raw).copied())
             .unwrap_or(DRIFT_CATEGORY_ID);
 
+        let provenance_is_empty =
+            (8..=11).all(|field| record.get(field).unwrap_or_default().trim().is_empty());
+        let (started_at_utc, ended_at_utc, operational_day_policy) = if has_temporal_provenance
+            && provenance_is_empty
+        {
+            (None, None, None)
+        } else if has_temporal_provenance {
+            let parse_timestamp =
+                |field: usize, label: &str| -> Result<DateTime<Utc>, StorageError> {
+                    let raw = record.get(field).unwrap_or_default();
+                    DateTime::parse_from_rfc3339(raw)
+                        .map(|value| value.with_timezone(&Utc))
+                        .map_err(|error| StorageError::InvalidCsvData {
+                            file: "time_log.csv",
+                            row,
+                            message: format!("invalid {label} '{raw}': {error}"),
+                        })
+                };
+            let started = parse_timestamp(8, "start timestamp")?;
+            let ended = parse_timestamp(9, "end timestamp")?;
+            let utc_offset_seconds =
+                record
+                    .get(10)
+                    .unwrap_or_default()
+                    .parse::<i32>()
+                    .map_err(|error| StorageError::InvalidCsvData {
+                        file: "time_log.csv",
+                        row,
+                        message: format!("invalid boundary UTC offset: {error}"),
+                    })?;
+            if chrono::FixedOffset::east_opt(utc_offset_seconds).is_none() {
+                return Err(StorageError::InvalidCsvData {
+                    file: "time_log.csv",
+                    row,
+                    message: format!("boundary UTC offset {utc_offset_seconds} is unsupported"),
+                });
+            }
+            let start_minutes =
+                record
+                    .get(11)
+                    .unwrap_or_default()
+                    .parse::<u16>()
+                    .map_err(|error| StorageError::InvalidCsvData {
+                        file: "time_log.csv",
+                        row,
+                        message: format!("invalid boundary start minute: {error}"),
+                    })?;
+            if start_minutes > 1439 {
+                return Err(StorageError::InvalidCsvData {
+                    file: "time_log.csv",
+                    row,
+                    message: format!("boundary start minute {start_minutes} is outside 0..1439"),
+                });
+            }
+            (
+                Some(started),
+                Some(ended),
+                Some(OperationalDayPolicy {
+                    utc_offset_seconds,
+                    start_minutes,
+                }),
+            )
+        } else {
+            (None, None, None)
+        };
+
         loaded.sessions.push(Session {
             id,
             date: record.get(1).unwrap_or_default().to_string(),
@@ -274,6 +369,9 @@ pub fn try_load_sessions_from_csv(
                 .get(7)
                 .and_then(|value| value.parse::<usize>().ok())
                 .unwrap_or(0),
+            started_at_utc,
+            ended_at_utc,
+            operational_day_policy,
         });
 
         loaded.next_session_id = loaded.next_session_id.max(id + 1);
@@ -332,6 +430,20 @@ pub fn save_sessions_to_csv(
             .map(|category| category.name.as_str())
             .unwrap_or(DRIFT_CATEGORY_CONFIG_NAME);
 
+        let (started_at_utc, ended_at_utc, offset, start_minutes) = match (
+            session.started_at_utc,
+            session.ended_at_utc,
+            session.operational_day_policy,
+        ) {
+            (Some(started), Some(ended), Some(policy)) => (
+                started.to_rfc3339(),
+                ended.to_rfc3339(),
+                policy.utc_offset_seconds.to_string(),
+                policy.start_minutes.to_string(),
+            ),
+            _ => (String::new(), String::new(), String::new(), String::new()),
+        };
+
         writer
             .write_record([
                 session.id.to_string(),
@@ -342,6 +454,10 @@ pub fn save_sessions_to_csv(
                 session.start_time.clone(),
                 session.end_time.clone(),
                 session.elapsed_seconds.to_string(),
+                started_at_utc,
+                ended_at_utc,
+                offset,
+                start_minutes,
             ])
             .map_err(|e| e.to_string())?;
     }
@@ -657,6 +773,9 @@ mod tests {
             start_time: "10:00:00".to_string(),
             end_time: "11:00:00".to_string(),
             elapsed_seconds: 3600,
+            started_at_utc: None,
+            ended_at_utc: None,
+            operational_day_policy: None,
         }];
 
         save_sessions_to_csv(&path, &sessions, &categories).unwrap();

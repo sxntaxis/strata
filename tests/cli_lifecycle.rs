@@ -1,5 +1,6 @@
 #![cfg(target_os = "linux")]
 
+use chrono::{Duration as ChronoDuration, Utc};
 use std::{
     fs,
     os::unix::fs::PermissionsExt,
@@ -81,6 +82,20 @@ impl TestProfile {
     fn time_log_path(&self) -> PathBuf {
         self.data_dir().join("time_log.csv")
     }
+
+    fn backdate_active_session(&self, seconds: i64) {
+        let path = self.active_session_path();
+        let content = fs::read_to_string(&path).expect("active session should be readable");
+        let mut value: serde_json::Value =
+            serde_json::from_str(&content).expect("active session JSON should be valid");
+        value["start_time"] =
+            serde_json::Value::String((Utc::now() - ChronoDuration::seconds(seconds)).to_rfc3339());
+        fs::write(
+            path,
+            serde_json::to_string_pretty(&value).expect("active session JSON should serialize"),
+        )
+        .expect("active session should be backdated");
+    }
 }
 
 impl Drop for TestProfile {
@@ -113,6 +128,7 @@ fn start_stop_report_round_trip_uses_an_isolated_profile() {
     ]);
     assert!(start.status.success(), "start failed: {}", stderr(&start));
     assert_exists(&profile.active_session_path());
+    profile.backdate_active_session(2);
 
     let stop = profile.run(&["stop"]);
     assert!(stop.status.success(), "stop failed: {}", stderr(&stop));
@@ -164,6 +180,7 @@ fn repeated_stop_fails_without_adding_a_duplicate_session() {
 
     let start = profile.run(&["start", "single-project", "--category", "Work"]);
     assert!(start.status.success(), "start failed: {}", stderr(&start));
+    profile.backdate_active_session(2);
 
     let first_stop = profile.run(&["stop"]);
     assert!(
@@ -250,6 +267,7 @@ fn unwritable_time_log_fails_stop_without_consuming_active_state() {
     let profile = TestProfile::new("unwritable-time-log");
     let start = profile.run(&["start", "retryable-project", "--category", "Work"]);
     assert!(start.status.success(), "start failed: {}", stderr(&start));
+    profile.backdate_active_session(2);
 
     fs::write(profile.time_log_path(), EMPTY_TIME_LOG).expect("time log should be initialized");
     let active_path = profile.active_session_path();

@@ -1,12 +1,14 @@
 #![cfg(target_os = "linux")]
 
+use chrono::{Duration as ChronoDuration, SecondsFormat, Utc};
 use std::{
     fs,
     io::Write,
     os::unix::fs::PermissionsExt,
     path::PathBuf,
     process::{Command, Output, Stdio},
-    time::{SystemTime, UNIX_EPOCH},
+    thread,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use rusqlite::Connection;
@@ -91,12 +93,23 @@ impl TestProfile {
             command.env("STRATA_TEST_SQLITE_FAULT", fault);
         }
         let mut child = command.spawn().expect("pseudo-terminal TUI should start");
-        child
-            .stdin
-            .take()
-            .expect("TUI stdin should exist")
-            .write_all(input)
-            .expect("TUI input should be written");
+        let mut stdin = child.stdin.take().expect("TUI stdin should exist");
+        for byte in input {
+            thread::sleep(Duration::from_millis(1_100));
+            if let Err(error) = stdin.write_all(std::slice::from_ref(byte)) {
+                if error.kind() == std::io::ErrorKind::BrokenPipe {
+                    break;
+                }
+                panic!("TUI input should be written: {error}");
+            }
+            if let Err(error) = stdin.flush() {
+                if error.kind() == std::io::ErrorKind::BrokenPipe {
+                    break;
+                }
+                panic!("TUI input should flush: {error}");
+            }
+        }
+        drop(stdin);
         child.wait_with_output().expect("TUI process should finish")
     }
 
@@ -132,6 +145,19 @@ impl TestProfile {
 
     fn legacy_time_log_path(&self) -> PathBuf {
         self.data_home.join("strata/time_log.csv")
+    }
+
+    fn backdate_sqlite_active_session(&self, seconds: i64) {
+        let connection = Connection::open(self.database_path()).expect("database should open");
+        let started_at = (Utc::now() - ChronoDuration::seconds(seconds))
+            .to_rfc3339_opts(SecondsFormat::Nanos, true);
+        let changed = connection
+            .execute(
+                "UPDATE active_session SET started_at_utc = ?1 WHERE singleton = 1",
+                [started_at],
+            )
+            .expect("active session should be backdated");
+        assert_eq!(changed, 1, "one active SQLite session should be backdated");
     }
 
     fn migrate(&self) {
@@ -274,6 +300,7 @@ fn activated_cli_uses_sqlite_without_legacy_dual_writes() {
         "SQLite authority",
     ]);
     assert!(start.status.success(), "start failed: {}", stderr(&start));
+    profile.backdate_sqlite_active_session(2);
     assert!(!profile.legacy_active_path().exists());
     assert!(!profile.legacy_time_log_path().exists());
 
@@ -396,6 +423,7 @@ fn unacknowledged_cli_stop_is_recovered_without_duplicate_session() {
 
     let start = profile.run(&["start", "receipt-project", "--category", "Work"]);
     assert!(start.status.success(), "start failed: {}", stderr(&start));
+    profile.backdate_sqlite_active_session(2);
     let first_stop = profile.run(&["stop"]);
     assert!(
         first_stop.status.success(),

@@ -60,7 +60,6 @@ enum SessionClockMode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AtlasSelectable {
     TimeLogPath,
-    DayStartMode,
     WeekStartDay,
     Action(keybindings::Action),
 }
@@ -69,7 +68,6 @@ enum AtlasSelectable {
 enum AtlasOverlay {
     CaptureKey { action: keybindings::Action },
     EditTimeLogPath { input: String },
-    SelectDayStartMode { selected: usize },
     SelectWeekStartDay { selected: usize },
 }
 
@@ -539,11 +537,7 @@ impl App {
     }
 
     fn atlas_items(&self) -> Vec<AtlasSelectable> {
-        let mut items = vec![
-            AtlasSelectable::TimeLogPath,
-            AtlasSelectable::DayStartMode,
-            AtlasSelectable::WeekStartDay,
-        ];
+        let mut items = vec![AtlasSelectable::TimeLogPath, AtlasSelectable::WeekStartDay];
         items.extend(
             keybindings::Action::all()
                 .iter()
@@ -590,9 +584,6 @@ impl App {
             AtlasSelectable::TimeLogPath => {
                 "Path where session rows are written (time_log.csv).".to_string()
             }
-            AtlasSelectable::DayStartMode => {
-                "Operational day boundary mode used for day rollover.".to_string()
-            }
             AtlasSelectable::WeekStartDay => {
                 "First weekday used by Week range in Karma pop-up.".to_string()
             }
@@ -605,7 +596,6 @@ impl App {
 
         match item {
             AtlasSelectable::TimeLogPath => Color::Cyan,
-            AtlasSelectable::DayStartMode => Color::Yellow,
             AtlasSelectable::WeekStartDay => Color::Green,
             AtlasSelectable::Action(action) => match action.category() {
                 keybindings::ActionCategory::Global => Color::Cyan,
@@ -615,13 +605,6 @@ impl App {
                 keybindings::ActionCategory::HelpModal => Color::Blue,
             },
         }
-    }
-
-    fn day_start_mode_options() -> [crate::domain::DayBoundaryMode; 2] {
-        [
-            crate::domain::DayBoundaryMode::FixedHour,
-            crate::domain::DayBoundaryMode::Sunrise,
-        ]
     }
 
     fn week_start_options() -> [FirstDayOfWeek; 7] {
@@ -634,28 +617,6 @@ impl App {
             FirstDayOfWeek::Saturday,
             FirstDayOfWeek::Sunday,
         ]
-    }
-
-    fn day_start_setting_label(&self) -> String {
-        let boundary = self.runtime_settings.day_boundary;
-        let mode = match boundary.mode {
-            crate::domain::DayBoundaryMode::FixedHour => "fixed",
-            crate::domain::DayBoundaryMode::Sunrise => "sunrise",
-        };
-
-        let sign = if boundary.utc_offset_seconds < 0 {
-            "-"
-        } else {
-            "+"
-        };
-        let abs_offset = boundary.utc_offset_seconds.unsigned_abs();
-        let offset_hours = abs_offset / 3600;
-        let offset_minutes = (abs_offset % 3600) / 60;
-
-        format!(
-            "{} {:02}:{:02} (UTC{}{:02}:{:02})",
-            mode, boundary.fixed_hour, boundary.fixed_minute, sign, offset_hours, offset_minutes
-        )
     }
 
     fn first_day_of_week_label(&self) -> String {
@@ -754,13 +715,6 @@ impl App {
                 self.atlas_overlay = Some(AtlasOverlay::EditTimeLogPath {
                     input: storage::get_time_log_path().display().to_string(),
                 });
-            }
-            AtlasSelectable::DayStartMode => {
-                let selected = Self::day_start_mode_options()
-                    .iter()
-                    .position(|mode| *mode == self.runtime_settings.day_boundary.mode)
-                    .unwrap_or(0);
-                self.atlas_overlay = Some(AtlasOverlay::SelectDayStartMode { selected });
             }
             AtlasSelectable::WeekStartDay => {
                 let selected = Self::week_start_options()

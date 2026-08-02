@@ -1,7 +1,7 @@
 # Strata accepted decision index
 
 Status: accepted authority
-Last reviewed: 2026-08-01
+Last reviewed: 2026-08-02
 
 Detailed rationale and unresolved implications live in `notebook/decisions/DECISION-REGISTER.md`. This file contains only decisions accepted strongly enough to constrain implementation.
 
@@ -21,6 +21,9 @@ Detailed rationale and unresolved implications live in `notebook/decisions/DECIS
 | STRATA-D012 | Legacy sources remain evidence until archive-first, provenance-verified, separately confirmed removal. | implemented and certified |
 | STRATA-D013 | CLI and TUI share one validated startup configuration; invalid configuration blocks authority resolution unless `--ignore-config` is explicitly supplied. | implemented and certified |
 | STRATA-D014 | Live duration is monotonic; persisted timestamps are UTC; civil projection uses the validated fixed offset; persisted operational-day keys own historical grouping; ambiguous clock discontinuities fail closed. | implemented and certified |
+| STRATA-D015 | A logical session remains one canonical ledger identity; reports allocate its duration through exact operational-day overlap slices using policy captured with the session. | implemented and certified |
+| STRATA-D016 | Fixed-clock policy is the only supported operational-day mode; the former sunrise label is removed and migrated visibly because no solar calculation existed. | implemented and certified |
+| STRATA-D017 | Zero-whole-second finishes and switches are transactional transition events with receipts, not completed work rows or sediment. | implemented and certified |
 
 ## Explicitly unresolved
 

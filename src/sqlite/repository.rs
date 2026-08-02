@@ -1,7 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use chrono::{DateTime, NaiveDate, Utc};
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
 use thiserror::Error;
+
+use crate::{domain::OperationalDayPolicy, temporal};
 
 use super::{NewActiveSession, SessionCompletion, SqliteRepository, SqliteStoreError};
 
@@ -55,6 +58,8 @@ pub(crate) struct SessionRecord {
     pub ended_at_utc: String,
     pub operational_day: String,
     pub elapsed_seconds: i64,
+    pub boundary_utc_offset_seconds: Option<i64>,
+    pub boundary_start_minutes: Option<i64>,
     pub source: String,
 }
 
@@ -68,6 +73,8 @@ pub(crate) struct NewSessionRecord<'a> {
     pub ended_at_utc: &'a str,
     pub operational_day: &'a str,
     pub elapsed_seconds: i64,
+    pub boundary_utc_offset_seconds: i32,
+    pub boundary_start_minutes: u16,
     pub source: &'a str,
 }
 
@@ -362,7 +369,17 @@ impl SqliteRepository {
                 "start operational day is after end operational day".to_string(),
             ));
         }
-        query_sessions_between(&self.connection, start_operational_day, end_operational_day)
+        let start =
+            NaiveDate::parse_from_str(start_operational_day, "%Y-%m-%d").map_err(|error| {
+                RepositoryError::InvalidInput(format!("invalid start operational day: {error}"))
+            })?;
+        let end = NaiveDate::parse_from_str(end_operational_day, "%Y-%m-%d").map_err(|error| {
+            RepositoryError::InvalidInput(format!("invalid end operational day: {error}"))
+        })?;
+        Ok(query_all_sessions(&self.connection)?
+            .into_iter()
+            .filter(|session| session_overlaps_range(session, start, end))
+            .collect())
     }
 
     pub fn insert_session(
@@ -398,8 +415,10 @@ impl SqliteRepository {
                  ended_at_utc = ?6,
                  operational_day = ?7,
                  elapsed_seconds = ?8,
-                 source = ?9
-             WHERE id = ?10",
+                 boundary_utc_offset_seconds = ?9,
+                 boundary_start_minutes = ?10,
+                 source = ?11
+             WHERE id = ?12",
             params![
                 session.stable_id,
                 session.project,
@@ -409,6 +428,8 @@ impl SqliteRepository {
                 session.ended_at_utc,
                 session.operational_day,
                 session.elapsed_seconds,
+                session.boundary_utc_offset_seconds,
+                session.boundary_start_minutes,
                 session.source,
                 session_id,
             ],
@@ -463,8 +484,10 @@ impl SqliteRepository {
                 ended_at_utc,
                 operational_day,
                 elapsed_seconds,
+                boundary_utc_offset_seconds,
+                boundary_start_minutes,
                 source
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 active.stable_id,
                 active.project,
@@ -474,6 +497,8 @@ impl SqliteRepository {
                 completion.ended_at_utc,
                 completion.operational_day,
                 completion.elapsed_seconds,
+                completion.boundary_utc_offset_seconds,
+                completion.boundary_start_minutes,
                 completion.source,
             ],
         )?;
@@ -715,9 +740,19 @@ fn validate_session(session: &NewSessionRecord<'_>) -> Result<(), RepositoryErro
     require_non_empty(session.ended_at_utc, "session end timestamp")?;
     require_non_empty(session.operational_day, "session operational day")?;
     require_non_empty(session.source, "session source")?;
-    if session.elapsed_seconds < 0 {
+    if session.elapsed_seconds <= 0 {
         return Err(RepositoryError::InvalidInput(
-            "session elapsed seconds cannot be negative".to_string(),
+            "ordinary session elapsed seconds must be positive".to_string(),
+        ));
+    }
+    if chrono::FixedOffset::east_opt(session.boundary_utc_offset_seconds).is_none() {
+        return Err(RepositoryError::InvalidInput(
+            "session boundary UTC offset is unsupported".to_string(),
+        ));
+    }
+    if session.boundary_start_minutes > 1439 {
+        return Err(RepositoryError::InvalidInput(
+            "session boundary start minute is outside 0..1439".to_string(),
         ));
     }
     Ok(())
@@ -819,8 +854,10 @@ fn insert_session_record(
             ended_at_utc,
             operational_day,
             elapsed_seconds,
+            boundary_utc_offset_seconds,
+            boundary_start_minutes,
             source
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
             session.stable_id,
             session.project,
@@ -830,6 +867,8 @@ fn insert_session_record(
             session.ended_at_utc,
             session.operational_day,
             session.elapsed_seconds,
+            session.boundary_utc_offset_seconds,
+            session.boundary_start_minutes,
             session.source,
         ],
     )?;
@@ -901,7 +940,8 @@ fn query_all_sessions(connection: &Connection) -> Result<Vec<SessionRecord>, Rep
     let mut statement = connection.prepare(
         "SELECT id, stable_id, project, category_id, description,
                 started_at_utc, ended_at_utc, operational_day,
-                elapsed_seconds, source
+                elapsed_seconds, boundary_utc_offset_seconds,
+                boundary_start_minutes, source
          FROM sessions
          ORDER BY operational_day, started_at_utc, id",
     )?;
@@ -909,24 +949,51 @@ fn query_all_sessions(connection: &Connection) -> Result<Vec<SessionRecord>, Rep
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
-fn query_sessions_between(
-    connection: &Connection,
-    start_operational_day: &str,
-    end_operational_day: &str,
-) -> Result<Vec<SessionRecord>, RepositoryError> {
-    let mut statement = connection.prepare(
-        "SELECT id, stable_id, project, category_id, description,
-                started_at_utc, ended_at_utc, operational_day,
-                elapsed_seconds, source
-         FROM sessions
-         WHERE operational_day >= ?1 AND operational_day <= ?2
-         ORDER BY operational_day, started_at_utc, id",
-    )?;
-    let rows = statement.query_map(
-        params![start_operational_day, end_operational_day],
-        map_session,
-    )?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+fn session_overlaps_range(session: &SessionRecord, start: NaiveDate, end: NaiveDate) -> bool {
+    let fallback = || {
+        NaiveDate::parse_from_str(&session.operational_day, "%Y-%m-%d")
+            .is_ok_and(|day| day >= start && day <= end)
+    };
+    let (Some(offset), Some(start_minutes)) = (
+        session.boundary_utc_offset_seconds,
+        session.boundary_start_minutes,
+    ) else {
+        return fallback();
+    };
+    let Ok(offset) = i32::try_from(offset) else {
+        return fallback();
+    };
+    let Ok(start_minutes) = u16::try_from(start_minutes) else {
+        return fallback();
+    };
+    let Ok(started_at_utc) = DateTime::parse_from_rfc3339(&session.started_at_utc)
+        .map(|value| value.with_timezone(&Utc))
+    else {
+        return fallback();
+    };
+    let Ok(ended_at_utc) =
+        DateTime::parse_from_rfc3339(&session.ended_at_utc).map(|value| value.with_timezone(&Utc))
+    else {
+        return fallback();
+    };
+    let Ok(elapsed_seconds) = usize::try_from(session.elapsed_seconds) else {
+        return fallback();
+    };
+    temporal::allocate_operational_day_slices(
+        started_at_utc,
+        ended_at_utc,
+        elapsed_seconds,
+        OperationalDayPolicy {
+            utc_offset_seconds: offset,
+            start_minutes,
+        },
+    )
+    .map(|slices| {
+        slices
+            .iter()
+            .any(|slice| slice.operational_day >= start && slice.operational_day <= end)
+    })
+    .unwrap_or_else(|_| fallback())
 }
 
 fn query_active_session(
@@ -1063,7 +1130,9 @@ fn map_session(row: &Row<'_>) -> rusqlite::Result<SessionRecord> {
         ended_at_utc: row.get(6)?,
         operational_day: row.get(7)?,
         elapsed_seconds: row.get(8)?,
-        source: row.get(9)?,
+        boundary_utc_offset_seconds: row.get(9)?,
+        boundary_start_minutes: row.get(10)?,
+        source: row.get(11)?,
     })
 }
 
@@ -1095,6 +1164,8 @@ mod tests {
             ended_at_utc: "2026-08-01T17:00:00Z",
             operational_day: day,
             elapsed_seconds: 3600,
+            boundary_utc_offset_seconds: -21600,
+            boundary_start_minutes: 360,
             source: "test",
         }
     }
@@ -1145,15 +1216,38 @@ mod tests {
     }
 
     #[test]
+    fn bounded_session_query_includes_canonical_rows_that_overlap_the_day() {
+        let mut repository = SqliteRepository::open_in_memory().unwrap();
+        let category_id = repository.create_category(&category("Study")).unwrap();
+        let mut crossing = session("crossing", category_id, "2026-08-02");
+        crossing.started_at_utc = "2026-08-02T11:30:00Z";
+        crossing.ended_at_utc = "2026-08-02T12:30:00Z";
+        crossing.elapsed_seconds = 3600;
+        repository.insert_session(&crossing).unwrap();
+
+        let previous = repository
+            .list_sessions_between("2026-08-01", "2026-08-01")
+            .unwrap();
+        let current = repository
+            .list_sessions_between("2026-08-02", "2026-08-02")
+            .unwrap();
+
+        assert_eq!(previous.len(), 1);
+        assert_eq!(current.len(), 1);
+        assert_eq!(previous[0].stable_id, "crossing");
+    }
+
+    #[test]
     fn session_crud_and_bounds_are_repository_owned() {
         let mut repository = SqliteRepository::open_in_memory().unwrap();
         let category_id = repository.create_category(&category("Study")).unwrap();
         let first = repository
             .insert_session(&session("session-1", category_id, "2026-08-01"))
             .unwrap();
-        repository
-            .insert_session(&session("session-2", category_id, "2026-08-02"))
-            .unwrap();
+        let mut second = session("session-2", category_id, "2026-08-02");
+        second.started_at_utc = "2026-08-02T16:00:00Z";
+        second.ended_at_utc = "2026-08-02T17:00:00Z";
+        repository.insert_session(&second).unwrap();
 
         let mut edited = session("session-1-edited", category_id, "2026-08-01");
         edited.description = "Edited";
@@ -1181,6 +1275,8 @@ mod tests {
             ended_at_utc: "2026-08-01T18:00:00Z",
             operational_day: "2026-08-01",
             elapsed_seconds: 3600,
+            boundary_utc_offset_seconds: -21600,
+            boundary_start_minutes: 360,
             source: "runtime",
         };
         let missing_category = active("active-2", 999);

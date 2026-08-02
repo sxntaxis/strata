@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{
     constants::ATLAS_LAYOUT_SETTINGS,
-    domain::{DayBoundaryMode, FirstDayOfWeek},
+    domain::FirstDayOfWeek,
     keybindings::{Action, ActionCategory},
 };
 
@@ -159,14 +159,6 @@ impl App {
                     value_col,
                 ),
                 "time_log_path".to_string(),
-                action_col,
-            ),
-            self.selectable_row(
-                AtlasSelectable::DayStartMode,
-                selected_item,
-                self.atlas_item_color(AtlasSelectable::DayStartMode),
-                pad_column(&self.day_start_setting_label(), value_col),
-                "day_start".to_string(),
                 action_col,
             ),
             self.selectable_row(
@@ -348,48 +340,6 @@ impl App {
                 f.render_widget(ratatui::widgets::Clear, rect);
                 f.render_widget(Paragraph::new(body).block(block), rect);
             }
-            AtlasOverlay::SelectDayStartMode { selected } => {
-                let rect = self.modal_rect_ratio(terminal_size, 1, 3);
-                let block = Block::default()
-                    .title(Line::from(Span::styled(
-                        "day start",
-                        Style::default()
-                            .fg(Color::White)
-                            .add_modifier(Modifier::BOLD),
-                    )))
-                    .title_alignment(Alignment::Center)
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .border_style(
-                        Style::default().fg(self.atlas_item_color(AtlasSelectable::DayStartMode)),
-                    );
-
-                let options = Self::day_start_mode_options();
-                let lines: Vec<Line<'static>> = options
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, mode)| {
-                        let label = day_start_mode_label(*mode);
-                        if idx == *selected {
-                            Line::from(Span::styled(
-                                format!("> {}", label),
-                                Style::default()
-                                    .fg(Color::Black)
-                                    .bg(self.atlas_item_color(AtlasSelectable::DayStartMode))
-                                    .add_modifier(Modifier::BOLD),
-                            ))
-                        } else {
-                            Line::from(Span::styled(
-                                format!("  {}", label),
-                                Style::default().fg(Color::White),
-                            ))
-                        }
-                    })
-                    .collect();
-
-                f.render_widget(ratatui::widgets::Clear, rect);
-                f.render_widget(Paragraph::new(lines).block(block), rect);
-            }
             AtlasOverlay::SelectWeekStartDay { selected } => {
                 let rect = self.modal_rect_ratio(terminal_size, 1, 3);
                 let block = Block::default()
@@ -433,13 +383,6 @@ impl App {
                 f.render_widget(Paragraph::new(lines).block(block), rect);
             }
         }
-    }
-}
-
-fn day_start_mode_label(mode: DayBoundaryMode) -> &'static str {
-    match mode {
-        DayBoundaryMode::FixedHour => "fixed",
-        DayBoundaryMode::Sunrise => "sunrise",
     }
 }
 

@@ -5,8 +5,8 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use crate::{
     constants::COLORS,
     domain::{
-        Category, CategoryId, DRIFT_CATEGORY_CONFIG_NAME, Session, civil_time_for_utc,
-        is_drift_name, operational_day_key_for_utc,
+        Category, CategoryId, DRIFT_CATEGORY_CONFIG_NAME, OperationalDayPolicy, Session,
+        civil_time_for_utc, day_boundary_config, is_drift_name, operational_day_key_for_utc,
     },
     temporal,
 };
@@ -38,6 +38,9 @@ pub(crate) struct SqliteCliSession {
     pub start_time: String,
     pub end_time: String,
     pub elapsed_seconds: usize,
+    pub started_at_utc: DateTime<Utc>,
+    pub ended_at_utc: DateTime<Utc>,
+    pub operational_day_policy: Option<OperationalDayPolicy>,
 }
 
 impl SqliteCliSession {
@@ -50,6 +53,9 @@ impl SqliteCliSession {
             start_time: self.start_time.clone(),
             end_time: self.end_time.clone(),
             elapsed_seconds: self.elapsed_seconds,
+            started_at_utc: Some(self.started_at_utc),
+            ended_at_utc: Some(self.ended_at_utc),
+            operational_day_policy: self.operational_day_policy,
         }
     }
 }
@@ -131,6 +137,7 @@ pub(crate) fn stop_session(
             .to_string();
         let ended_at_utc = ended_at.to_rfc3339_opts(SecondsFormat::Millis, true);
         let operation_id = format!("finish:{}", active.stable_id);
+        let policy = OperationalDayPolicy::from_config(day_boundary_config());
         runtime_coordination::finish_active_session(
             &mut repository,
             &active.stable_id,
@@ -139,6 +146,8 @@ pub(crate) fn stop_session(
                 ended_at_utc: &ended_at_utc,
                 operational_day: &operational_day,
                 elapsed_seconds: elapsed_i64,
+                boundary_utc_offset_seconds: policy.utc_offset_seconds,
+                boundary_start_minutes: policy.start_minutes,
                 source: "cli-runtime",
             },
             false,
@@ -219,6 +228,28 @@ pub(crate) fn read_snapshot(database_path: &Path) -> Result<SqliteCliSnapshot, S
                     record.id, record.category_id
                 )
             })?;
+        let started_at_utc = parse_utc(&record.started_at_utc)?;
+        let ended_at_utc = parse_utc(&record.ended_at_utc)?;
+        let operational_day_policy = match (
+            record.boundary_utc_offset_seconds,
+            record.boundary_start_minutes,
+        ) {
+            (Some(offset), Some(start_minutes)) => Some(OperationalDayPolicy {
+                utc_offset_seconds: i32::try_from(offset).map_err(|_| {
+                    format!("Session {} boundary UTC offset is outside i32", record.id)
+                })?,
+                start_minutes: u16::try_from(start_minutes).map_err(|_| {
+                    format!("Session {} boundary start minute is outside u16", record.id)
+                })?,
+            }),
+            (None, None) => None,
+            _ => {
+                return Err(format!(
+                    "Session {} has partial boundary provenance",
+                    record.id
+                ));
+            }
+        };
         sessions.push(SqliteCliSession {
             id,
             date: record.operational_day,
@@ -226,9 +257,12 @@ pub(crate) fn read_snapshot(database_path: &Path) -> Result<SqliteCliSnapshot, S
             category_name,
             project: record.project,
             description: record.description,
-            start_time: local_clock(&record.started_at_utc)?,
-            end_time: local_clock(&record.ended_at_utc)?,
+            start_time: local_clock(&record.started_at_utc, operational_day_policy)?,
+            end_time: local_clock(&record.ended_at_utc, operational_day_policy)?,
             elapsed_seconds,
+            started_at_utc,
+            ended_at_utc,
+            operational_day_policy,
         });
     }
 
@@ -238,11 +272,19 @@ pub(crate) fn read_snapshot(database_path: &Path) -> Result<SqliteCliSnapshot, S
     })
 }
 
-fn local_clock(timestamp: &str) -> Result<String, String> {
-    let utc = DateTime::parse_from_rfc3339(timestamp)
-        .map_err(|error| format!("Invalid SQLite session timestamp '{timestamp}': {error}"))?
-        .with_timezone(&Utc);
-    Ok(civil_time_for_utc(utc).format("%H:%M:%S").to_string())
+fn parse_utc(timestamp: &str) -> Result<DateTime<Utc>, String> {
+    DateTime::parse_from_rfc3339(timestamp)
+        .map_err(|error| format!("Invalid SQLite session timestamp '{timestamp}': {error}"))
+        .map(|value| value.with_timezone(&Utc))
+}
+
+fn local_clock(timestamp: &str, policy: Option<OperationalDayPolicy>) -> Result<String, String> {
+    let utc = parse_utc(timestamp)?;
+    let civil = match policy {
+        Some(policy) => temporal::civil_from_policy(utc, policy)?,
+        None => civil_time_for_utc(utc),
+    };
+    Ok(civil.format("%H:%M:%S").to_string())
 }
 
 fn display_category_name(category_id: i64, stored_name: &str) -> String {

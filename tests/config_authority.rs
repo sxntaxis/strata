@@ -166,3 +166,31 @@ fn ignore_config_is_an_explicit_deliberate_default_override() {
     assert!(active.contains("deliberate-default"));
     assert!(!profile.database_path().exists());
 }
+
+#[test]
+fn removed_sunrise_mode_is_migrated_visibly_to_fixed_policy() {
+    let profile = TestProfile::new("sunrise-migration");
+    fs::write(
+        profile.config_path(),
+        r#"{"day_start_mode":"sunrise","day_start_hour":5,"day_start_minute":45}"#,
+    )
+    .expect("write legacy sunrise config");
+
+    let output = profile.run(&["report", "--today"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let warning = stderr(&output);
+    assert!(
+        warning.contains("migrated removed day_start_mode 'sunrise'"),
+        "{warning}"
+    );
+    assert!(
+        warning.contains("never implemented solar sunrise"),
+        "{warning}"
+    );
+
+    let migrated = fs::read_to_string(profile.config_path()).expect("read migrated config");
+    assert!(migrated.contains("\"day_start_mode\": \"fixed\""));
+    assert!(migrated.contains("\"day_start_hour\": 5"));
+    assert!(migrated.contains("\"day_start_minute\": 45"));
+    profile.assert_no_authority_write();
+}
