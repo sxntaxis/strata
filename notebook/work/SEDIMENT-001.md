@@ -58,16 +58,34 @@ Issue completed: #7.
 
 Accepted authority is recorded in `docs/SEDIMENT_AUTHORITY.md` and STRATA-D025.
 
-### SEDIMENT-001C — bounded detached recovery
+### SEDIMENT-001C1 — compressed recovery mass
+
+Status: implemented and certified in PR #52.
+Issue advanced: #6; not closed.
+
+- pending mass is represented as ordered category/count runs;
+- adjacent same-category additions merge while transitions preserve FIFO order;
+- bulk addition and storage are independent of the number of grains represented;
+- ingress flush work is bounded by currently free columns;
+- `SandState` schema version 2 serializes runs and migrates version 1 pending vectors;
+- overflow fails visibly;
+- periodic event counts and remainders use checked integer arithmetic without replay;
+- a billion blocked grains are certified as one run.
+
+Accepted authority is recorded in `docs/SEDIMENT_AUTHORITY.md` and STRATA-D026 through STRATA-D027.
+
+### SEDIMENT-001C2 — durable bounded detached recovery
 
 Status: next.
 Issue: #6.
 
-- restore committed topology directly;
-- calculate elapsed contribution once;
-- add missed logical mass in bounded work rather than replaying every physics frame;
+- claim and validate checkpoint evidence before applying recovery;
+- restore committed canonical topology directly;
+- calculate detached elapsed contribution once with exact periodic arithmetic;
+- add missed category mass through compressed runs rather than frame replay;
+- preserve topology instead of installing a relaxed catch-up replacement;
 - retain checkpoint evidence until recovered sediment and session state commit together;
-- certify repeated reopen and interrupted recovery without duplication or loss.
+- certify short gaps, extreme gaps, repeated reopen, interrupted commit, stale/invalid checkpoints, and exact mass without duplication or loss.
 
 ### SEDIMENT-001D — snapshot identity
 
@@ -81,4 +99,4 @@ Issue: #18.
 
 ## Current edge
 
-Implement SEDIMENT-001C. Canonical logical mass and topology are now independent of terminal geometry. Detached recovery must restore that state directly and add elapsed mass through a bounded, retry-safe operation rather than replaying every missed physics frame.
+Implement SEDIMENT-001C2. The engine can now represent and calculate arbitrarily large detached contributions without linear allocation or replay. Integrate that authority with checkpoint claiming, validation, atomic SQLite commit, legacy-file custody, and lifecycle semantics so issue #6 can close without weakening canonical topology.

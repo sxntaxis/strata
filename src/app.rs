@@ -1401,6 +1401,7 @@ impl App {
             grains: projected_grains,
             frame_count: state.frame_count,
             pending_grains: state.pending_grains.clone(),
+            pending_runs: Vec::new(),
             sweep_left_to_right: state.sweep_left_to_right,
             rng_state: state.rng_state,
         }

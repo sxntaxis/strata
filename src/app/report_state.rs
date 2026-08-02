@@ -469,6 +469,7 @@ impl App {
             sweep_left_to_right: true,
             rng_state: 0,
             pending_grains: Vec::new(),
+            pending_runs: Vec::new(),
         })
     }
 

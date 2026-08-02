@@ -30,7 +30,7 @@ Current responsibility map:
 - `src/sqlite.rs` and `src/sqlite/**` — schema migration, authoritative repositories, CLI/TUI adapters, runtime coordination, failure certification, deterministic interchange, backup/restore, and legacy-evidence custody.
 - `src/storage.rs` — XDG paths, pre-activation legacy compatibility, migration input, and atomic file helpers.
 - `src/app.rs` and `src/app/**` — TUI orchestration, interaction, rendering, reports, modals, and persistence-recovery controls.
-- `src/sand/**` — canonical logical grains, physics, pending ingress, viewport projection, snapshots, and Braille rendering.
+- `src/sand/**` — canonical logical grains, compressed pending mass, physics, viewport projection, recovery arithmetic, snapshots, and Braille rendering.
 
 ## Authority state
 
@@ -123,7 +123,17 @@ SEDIMENT-001B separates canonical sediment from terminal geometry:
 - repeated no-time-elapsed viewport oscillation is exactly idempotent at the `SandState` level;
 - the former destructive resize module and edge-band policy are removed.
 
-Bounded detached recovery and immutable snapshot kinds remain SEDIMENT-001C and 001D. The evolving accepted contract is `docs/SEDIMENT_AUTHORITY.md`.
+SEDIMENT-001C1 establishes bounded mass representation and recovery arithmetic:
+
+- pending logical mass is stored as ordered category/count runs rather than one allocation per grain;
+- adjacent same-category runs merge while category transitions preserve FIFO order;
+- bulk logical addition is independent of the number of added grains except for placement into currently free ingress columns;
+- ingress flushing is bounded by free columns, and snapshots scale with physical grains plus run changes;
+- `SandState` schema version 2 stores compressed runs and deterministically migrates version 1 pending vectors;
+- count overflow fails visibly rather than wrapping or saturating;
+- periodic event counts and remainders use checked integer arithmetic without iterative replay.
+
+Checkpoint claiming, durable recovery commit, and application lifecycle integration remain SEDIMENT-001C2. Immutable snapshot kinds remain SEDIMENT-001D. The evolving accepted contract is `docs/SEDIMENT_AUTHORITY.md`.
 
 ## Truth boundaries
 
@@ -133,7 +143,7 @@ Owns exact elapsed intervals, timestamps, layers, project identity, notes, opera
 
 ### Sediment formation
 
-Owns accountable visual history. Total represented duration and per-layer mass must be conserved exactly. Canonical topology, contours, color composition, neighborhoods, and broad chronology are independent of the current viewport.
+Owns accountable visual history. Total represented duration and per-layer mass must be conserved exactly. Canonical topology, contours, color composition, neighborhoods, and broad chronology are independent of the current viewport. Pending mass may be compressed representationally without changing its count, category order, or identity.
 
 ### Reports and balance
 
@@ -145,10 +155,11 @@ TUI and CLI translate user intent and present state. Neither may maintain an ind
 
 ## Current architectural frontier
 
-Persistence, startup configuration, clock authority, interval boundaries, session classification, report/export projection correctness, sediment dimension units, lossless ingress, and viewport-independent topology are no longer the primary risks. The next programs are:
+Persistence, startup configuration, clock authority, interval boundaries, session classification, report/export projection correctness, sediment dimension units, lossless ingress, viewport-independent topology, and bounded mass representation are no longer the primary risks. The next programs are:
 
-1. complete bounded detached recovery and snapshot identity;
-2. complete interaction-mode and terminal-lifecycle contracts.
+1. integrate compressed mass with atomic, retry-safe detached checkpoint recovery;
+2. establish immutable historical snapshot identity;
+3. complete interaction-mode and terminal-lifecycle contracts.
 
 Complete profile isolation and deliberate runtime profile switching remain separate work under issue #15.
 
@@ -158,4 +169,5 @@ Complete profile isolation and deliberate runtime profile switching remain separ
 - Notebook research remains working memory until promoted.
 - Sediment snapshots and report output are projections, not substitutes for their owning state.
 - Terminal dimensions are presentation state, not canonical sediment dimensions.
+- Compressed pending runs are an exact representation of logical mass, not aggregation that permits count or category loss.
 - CSV, JSON, and ICS are external adapters, not canonical domain models.

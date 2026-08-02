@@ -2,7 +2,7 @@
 
 Status: partially implemented and certified
 Program: SEDIMENT-001
-Current completed unit: SEDIMENT-001B
+Current completed unit: SEDIMENT-001C1
 Issues completed: #7, #16, #26
 Last reviewed: 2026-08-02
 
@@ -19,11 +19,24 @@ A due grain exists exactly once as either:
 - a placed physical grain in the logical dot grid; or
 - a pending grain waiting for an ingress position.
 
-Physical blockage is not permission to discard elapsed-time mass. `grain_count` therefore represents placed plus pending logical mass. Pending grains retain category identity, preserve FIFO order, and are persisted with `SandState`.
+Physical blockage is not permission to discard elapsed-time mass. `grain_count` therefore represents placed plus pending logical mass. Pending grains retain category identity and FIFO category order.
 
-A newly due grain enters the pending reservoir first. The engine chooses a randomized starting column and scans the entire ingress row exactly once. It remains pending only when every ingress column is occupied. Normal simulation updates retry pending ingress without creating another grain.
+A newly due grain enters the pending reservoir first. The engine chooses randomized free ingress columns and performs no more placement work than the number of currently free columns. Any unplaced remainder stays pending without creating another grain.
 
-Clearing all sediment clears both placed and pending mass. Category-specific clearing and removal apply to both forms. Unknown category identities encountered during restore follow the existing explicit normalization to idle rather than disappearing.
+Clearing all sediment clears both placed and pending mass. Category-specific clearing and removal apply to both forms. Unknown category identities encountered during restore follow the established explicit normalization to idle rather than disappearing.
+
+## Compressed pending mass
+
+Pending mass is stored as ordered category/count runs rather than one category ID per grain.
+
+- Adjacent additions for the same category merge into one run.
+- Category transitions remain ordered, preserving FIFO category chronology.
+- Adding an arbitrarily large count performs constant work in the count itself, apart from placing grains into currently free ingress columns.
+- Flushing is bounded by current ingress capacity, not by total pending mass.
+- Snapshot size is proportional to physical grains plus category-run changes rather than blocked elapsed seconds.
+- Logical and run-count overflow is rejected rather than wrapped or silently saturated.
+
+This representation is required for bounded detached recovery. A billion missed grains can exist as one run instead of a billion allocations or replay steps.
 
 ## Dimension units
 
@@ -55,14 +68,23 @@ This unit deliberately does not define zoom, compression, panning, minimaps, or 
 
 ## Persistence compatibility
 
-`SandState.pending_grains` is backward-compatible:
+`SandState` schema version 2 stores pending category/count runs.
 
-- older JSON without the field loads as an empty pending reservoir;
-- an empty reservoir is omitted during serialization, preserving prior ordinary state shape;
-- nonempty pending mass is serialized in category-preserving order;
-- storage, SQLite state, detached checkpoints, catch-up projections, and report previews use the same state contract.
+- Version 1 states with `pending_grains` migrate deterministically into adjacent compressed runs.
+- Older JSON without either pending field loads as an empty pending reservoir.
+- Version 2 writes `pending_runs` and leaves the legacy vector empty.
+- Empty pending collections are omitted during serialization.
+- Zero-count runs contribute no mass.
+- Unknown pending category IDs normalize to idle under the same rule as placed grains.
+- Storage, SQLite state, detached checkpoints, catch-up projections, and report previews use the same state contract.
 
-Canonical `grid_width` and `grid_height` are restored as persisted rather than adapted to the opening viewport. Viewport dimensions remain runtime presentation state and are not written into canonical sediment merely because the terminal changed.
+Canonical `grid_width` and `grid_height` restore as persisted rather than adapting to the opening viewport. Viewport dimensions remain runtime presentation state and are not written into canonical sediment merely because the terminal changed.
+
+## Exact periodic arithmetic
+
+Recovery event counts and accumulator remainders are calculated with checked integer nanosecond arithmetic. A long elapsed interval is divided by its period directly; it is not advanced through one loop iteration per missed event. Zero periods and unrepresentable counts fail visibly.
+
+SEDIMENT-001C1 certifies this arithmetic as a prerequisite. SEDIMENT-001C2 must connect it to checkpoint lifecycle and session recovery before detached recovery is considered complete.
 
 ## Certification for SEDIMENT-001A
 
@@ -84,14 +106,26 @@ SEDIMENT-001B proves:
 - grains outside a smaller viewport remain hidden rather than discarded and reappear when the viewport expands;
 - render output always matches current terminal-cell dimensions independently of canonical canvas size;
 - restore on a differently sized viewport preserves stored dimensions and coordinates exactly;
-- the destructive resize module and resize-triggered global gravity path no longer exist;
+- the destructive resize module and resize-triggered global gravity path no longer exist.
+
+## Certification for SEDIMENT-001C1
+
+SEDIMENT-001C1 proves:
+
+- one billion blocked grains require one pending run;
+- adjacent same-category additions merge while category transitions preserve order;
+- ingress flushing performs at most one placement per currently free ingress column;
+- category clearing and counted removal operate exactly across compressed runs;
+- version 1 pending vectors migrate into equivalent version 2 runs;
+- version 2 snapshot/restore preserves run order, counts, identity, and total mass;
+- long-duration periodic calculation returns exact due counts and accumulator remainder without replay;
 - formatting, strict Clippy, and the full all-features suite pass.
 
 ## Remaining SEDIMENT-001 authority
 
 The following contracts remain open:
 
-- bounded, retry-safe detached recovery — SEDIMENT-001C / issue #6;
+- integration of compressed mass with durable, retry-safe detached checkpoint recovery — SEDIMENT-001C2 / issue #6;
 - explicit immutable snapshot kinds and provenance — SEDIMENT-001D / issue #18.
 
-Until those units are certified, detached catch-up and historical snapshots retain their current implementation limits and must not be described as fully conserved sediment authority.
+Until those units are certified, detached checkpoint lifecycle and historical snapshots retain their current implementation limits and must not be described as fully conserved sediment authority.

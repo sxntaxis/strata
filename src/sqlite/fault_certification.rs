@@ -138,6 +138,7 @@ fn sand_state(frame_count: usize) -> SandState {
         sweep_left_to_right: true,
         rng_state: u64::try_from(frame_count).unwrap(),
         pending_grains: Vec::new(),
+        pending_runs: Vec::new(),
     }
 }
 

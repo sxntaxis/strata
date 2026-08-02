@@ -32,6 +32,8 @@ Detailed rationale and unresolved implications live in `notebook/decisions/DECIS
 | STRATA-D023 | Every due sediment grain is conserved logical mass in exactly one placed or pending form; physical ingress blockage never authorizes loss, and category identity persists in either form. | implemented and certified |
 | STRATA-D024 | Terminal-cell dimensions and Braille-dot grid dimensions are separate named units; rendering emits one Braille character per drawable terminal cell while simulation and persistence operate in dot-grid units. | implemented and certified |
 | STRATA-D025 | The persisted logical dot grid owns canonical sediment topology; terminal resizing is a centered, bottom-aligned projection-only operation and cannot mutate, repack, relax, or discard logical history. | implemented and certified |
+| STRATA-D026 | Pending logical sediment is represented as ordered category/count runs; compression may reduce storage and work but cannot alter total mass, category identity, or FIFO category order. | implemented and certified |
+| STRATA-D027 | Recovery event counts and accumulator remainders are calculated with checked integer arithmetic; detached duration must not require one loop iteration or allocation per missed event. | implemented and certified prerequisite |
 
 ## Explicitly unresolved
 
@@ -42,7 +44,7 @@ The following are not accepted decisions:
 - final `Karma`/balance terminology;
 - clearing and formation lifecycle beyond placed/pending mass conservation;
 - future zoom, compression, panning, or explicit canonical-canvas migration;
-- bounded detached catch-up and recovery semantics;
+- checkpoint lifecycle integration for bounded detached recovery;
 - immutable historical snapshot kinds and provenance;
 - user-facing crash uncertainty beyond current recovery mechanics;
 - configurable quantum migration rules;
