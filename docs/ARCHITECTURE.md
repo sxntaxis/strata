@@ -10,7 +10,7 @@ TUI / CLI
     ↓
 shared invocation and validated startup configuration
     ↓
-application orchestration and explicit interaction modes
+terminal lifecycle + application orchestration + explicit interaction modes
     ↓
 domain time, category, session, report, recovery, and snapshot rules
     ↓
@@ -28,6 +28,7 @@ Current responsibility map:
 - `src/sqlite.rs` and `src/sqlite/**` — schema migrations, repositories, runtime transactions, checkpoint custody, deterministic interchange, backup/restore, and fault certification.
 - `src/storage.rs` — XDG paths, legacy-file authority, atomic file helpers, and custody-separated contribution files.
 - `src/app.rs` and `src/app/**` — TUI orchestration, explicit modal/edit state, persistence reconciliation, bounded recovery, historical artifact selection, input routing, and rendering.
+- `src/app/terminal_lifecycle.rs` — raw-mode/alternate-screen RAII, process-wide panic restoration, exactly-once cleanup, runtime failure composition, and debug fault certification.
 - `src/sand/engine.rs` — canonical logical grains, compressed pending mass, physics, viewport projection, and Braille rendering.
 - `src/sand/recovery.rs` — bounded recovery arithmetic and topology-preserving detached contribution.
 - `src/sand/snapshot.rs` — snapshot kinds, exact daily contribution construction, provenance, revisions, selection, and immutable rendering.
@@ -78,14 +79,26 @@ Report-log view and report-description editing are separate interaction modes.
 
 - View mode is read-only and retains normal command routing.
 - Confirm on a persisted report row creates a draft owned by the stable session ID.
-- In edit mode, every unmodified character—including ordinary command letters, spaces, and Unicode—is draft text.
+- In edit mode, every unmodified character—including command letters, spaces, and Unicode—is draft text.
 - Enter requests one persistence commit; Esc discards the complete draft.
 - Modified input is ignored unless the configured keymap resolves it to deliberate emergency Quit.
-- SQLite updates canonical history transactionally before memory changes.
-- Legacy-file authority writes a cloned collection before memory changes.
+- SQLite or legacy-file persistence succeeds before memory changes.
 - Failed persistence retains the complete draft and enters visible recovery.
-- Description edits do not invalidate sediment contributions.
-- The report UI exposes VIEW versus EDIT state and renders the live draft with a cursor marker.
+- The report UI exposes VIEW versus EDIT state and the live draft cursor.
+
+### Terminal lifecycle authority
+
+`TerminalSession` is the sole owner of raw mode, alternate-screen state, cursor restoration, output flushing, and the ratatui terminal.
+
+- Acquisition and partial-startup failure share one RAII cleanup boundary.
+- Explicit close, `Drop`, and the process-wide panic hook converge on idempotent `restore_once()` state.
+- Cleanup attempts all applicable restoration operations and aggregates failures.
+- Application finalization remains separate from terminal restoration.
+- Draw, poll, and read errors enter an outer runtime-failure boundary.
+- Runtime I/O failure attempts one direct emergency checkpoint before returning.
+- The original I/O error kind and message remain primary; checkpoint and cleanup outcomes are attached as context.
+- Panic restores the terminal before delegating to the previous hook and does not claim application persistence.
+- Linux PTY tests verify exact termios restoration and one cleanup execution on normal quit, detach, draw/poll/read failure, and panic.
 
 The evolving interaction contract is `docs/INTERACTION_AUTHORITY.md`.
 
@@ -109,20 +122,23 @@ Own semantic identity and provenance for persisted or derived visual artifacts. 
 
 ### Interaction
 
-Input routing owns the distinction between navigation, commands, draft text, commit, cancel, and emergency control. A selected row does not become editable until an explicit edit-mode transition. Draft state is not canonical history until one successful commit.
+Input routing owns navigation, commands, draft text, commit, cancel, and emergency control. Draft state is not canonical history until one successful commit.
+
+### Terminal lifecycle
+
+The terminal guard owns host-terminal acquisition and restoration. The application loop owns domain finalization and checkpoint attempts. Cleanup context may annotate an application or runtime error but may not replace its primary cause.
 
 ### Interface
 
-TUI and CLI translate user intent and present state. Neither may own an independent ledger, reinterpret authority, mutate canonical sediment to fit the terminal, advance historical artifacts while viewing them, or mutate history through ambiguous focus.
+TUI and CLI translate user intent and present state. Neither may own an independent ledger, reinterpret authority, mutate canonical sediment to fit the terminal, advance historical artifacts while viewing them, mutate history through ambiguous focus, or leave the host terminal in application mode after control exits Strata.
 
 ## Current architectural frontier
 
-Sediment conservation and explicit report editing are complete. The next priorities are:
+Sediment conservation, explicit report editing, and terminal lifecycle safety are complete. The next priorities are:
 
-1. INTERACTION-001B — process-wide terminal lifecycle restoration and runtime failure custody;
-2. INTERACTION-001C — complete keymap truth and command-atlas parity;
-3. reconciliation of partially satisfied issues #5, #10, and #13;
-4. later domain/profile work, including complete profile isolation under issue #15.
+1. INTERACTION-001C — complete keymap truth and command-atlas/runtime parity;
+2. reconciliation of partially satisfied issues #5, #10, and #13;
+3. later domain/profile work, including complete profile isolation under issue #15.
 
 ## Non-authority
 
@@ -132,4 +148,5 @@ Sediment conservation and explicit report editing are complete. The next priorit
 - A derived preview is not persisted authority.
 - Legacy cumulative daily rows/files are evidence, not daily contributions.
 - An uncommitted edit draft is not canonical session history.
+- A panic cleanup is not evidence of successful application persistence.
 - CSV, JSON, and ICS are external adapters, not canonical domain models.

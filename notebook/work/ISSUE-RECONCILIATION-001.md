@@ -25,10 +25,10 @@ The original issue descriptions predate the completed SQLite migration. Their ac
 | #5, #10, #13 | SQLite integrity, active authority, and category archival likely satisfy substantial portions; verify every criterion before closing or rewriting. | reconciliation audit |
 | #6, #7, #16, #18, #26 | Completed by SEDIMENT-001: conserved mass/topology/recovery and truthful immutable historical artifacts. | none |
 | #19 | Completed by INTERACTION-001A: explicit report-log edit mode, stable-ID draft, atomic commit, full cancel, and command/text separation. | none |
-| #20 | Terminal cleanup and runtime/panic failure custody remain open. | INTERACTION-001B |
-| #24 | Keymap state, direct F1 behavior, contextual aliases, and atlas/runtime parity remain open. | INTERACTION-001C |
+| #20 | Completed by INTERACTION-001B: exactly-once terminal restoration, runtime emergency checkpoint custody, primary-error preservation, and PTY certification. | none |
+| #24 | Keymap state, direct F1 behavior, contextual aliases, mandatory controls, and atlas/runtime parity remain open. | INTERACTION-001C |
 | #22 | Active draft versus category metadata remains a domain/UI distinction. | DOMAIN-002 |
 
 ## Immediate action
 
-Implement INTERACTION-001B for issue #20. Establish one process-wide terminal lifecycle guard and certify restoration plus emergency checkpoint behavior on normal, error, detach, and panic paths.
+Implement INTERACTION-001C for issue #24. Establish explicit action state, declared contextual and mandatory policy, remove hidden runtime fallbacks, and certify command-atlas parity.
