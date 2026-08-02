@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, LineGauge, Paragraph},
 };
 
-use crate::constants::{APP_LAYOUT_SETTINGS, SAND_ENGINE};
+use crate::constants::APP_LAYOUT_SETTINGS;
 use crate::domain::{DRIFT_CATEGORY_CONFIG_NAME, is_drift_category_id};
 
 use super::App;
@@ -19,8 +19,8 @@ impl App {
         let inner_width = size.width.saturating_sub(2);
         let inner_height = size.height.saturating_sub(2);
 
-        if self.sand_engine.grid_width_dots != inner_width * SAND_ENGINE.dot_width as u16
-            || self.sand_engine.grid_height_dots != inner_height * SAND_ENGINE.dot_height as u16
+        if self.sand_engine.cell_width != inner_width
+            || self.sand_engine.cell_height != inner_height
         {
             self.sand_engine.resize(inner_width, inner_height);
         }

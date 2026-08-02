@@ -104,14 +104,6 @@ pub const REPORT_MODAL_SETTINGS: ReportModalSettings = ReportModalSettings {
     summary_name_gap: 4,
 };
 
-pub const SAND_RESIZE_SETTINGS: SandResizeSettings = SandResizeSettings {
-    band_scale_divisor: 40,
-    min_band_width_cells: 2,
-    max_band_width_cells: 6,
-    min_band_height_cells: 1,
-    max_band_height_cells: 3,
-};
-
 pub const ATLAS_LAYOUT_SETTINGS: AtlasLayoutSettings = AtlasLayoutSettings {
     value_col_width: 30,
     action_col_width: 24,
@@ -199,14 +191,6 @@ pub struct ReportModalSettings {
     pub detail_date_preview_width: usize,
     pub min_tag_width: usize,
     pub summary_name_gap: usize,
-}
-
-pub struct SandResizeSettings {
-    pub band_scale_divisor: usize,
-    pub min_band_width_cells: usize,
-    pub max_band_width_cells: usize,
-    pub min_band_height_cells: usize,
-    pub max_band_height_cells: usize,
 }
 
 pub struct AtlasLayoutSettings {
