@@ -42,6 +42,8 @@ Detailed rationale and unresolved implications live in `notebook/decisions/DECIS
 | STRATA-D033 | Autosave, relevant mutation, and recovery completion reconcile every affected operational day; legacy cumulative daily rows and files remain archive-in-place evidence and are never reinterpreted as daily contributions. | implemented and certified |
 | STRATA-D034 | Historical-description viewing and editing are explicit separate modes. Plain characters are commands in view mode and draft text in edit mode; Enter commits, Esc cancels, and only a configured modified emergency Quit may escape edit routing. | implemented and certified |
 | STRATA-D035 | An edit draft is not canonical history. SQLite or legacy-file persistence must succeed before memory changes; failed commit retains the complete stable-ID draft and enters visible recovery. | implemented and certified |
+| STRATA-D036 | One RAII terminal session owns raw mode, alternate-screen state, cursor restoration, output flushing, and the ratatui terminal. Explicit close, Drop, partial-startup failure, and panic converge on one idempotent exactly-once restoration boundary. | implemented and certified |
+| STRATA-D037 | Draw, poll, and read failures attempt one direct emergency checkpoint, preserve the original I/O error kind and text, and attach checkpoint/cleanup outcomes only as context. Panic restores the terminal without claiming persistence success. | implemented and certified |
 
 ## Explicitly unresolved
 
@@ -53,8 +55,7 @@ The following are not accepted decisions:
 - clearing and formation lifecycle beyond placed/pending mass conservation;
 - future zoom, compression, panning, or explicit canonical-canvas migration;
 - safe cross-authority replay of queued checkpoint mutations, if it is ever required;
-- process-wide terminal restoration and panic/runtime-error custody;
-- explicit Bound, Unbound, Disabled, and mandatory keymap semantics;
+- explicit Bound, Unbound, Disabled, contextual, and mandatory keymap semantics;
 - user-facing crash uncertainty beyond current recovery controls;
 - configurable quantum migration rules;
 - complete profile switching and isolation semantics under issue #15;
