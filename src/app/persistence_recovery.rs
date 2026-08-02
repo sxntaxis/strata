@@ -17,7 +17,7 @@ use ratatui::{
 use serde::Serialize;
 
 use crate::{
-    domain::{DRIFT_CATEGORY_ID, is_drift_category_id, operational_day_key_now},
+    domain::{DRIFT_CATEGORY_ID, operational_day_key_now},
     sqlite, storage,
 };
 
@@ -40,6 +40,7 @@ pub(super) enum PersistenceOperation {
     DriftSessionDelete,
     SandStateSave,
     DailySnapshotSave,
+    DailySnapshotDelete,
     CheckpointSave,
     CheckpointClear,
     CheckpointRecovery,
@@ -63,6 +64,7 @@ impl fmt::Display for PersistenceOperation {
             Self::DriftSessionDelete => "idle-session deletion",
             Self::SandStateSave => "sediment-state save",
             Self::DailySnapshotSave => "daily sediment snapshot save",
+            Self::DailySnapshotDelete => "daily sediment snapshot deletion",
             Self::CheckpointSave => "detached checkpoint save",
             Self::CheckpointClear => "checkpoint cleanup",
             Self::CheckpointRecovery => "checkpoint recovery commit",
@@ -308,11 +310,9 @@ impl App {
 
     pub(super) fn try_flush_current_state(&mut self) -> Result<(), String> {
         let categories = self.time_tracker.categories_for_storage();
-        let mut state = self.sand_engine.snapshot_state();
-        if is_drift_category_id(self.time_tracker.active_category_id()) {
-            state.grains.retain(|grain| grain.category_id != 0);
-        }
-        let operational_day = operational_day_key_now().format("%Y-%m-%d").to_string();
+        let operational_day_date = operational_day_key_now();
+        let operational_day = operational_day_date.format("%Y-%m-%d").to_string();
+        let daily_contribution = self.daily_contribution_from_time_log(operational_day_date);
 
         if let Some(database_path) = self.sqlite_database_path.clone() {
             self.archived_categories = sqlite::sync_tui_categories(
@@ -328,7 +328,11 @@ impl App {
             sqlite::sync_tui_category_tags(&database_path, &self.category_tags, &category_ids)?;
             sqlite::sync_tui_sessions(&database_path, &self.time_tracker.sessions)?;
             sqlite::save_tui_sand_state(&database_path, &self.sand_engine.snapshot_state())?;
-            sqlite::save_tui_daily_snapshot(&database_path, &operational_day, &state)?;
+            if let Some(snapshot) = daily_contribution.as_ref() {
+                sqlite::save_tui_daily_snapshot(&database_path, &operational_day, snapshot)?;
+            } else {
+                sqlite::delete_tui_daily_snapshot(&database_path, &operational_day)?;
+            }
         } else {
             storage::save_categories_to_csv(&storage::get_categories_path(), &categories)
                 .map_err(|error| error.to_string())?;
@@ -343,10 +347,13 @@ impl App {
                 &storage::get_sand_state_path(),
                 &self.sand_engine.snapshot_state(),
             )?;
-            storage::save_sand_state(
-                &storage::get_sand_history_path_for_day(operational_day_key_now()),
-                &state,
-            )?;
+            let contribution_path =
+                storage::get_sand_contribution_path_for_day(operational_day_date);
+            if let Some(snapshot) = daily_contribution.as_ref() {
+                storage::write_json_atomic(&contribution_path, snapshot)?;
+            } else {
+                storage::delete_file_if_exists(&contribution_path)?;
+            }
         }
         Ok(())
     }

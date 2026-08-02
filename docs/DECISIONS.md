@@ -38,6 +38,8 @@ Detailed rationale and unresolved implications live in `notebook/decisions/DECIS
 | STRATA-D029 | Normal shutdown may retire only pending or committed checkpoint evidence; recovering and quarantined evidence remain protected. Runtime checkpoints are refused while mutations are queued, and legacy mutation-bearing evidence fails closed without stable receipts. | implemented and certified |
 | STRATA-D030 | Historical sediment artifacts have explicit semantic kinds: cumulative checkpoint, daily contribution, or derived preview. These kinds are not interchangeable, and legacy cumulative daily rows cannot silently satisfy daily-contribution requests. | implemented and certified |
 | STRATA-D031 | Historical snapshot viewing is immutable and projection-only: it never advances physics, mutates the artifact, or persists a derived preview; provenance, reconstruction status, source revision, and idle policy remain explicit. | implemented and certified |
+| STRATA-D032 | Persisted daily sediment is a typed ledger-derived contribution accepted only when schema, kind, operational day, and sediment-relevant source revision exactly match canonical session slices. | implemented and certified |
+| STRATA-D033 | Autosave, relevant mutation, and recovery completion reconcile every affected operational day; legacy cumulative daily rows and files remain archive-in-place evidence and are never reinterpreted as daily contributions. | implemented and certified |
 
 ## Explicitly unresolved
 
@@ -49,9 +51,6 @@ The following are not accepted decisions:
 - clearing and formation lifecycle beyond placed/pending mass conservation;
 - future zoom, compression, panning, or explicit canonical-canvas migration;
 - safe cross-authority replay of queued checkpoint mutations, if it is ever required;
-- authoritative daily-contribution persistence and source-revision comparison;
-- session edit/delete invalidation across every affected operational day;
-- archive, migration, or removal disposition for legacy cumulative daily rows;
 - user-facing crash uncertainty beyond current recovery controls;
 - configurable quantum migration rules;
 - complete profile switching and isolation semantics under issue #15;

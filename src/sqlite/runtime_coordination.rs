@@ -523,6 +523,7 @@ pub(crate) fn commit_checkpoint_recovery(
     expected_active_stable_id: &str,
     operational_day: &str,
     state: &SandStateRecord,
+    daily_payload_json: &str,
     captured_at_utc: &str,
 ) -> Result<(), CoordinationError> {
     let transaction = repository
@@ -567,19 +568,19 @@ pub(crate) fn commit_checkpoint_recovery(
     )?;
     transaction.execute(
         "DELETE FROM sand_snapshots
-         WHERE snapshot_kind = 'daily' AND operational_day = ?1",
+         WHERE snapshot_kind = 'daily-contribution' AND operational_day = ?1",
         params![operational_day],
     )?;
     transaction.execute(
         "INSERT INTO sand_snapshots (
             formation_id, snapshot_kind, operational_day, quantum_seconds,
             payload_json, captured_at_utc, legacy_import_id
-         ) VALUES (?1, 'daily', ?2, ?3, ?4, ?5, NULL)",
+         ) VALUES (?1, 'daily-contribution', ?2, ?3, ?4, ?5, NULL)",
         params![
             state.formation_id,
             operational_day,
             state.quantum_seconds,
-            state.payload_json,
+            daily_payload_json,
             captured_at_utc,
         ],
     )?;
@@ -1276,6 +1277,7 @@ mod tests {
                 "active-a",
                 "2026-08-01",
                 &state,
+                "{\"schema_version\":1,\"kind\":\"daily-contribution\"}",
                 "2026-08-01T11:00:00Z",
             )
             .is_err()
@@ -1303,6 +1305,7 @@ mod tests {
             "active-a",
             "2026-08-01",
             &state,
+            "{\"schema_version\":1,\"kind\":\"daily-contribution\"}",
             "2026-08-01T11:00:00Z",
         )
         .unwrap();

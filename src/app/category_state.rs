@@ -2,7 +2,7 @@ use ratatui::style::Color;
 
 use crate::{
     constants::{CATEGORY_SETTINGS, COLORS},
-    domain::{CategoryId, DRIFT_CATEGORY_ID, is_drift_category_id, operational_day_key_now},
+    domain::{CategoryId, DRIFT_CATEGORY_ID},
     sqlite, storage,
 };
 
@@ -71,11 +71,7 @@ impl App {
     }
 
     pub(super) fn persist_daily_sand_snapshot(&mut self) {
-        let mut state = self.sand_engine.snapshot_state();
-        if is_drift_category_id(self.time_tracker.active_category_id()) {
-            state.grains.retain(|grain| grain.category_id != 0);
-        }
-        self.save_daily_sand_snapshot(operational_day_key_now(), &state);
+        self.reconcile_all_daily_contributions();
     }
 
     pub(super) fn persist_category_tags(&mut self) {
@@ -131,10 +127,10 @@ impl App {
         self.sand_engine.restore_state(&state, &valid_category_ids);
     }
 
-    pub(super) fn load_daily_sand_snapshot(
+    pub(super) fn load_daily_sediment_snapshot(
         &mut self,
         day: NaiveDate,
-    ) -> Option<crate::sand::SandState> {
+    ) -> Option<crate::sand::SedimentSnapshot> {
         if let Some(database_path) = self.sqlite_database_path.clone() {
             let day = day.format("%Y-%m-%d").to_string();
             match sqlite::load_tui_daily_snapshot(&database_path, &day) {
@@ -149,27 +145,66 @@ impl App {
                 }
             }
         } else {
-            storage::load_sand_state(&storage::get_sand_history_path_for_day(day))
+            let path = storage::get_sand_contribution_path_for_day(day);
+            if !storage::file_exists(&path) {
+                return None;
+            }
+            match storage::read_json::<crate::sand::SedimentSnapshot>(&path) {
+                Ok(snapshot) => Some(snapshot),
+                Err(error) => {
+                    self.record_storage_result_for::<()>(
+                        PersistenceOperation::StateReload,
+                        RecoveryAction::ReloadAuthority,
+                        Err(error),
+                    );
+                    None
+                }
+            }
         }
     }
 
-    pub(super) fn save_daily_sand_snapshot(
+    pub(super) fn save_daily_sediment_snapshot(
         &mut self,
         day: NaiveDate,
-        state: &crate::sand::SandState,
+        snapshot: &crate::sand::SedimentSnapshot,
     ) {
         if let Some(database_path) = self.sqlite_database_path.clone() {
             let day = day.format("%Y-%m-%d").to_string();
-            let result = sqlite::save_tui_daily_snapshot(&database_path, &day, state);
+            let result = sqlite::save_tui_daily_snapshot(&database_path, &day, snapshot);
             self.record_storage_result_for(
                 PersistenceOperation::DailySnapshotSave,
                 RecoveryAction::FlushCurrentState,
                 result,
             );
         } else {
-            let path = storage::get_sand_history_path_for_day(day);
-            if let Err(error) = storage::save_sand_state(&path, state) {
-                self.record_storage_result::<()>(Err(error));
+            let path = storage::get_sand_contribution_path_for_day(day);
+            if let Err(error) = storage::write_json_atomic(&path, snapshot) {
+                self.record_storage_result_for::<()>(
+                    PersistenceOperation::DailySnapshotSave,
+                    RecoveryAction::FlushCurrentState,
+                    Err(error),
+                );
+            }
+        }
+    }
+
+    pub(super) fn delete_daily_sediment_snapshot(&mut self, day: NaiveDate) {
+        if let Some(database_path) = self.sqlite_database_path.clone() {
+            let day = day.format("%Y-%m-%d").to_string();
+            let result = sqlite::delete_tui_daily_snapshot(&database_path, &day);
+            self.record_storage_result_for(
+                PersistenceOperation::DailySnapshotDelete,
+                RecoveryAction::FlushCurrentState,
+                result,
+            );
+        } else {
+            let path = storage::get_sand_contribution_path_for_day(day);
+            if let Err(error) = storage::delete_file_if_exists(&path) {
+                self.record_storage_result_for::<()>(
+                    PersistenceOperation::DailySnapshotDelete,
+                    RecoveryAction::FlushCurrentState,
+                    Err(error),
+                );
             }
         }
     }

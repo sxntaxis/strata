@@ -561,8 +561,14 @@ pub fn get_sand_history_dir() -> PathBuf {
     dir
 }
 
+#[cfg(test)]
 pub fn get_sand_history_path_for_day(day: NaiveDate) -> PathBuf {
     let filename = format!("{}.json", day.format("%Y-%m-%d"));
+    get_sand_history_dir().join(filename)
+}
+
+pub fn get_sand_contribution_path_for_day(day: NaiveDate) -> PathBuf {
+    let filename = format!("{}.contribution.json", day.format("%Y-%m-%d"));
     get_sand_history_dir().join(filename)
 }
 
@@ -887,6 +893,21 @@ mod tests {
 
         delete_file_if_exists(&path).unwrap();
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn test_sand_contribution_path_is_distinct_from_legacy_history() {
+        let day = NaiveDate::from_ymd_opt(2026, 8, 1).unwrap();
+        let legacy = get_sand_history_path_for_day(day);
+        let contribution = get_sand_contribution_path_for_day(day);
+        assert_ne!(legacy, contribution);
+        assert!(
+            contribution
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .ends_with(".contribution.json")
+        );
     }
 
     #[test]

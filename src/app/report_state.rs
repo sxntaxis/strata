@@ -1,4 +1,4 @@
-use std::fmt::Write as _;
+use std::collections::BTreeSet;
 
 use chrono::{Duration as ChronoDuration, NaiveDate};
 use ratatui::{prelude::Line, style::Color};
@@ -11,7 +11,8 @@ use crate::domain::{
     session_slices,
 };
 use crate::sand::{
-    SandState, SandStateGrain, SedimentSnapshot, select_daily_artifact, stable_source_revision,
+    DailySedimentSlice, SedimentSnapshot, daily_contribution_from_slices,
+    derived_preview_from_slices, select_daily_artifact,
 };
 
 use super::{App, PersistenceOperation, RecoveryAction};
@@ -199,6 +200,18 @@ impl App {
         let Some(category_id) = self.report_logs_category_id else {
             return false;
         };
+        let affected_days = self
+            .time_tracker
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .map(|session| {
+                session_slices(session)
+                    .into_iter()
+                    .map(|slice| slice.operational_day)
+                    .collect::<BTreeSet<_>>()
+            })
+            .unwrap_or_default();
 
         if let Some(database_path) = self.sqlite_database_path.clone() {
             let result = crate::sqlite::delete_tui_session(&database_path, session_id);
@@ -225,7 +238,10 @@ impl App {
         if self.sqlite_database_path.is_none() {
             self.persist_sessions();
         }
-        self.rebuild_report_snapshot_for_interval_end_day();
+        for day in affected_days {
+            self.reconcile_daily_contribution(day);
+        }
+        self.clear_report_snapshot_cache();
 
         let refreshed = self.report_current_logs();
         self.clamp_report_log_selection(refreshed.len());
@@ -311,9 +327,7 @@ impl App {
             return;
         }
 
-        let persisted = self
-            .load_daily_sand_snapshot(end_day)
-            .map(|state| SedimentSnapshot::legacy_daily_payload(key.clone(), state));
+        let persisted = self.load_daily_sediment_snapshot(end_day);
         let derived = self.synthetic_snapshot_from_time_log(end_day);
 
         self.report_snapshot_end_day = Some(key.clone());
@@ -322,17 +336,33 @@ impl App {
         self.report_snapshot_preview_lines = None;
     }
 
-    pub(super) fn rebuild_report_snapshot_for_interval_end_day(&mut self) {
-        let end_day = self.report_interval_end_day();
-        let key = end_day.format("%Y-%m-%d").to_string();
-        self.report_snapshot_artifact = self.synthetic_snapshot_from_time_log(end_day);
-        self.report_snapshot_end_day = Some(key);
-        self.report_snapshot_preview_key = None;
-        self.report_snapshot_preview_lines = None;
+    pub(super) fn daily_contribution_from_time_log(
+        &self,
+        day: NaiveDate,
+    ) -> Option<SedimentSnapshot> {
+        let slices = self.daily_sediment_slices(day);
+        let day_key = day.format("%Y-%m-%d").to_string();
+        daily_contribution_from_slices(
+            &day_key,
+            self.sand_engine.grid_width_dots,
+            self.sand_engine.grid_height_dots,
+            &slices,
+        )
     }
 
     fn synthetic_snapshot_from_time_log(&self, day: NaiveDate) -> Option<SedimentSnapshot> {
-        let mut day_sessions: Vec<(u64, usize, String, String, usize)> = self
+        let slices = self.daily_sediment_slices(day);
+        let day_key = day.format("%Y-%m-%d").to_string();
+        derived_preview_from_slices(
+            &day_key,
+            self.sand_engine.grid_width_dots,
+            self.sand_engine.grid_height_dots,
+            &slices,
+        )
+    }
+
+    fn daily_sediment_slices(&self, day: NaiveDate) -> Vec<DailySedimentSlice> {
+        let mut slices = self
             .time_tracker
             .sessions
             .iter()
@@ -340,149 +370,89 @@ impl App {
                 session_slices(session)
                     .into_iter()
                     .filter(move |slice| slice.operational_day == day)
-                    .map(move |slice| {
-                        (
-                            session.category_id.0,
-                            slice.elapsed_seconds,
-                            slice.start_time,
-                            slice.end_time,
-                            session.id,
-                        )
+                    .map(move |slice| DailySedimentSlice {
+                        category_id: session.category_id.0,
+                        elapsed_seconds: slice.elapsed_seconds,
+                        start_time: slice.start_time,
+                        end_time: slice.end_time,
+                        session_id: session.id,
                     })
             })
-            .collect();
+            .collect::<Vec<_>>();
 
-        if day == operational_day_key_now()
-            && let Some(live) = self.live_session_preview()
-        {
-            let preview = crate::domain::Session {
-                id: usize::MAX,
-                date: day.format("%Y-%m-%d").to_string(),
-                category_id: live.category_id,
-                project: String::new(),
-                description: live.description,
-                start_time: String::new(),
-                end_time: String::new(),
-                elapsed_seconds: live.elapsed_seconds,
-                started_at_utc: Some(live.started_at_utc),
-                ended_at_utc: Some(live.ended_at_utc),
-                operational_day_policy: Some(live.operational_day_policy),
-            };
-            day_sessions.extend(
+        if let Some(preview) = self.live_preview_session() {
+            slices.extend(
                 session_slices(&preview)
                     .into_iter()
                     .filter(|slice| slice.operational_day == day)
-                    .map(|slice| {
-                        (
-                            preview.category_id.0,
-                            slice.elapsed_seconds,
-                            slice.start_time,
-                            slice.end_time,
-                            usize::MAX,
-                        )
+                    .map(|slice| DailySedimentSlice {
+                        category_id: preview.category_id.0,
+                        elapsed_seconds: slice.elapsed_seconds,
+                        start_time: slice.start_time,
+                        end_time: slice.end_time,
+                        session_id: usize::MAX,
                     }),
             );
         }
+        slices
+    }
 
-        if day_sessions.is_empty() {
-            return None;
-        }
+    fn live_preview_session(&self) -> Option<crate::domain::Session> {
+        let day = operational_day_key_now();
+        let live = self.live_session_preview()?;
+        Some(crate::domain::Session {
+            id: usize::MAX,
+            date: day.format("%Y-%m-%d").to_string(),
+            category_id: live.category_id,
+            project: String::new(),
+            description: live.description,
+            start_time: String::new(),
+            end_time: String::new(),
+            elapsed_seconds: live.elapsed_seconds,
+            started_at_utc: Some(live.started_at_utc),
+            ended_at_utc: Some(live.ended_at_utc),
+            operational_day_policy: Some(live.operational_day_policy),
+        })
+    }
 
-        day_sessions.sort_by(|a, b| a.2.cmp(&b.2).then(a.3.cmp(&b.3)).then(a.4.cmp(&b.4)));
-
-        let day_key = day.format("%Y-%m-%d").to_string();
-        let mut revision_material = format!("day={day_key}|idle=included|");
-        for (category_id, seconds, start, end, session_id) in &day_sessions {
-            let _ = write!(
-                revision_material,
-                "{category_id}:{seconds}:{start}:{end}:{session_id}|"
+    pub(super) fn daily_contribution_days(&self) -> BTreeSet<NaiveDate> {
+        let mut days = self
+            .time_tracker
+            .sessions
+            .iter()
+            .flat_map(session_slices)
+            .map(|slice| slice.operational_day)
+            .collect::<BTreeSet<_>>();
+        if let Some(preview) = self.live_preview_session() {
+            days.extend(
+                session_slices(&preview)
+                    .into_iter()
+                    .map(|slice| slice.operational_day),
             );
         }
-        let source_revision = stable_source_revision(revision_material.as_bytes());
+        days
+    }
 
-        let grid_width = self.sand_engine.grid_width_dots;
-        let grid_height = self.sand_engine.grid_height_dots;
-        let capacity = grid_width.saturating_mul(grid_height);
-        if capacity == 0 {
-            return None;
-        }
-
-        let total_seconds: usize = day_sessions
-            .iter()
-            .map(|(_, seconds, _, _, _)| *seconds)
-            .sum();
-        let target_grains = total_seconds.min(capacity);
-        if target_grains == 0 {
-            return None;
-        }
-
-        let mut allocations: Vec<(u64, usize, usize, usize)> = day_sessions
-            .iter()
-            .enumerate()
-            .map(|(order, (category_id, seconds, _, _, _))| {
-                let weighted = (*seconds as u128) * (target_grains as u128);
-                let base = (weighted / (total_seconds as u128)) as usize;
-                let remainder = (weighted % (total_seconds as u128)) as usize;
-                (*category_id, base, remainder, order)
-            })
-            .collect();
-
-        let mut assigned: usize = allocations.iter().map(|(_, count, _, _)| *count).sum();
-        if assigned < target_grains {
-            let mut ranked: Vec<usize> = (0..allocations.len()).collect();
-            ranked.sort_by(|a, b| {
-                allocations[*b]
-                    .2
-                    .cmp(&allocations[*a].2)
-                    .then(allocations[*a].3.cmp(&allocations[*b].3))
-            });
-
-            let mut idx = 0usize;
-            while assigned < target_grains && !ranked.is_empty() {
-                let allocation_index = ranked[idx];
-                allocations[allocation_index].1 += 1;
-                assigned += 1;
-                idx = (idx + 1) % ranked.len();
-            }
-        }
-
-        allocations.sort_by_key(|(_, _, _, order)| *order);
-
-        let mut grains = Vec::with_capacity(target_grains);
-        for (category_id, count, _, _) in allocations {
-            for _ in 0..count {
-                let grain_index = grains.len();
-                let x = grain_index % grid_width;
-                let row = grain_index / grid_width;
-                if row >= grid_height {
-                    break;
-                }
-
-                let y = grid_height - 1 - row;
-                grains.push(SandStateGrain { x, y, category_id });
-            }
-            if grains.len() >= target_grains {
+    pub(super) fn reconcile_all_daily_contributions(&mut self) {
+        let days = self.daily_contribution_days();
+        for day in days {
+            self.reconcile_daily_contribution(day);
+            if self.has_persistence_recovery() {
                 break;
             }
         }
+    }
 
-        let state = SandState {
-            version: SandState::VERSION,
-            grid_width,
-            grid_height,
-            grains,
-            frame_count: 0,
-            sweep_left_to_right: true,
-            rng_state: 0,
-            pending_grains: Vec::new(),
-            pending_runs: Vec::new(),
-        };
-
-        Some(SedimentSnapshot::derived_preview(
-            day_key,
-            source_revision,
-            state,
-        ))
+    pub(super) fn reconcile_daily_contribution(&mut self, day: NaiveDate) {
+        let expected = self.daily_contribution_from_time_log(day);
+        let existing = self.load_daily_sediment_snapshot(day);
+        if existing == expected {
+            return;
+        }
+        match expected {
+            Some(snapshot) => self.save_daily_sediment_snapshot(day, &snapshot),
+            None => self.delete_daily_sediment_snapshot(day),
+        }
     }
 
     pub(super) fn clamp_report_selection(&mut self, row_count: usize) {

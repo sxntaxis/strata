@@ -14,7 +14,7 @@ use crate::{
         Category, CategoryId, DRIFT_CATEGORY_CONFIG_NAME, OperationalDayPolicy, Session,
         day_boundary_config, runtime_settings,
     },
-    sand::SandState,
+    sand::{SandState, SedimentSnapshot},
     storage::{CategoryTagsState, LoadedCategories, LoadedSessions},
 };
 
@@ -696,7 +696,7 @@ pub(crate) fn load_sand_state(database_path: &Path) -> Result<Option<SandState>,
 pub(crate) fn save_daily_snapshot(
     database_path: &Path,
     operational_day: &str,
-    state: &SandState,
+    snapshot: &SedimentSnapshot,
 ) -> Result<(), String> {
     runtime_coordination::maybe_inject_test_fault("daily-snapshot", "before-write")
         .map_err(|error| error.to_string())?;
@@ -710,14 +710,14 @@ pub(crate) fn save_daily_snapshot(
         .as_ref()
         .map(|record| record.quantum_seconds)
         .unwrap_or(1);
-    let payload_json = serde_json::to_string(state).map_err(|error| error.to_string())?;
+    let payload_json = serde_json::to_string(snapshot).map_err(|error| error.to_string())?;
     let transaction = repository
         .connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|error| error.to_string())?;
     transaction
         .execute(
-            "DELETE FROM sand_snapshots WHERE snapshot_kind = 'daily' AND operational_day = ?1",
+            "DELETE FROM sand_snapshots WHERE snapshot_kind = 'daily-contribution' AND operational_day = ?1",
             params![operational_day],
         )
         .map_err(|error| error.to_string())?;
@@ -726,7 +726,7 @@ pub(crate) fn save_daily_snapshot(
             "INSERT INTO sand_snapshots (
                 formation_id, snapshot_kind, operational_day, quantum_seconds,
                 payload_json, captured_at_utc
-             ) VALUES (?1, 'daily', ?2, ?3, ?4, ?5)",
+             ) VALUES (?1, 'daily-contribution', ?2, ?3, ?4, ?5)",
             params![
                 formation_id,
                 operational_day,
@@ -744,13 +744,13 @@ pub(crate) fn save_daily_snapshot(
 pub(crate) fn load_daily_snapshot(
     database_path: &Path,
     operational_day: &str,
-) -> Result<Option<SandState>, String> {
+) -> Result<Option<SedimentSnapshot>, String> {
     let repository = open_cli_repository(database_path)?;
     let payload: Option<String> = repository
         .connection
         .query_row(
             "SELECT payload_json FROM sand_snapshots
-             WHERE snapshot_kind = 'daily' AND operational_day = ?1
+             WHERE snapshot_kind = 'daily-contribution' AND operational_day = ?1
              ORDER BY id DESC LIMIT 1",
             params![operational_day],
             |row| row.get(0),
@@ -775,7 +775,7 @@ pub(crate) fn delete_daily_snapshot(
         .map_err(|error| error.to_string())?;
     transaction
         .execute(
-            "DELETE FROM sand_snapshots WHERE snapshot_kind = 'daily' AND operational_day = ?1",
+            "DELETE FROM sand_snapshots WHERE snapshot_kind = 'daily-contribution' AND operational_day = ?1",
             params![operational_day],
         )
         .map_err(|error| error.to_string())?;
@@ -858,6 +858,7 @@ pub(crate) fn commit_checkpoint_recovery(
     expected_active_stable_id: &str,
     operational_day: &str,
     state: &SandState,
+    daily_contribution: &SedimentSnapshot,
 ) -> Result<(), String> {
     let mut repository = open_cli_repository(database_path)?;
     let existing = repository.sand_state().map_err(|error| error.to_string())?;
@@ -871,6 +872,8 @@ pub(crate) fn commit_checkpoint_recovery(
         .unwrap_or(1);
     let now = timestamp(Utc::now());
     let payload_json = serde_json::to_string(state).map_err(|error| error.to_string())?;
+    let daily_payload_json =
+        serde_json::to_string(daily_contribution).map_err(|error| error.to_string())?;
     runtime_coordination::commit_checkpoint_recovery(
         &mut repository,
         expected_active_stable_id,
@@ -885,6 +888,7 @@ pub(crate) fn commit_checkpoint_recovery(
             payload_json,
             updated_at_utc: now.clone(),
         },
+        &daily_payload_json,
         &now,
     )
     .map_err(|error| error.to_string())
@@ -1171,7 +1175,12 @@ mod tests {
             pending_runs: Vec::new(),
         };
         save_sand_state(&path, &state).unwrap();
-        save_daily_snapshot(&path, "2026-08-01", &state).unwrap();
+        let daily = SedimentSnapshot::daily_contribution(
+            "2026-08-01".to_string(),
+            "revision-a".to_string(),
+            state.clone(),
+        );
+        save_daily_snapshot(&path, "2026-08-01", &daily).unwrap();
         save_checkpoint(
             &path,
             "checkpoint-active",
@@ -1183,15 +1192,45 @@ mod tests {
         assert_eq!(load_sand_state(&path).unwrap(), Some(state.clone()));
         assert_eq!(
             load_daily_snapshot(&path, "2026-08-01").unwrap(),
-            Some(state.clone())
+            Some(daily.clone())
         );
+        let repository = open_cli_repository(&path).unwrap();
+        repository
+            .connection
+            .execute(
+                "INSERT INTO sand_snapshots (
+                    formation_id, snapshot_kind, operational_day, quantum_seconds,
+                    payload_json, captured_at_utc
+                 ) VALUES ('default', 'daily', '2026-08-01', 1, '{}', '2026-08-01T12:00:00Z')",
+                [],
+            )
+            .unwrap();
+        drop(repository);
+        save_daily_snapshot(&path, "2026-08-01", &daily).unwrap();
+        let repository = open_cli_repository(&path).unwrap();
+        let legacy_count: i64 = repository
+            .connection
+            .query_row(
+                "SELECT count(*) FROM sand_snapshots
+                 WHERE snapshot_kind = 'daily' AND operational_day = '2026-08-01'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            legacy_count, 1,
+            "legacy daily evidence must remain untouched"
+        );
+        drop(repository);
+
         let checkpoint: Option<SqliteClaimedCheckpoint<BTreeMap<String, String>>> =
             load_checkpoint(&path).unwrap();
         assert_eq!(
             checkpoint.unwrap().payload.get("status").unwrap(),
             "detached"
         );
-        commit_checkpoint_recovery(&path, "checkpoint-active", "2026-08-01", &state).unwrap();
+        commit_checkpoint_recovery(&path, "checkpoint-active", "2026-08-01", &state, &daily)
+            .unwrap();
         clear_checkpoint(&path).unwrap();
         assert!(
             load_checkpoint::<BTreeMap<String, String>>(&path)

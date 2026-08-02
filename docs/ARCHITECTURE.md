@@ -5,8 +5,6 @@ Last reviewed: 2026-08-02
 
 ## Current system
 
-Strata is one Rust application with two user interfaces:
-
 ```text
 TUI / CLI
     ↓
@@ -22,132 +20,125 @@ SQLite repository/runtime coordination + sediment simulation
 Current responsibility map:
 
 - `src/main.rs` — process entry.
-- `src/lib.rs` — shared CLI/TUI invocation, startup configuration validation, and entry-point selection.
-- `src/cli.rs` — command parsing, non-interactive lifecycle, reports, exports, migration, and maintenance commands.
-- `src/keybindings.rs` — shared keymap and authority/time-setting parsing and validation.
-- `src/domain.rs` — canonical session identity, project/category rules, operational-day logic, and report aggregation.
-- `src/temporal.rs` — checked wall intervals, monotonic/wall reconciliation, fixed-clock civil policy, operational-day windows, and exact overlap slicing.
-- `src/sqlite.rs` and `src/sqlite/**` — schema migration, authoritative repositories, CLI/TUI adapters, runtime coordination, checkpoint transactions, failure certification, deterministic interchange, backup/restore, and legacy-evidence custody.
-- `src/storage.rs` — XDG paths, pre-activation legacy compatibility, migration input, atomic file helpers, and legacy runtime-checkpoint files.
-- `src/app.rs` and `src/app/**` — TUI orchestration, interaction, rendering, reports, runtime checkpoints, bounded recovery, historical-preview selection, modals, and persistence-recovery controls.
+- `src/lib.rs` — shared CLI/TUI invocation and startup authority.
+- `src/cli.rs` — command lifecycle, reports, exports, migration, and maintenance.
+- `src/keybindings.rs` — keymap plus validated runtime/time settings.
+- `src/domain.rs` — canonical sessions, project/category identity, operational-day allocation, and reports.
+- `src/temporal.rs` — monotonic/wall reconciliation, fixed-offset civil policy, and exact overlap slicing.
+- `src/sqlite.rs` and `src/sqlite/**` — schema migrations, repositories, runtime transactions, checkpoint custody, deterministic interchange, backup/restore, and fault certification.
+- `src/storage.rs` — XDG paths, legacy-file authority, atomic file helpers, and custody-separated contribution files.
+- `src/app.rs` and `src/app/**` — TUI orchestration, persistence reconciliation, bounded recovery, historical artifact selection, interaction, and rendering.
 - `src/sand/engine.rs` — canonical logical grains, compressed pending mass, physics, viewport projection, and Braille rendering.
 - `src/sand/recovery.rs` — bounded recovery arithmetic and topology-preserving detached contribution.
-- `src/sand/snapshot.rs` — typed snapshot identity, provenance, deterministic source revisions, artifact selection, and immutable rendering.
+- `src/sand/snapshot.rs` — snapshot kinds, exact daily contribution construction, provenance, revisions, selection, and immutable rendering.
 
-## Authority state
+## Established authority
 
-The SQLite migration program closed at 9/9 acceptance criteria in issue #8.
+### Persistence and startup
 
-- Before explicit activation, legacy CSV/JSON remains the live authority.
-- After explicit activation, CLI and TUI share one SQLite authority.
-- Activated runtime never dual-writes legacy sources and never falls back to them automatically.
-- Runtime transitions are stable-ID fenced, transactional, and retry-safe.
-- Persistence failures enter a non-dismissible recovery state rather than continuing with divergent memory.
+- SQLite becomes live authority only after explicit activation.
+- CLI and TUI share one validated startup configuration.
+- Activated runtime never dual-writes or silently falls back to legacy sources.
+- Persistence and authority failures fail closed with visible recovery controls.
 - Deterministic CSV bundles are interchange, not a competing live ledger.
-- Legacy source inventory, archive, and removal are provenance-verified custody operations.
 
-AUTHORITY-001 establishes one validated startup gate for CLI and TUI. Invalid configuration blocks authority resolution unless `--ignore-config` is explicitly supplied.
+### Time and sessions
 
-TEMPORAL-001 establishes monotonic live duration, UTC persistence, fixed-offset civil authority, checked wall recovery, discontinuity refusal, and historical operational-day ownership.
+- Live duration is monotonic; UTC owns persisted absolute chronology.
+- Fixed-offset civil policy owns new operational-day projection.
+- Canonical sessions remain singular while exact overlap slices allocate report and daily-contribution mass across operational days.
+- Project and category are independent canonical axes.
+- Idle is explicit, continues producing sediment, and remains excluded from ordinary active-time totals.
 
-TEMPORAL-002 keeps one canonical session identity while reports derive exact operational-day overlap slices; it removes false sunrise semantics and treats zero-whole-second transitions as receipt-only events.
+### Reports and exports
 
-DOMAIN-001 makes project and category independent canonical axes, requires explicit CLI classification, and completes the user-facing idle vocabulary migration.
+- Report ranges are inclusive operational-day projections.
+- Active time is included by default as explicit provisional state; `--completed-only` selects committed history.
+- Ordering is deterministic.
+- JSON schema version 2 and RFC 5545-safe ICS use stable identities and authoritative UTC endpoints.
 
-REPORT-001 establishes inclusive operational-day ranges, explicit provisional active projection, deterministic ordering, JSON schema version 2, and RFC 5545-safe ICS using authoritative UTC chronology.
+### Sediment mass and topology
 
-SEDIMENT-001A establishes sediment mass and geometry primitives:
+- Every due grain is exactly one placed or pending logical grain.
+- Pending mass uses ordered category/count runs.
+- Terminal-cell and Braille-dot dimensions are distinct.
+- The persisted logical grid owns canonical topology.
+- Resize is a centered, bottom-aligned projection-only operation.
+- Blockage, resize, persistence, restore, and recovery conserve total and per-category mass.
 
-- terminal-cell and Braille-dot dimensions are explicit independent units;
-- each due grain exists as placed or pending logical mass;
-- ingress examines every available column before blockage;
-- blocked mass remains category-preserving and durable;
-- clearing and category removal operate on placed and pending forms.
+### Runtime recovery
 
-SEDIMENT-001B separates canonical sediment from terminal geometry:
+- Runtime checkpoints cover autosave, detach, terminal closure, and crash recovery.
+- Evidence is claimed and a fixed target is persisted before recovered publication.
+- Checkpoint topology and engine metadata restore directly.
+- Missed mass becomes compressed pending runs.
+- Missed physics is never replayed.
+- SQLite recovery publication is atomic and reclaimable.
+- Legacy-file retry is deterministic.
+- Recovery completion reconciles every operational day touched by canonical slices.
 
-- the persisted logical grid owns dimensions, coordinates, neighborhoods, and topology;
-- terminal dimensions are presentation-only viewport state;
-- resize cannot invoke gravity, repacking, ingress placement, or logical mutation;
-- projection is horizontally centered and bottom-aligned;
-- the destructive resize module and edge-band policy are removed.
+### Historical sediment artifacts
 
-SEDIMENT-001C1 establishes bounded mass representation and periodic arithmetic:
+`SedimentSnapshot` distinguishes:
 
-- pending mass is stored as ordered category/count runs;
-- adjacent same-category runs merge while transitions preserve FIFO order;
-- work and storage are independent of represented count;
-- `SandState` schema version 2 stores runs and migrates version 1 vectors;
-- periodic event counts and remainders use checked integer arithmetic without replay.
+- cumulative checkpoints;
+- daily contributions;
+- derived previews.
 
-SEDIMENT-001C2 establishes bounded durable runtime recovery:
+Each artifact records day, revision, provenance, idle policy, reconstruction status, and `SandState`. Kinds are non-interchangeable. Historical viewing is immutable and never advances physics or writes persistence.
 
-- runtime checkpoints cover autosave, detach, terminal closure, and crash recovery;
-- evidence is claimed and a recovery target is persisted before publication;
-- checkpoint topology and engine metadata restore directly;
-- missed mass is appended as compressed pending runs;
-- missed physics is never replayed and no relaxed topology is installed;
-- SQLite recovery publication is atomic and reclaimable;
-- legacy-file recovery uses deterministic target and committed markers;
-- unresolved evidence fails closed and remains protected.
+### Daily contribution authority
 
-SEDIMENT-001D1 establishes snapshot identity and immutable viewing:
+Persisted daily sediment is derived from exact canonical session slices rather than cumulative live state.
 
-- one `SedimentSnapshot` envelope distinguishes cumulative checkpoints, daily contributions, and derived previews;
-- each artifact carries optional day, source revision, provenance, idle policy, reconstruction status, and `SandState`;
-- legacy bare daily payloads are classified as cumulative legacy evidence rather than silently treated as daily contributions;
-- incompatible or missing daily artifacts fall back to in-memory ledger-derived previews;
-- historical rendering uses a fresh viewport engine, never advances physics, and cannot mutate or persist the artifact;
-- preview cache identity includes the full serialized artifact and viewport;
-- report UI exposes artifact kind, reconstruction status, and idle policy.
+- Idle inclusion is explicit.
+- Every second is conserved, with overflow represented as pending runs.
+- Source revision covers all sediment-relevant chronology and identity fields.
+- Persisted artifacts are trusted only on exact schema/kind/day/revision match.
+- Missing or stale authority yields an in-memory derived preview until reconciliation publishes the correct contribution.
+- Autosave, full-state flush, relevant deletion, and recovery completion reconcile authoritative contributions.
+- Cross-boundary session deletion rebuilds every touched day.
+- Description-only edits do not invalidate sediment.
 
-The evolving accepted sediment contract is `docs/SEDIMENT_AUTHORITY.md`.
+SQLite schema version 6 introduces `snapshot_kind = 'daily-contribution'` while preserving old `daily` rows. Legacy-file authority uses `.contribution.json` while preserving old daily JSON files. Legacy cumulative artifacts are archive-in-place evidence and never silently become new authority.
+
+The detailed contract is `docs/SEDIMENT_AUTHORITY.md`.
 
 ## Truth boundaries
 
 ### Chronological ledger
 
-Owns exact elapsed intervals, timestamps, categories, project identity, notes, operational-day interpretation, and reportable totals.
+Owns exact elapsed intervals, timestamps, categories, projects, descriptions, operational-day policy, and reportable totals.
 
 ### Sediment formation
 
-Owns accountable visual history. Total represented duration and per-category mass must be conserved exactly. Canonical topology and broad chronology are independent of the current viewport. Pending mass may be compressed without changing count, category identity, or FIFO order.
+Owns accountable visual history and canonical topology. It must conserve mass and category identity while remaining independent of the current viewport.
 
 ### Runtime recovery
 
-Owns custody of the last durably checkpointed simulation state and exact elapsed contribution since that state. Recovery may add missing logical mass and accumulator remainders, but may not replay unbounded physics, relax topology, silently reclassify categories, or delete unresolved evidence.
+Owns checkpoint evidence and exact elapsed contribution since the checkpoint. It may add mass and advance accumulator remainders, but may not replay unbounded physics, relax topology, or discard unresolved evidence.
 
 ### Historical snapshots
 
-A snapshot envelope owns semantic identity and provenance for a visual artifact. `CumulativeCheckpoint`, `DailyContribution`, and `DerivedPreview` are not interchangeable. Viewing is immutable and projection-only. Chronological sessions remain the reconstruction authority for derived previews.
-
-### Reports and balance
-
-Are projections over chronological truth. They may omit idle or apply user-defined polarity, but they must not rewrite underlying intervals or persist a derived preview as authentic history without an explicit authority transition.
+Own semantic identity and provenance for persisted or derived visual artifacts. A derived preview is a read-only projection; a daily contribution becomes authority only through explicit typed persistence.
 
 ### Interface
 
-TUI and CLI translate user intent and present state. Neither may maintain an independent ledger, independently reinterpret configuration, silently select another profile, mutate canonical sediment to fit the terminal, or advance historical snapshots while viewing them.
+TUI and CLI translate user intent and present state. Neither may own an independent ledger, reinterpret authority, mutate canonical sediment to fit the terminal, or advance historical artifacts while viewing them.
 
 ## Current architectural frontier
 
-Persistence, startup configuration, clock authority, interval boundaries, session classification, report/export correctness, sediment mass, viewport topology, bounded runtime recovery, explicit snapshot identity, and immutable historical viewing are no longer the primary risks.
+The sediment conservation program is complete. The next priorities are:
 
-The next programs are:
-
-1. complete authoritative daily-contribution persistence, revision comparison, mutation invalidation, and legacy snapshot disposition in SEDIMENT-001D2;
-2. complete interaction-mode and terminal-lifecycle contracts;
-3. reconcile remaining partially satisfied domain and profile issues.
-
-Complete profile isolation and deliberate runtime profile switching remain separate work under issue #15.
+1. INTERACTION-001 — explicit edit modes, truthful keybinding behavior, and terminal lifecycle safety;
+2. reconciliation of partially satisfied issues #5, #10, and #13;
+3. later domain/profile work, including complete profile isolation under issue #15.
 
 ## Non-authority
 
-- GitHub issues describe defects and proposals; they do not override accepted product doctrine.
-- Notebook research remains working memory until promoted.
-- Terminal dimensions are presentation state, not canonical sediment dimensions.
-- Compressed pending runs are exact logical mass, not permission for count or category loss.
-- Recovery does not claim safe queued-mutation replay without stable receipts.
-- A legacy cumulative daily row is evidence, not an authoritative daily contribution.
-- A derived preview is a deterministic view, not persisted sediment authority.
+- GitHub issues do not override accepted doctrine.
+- Notebook research is working memory until promoted.
+- Terminal dimensions are not canonical sediment dimensions.
+- A derived preview is not persisted authority.
+- Legacy cumulative daily rows/files are evidence, not daily contributions.
 - CSV, JSON, and ICS are external adapters, not canonical domain models.
