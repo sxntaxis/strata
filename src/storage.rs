@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
@@ -25,6 +25,7 @@ use crate::{
 #[derive(Debug)]
 pub struct LoadedCategories {
     pub categories: Vec<Category>,
+    pub archived_categories: Vec<Category>,
     pub next_category_id: u64,
 }
 
@@ -34,7 +35,16 @@ pub struct LoadedSessions {
     pub next_session_id: usize,
 }
 
-const CATEGORIES_HEADER: [&str; 5] = ["id", "name", "description", "color_index", "karma_effect"];
+const LEGACY_CATEGORIES_HEADER: [&str; 5] =
+    ["id", "name", "description", "color_index", "karma_effect"];
+const CATEGORIES_HEADER: [&str; 6] = [
+    "id",
+    "name",
+    "description",
+    "color_index",
+    "karma_effect",
+    "archived",
+];
 const LEGACY_SESSIONS_HEADER: [&str; 8] = [
     "id",
     "date",
@@ -147,6 +157,7 @@ fn default_categories_loaded() -> LoadedCategories {
             description: String::new(),
             karma_effect: 0,
         }],
+        archived_categories: Vec::new(),
         next_category_id: 1,
     }
 }
@@ -188,58 +199,128 @@ pub fn try_load_categories_from_csv(path: &Path) -> Result<LoadedCategories, Sto
 
     let mut reader = ReaderBuilder::new().has_headers(true).from_path(path)?;
     let headers = reader.headers()?.clone();
-    if !csv_header_matches(&headers, &CATEGORIES_HEADER) {
+    let has_archived_state = csv_header_matches(&headers, &CATEGORIES_HEADER);
+    if !has_archived_state && !csv_header_matches(&headers, &LEGACY_CATEGORIES_HEADER) {
         return Err(StorageError::InvalidCsvSchema {
             file: "categories.csv",
-            expected: CATEGORIES_HEADER.join(","),
+            expected: format!(
+                "{} or {}",
+                LEGACY_CATEGORIES_HEADER.join(","),
+                CATEGORIES_HEADER.join(",")
+            ),
             found: csv_header_string(&headers),
         });
     }
 
     let mut loaded = default_categories_loaded();
+    let mut seen_ids = HashSet::from([DRIFT_CATEGORY_ID.0]);
+    let mut seen_names = HashSet::from([DRIFT_CATEGORY_CONFIG_NAME.to_string()]);
 
-    for record in reader.records() {
+    for (index, record) in reader.records().enumerate() {
+        let row = index + 2;
         let record = record?;
-
-        let Some(id_raw) = record.get(0) else {
-            continue;
-        };
-        let id: u64 = match id_raw.parse() {
-            Ok(id) => id,
-            Err(_) => {
-                eprintln!("Warning: Invalid category ID '{}', skipping", id_raw);
-                continue;
-            }
-        };
-
+        let id_raw = record.get(0).unwrap_or_default();
+        let id = id_raw
+            .parse::<u64>()
+            .map_err(|error| StorageError::InvalidCsvData {
+                file: "categories.csv",
+                row,
+                message: format!("invalid category ID '{id_raw}': {error}"),
+            })?;
         if id == DRIFT_CATEGORY_ID.0 {
-            continue;
+            return Err(StorageError::InvalidCsvData {
+                file: "categories.csv",
+                row,
+                message: "idle category ID 0 is implicit and must not appear as a catalog row"
+                    .to_string(),
+            });
+        }
+        if !seen_ids.insert(id) {
+            return Err(StorageError::InvalidCsvData {
+                file: "categories.csv",
+                row,
+                message: format!("duplicate category ID {id}"),
+            });
         }
 
         let name = record.get(1).unwrap_or_default().trim().to_string();
         if name.is_empty() || crate::domain::is_drift_name(&name) {
-            continue;
+            return Err(StorageError::InvalidCsvData {
+                file: "categories.csv",
+                row,
+                message: format!("invalid or reserved category name '{name}'"),
+            });
+        }
+        let normalized_name = name.to_ascii_lowercase();
+        if !seen_names.insert(normalized_name) {
+            return Err(StorageError::InvalidCsvData {
+                file: "categories.csv",
+                row,
+                message: format!("duplicate category name '{name}'"),
+            });
         }
 
         let description = record.get(2).unwrap_or_default().to_string();
-        let color_idx = record
-            .get(3)
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(0)
-            % COLORS.len();
-        let karma_effect = record
-            .get(4)
-            .and_then(|value| value.parse::<i8>().ok())
-            .unwrap_or(1);
+        let color_raw = record.get(3).unwrap_or_default();
+        let color_idx =
+            color_raw
+                .parse::<usize>()
+                .map_err(|error| StorageError::InvalidCsvData {
+                    file: "categories.csv",
+                    row,
+                    message: format!("invalid color index '{color_raw}': {error}"),
+                })?;
+        if color_idx >= COLORS.len() {
+            return Err(StorageError::InvalidCsvData {
+                file: "categories.csv",
+                row,
+                message: format!(
+                    "color index {color_idx} is outside 0..{}",
+                    COLORS.len().saturating_sub(1)
+                ),
+            });
+        }
+        let karma_raw = record.get(4).unwrap_or_default();
+        let karma_effect =
+            karma_raw
+                .parse::<i8>()
+                .map_err(|error| StorageError::InvalidCsvData {
+                    file: "categories.csv",
+                    row,
+                    message: format!("invalid karma effect '{karma_raw}': {error}"),
+                })?;
+        if !(-1..=1).contains(&karma_effect) {
+            return Err(StorageError::InvalidCsvData {
+                file: "categories.csv",
+                row,
+                message: format!("karma effect {karma_effect} is outside -1..1"),
+            });
+        }
+        let archived = if has_archived_state {
+            let raw = record.get(5).unwrap_or_default();
+            raw.parse::<bool>()
+                .map_err(|error| StorageError::InvalidCsvData {
+                    file: "categories.csv",
+                    row,
+                    message: format!("invalid archived state '{raw}': {error}"),
+                })?
+        } else {
+            false
+        };
 
-        loaded.categories.push(Category {
+        let category = Category {
             id: CategoryId::new(id),
             name,
             color: COLORS[color_idx],
             description,
             karma_effect,
-        });
-        loaded.next_category_id = loaded.next_category_id.max(id + 1);
+        };
+        if archived {
+            loaded.archived_categories.push(category);
+        } else {
+            loaded.categories.push(category);
+        }
+        loaded.next_category_id = loaded.next_category_id.max(id.saturating_add(1));
     }
 
     Ok(loaded)
@@ -315,11 +396,24 @@ pub fn try_load_sessions_from_csv(
             }
         };
 
-        let category_id = record
-            .get(2)
-            .and_then(|value| value.parse::<u64>().ok())
-            .and_then(|raw| category_by_id.get(&raw).copied())
-            .unwrap_or(DRIFT_CATEGORY_ID);
+        let category_raw = record.get(2).unwrap_or_default();
+        let category_value =
+            category_raw
+                .parse::<u64>()
+                .map_err(|error| StorageError::InvalidCsvData {
+                    file: "time_log.csv",
+                    row,
+                    message: format!("invalid category ID '{category_raw}': {error}"),
+                })?;
+        let category_id = category_by_id.get(&category_value).copied().ok_or_else(|| {
+            StorageError::InvalidCsvData {
+                file: "time_log.csv",
+                row,
+                message: format!(
+                    "unknown category ID {category_value}; restore its catalog row or explicitly reassign the session"
+                ),
+            }
+        })?;
 
         let provenance_is_empty = (absolute_start_index..=boundary_start_index)
             .all(|field| record.get(field).unwrap_or_default().trim().is_empty());
@@ -415,20 +509,37 @@ pub fn try_load_sessions_from_csv(
 }
 
 pub fn save_categories_to_csv(path: &Path, categories: &[Category]) -> Result<(), String> {
+    save_category_catalog_to_csv(path, categories, &[])
+}
+
+pub fn save_category_catalog_to_csv(
+    path: &Path,
+    active_categories: &[Category],
+    archived_categories: &[Category],
+) -> Result<(), String> {
     let mut writer = WriterBuilder::new().has_headers(false).from_writer(vec![]);
     writer
         .write_record(CATEGORIES_HEADER)
         .map_err(|e| e.to_string())?;
 
-    for category in categories {
-        if category.id.0 == 0 {
+    for (category, archived) in active_categories
+        .iter()
+        .map(|category| (category, false))
+        .chain(archived_categories.iter().map(|category| (category, true)))
+    {
+        if category.id == DRIFT_CATEGORY_ID {
             continue;
         }
 
         let color_pos = COLORS
             .iter()
             .position(|&color| color == category.color)
-            .unwrap_or(0);
+            .ok_or_else(|| {
+                format!(
+                    "category {} uses a color outside the persisted palette",
+                    category.id.0
+                )
+            })?;
 
         writer
             .write_record([
@@ -437,6 +548,7 @@ pub fn save_categories_to_csv(path: &Path, categories: &[Category]) -> Result<()
                 category.description.clone(),
                 color_pos.to_string(),
                 category.karma_effect.to_string(),
+                archived.to_string(),
             ])
             .map_err(|e| e.to_string())?;
     }
@@ -462,7 +574,12 @@ pub fn save_sessions_to_csv(
             .iter()
             .find(|category| category.id == session.category_id)
             .map(|category| category.name.as_str())
-            .unwrap_or(DRIFT_CATEGORY_CONFIG_NAME);
+            .ok_or_else(|| {
+                format!(
+                    "session {} references unknown category ID {}",
+                    session.id, session.category_id.0
+                )
+            })?;
 
         let (started_at_utc, ended_at_utc, offset, start_minutes) = match (
             session.started_at_utc,
@@ -784,6 +901,150 @@ mod tests {
         assert_eq!(loaded.categories[1].name, "Work");
         assert_eq!(loaded.categories[1].description, "focus, deep work");
 
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn category_catalog_is_backward_compatible_and_preserves_archived_rows() {
+        let legacy_path = unique_path("strata_categories_legacy_catalog", "csv");
+        fs::write(
+            &legacy_path,
+            "id,name,description,color_index,karma_effect\n1,Work,focus,0,1\n",
+        )
+        .unwrap();
+        let legacy = try_load_categories_from_csv(&legacy_path).unwrap();
+        assert_eq!(legacy.categories.len(), 2);
+        assert!(legacy.archived_categories.is_empty());
+
+        let catalog_path = unique_path("strata_categories_archived_catalog", "csv");
+        let active = vec![
+            Category {
+                id: DRIFT_CATEGORY_ID,
+                name: "idle".to_string(),
+                color: Color::White,
+                description: String::new(),
+                karma_effect: 0,
+            },
+            Category {
+                id: CategoryId::new(1),
+                name: "Work".to_string(),
+                color: COLORS[0],
+                description: "focus".to_string(),
+                karma_effect: 1,
+            },
+        ];
+        let archived = vec![Category {
+            id: CategoryId::new(2),
+            name: "Old Client".to_string(),
+            color: COLORS[1],
+            description: "historical".to_string(),
+            karma_effect: -1,
+        }];
+        save_category_catalog_to_csv(&catalog_path, &active, &archived).unwrap();
+        let loaded = try_load_categories_from_csv(&catalog_path).unwrap();
+        assert_eq!(loaded.categories.len(), 2);
+        assert_eq!(loaded.archived_categories.len(), 1);
+        assert_eq!(loaded.archived_categories[0].id, CategoryId::new(2));
+        assert_eq!(loaded.archived_categories[0].name, "Old Client");
+        assert_eq!(loaded.archived_categories[0].description, "historical");
+        assert_eq!(loaded.archived_categories[0].karma_effect, -1);
+
+        fs::remove_file(legacy_path).ok();
+        fs::remove_file(catalog_path).ok();
+    }
+
+    #[test]
+    fn unknown_or_malformed_session_category_fails_closed_but_idle_remains_valid() {
+        let categories = default_categories_loaded().categories;
+        let missing_path = unique_path("strata_sessions_missing_category", "csv");
+        fs::write(
+            &missing_path,
+            "id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds\n1,2026-08-01,42,Missing,work,10:00:00,11:00:00,3600\n",
+        )
+        .unwrap();
+        let missing = try_load_sessions_from_csv(&missing_path, &categories).unwrap_err();
+        assert!(missing.to_string().contains("unknown category ID 42"));
+
+        let malformed_path = unique_path("strata_sessions_malformed_category", "csv");
+        fs::write(
+            &malformed_path,
+            "id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds\n1,2026-08-01,not-an-id,Missing,work,10:00:00,11:00:00,3600\n",
+        )
+        .unwrap();
+        let malformed = try_load_sessions_from_csv(&malformed_path, &categories).unwrap_err();
+        assert!(
+            malformed
+                .to_string()
+                .contains("invalid category ID 'not-an-id'")
+        );
+
+        let idle_path = unique_path("strata_sessions_idle_category", "csv");
+        fs::write(
+            &idle_path,
+            "id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds\n1,2026-08-01,0,idle,break,10:00:00,11:00:00,3600\n",
+        )
+        .unwrap();
+        let idle = try_load_sessions_from_csv(&idle_path, &categories).unwrap();
+        assert_eq!(idle.sessions[0].category_id, DRIFT_CATEGORY_ID);
+
+        fs::remove_file(missing_path).ok();
+        fs::remove_file(malformed_path).ok();
+        fs::remove_file(idle_path).ok();
+    }
+
+    #[test]
+    fn session_writer_refuses_unknown_category_identity() {
+        let path = unique_path("strata_sessions_unknown_writer", "csv");
+        let session = Session {
+            id: 7,
+            date: "2026-08-01".to_string(),
+            category_id: CategoryId::new(99),
+            project: String::new(),
+            description: String::new(),
+            start_time: "10:00:00".to_string(),
+            end_time: "11:00:00".to_string(),
+            elapsed_seconds: 3600,
+            started_at_utc: None,
+            ended_at_utc: None,
+            operational_day_policy: None,
+        };
+        let error =
+            save_sessions_to_csv(&path, &[session], &default_categories_loaded().categories)
+                .unwrap_err();
+        assert!(error.contains("unknown category ID 99"));
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn archived_category_metadata_keeps_session_labels_round_trippable() {
+        let path = unique_path("strata_sessions_archived_label", "csv");
+        let archived = Category {
+            id: CategoryId::new(8),
+            name: "Archived Work".to_string(),
+            color: COLORS[2],
+            description: "retained".to_string(),
+            karma_effect: 1,
+        };
+        let session = Session {
+            id: 8,
+            date: "2026-08-01".to_string(),
+            category_id: archived.id,
+            project: String::new(),
+            description: "historical".to_string(),
+            start_time: "10:00:00".to_string(),
+            end_time: "11:00:00".to_string(),
+            elapsed_seconds: 3600,
+            started_at_utc: None,
+            ended_at_utc: None,
+            operational_day_policy: None,
+        };
+        let mut catalog = default_categories_loaded().categories;
+        catalog.push(archived.clone());
+        save_sessions_to_csv(&path, &[session], &catalog).unwrap();
+        let loaded = try_load_sessions_from_csv(&path, &catalog).unwrap();
+        assert_eq!(loaded.sessions[0].category_id, archived.id);
+        let csv = fs::read_to_string(&path).unwrap();
+        assert!(csv.contains("Archived Work"));
         fs::remove_file(path).ok();
     }
 

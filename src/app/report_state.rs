@@ -319,7 +319,8 @@ impl App {
                 return false;
             };
             session.description = edit.draft.clone();
-            let categories = self.time_tracker.categories_for_storage();
+            let mut categories = self.time_tracker.categories_for_storage();
+            categories.extend(self.archived_categories.iter().cloned());
             let result = crate::storage::save_sessions_to_csv(
                 &crate::storage::get_time_log_path(),
                 &sessions,

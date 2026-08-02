@@ -28,7 +28,9 @@ impl App {
             }
         } else {
             let path = storage::get_categories_path();
-            if let Err(error) = storage::save_categories_to_csv(&path, &categories) {
+            if let Err(error) =
+                storage::save_category_catalog_to_csv(&path, &categories, &self.archived_categories)
+            {
                 self.record_storage_result::<()>(Err(error));
             }
         }
@@ -43,7 +45,8 @@ impl App {
                 result,
             );
         } else {
-            let categories = self.time_tracker.categories_for_storage();
+            let mut categories = self.time_tracker.categories_for_storage();
+            categories.extend(self.archived_categories.iter().cloned());
             let path = storage::get_time_log_path();
             if let Err(error) =
                 storage::save_sessions_to_csv(&path, &self.time_tracker.sessions, &categories)
@@ -314,9 +317,7 @@ impl App {
             .iter()
             .position(|category| category.name.eq_ignore_ascii_case(requested_name))
             .and_then(|index| {
-                let mut category = self.archived_categories[index].clone();
-                category.color = COLORS[self.color_index % COLORS.len()];
-                category.description.clear();
+                let category = self.archived_categories[index].clone();
                 self.time_tracker
                     .restore_category(category)
                     .then_some((index, self.archived_categories[index].id))
@@ -349,10 +350,11 @@ impl App {
             && self.selected_index < self.time_tracker.category_count()
             && self.selected_index > 0
         {
-            let removed_id = self
+            let removed_category = self
                 .time_tracker
                 .category_by_index(self.selected_index)
-                .map(|category| category.id);
+                .cloned();
+            let removed_id = removed_category.as_ref().map(|category| category.id);
 
             let was_active = removed_id
                 .map(|category_id| category_id == self.time_tracker.active_category_id())
@@ -383,9 +385,14 @@ impl App {
             }
 
             if self.time_tracker.delete_category(self.selected_index) {
-                if let Some(category_id) = removed_id {
-                    self.category_tags.tags_by_category.remove(&category_id.0);
-                    self.persist_category_tags();
+                if self.sqlite_database_path.is_none()
+                    && let Some(category) = removed_category
+                    && !self
+                        .archived_categories
+                        .iter()
+                        .any(|archived| archived.id == category.id)
+                {
+                    self.archived_categories.push(category);
                 }
 
                 if self.selected_index > 0

@@ -160,6 +160,7 @@ pub(crate) fn load_state(database_path: &Path) -> Result<SqliteTuiState, String>
     Ok(SqliteTuiState {
         loaded_categories: LoadedCategories {
             categories: active_categories,
+            archived_categories: archived_categories.clone(),
             next_category_id: max_category_id.saturating_add(1).max(1),
         },
         loaded_sessions: LoadedSessions {

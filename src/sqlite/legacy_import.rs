@@ -21,7 +21,16 @@ use crate::{
 
 use super::SqliteRepository;
 
-const CATEGORIES_HEADER: [&str; 5] = ["id", "name", "description", "color_index", "karma_effect"];
+const LEGACY_CATEGORIES_HEADER: [&str; 5] =
+    ["id", "name", "description", "color_index", "karma_effect"];
+const CATEGORIES_HEADER: [&str; 6] = [
+    "id",
+    "name",
+    "description",
+    "color_index",
+    "karma_effect",
+    "archived",
+];
 const LEGACY_SESSIONS_HEADER: [&str; 8] = [
     "id",
     "date",
@@ -170,6 +179,7 @@ struct LegacyCategory {
     description: String,
     color_index: i64,
     balance_effect: i64,
+    archived: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -512,14 +522,16 @@ impl SqliteRepository {
                     name,
                     description,
                     color_index,
-                    balance_effect
-                 ) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    balance_effect,
+                    archived_at_utc
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
                     category.id,
                     category.name,
                     category.description,
                     category.color_index,
                     category.balance_effect,
+                    category.archived.then_some(started_at_utc.as_str()),
                 ],
             )?;
         }
@@ -873,11 +885,22 @@ fn parse_categories(bytes: &[u8]) -> Result<Vec<LegacyCategory>, LegacyImportErr
         .has_headers(true)
         .flexible(false)
         .from_reader(Cursor::new(bytes));
-    validate_header(
-        source,
-        reader.headers().map_err(|error| csv_error(source, error))?,
-        &CATEGORIES_HEADER,
-    )?;
+    let header = reader
+        .headers()
+        .map_err(|error| csv_error(source, error))?
+        .clone();
+    let has_archived_state = header.iter().eq(CATEGORIES_HEADER.iter().copied());
+    if !has_archived_state && !header.iter().eq(LEGACY_CATEGORIES_HEADER.iter().copied()) {
+        return Err(invalid(
+            source,
+            None,
+            format!(
+                "invalid header; expected '{}' or '{}'",
+                LEGACY_CATEGORIES_HEADER.join(","),
+                CATEGORIES_HEADER.join(",")
+            ),
+        ));
+    }
 
     let mut categories = Vec::new();
     let mut ids = HashSet::new();
@@ -939,6 +962,18 @@ fn parse_categories(bytes: &[u8]) -> Result<Vec<LegacyCategory>, LegacyImportErr
                 format!("karma effect {balance_effect} is outside -1..1"),
             ));
         }
+        let archived = if has_archived_state {
+            let raw = required_field(source, row, &record, 5, "archived state")?;
+            raw.parse::<bool>().map_err(|error| {
+                invalid(
+                    source,
+                    Some(row),
+                    format!("invalid archived state '{raw}': {error}"),
+                )
+            })?
+        } else {
+            false
+        };
 
         categories.push(LegacyCategory {
             id,
@@ -946,6 +981,7 @@ fn parse_categories(bytes: &[u8]) -> Result<Vec<LegacyCategory>, LegacyImportErr
             description: record.get(2).unwrap_or_default().to_string(),
             color_index,
             balance_effect,
+            archived,
         });
     }
     categories.sort_by_key(|category| category.id);
@@ -2045,6 +2081,42 @@ mod tests {
             operational_day_start_minutes: 6 * 60,
             quantum_seconds: 1,
         }
+    }
+
+    #[test]
+    fn imports_archived_category_catalog_without_reactivating_history() {
+        let fixture = Fixture::new("archived-category-catalog");
+        fs::write(
+            &fixture.paths.categories_csv,
+            "id,name,description,color_index,karma_effect,archived\n1,Current,active,0,1,false\n2,Old Client,historical,1,-1,true\n",
+        )
+        .unwrap();
+        fs::write(
+            &fixture.paths.sessions_csv,
+            "id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds\n1,2026-08-01,2,Old Client,legacy work,10:00:00,11:00:00,3600\n",
+        )
+        .unwrap();
+
+        let plan = LegacyImportPlan::from_paths(&fixture.paths, options()).unwrap();
+        let mut repository = SqliteRepository::open_in_memory().unwrap();
+        repository.import_legacy(&plan).unwrap();
+
+        let archived: Option<String> = repository
+            .connection
+            .query_row(
+                "SELECT archived_at_utc FROM categories WHERE id = 2",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(archived.is_some());
+        let category_id: i64 = repository
+            .connection
+            .query_row("SELECT category_id FROM sessions WHERE id = 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(category_id, 2);
     }
 
     #[test]

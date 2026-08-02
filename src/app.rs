@@ -240,18 +240,19 @@ impl App {
                 let sessions_path = storage::get_time_log_path();
                 let loaded_categories = storage::try_load_categories_from_csv(&categories_path)
                     .map_err(|error| error.to_string())?;
-                let loaded_sessions = storage::try_load_sessions_from_csv(
-                    &sessions_path,
-                    &loaded_categories.categories,
-                )
-                .map_err(|error| error.to_string())?;
+                let mut session_categories = loaded_categories.categories.clone();
+                session_categories.extend(loaded_categories.archived_categories.iter().cloned());
+                let loaded_sessions =
+                    storage::try_load_sessions_from_csv(&sessions_path, &session_categories)
+                        .map_err(|error| error.to_string())?;
                 let tags = storage::load_category_tags(&storage::get_category_tags_path());
+                let archived_categories = loaded_categories.archived_categories.clone();
                 (
                     None,
                     loaded_categories,
                     loaded_sessions,
                     tags,
-                    Vec::new(),
+                    archived_categories,
                     None,
                 )
             }
