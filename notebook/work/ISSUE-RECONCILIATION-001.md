@@ -23,10 +23,13 @@ The original issue descriptions predate the completed SQLite migration. Their ac
 | #2, #12 | Completed by DOMAIN-001: project survives canonical history and exports; CLI classification is explicit; idle is deliberate and user-facing. | none |
 | #1, #3, #14, #17, #28 | Completed by REPORT-001: inclusive operational-day ranges, truthful calendar help, provisional active projection, valid ICS, and deterministic ordering. | none |
 | #5, #10, #13 | SQLite integrity, active authority, and category archival likely satisfy substantial portions; verify every criterion before closing or rewriting. | reconciliation audit |
-| #6, #7, #16, #18, #26 | Sediment conservation/topology/rendering remain conceptually coupled. | SEDIMENT-001 |
+| #6 | Completed by SEDIMENT-001C1/C2: compressed pending mass, bounded topology-preserving runtime recovery, atomic/reclaimable checkpoint evidence, and safe shutdown retirement. | none |
+| #7 | Completed by SEDIMENT-001B: canonical logical canvas and projection-only terminal resize. | none |
+| #16, #26 | Completed by SEDIMENT-001A: lossless ingress, explicit geometry units, and exact Braille viewport dimensions. | none |
+| #18 | Historical snapshot identity, provenance, immutability, and invalidation remain open. | SEDIMENT-001D |
 | #19, #20, #24 | Interaction modes, terminal cleanup, and keymap truth remain independent of SQLite. | INTERACTION-001 |
 | #22 | Active draft versus category metadata remains a domain/UI distinction. | DOMAIN-002 |
 
 ## Immediate action
 
-Implement SEDIMENT-001 for issues #6, #7, #16, #18, and #26. Reporting is now a truthful projection over stable ledger truth; sediment must gain an equally explicit conservation model without becoming a competing time authority.
+Implement SEDIMENT-001D for issue #18. Mass, topology, viewport behavior, and runtime recovery are now conserved; historical sediment artifacts must declare their kind and provenance and remain immutable while viewed.
