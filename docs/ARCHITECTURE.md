@@ -14,7 +14,7 @@ terminal lifecycle + application orchestration + explicit interaction modes
     ↓
 domain time, category, session, report, recovery, and snapshot rules
     ↓
-SQLite repository/runtime coordination + legacy catalog custody + sediment simulation
+SQLite repository/runtime coordination + legacy catalog/checkpoint custody + sediment simulation
 ```
 
 Current responsibility map:
@@ -25,9 +25,9 @@ Current responsibility map:
 - `src/keybindings.rs` — validated runtime/time settings plus configured Bound/Unbound/Disabled action state, mandatory key policy, contextual aliases, and the shared input resolver.
 - `src/domain.rs` — canonical sessions, project/category identity, operational-day allocation, and reports.
 - `src/temporal.rs` — monotonic/wall reconciliation, fixed-offset civil policy, and exact overlap slicing.
-- `src/sqlite.rs` and `src/sqlite/**` — schema migrations, category archival, repositories, runtime transactions, checkpoint custody, deterministic interchange, backup/restore, and fault certification.
-- `src/storage.rs` — XDG paths, strict legacy active/archived category catalog, session-reference validation, atomic file helpers, and custody-separated contribution files.
-- `src/app.rs` and `src/app/**` — TUI orchestration, active/archived category projections, explicit modal/edit state, persistence reconciliation, bounded recovery, historical artifact selection, context selection, resolver execution, palette/atlas projection, and rendering.
+- `src/sqlite.rs` and `src/sqlite/**` — schema migrations, category archival, repositories, active/checkpoint transition transactions, checkpoint custody, deterministic interchange, backup/restore, and fault certification.
+- `src/storage.rs` — XDG paths, strict legacy active/archived category catalog, session-reference validation, atomic file helpers, legacy runtime checkpoint files, and custody-separated contribution files.
+- `src/app.rs` and `src/app/**` — TUI orchestration, active/archived category projections, semantic-edge checkpoint refresh, explicit modal/edit state, persistence reconciliation, bounded recovery, historical artifact selection, context selection, resolver execution, palette/atlas projection, and rendering.
 - `src/app/terminal_lifecycle.rs` — raw-mode/alternate-screen RAII, process-wide panic restoration, exactly-once cleanup, runtime failure composition, and debug fault certification.
 - `src/sand/engine.rs` — canonical logical grains, compressed pending mass, physics, viewport projection, and Braille rendering.
 - `src/sand/recovery.rs` — bounded recovery arithmetic and topology-preserving detached contribution.
@@ -66,6 +66,21 @@ Category retirement changes availability, not identity or historical meaning.
 - Legacy-to-SQLite migration retains archived state and original session foreign keys.
 
 The detailed category contract is `docs/CATEGORY_AUTHORITY.md`.
+
+### Active-session and checkpoint recovery
+
+A runtime checkpoint belongs to one active-session generation.
+
+- SQLite switch, reset, and finish validate the expected active stable ID and prior checkpoint custody inside the same transaction.
+- Only `pending` or `committed` evidence for the expected prior identity may be retired by an ordinary transition.
+- `recovering`, `quarantined`, missing-identity, or mismatched evidence blocks the transition before completed history or replacement active state changes.
+- Idempotent transition receipts return before touching a later checkpoint generation.
+- SQLite startup validates checkpoint identity against authoritative active state before applying recovery payload state; incompatible evidence is quarantined.
+- Application orchestration immediately publishes current-generation evidence after successful switch, reset, or persisted active-description change.
+- Unrelated category metadata does not trigger checkpoint publication.
+- Legacy authority also refreshes evidence at those semantic edges, but its sessions and checkpoint remain separate files and therefore do not yet form an atomic transition.
+
+The partial recovery contract and remaining issue #10 boundary are recorded in `docs/RECOVERY_AUTHORITY.md`.
 
 ### Reports and exports
 
@@ -143,13 +158,17 @@ Owns exact elapsed intervals, timestamps, categories, projects, descriptions, op
 
 Owns stable category identity, active/archived state, historical display metadata, and reference validation. Retirement may hide an identity from new selection but may not erase, relabel, or redirect existing sessions, sediment, snapshots, or tags.
 
-### Sediment formation
+### Active generation
 
-Owns accountable visual history and canonical topology. It must conserve mass and category identity while remaining independent of the current viewport.
+Owns the current stable active-session identity and its transition receipts. Checkpoint evidence may describe that generation but cannot replace authoritative active identity or survive a completed transition under a stale stable ID.
 
 ### Runtime recovery
 
-Owns checkpoint evidence and exact elapsed contribution since the checkpoint. It may add mass and advance accumulator remainders, but may not replay unbounded physics, relax topology, or discard unresolved evidence.
+Owns checkpoint evidence and exact elapsed contribution since the checkpoint. It may add mass and advance accumulator remainders, but may not replay unbounded physics, relax topology, discard protected evidence, or apply payload state to a different active generation.
+
+### Sediment formation
+
+Owns accountable visual history and canonical topology. It must conserve mass and category identity while remaining independent of the current viewport.
 
 ### Historical snapshots
 
@@ -165,13 +184,13 @@ The terminal guard owns host-terminal acquisition and restoration. The applicati
 
 ### Interface
 
-TUI and CLI translate user intent and present state. Neither may own an independent ledger, reinterpret authority, mutate canonical sediment to fit the terminal, advance historical artifacts while viewing them, mutate history through ambiguous focus, invent fallback input routes, mislabel unreachable commands, silently convert unresolved categories to idle, or leave the host terminal in application mode after control exits Strata.
+TUI and CLI translate user intent and present state. Neither may own an independent ledger, reinterpret authority, mutate canonical sediment to fit the terminal, advance historical artifacts while viewing them, mutate history through ambiguous focus, invent fallback input routes, mislabel unreachable commands, silently convert unresolved categories to idle, apply stale checkpoint identity, or leave the host terminal in application mode after control exits Strata.
 
 ## Current architectural frontier
 
-Persistence, temporal, domain, report, sediment, interaction, and cross-authority category integrity are complete. The next priorities are:
+Persistence, temporal, domain, report, sediment, interaction, cross-authority category integrity, and active/checkpoint generation coherence are complete. The next priorities are:
 
-1. reconcile active-session crash recovery issue #10 against the merged checkpoint and runtime-coordination authority;
+1. implement RECONCILIATION-001B2: stable legacy transition receipts, kill-point replay certification, initial active-start evidence, and visible recovery cutoff semantics for issue #10;
 2. design the explicit merge/reassignment and permanent-deletion remainder of issue #13;
 3. later domain/UI distinction work under issue #22;
 4. later profile authority, including complete isolation and deliberate switching under issue #15.
@@ -189,4 +208,6 @@ Persistence, temporal, domain, report, sediment, interaction, and cross-authorit
 - An unbound action is not a disabled action.
 - An archived category is not deleted history.
 - An unresolved category reference is not idle.
+- A refreshed legacy checkpoint is not an atomic multi-file transition receipt.
+- A checkpoint without visible cutoff semantics is not proof of exact post-capture elapsed time.
 - CSV, JSON, and ICS are external adapters, not canonical domain models.
