@@ -52,6 +52,8 @@ Detailed rationale and unresolved implications live in `notebook/decisions/DECIS
 | STRATA-D043 | An active-session transition and retirement of its prior checkpoint generation form one coherence boundary. SQLite switch, reset, and finish may retire only pending or committed evidence for the expected prior stable ID; incompatible evidence aborts the transaction before history changes. | implemented and certified |
 | STRATA-D044 | Checkpoint evidence must identify the authoritative active generation before recovery payload state is applied. Missing or mismatched identity is quarantined, and successful switch/reset/active-description changes publish current-generation evidence immediately at the semantic edge. | implemented and certified |
 | STRATA-D045 | A legacy switch is a receipt-governed multi-file transition: publish the resulting checkpoint and deterministic receipt first, replay session/catalog effects idempotently, and clear the receipt only after every authority converges. Whole-second ledger semantics—not exact subsecond wall-start equality—own the completed row. | implemented and certified |
+| STRATA-D046 | A normal legacy finish is a receipt-governed terminal transition: publish prior-generation evidence before active mutation, never resume a receipt-marked finished generation, and retire the receipt only after session, catalog, sediment, and every affected daily contribution converge. | implemented and certified |
+| STRATA-D047 | Persistence recovery must preserve active and archived category meaning in reload, flush, sediment validation, and emergency export; recovery artifacts identify archival state explicitly. | implemented and certified |
 
 ## Explicitly unresolved
 
@@ -63,7 +65,7 @@ The following are not accepted decisions:
 - clearing and formation lifecycle beyond placed/pending mass conservation;
 - future zoom, compression, panning, or explicit canonical-canvas migration;
 - safe cross-authority replay of queued checkpoint mutations, if it is ever required;
-- stable legacy reset and finish receipts across separate file publications;
+- a stable legacy clear-all/reset receipt across separate file publications;
 - initial active-start/checkpoint atomicity or its explicit recovery policy;
 - exact sediment classification at active transition boundaries;
 - user-visible recovery cutoff, reconstruction, and uncertainty semantics under issue #10;
