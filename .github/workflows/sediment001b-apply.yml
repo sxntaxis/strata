@@ -26,9 +26,25 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          path = Path('tools/sediment001b-apply.py')
+
+          script = Path('tools/sediment001b-apply.py')
           needle = chr(92) + 'u{2800}'
-          path.write_text(path.read_text().replace(needle, '⠀'))
+          script.write_text(script.read_text().replace(needle, '⠀'))
+
+          render = Path('src/app/render_views.rs')
+          source = render.read_text()
+          compact = (
+              '        if self.sand_engine.grid_width_dots != inner_width * SAND_ENGINE.dot_width as u16\n'
+              '            || self.sand_engine.grid_height_dots != inner_height * SAND_ENGINE.dot_height as u16'
+          )
+          normalized = (
+              '        if self.sand_engine.grid_width_dots != inner_width * SAND_ENGINE.dot_width as u16\n'
+              '            || self.sand_engine.grid_height_dots\n'
+              '                != inner_height * SAND_ENGINE.dot_height as u16'
+          )
+          if compact not in source:
+              raise SystemExit('render resize anchor was not found')
+          render.write_text(source.replace(compact, normalized, 1))
           PY
           python tools/sediment001b-apply.py
       - name: Format
