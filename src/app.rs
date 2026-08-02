@@ -1844,14 +1844,32 @@ impl App {
                     .to_string(),
             );
         }
-        if receipt.version != LegacyTransitionReceipt::VERSION {
+        if checkpoint.schema_version != DetachedRuntimeCheckpoint::VERSION {
             return Err(format!(
-                "unsupported legacy transition receipt version {}",
-                receipt.version
+                "legacy transition receipt requires checkpoint schema {}, found {}; evidence retained",
+                DetachedRuntimeCheckpoint::VERSION,
+                checkpoint.schema_version
             ));
         }
-        if receipt.kind != LegacyTransitionKind::Switch {
-            return Err("unsupported legacy transition kind; evidence retained".to_string());
+        receipt.validate_switch_boundaries()?;
+        let expected_identity = format!(
+            "legacy:{}:{}",
+            receipt.expected_previous_category_id,
+            receipt
+                .expected_previous_started_at_utc
+                .to_rfc3339_opts(SecondsFormat::Nanos, true)
+        );
+        let expected_operation_id = self.transition_operation_id(
+            "legacy-switch",
+            &expected_identity,
+            receipt.transition_at_utc,
+            &receipt.resulting_active.category_id.to_string(),
+        );
+        if receipt.operation_id != expected_operation_id {
+            return Err(format!(
+                "legacy switch receipt operation ID {} is inconsistent; evidence retained",
+                receipt.operation_id
+            ));
         }
         if checkpoint.active_category_id != receipt.resulting_active.category_id
             || checkpoint.active_description != receipt.resulting_active.description
