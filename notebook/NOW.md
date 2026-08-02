@@ -5,63 +5,43 @@ state: active
 created: 2026-08-01
 updated: 2026-08-02
 authority: working
-summary: SEDIMENT-001 is complete; sediment mass, topology, recovery, snapshots, and daily persistence are conserved.
-next: Implement INTERACTION-001 for issues #19, #20, and #24.
+summary: INTERACTION-001A is complete; report-log viewing and historical-description editing are explicit separate modes.
+next: Implement INTERACTION-001B for issue #20: process-wide terminal restoration and runtime failure custody.
 ---
 
 # NOW — Strata
 
 ## Current phase
 
-The SQLite migration program, AUTHORITY-001, TEMPORAL-001, TEMPORAL-002, DOMAIN-001, REPORT-001, and the complete SEDIMENT-001 sequence are finished.
+The SQLite migration, authority, temporal, domain, reporting, and sediment programs are complete. INTERACTION-001A has established explicit report-log edit ownership and atomic draft persistence.
 
 Strata now has:
 
 - durable fail-closed persistence;
 - explicit monotonic/UTC/fixed-offset time authority;
 - canonical project/category/session identity;
-- truthful deterministic report and export projections;
-- lossless sediment ingress;
-- viewport-independent canonical topology;
-- compressed logical mass;
-- bounded topology-preserving recovery;
-- explicit snapshot identity and immutable historical viewing;
-- revision-matched typed daily contributions;
-- complete cross-day mutation and recovery reconciliation;
-- archive-in-place legacy snapshot custody.
+- truthful deterministic reports and exports;
+- conserved sediment mass, topology, recovery, snapshots, and daily contributions;
+- explicit separation between report-log viewing and description editing;
+- stable-ID drafts that become canonical only after one successful commit;
+- visible edit/cancel/commit state;
+- command-letter and Unicode text support inside edit mode without stealing commands outside it.
 
-The project is beginning **interaction authority**.
-
-## Accepted product baseline
-
-- Strata is a continuous temporal ledger and an active timer.
-- Time always passes; the baseline is idle.
-- Idle produces sediment but is excluded from ordinary active-time totals.
-- Exact chronological history and accountable sedimentary history are complementary truths.
-- One grain currently represents one elapsed second.
-- Every due grain is exactly one placed or pending logical grain.
-- Terminal geometry is projection state, not canonical sediment authority.
-- Runtime recovery cannot replay unbounded physics or relax topology.
-- Cumulative checkpoints, daily contributions, and derived previews are distinct.
-- Historical viewing is immutable.
-- Persisted daily contributions are trusted only when their revision matches canonical ledger slices.
+The project is implementing **interaction authority**.
 
 ## Verified technical baseline
 
 - SQLite schema version 6 is authoritative after explicit activation.
 - CLI and TUI share configuration, repository, temporal, session, recovery, and snapshot boundaries.
-- Reports use exact operational-day slices and explicit provisional active state.
-- JSON and ICS have deterministic ordering and authoritative UTC chronology.
-- `SandState` v2 stores compressed pending runs and migrates v1 vectors.
-- Resize, persistence, restore, and recovery conserve mass and topology.
-- Runtime checkpoints cover autosave, detach, terminal closure, and crash recovery.
-- Recovery publication is bounded, atomic/reclaimable in SQLite, deterministic in legacy-file authority, and reconciles all represented days.
-- Snapshot envelopes expose kind, day, revision, provenance, idle policy, reconstruction status, and state.
-- Historical rendering never advances physics or writes persistence.
-- Daily contributions derive from exact canonical session slices, conserve overflow as pending mass, and include idle explicitly.
-- Stale contributions fall back to in-memory derived previews until reconciliation.
-- Session deletion rebuilds every touched operational day.
-- Legacy SQLite `daily` rows and legacy daily JSON files remain untouched evidence.
+- Historical sediment viewing is immutable and typed daily contributions are revision-matched to ledger truth.
+- Report-log view is read-only.
+- Confirm creates a draft owned by a stable persisted session ID.
+- Plain command letters, spaces, and Unicode are draft text only while editing.
+- Enter requests one commit; Esc cancels the whole draft.
+- SQLite or legacy-file persistence succeeds before in-memory history changes.
+- Failed commit retains the complete draft and enters visible persistence recovery.
+- Description-only edits do not invalidate sediment contributions.
+- Quit from report context is no longer silently ignored.
 
 ## Completed post-migration units
 
@@ -70,25 +50,24 @@ The project is beginning **interaction authority**.
 - **TEMPORAL-002** — issues #4, #23, #27.
 - **DOMAIN-001** — issues #2, #12.
 - **REPORT-001** — issues #1, #3, #14, #17, #28.
-- **SEDIMENT-001A** — issues #16, #26.
-- **SEDIMENT-001B** — issue #7.
-- **SEDIMENT-001C1/C2** — issue #6.
-- **SEDIMENT-001D1/D2** — issue #18.
+- **SEDIMENT-001** — issues #6, #7, #16, #18, #26.
+- **INTERACTION-001A** — issue #19: explicit report-description edit mode and atomic draft commit.
 
 ## Active sequence
 
-1. **INTERACTION-001** — issues #19, #20, #24: explicit edit modes, terminal lifecycle guard, and truthful keybinding behavior.
-2. Reconcile partially satisfied issues #5, #10, and #13.
-3. Later domain/profile work, including issue #15 and issue #22.
+1. **INTERACTION-001B** — issue #20: process-wide terminal lifecycle restoration and runtime-error recovery custody.
+2. **INTERACTION-001C** — issue #24: explicit keymap state and command-atlas/runtime parity.
+3. Reconcile partially satisfied issues #5, #10, and #13.
+4. Later domain/profile work, including issue #15 and issue #22.
 
 ## Current risks
 
-- Interaction edit modes are not fully explicit or isolated.
-- Terminal cleanup still needs one process-wide lifecycle guard.
-- Keybinding configuration and runtime behavior require a final truth audit.
+- Raw mode, alternate screen, mouse capture, and cursor restoration lack one process-wide RAII owner.
+- Draw, poll, read, and panic paths can bypass terminal cleanup or emergency checkpoint publication.
+- Keybinding configuration and runtime behavior still contain hidden fallbacks and direct F1 handling.
 - Queued checkpoint mutations have no stable cross-authority receipt identity and fail closed.
 - Complete profile switching/isolation remains open.
 
 ## Next
 
-Implement **INTERACTION-001** for issues #19, #20, and #24. Establish explicit modal ownership, guarantee terminal restoration across every exit/panic path, and certify that configured bindings match actual runtime behavior without hidden global shortcuts.
+Implement **INTERACTION-001B** for issue #20. Introduce one terminal lifecycle guard, separate host-terminal restoration from application finalization, preserve original runtime errors, attempt emergency checkpoint custody, and certify normal quit, detach, runtime failure, and panic behavior under PTY tests.
