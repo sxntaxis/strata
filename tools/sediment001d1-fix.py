@@ -40,6 +40,15 @@ text = text.replace(
 )
 persistence.write_text(text)
 
+sqlite = Path("src/sqlite.rs")
+text = sqlite.read_text()
+text = text.replace(
+    "    delete_daily_snapshot as delete_tui_daily_snapshot,\n",
+    "",
+    1,
+)
+sqlite.write_text(text)
+
 snapshot = Path("src/sand/snapshot.rs")
 text = snapshot.read_text()
 needle = "    pub fn daily_contribution(\n"
