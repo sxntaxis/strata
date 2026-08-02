@@ -26,9 +26,9 @@ The original issue descriptions predate the completed SQLite migration. Their ac
 | #6, #7, #16, #18, #26 | Completed by SEDIMENT-001: conserved mass/topology/recovery and truthful immutable historical artifacts. | none |
 | #19 | Completed by INTERACTION-001A: explicit report-log edit mode, stable-ID draft, atomic commit, full cancel, and command/text separation. | none |
 | #20 | Completed by INTERACTION-001B: exactly-once terminal restoration, runtime emergency checkpoint custody, primary-error preservation, and PTY certification. | none |
-| #24 | Keymap state, direct F1 behavior, contextual aliases, mandatory controls, and atlas/runtime parity remain open. | INTERACTION-001C |
+| #24 | Completed by INTERACTION-001C: explicit Bound/Unbound/Disabled state, declared contextual aliases, mandatory recovery-safe Ctrl-C, configurable F1, hidden-fallback removal, and atlas/palette/runtime parity. | none |
 | #22 | Active draft versus category metadata remains a domain/UI distinction. | DOMAIN-002 |
 
 ## Immediate action
 
-Implement INTERACTION-001C for issue #24. Establish explicit action state, declared contextual and mandatory policy, remove hidden runtime fallbacks, and certify command-atlas parity.
+Audit issues #5, #10, and #13 criterion by criterion against the merged SQLite authority, category archival, runtime coordination, and failure-recovery implementation. Close only criteria with direct certified evidence; rewrite or retain any genuinely unresolved remainder.

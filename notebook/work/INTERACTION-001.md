@@ -1,8 +1,8 @@
 ---
 id: INTERACTION-001
 kind: work
-state: active
-authority: working
+state: completed
+authority: accepted
 created: 2026-08-02
 updated: 2026-08-02
 ---
@@ -13,7 +13,7 @@ updated: 2026-08-02
 
 Make every keystroke and process exit resolve through one visible, testable contract. Viewing, editing, commands, mandatory emergency behavior, and terminal restoration must not depend on accidental precedence or hidden fallbacks.
 
-## Required invariants
+## Accepted invariants
 
 - View mode and text-edit mode are explicit and visually distinguishable.
 - Historical data changes only after one explicit commit.
@@ -24,7 +24,8 @@ Make every keystroke and process exit resolve through one visible, testable cont
 - Runtime failure attempts explicit checkpoint recovery without hiding the original error.
 - Configured, unbound, disabled, contextual, and mandatory actions are semantically distinct.
 - No action is reachable through an undocumented fallback.
-- The command atlas displays runtime truth.
+- The command atlas and command palette display runtime truth.
+- Mandatory Quit remains under persistence-recovery custody.
 
 ## Certified sequence
 
@@ -63,16 +64,36 @@ Accepted authority: STRATA-D036 through STRATA-D037.
 
 ### INTERACTION-001C — keymap truth
 
-Status: next.
-Issue: #24.
+Status: implemented and certified in PR #58.
+Issue completed: #24.
 
-- preserve explicit Bound, Unbound, and Disabled action state;
-- route F1 and contextual aliases through one declared policy;
-- remove hidden Confirm, Cancel, ReportToday, and other fallback execution;
-- declare any mandatory emergency binding separately and visibly;
-- make atlas output reflect configured and mandatory truth;
-- certify every current fallback and remapped alias.
+- Bound, Unbound, and Disabled are explicit distinct states;
+- null physical-key entries remove only that key, while `unbind_actions` disables an action;
+- contradictory bound-and-disabled configuration fails closed;
+- Ctrl-C Quit is mandatory, separate, non-configurable, and recovery-safe;
+- F1 is an ordinary configurable default;
+- Confirm, Cancel, ReportToday, and report Detach behavior is declared as named contextual policy;
+- one resolver owns direct, contextual, mandatory, and absent action outcomes;
+- disabled actions are unreachable through direct keys, aliases, and the palette;
+- atlas rows and control hints derive from runtime state;
+- Backspace Disable and Delete Unbind remain visibly distinct.
 
-## Current edge
+Accepted authority: STRATA-D038 through STRATA-D040.
 
-Implement INTERACTION-001C. Editing and host-terminal custody are now explicit. The remaining interaction risk is keymap truth: runtime behavior, configuration, contextual aliases, mandatory emergency controls, and the command atlas must describe the same reachable actions without hidden defaults.
+## Program certification
+
+INTERACTION-001 passes:
+
+- formatting;
+- strict Clippy with all targets/features and warnings denied;
+- 181 library tests;
+- 9 CLI lifecycle tests;
+- 6 configuration-authority tests;
+- 1 report-help regression test;
+- 12 SQLite/TUI process tests;
+- 2 temporal-authority tests;
+- 3 terminal-lifecycle PTY process tests.
+
+## Closure
+
+INTERACTION-001 is complete. Explicit editing, host-terminal custody, key state, contextual routing, mandatory emergency behavior, recovery-safe Quit, and command-atlas/runtime parity now share accepted authority. The next active frontier is the criterion-by-criterion reconciliation of partially satisfied issues #5, #10, and #13.

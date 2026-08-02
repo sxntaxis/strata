@@ -1,14 +1,14 @@
 # Interaction authority
 
-Status: partially implemented and certified
+Status: implemented and certified
 Program: INTERACTION-001
-Current completed unit: INTERACTION-001B
-Issues completed: #19, #20
+Current completed unit: INTERACTION-001C
+Issues completed: #19, #20, #24
 Last reviewed: 2026-08-02
 
 ## Purpose
 
-Interaction authority determines whether an input is navigation, a command, text, confirmation, cancellation, or emergency control, and who owns the host terminal while the TUI is active. Ambiguous focus must not mutate history, and runtime failure must not strand the terminal in application mode.
+Interaction authority determines whether an input is navigation, a command, text, confirmation, cancellation, contextual policy, or mandatory emergency control, and who owns the host terminal while the TUI is active. Ambiguous focus must not mutate history, hidden fallback behavior must not bypass configuration, and runtime failure must not strand the terminal in application mode.
 
 ## View and edit ownership
 
@@ -32,9 +32,9 @@ While report description edit mode is active:
 - Enter requests one commit;
 - Esc cancels the complete draft;
 - unrecognized modified input is ignored;
-- a modified key executes only when the configured keymap resolves it to deliberate emergency Quit.
+- a modified key executes only when the mandatory key policy resolves it to emergency Quit.
 
-No plain character is interpreted as a global or report command while editing. Outside edit mode, command routing remains unchanged.
+No plain character is interpreted as a global or report command while editing. Outside edit mode, command routing follows the shared keymap resolver.
 
 ## Edit persistence boundary
 
@@ -63,6 +63,59 @@ The report modal displays either:
 The selected row renders the live draft with an explicit cursor marker. Closing the report modal, changing UI mode, or resetting report state discards any uncommitted draft.
 
 Deletion remains a separate configured command. Enter no longer exits the report-log view; it enters editing. Quit from report context returns an application exit decision instead of being silently ignored.
+
+## Configured action state
+
+Every configurable action has exactly one state:
+
+- `Bound` — at least one direct configurable key reaches the action;
+- `Unbound` — no direct key reaches the action and no explicit prohibition exists;
+- `Disabled` — the action is explicitly prohibited from direct and contextual routing.
+
+A null physical-key entry removes only that key. `unbind_actions` is the persisted Disabled marker. Removing every direct key without a disabled marker produces Unbound, not Disabled.
+
+A configuration that binds and disables the same action is contradictory and rejected. Configuration does not silently choose one side of the contradiction.
+
+## Mandatory key policy
+
+`Ctrl-C → Quit` is the sole mandatory process-level key policy.
+
+It is separate from configurable bindings, cannot be rebound or disabled, and resolves before configured direct or contextual actions. Attempts to configure or persist Ctrl-C as an ordinary binding fail before the invalid state is written.
+
+Mandatory Quit remains under persistence-recovery custody. When recovery is active, Ctrl-C first exports the current recovery package and requests the established recovery exit rather than bypassing evidence custody or merely restarting the recovery loop.
+
+F1 is not mandatory. It is an ordinary configurable default for `toggle_keybindings_help`; removing or disabling the action removes F1 behavior.
+
+## Contextual action policy
+
+One resolver accepts an explicit input context and returns a mandatory, direct, contextual, or absent action result.
+
+Accepted inherited aliases are:
+
+- `main.confirm → open_layer_popup` when the target is Unbound;
+- `main.cancel → switch_to_drift` when the target is Unbound;
+- `main.karma_today → detach` when the target is Unbound;
+- `report.detach → karma_today` always when the target is not Disabled.
+
+Aliases are named configuration policy, not handler inspection. A disabled target is never reached. Removing an alias leaves the source action unchanged. Event handlers execute the resolver result without inspecting whether some other action has direct keys.
+
+Modal-local text and capture controls remain owned by their explicit modal modes and are not represented as configurable action bindings.
+
+## Command atlas and palette truth
+
+The command atlas displays the same reachable graph used by runtime:
+
+- direct keys for Bound actions;
+- `(unbound)` for Unbound actions;
+- `(disabled)` for Disabled actions;
+- mandatory Ctrl-C separately on Quit;
+- contextual alias names, targets, and activation conditions;
+- close, movement, and jump hints derived from current configured bindings;
+- Backspace as Disable and Delete as Unbind in action editing.
+
+The atlas does not synthesize contextual aliases as direct keys. F1 and `?` are shown as close controls only when their configured actions actually provide those routes.
+
+Disabled actions are removed from the command palette. Unbound actions remain available through deliberate palette invocation and are labeled `unbound`; palette selection is an explicit route rather than an invented physical binding.
 
 ## Terminal lifecycle ownership
 
@@ -121,21 +174,20 @@ Test-only fault and restoration-marker environment variables are active only in 
 
 ## Certification
 
-INTERACTION-001A and 001B pass:
+INTERACTION-001A through 001C pass:
 
 - formatting;
 - strict Clippy with all targets/features and warnings denied;
-- 170 unit tests;
+- 181 library tests;
 - 9 CLI lifecycle tests;
 - 6 configuration-authority tests;
 - 1 report-help regression test;
 - 12 SQLite/TUI process tests;
-- 3 terminal-lifecycle PTY process tests covering six lifecycle paths;
 - 2 temporal-authority tests;
-- doc tests.
+- 3 terminal-lifecycle PTY process tests covering six lifecycle paths.
 
-Focused lifecycle proofs cover idempotent restoration, preservation of primary error kind and text, application-error preservation when cleanup fails, termios restoration, emergency checkpoint publication, and panic cleanup without false persistence claims.
+Focused proofs cover explicit view/edit ownership, stable-ID draft persistence, idempotent restoration, primary-error preservation, termios restoration, emergency checkpoint publication, panic cleanup without false persistence claims, distinct Bound/Unbound/Disabled state, fail-closed configuration contradictions, mandatory-key protection, contextual alias conditions, disabled-route exclusion, and atlas/palette/runtime parity.
 
-## Remaining interaction authority
+## Closure
 
-INTERACTION-001C / issue #24 remains responsible for explicit Bound, Unbound, Disabled, contextual, and mandatory key semantics with command-atlas/runtime parity.
+INTERACTION-001 is complete. Future interaction work must preserve these boundaries rather than reintroducing hidden physical-key bypasses, handler fallbacks, ambiguous text ownership, or UI claims that differ from runtime reachability.

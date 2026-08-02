@@ -20,7 +20,7 @@ use crate::{
         ReportPeriod, RuntimeSettings, TimeTracker, civil_time_for_utc, is_drift_category_id,
         operational_day_key_for_utc, set_runtime_settings,
     },
-    keybindings,
+    keybindings::{self, Action, ActionBindingState, KeyBinding},
     sand::{
         RecoveryTiming, SandEngine, SandState, SandStateGrain, SedimentSnapshot,
         recover_detached_sediment,
@@ -584,26 +584,25 @@ impl App {
         self.atlas_items().len()
     }
 
-    fn effective_keys_for_action(
-        &self,
-        action: keybindings::Action,
-    ) -> Vec<keybindings::KeyBinding> {
-        let direct = self.keymap.keys_for_action(action);
-        if !direct.is_empty() {
-            return direct;
-        }
-
-        match action {
-            keybindings::Action::OpenCategoryModal => {
-                self.keymap.keys_for_action(keybindings::Action::Confirm)
-            }
-            keybindings::Action::SwitchToNone => {
-                self.keymap.keys_for_action(keybindings::Action::Cancel)
-            }
-            _ => direct,
-        }
+    pub(super) fn effective_keys_for_action(&self, action: Action) -> Vec<KeyBinding> {
+        let mut keys = self.keymap.keys_for_action(action);
+        keys.extend(self.keymap.mandatory_keys_for_action(action));
+        keys.sort_by_key(|key| key.to_string());
+        keys.dedup();
+        keys
     }
 
+    pub(super) fn keymap_state_for_action(&self, action: Action) -> ActionBindingState {
+        self.keymap.action_state(action)
+    }
+
+    pub(super) fn contextual_labels_for_action(&self, action: Action) -> Vec<String> {
+        self.keymap
+            .aliases_for_action(action)
+            .into_iter()
+            .map(|alias| alias.display_label())
+            .collect()
+    }
     fn atlas_item_description(&self, item: AtlasSelectable) -> String {
         match item {
             AtlasSelectable::TimeLogPath => {

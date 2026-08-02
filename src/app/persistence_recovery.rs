@@ -219,6 +219,11 @@ impl App {
         }
     }
 
+    pub(super) fn request_persistence_recovery_quit(&mut self) -> bool {
+        self.export_current_recovery(true);
+        self.recovery_exit_requested
+    }
+
     pub(super) fn handle_persistence_recovery_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Char('r' | 'R') => {
@@ -229,10 +234,7 @@ impl App {
                 self.export_current_recovery(false);
                 false
             }
-            KeyCode::Char('q' | 'Q') => {
-                self.export_current_recovery(true);
-                self.recovery_exit_requested
-            }
+            KeyCode::Char('q' | 'Q') => self.request_persistence_recovery_quit(),
             KeyCode::Char('x' | 'X') => {
                 let armed = self
                     .persistence_recovery

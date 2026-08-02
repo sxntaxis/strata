@@ -265,6 +265,68 @@ impl Action {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ActionBindingState {
+    Bound,
+    Unbound,
+    Disabled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum InputContext {
+    Main,
+    Report,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResolvedActionSource {
+    Mandatory,
+    Direct,
+    Contextual,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ResolvedAction {
+    pub action: Action,
+    pub source: ResolvedActionSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AliasCondition {
+    Always,
+    TargetUnbound,
+}
+
+impl AliasCondition {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Always => "always",
+            Self::TargetUnbound => "when target unbound",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ContextualAlias {
+    name: String,
+    context: InputContext,
+    source: Action,
+    target: Action,
+    condition: AliasCondition,
+}
+
+impl ContextualAlias {
+    pub(crate) fn display_label(&self) -> String {
+        format!(
+            "{} → {} ({})",
+            self.name,
+            self.target.config_name(),
+            self.condition.label()
+        )
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum KeyCodeSpec {
     Char(char),
@@ -450,6 +512,19 @@ impl KeyBinding {
         })
     }
 
+    fn mandatory_quit() -> Self {
+        Self {
+            ctrl: true,
+            alt: false,
+            shift: false,
+            code: KeyCodeSpec::Char('c'),
+        }
+    }
+
+    fn is_mandatory_quit(self) -> bool {
+        self == Self::mandatory_quit()
+    }
+
     fn to_config_string(self) -> String {
         let mut parts: Vec<String> = Vec::new();
         if self.ctrl {
@@ -532,12 +607,16 @@ fn parse_key_code(raw: &str) -> Result<(KeyCodeSpec, bool), String> {
 #[derive(Debug, Clone)]
 pub(crate) struct Keymap {
     bindings: HashMap<KeyBinding, Action>,
+    disabled_actions: HashSet<Action>,
+    contextual_aliases: Vec<ContextualAlias>,
 }
 
 impl Keymap {
     fn empty() -> Self {
         Self {
             bindings: HashMap::new(),
+            disabled_actions: HashSet::new(),
+            contextual_aliases: Vec::new(),
         }
     }
 
@@ -554,26 +633,102 @@ impl Keymap {
             .retain(|_, current_action| *current_action != action);
     }
 
+    fn disable_action(&mut self, action: Action) {
+        self.unbind_action(action);
+        self.disabled_actions.insert(action);
+    }
+
+    pub(crate) fn action_state(&self, action: Action) -> ActionBindingState {
+        if self.disabled_actions.contains(&action) {
+            ActionBindingState::Disabled
+        } else if self.bindings.values().any(|mapped| *mapped == action) {
+            ActionBindingState::Bound
+        } else {
+            ActionBindingState::Unbound
+        }
+    }
+
+    #[cfg(test)]
     pub(crate) fn action_for_key_event(&self, event: KeyEvent) -> Option<Action> {
+        self.resolve_key_event(InputContext::Other, event)
+            .map(|resolved| resolved.action)
+    }
+
+    pub(crate) fn mandatory_action_for_key_event(&self, event: KeyEvent) -> Option<Action> {
         let key = KeyBinding::from_key_event(event)?;
-        self.bindings.get(&key).copied()
+        key.is_mandatory_quit().then_some(Action::Quit)
+    }
+
+    pub(crate) fn resolve_key_event(
+        &self,
+        context: InputContext,
+        event: KeyEvent,
+    ) -> Option<ResolvedAction> {
+        if let Some(action) = self.mandatory_action_for_key_event(event) {
+            return Some(ResolvedAction {
+                action,
+                source: ResolvedActionSource::Mandatory,
+            });
+        }
+
+        let key = KeyBinding::from_key_event(event)?;
+        let source_action = self.bindings.get(&key).copied()?;
+        if self.action_state(source_action) == ActionBindingState::Disabled {
+            return None;
+        }
+
+        if let Some(alias) = self
+            .contextual_aliases
+            .iter()
+            .find(|alias| alias.context == context && alias.source == source_action)
+        {
+            let target_state = self.action_state(alias.target);
+            let applies = target_state != ActionBindingState::Disabled
+                && match alias.condition {
+                    AliasCondition::Always => true,
+                    AliasCondition::TargetUnbound => target_state == ActionBindingState::Unbound,
+                };
+            if applies {
+                return Some(ResolvedAction {
+                    action: alias.target,
+                    source: ResolvedActionSource::Contextual,
+                });
+            }
+        }
+
+        Some(ResolvedAction {
+            action: source_action,
+            source: ResolvedActionSource::Direct,
+        })
     }
 
     pub(crate) fn keys_for_action(&self, action: Action) -> Vec<KeyBinding> {
         let mut keys: Vec<KeyBinding> = self
             .bindings
             .iter()
-            .filter_map(|(key, mapped_action)| {
-                if *mapped_action == action {
-                    Some(*key)
-                } else {
-                    None
-                }
-            })
+            .filter_map(|(key, mapped_action)| (*mapped_action == action).then_some(*key))
             .collect();
-
         keys.sort_by_key(|key| key.to_string());
         keys
+    }
+
+    pub(crate) fn mandatory_keys_for_action(&self, action: Action) -> Vec<KeyBinding> {
+        if action == Action::Quit {
+            vec![KeyBinding::mandatory_quit()]
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub(crate) fn aliases_for_action(&self, action: Action) -> Vec<ContextualAlias> {
+        let mut aliases = self
+            .contextual_aliases
+            .iter()
+            .filter(|alias| alias.target == action)
+            .cloned()
+            .collect::<Vec<_>>();
+        aliases.sort_by(|left, right| left.name.cmp(&right.name));
+        aliases
     }
 }
 
@@ -585,6 +740,10 @@ struct KeymapConfig {
     keymap: BTreeMap<String, Option<String>>,
     #[serde(default)]
     unbind_actions: Vec<String>,
+    #[serde(default = "default_true")]
+    contextual_aliases_inherit: bool,
+    #[serde(default)]
+    contextual_aliases: BTreeMap<String, Option<String>>,
     #[serde(default)]
     day_start_mode: Option<String>,
     #[serde(default)]
@@ -605,6 +764,8 @@ impl Default for KeymapConfig {
             keymap_inherit: true,
             keymap: BTreeMap::new(),
             unbind_actions: Vec::new(),
+            contextual_aliases_inherit: true,
+            contextual_aliases: BTreeMap::new(),
             day_start_mode: None,
             day_start_hour: None,
             day_start_minute: None,
@@ -626,9 +787,8 @@ fn default_true() -> bool {
     true
 }
 
-const DEFAULT_BINDINGS: [(&str, Action); 31] = [
+const DEFAULT_BINDINGS: [(&str, Action); 30] = [
     ("q", Action::Quit),
-    ("ctrl-c", Action::Quit),
     ("ctrl-p", Action::ToggleCommandPalette),
     ("enter", Action::Confirm),
     ("esc", Action::Cancel),
@@ -660,6 +820,113 @@ const DEFAULT_BINDINGS: [(&str, Action); 31] = [
     ("end", Action::HelpBottom),
 ];
 
+#[derive(Debug, Clone, Copy)]
+struct ContextualAliasDefinition {
+    name: &'static str,
+    context: InputContext,
+    source: Action,
+    target: Action,
+    condition: AliasCondition,
+}
+
+const DEFAULT_CONTEXTUAL_ALIASES: [ContextualAliasDefinition; 4] = [
+    ContextualAliasDefinition {
+        name: "main.confirm",
+        context: InputContext::Main,
+        source: Action::Confirm,
+        target: Action::OpenCategoryModal,
+        condition: AliasCondition::TargetUnbound,
+    },
+    ContextualAliasDefinition {
+        name: "main.cancel",
+        context: InputContext::Main,
+        source: Action::Cancel,
+        target: Action::SwitchToNone,
+        condition: AliasCondition::TargetUnbound,
+    },
+    ContextualAliasDefinition {
+        name: "main.karma_today",
+        context: InputContext::Main,
+        source: Action::ReportToday,
+        target: Action::Detach,
+        condition: AliasCondition::TargetUnbound,
+    },
+    ContextualAliasDefinition {
+        name: "report.detach",
+        context: InputContext::Report,
+        source: Action::Detach,
+        target: Action::ReportToday,
+        condition: AliasCondition::Always,
+    },
+];
+
+fn contextual_alias_definition(name: &str) -> Option<ContextualAliasDefinition> {
+    DEFAULT_CONTEXTUAL_ALIASES
+        .iter()
+        .copied()
+        .find(|definition| definition.name == name)
+}
+
+fn default_contextual_aliases() -> Vec<ContextualAlias> {
+    DEFAULT_CONTEXTUAL_ALIASES
+        .iter()
+        .map(|definition| ContextualAlias {
+            name: definition.name.to_string(),
+            context: definition.context,
+            source: definition.source,
+            target: definition.target,
+            condition: definition.condition,
+        })
+        .collect()
+}
+
+fn parse_contextual_aliases(
+    config: &KeymapConfig,
+    path: &Path,
+) -> Result<Vec<ContextualAlias>, String> {
+    let mut aliases = if config.contextual_aliases_inherit {
+        default_contextual_aliases()
+    } else {
+        Vec::new()
+    };
+
+    for (name, configured_target) in &config.contextual_aliases {
+        let definition = contextual_alias_definition(name).ok_or_else(|| {
+            let available = DEFAULT_CONTEXTUAL_ALIASES
+                .iter()
+                .map(|definition| definition.name)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "Unknown contextual alias '{}' in {}. Available aliases: {available}",
+                name,
+                path.display()
+            )
+        })?;
+        aliases.retain(|alias| alias.name != *name);
+        let Some(target_name) = configured_target else {
+            continue;
+        };
+        let target = Action::from_config_name(target_name).ok_or_else(|| {
+            format!(
+                "Unknown contextual target '{}' for '{}' in {}",
+                target_name,
+                name,
+                path.display()
+            )
+        })?;
+        aliases.push(ContextualAlias {
+            name: name.clone(),
+            context: definition.context,
+            source: definition.source,
+            target,
+            condition: definition.condition,
+        });
+    }
+
+    Ok(aliases)
+}
+
 pub(crate) fn default_keymap() -> Keymap {
     let mut keymap = Keymap::empty();
     for (raw_key, action) in DEFAULT_BINDINGS {
@@ -667,6 +934,7 @@ pub(crate) fn default_keymap() -> Keymap {
             keymap.bind(key, action);
         }
     }
+    keymap.contextual_aliases = default_contextual_aliases();
     keymap
 }
 
@@ -859,7 +1127,8 @@ pub(crate) fn load_keybindings(path: &Path) -> Result<LoadedKeybindings, String>
 
     let runtime_settings = parse_runtime_settings(&config, path)?;
     let time_log_path = parse_time_log_path(&config, path)?;
-    let mut unbound_actions = parse_unbound_actions(&config, path)?;
+    let contextual_aliases = parse_contextual_aliases(&config, path)?;
+    let disabled_actions = parse_unbound_actions(&config, path)?;
 
     let mut parsed_overrides: Vec<(KeyBinding, Option<Action>)> = Vec::new();
     let mut overridden_actions: HashSet<Action> = HashSet::new();
@@ -867,6 +1136,13 @@ pub(crate) fn load_keybindings(path: &Path) -> Result<LoadedKeybindings, String>
     for (raw_key, raw_action) in config.keymap {
         let parsed_key = KeyBinding::parse(&raw_key)
             .map_err(|e| format!("Invalid key '{}' in {}: {e}", raw_key, path.display()))?;
+
+        if parsed_key.is_mandatory_quit() {
+            return Err(format!(
+                "Key 'ctrl-c' in {} is mandatory Quit policy and cannot be configured",
+                path.display()
+            ));
+        }
 
         let parsed_action = match raw_action {
             Some(action_name) => {
@@ -883,8 +1159,14 @@ pub(crate) fn load_keybindings(path: &Path) -> Result<LoadedKeybindings, String>
                         path.display()
                     )
                 })?;
+                if disabled_actions.contains(&action) {
+                    return Err(format!(
+                        "Action '{}' in {} is both bound and disabled",
+                        action.config_name(),
+                        path.display()
+                    ));
+                }
                 overridden_actions.insert(action);
-                unbound_actions.remove(&action);
                 Some(action)
             }
             None => None,
@@ -903,10 +1185,6 @@ pub(crate) fn load_keybindings(path: &Path) -> Result<LoadedKeybindings, String>
         for action in overridden_actions {
             keymap.unbind_action(action);
         }
-
-        for action in unbound_actions {
-            keymap.unbind_action(action);
-        }
     }
 
     for (key, action) in parsed_overrides {
@@ -916,6 +1194,10 @@ pub(crate) fn load_keybindings(path: &Path) -> Result<LoadedKeybindings, String>
             keymap.unbind_key(&key);
         }
     }
+    for action in disabled_actions {
+        keymap.disable_action(action);
+    }
+    keymap.contextual_aliases = contextual_aliases;
 
     Ok(LoadedKeybindings {
         keymap,
@@ -942,6 +1224,9 @@ pub(crate) fn set_action_binding(
     action: Action,
     binding: Option<KeyBinding>,
 ) -> Result<LoadedKeybindings, String> {
+    if binding.is_some_and(KeyBinding::is_mandatory_quit) {
+        return Err("Ctrl-C is mandatory Quit policy and cannot be rebound".to_string());
+    }
     let mut config = load_config_or_default(path)?;
     remove_action_keymap_entries(&mut config, action);
     remove_unbound_action_marker(&mut config, action);
@@ -955,6 +1240,23 @@ pub(crate) fn set_action_binding(
         config.unbind_actions.push(action.config_name().to_string());
         config.unbind_actions.sort();
         config.unbind_actions.dedup();
+    }
+
+    save_config(path, &config)?;
+    load_keybindings(path)
+}
+
+pub(crate) fn set_action_unbound(path: &Path, action: Action) -> Result<LoadedKeybindings, String> {
+    let mut config = load_config_or_default(path)?;
+    remove_action_keymap_entries(&mut config, action);
+    remove_unbound_action_marker(&mut config, action);
+
+    if config.keymap_inherit {
+        for (raw_key, default_action) in DEFAULT_BINDINGS {
+            if default_action == action {
+                config.keymap.insert(raw_key.to_string(), None);
+            }
+        }
     }
 
     save_config(path, &config)?;
@@ -990,7 +1292,8 @@ mod tests {
     use crate::domain::{DayBoundaryMode, FirstDayOfWeek};
 
     use super::{
-        Action, KeyBinding, Keymap, default_keymap, load_keybindings, set_action_binding,
+        Action, ActionBindingState, InputContext, KeyBinding, Keymap, ResolvedActionSource,
+        default_keymap, load_keybindings, set_action_binding, set_action_unbound,
         set_first_day_of_week,
     };
 
@@ -1290,5 +1593,178 @@ mod tests {
 
         fs::remove_file(path).ok();
         fs::remove_file(blocker).ok();
+    }
+
+    #[test]
+    fn contradictory_bound_and_disabled_action_is_rejected() {
+        let path = unique_path("strata_keymap_contradictory_state");
+        fs::write(
+            &path,
+            r#"{
+              "keymap":{"ctrl-r":"open_karma_popup"},
+              "unbind_actions":["open_karma_popup"]
+            }"#,
+        )
+        .unwrap();
+        let error = load_keymap_for_test(&path).unwrap_err();
+        assert!(error.contains("both bound and disabled"));
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn atlas_writer_rejects_mandatory_ctrl_c_before_persisting() {
+        let path = unique_path("strata_keymap_mandatory_writer");
+        let ctrl_c = KeyBinding::parse("ctrl-c").unwrap();
+        let error = set_action_binding(&path, Action::OpenReportModal, Some(ctrl_c)).unwrap_err();
+        assert!(error.contains("mandatory Quit policy"));
+        assert!(
+            !path.exists(),
+            "invalid mandatory override must not be persisted"
+        );
+    }
+
+    #[test]
+    fn mandatory_ctrl_c_is_separate_from_configured_quit_state() {
+        let path = unique_path("strata_keymap_mandatory_quit");
+        fs::write(&path, r#"{"unbind_actions":["quit"]}"#).unwrap();
+        let keymap = load_keymap_for_test(&path).unwrap();
+        assert_eq!(
+            keymap.action_state(Action::Quit),
+            ActionBindingState::Disabled
+        );
+        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        let resolved = keymap
+            .resolve_key_event(InputContext::Main, ctrl_c)
+            .unwrap();
+        assert_eq!(resolved.action, Action::Quit);
+        assert_eq!(resolved.source, ResolvedActionSource::Mandatory);
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn configuring_mandatory_ctrl_c_is_rejected() {
+        let path = unique_path("strata_keymap_mandatory_conflict");
+        fs::write(&path, r#"{"keymap":{"ctrl-c":"open_karma_popup"}}"#).unwrap();
+        let error = load_keymap_for_test(&path).unwrap_err();
+        assert!(error.contains("mandatory Quit policy"));
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn null_key_removal_produces_unbound_not_disabled() {
+        let path = unique_path("strata_keymap_unbound_state");
+        fs::write(&path, r#"{"keymap":{"f1":null,"?":null}}"#).unwrap();
+        let keymap = load_keymap_for_test(&path).unwrap();
+        assert_eq!(
+            keymap.action_state(Action::ToggleKeybindingsHelp),
+            ActionBindingState::Unbound
+        );
+        let f1 = KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE);
+        assert_eq!(keymap.resolve_key_event(InputContext::Main, f1), None);
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn disabled_action_is_not_reached_by_direct_or_contextual_routes() {
+        let path = unique_path("strata_keymap_disabled_alias");
+        fs::write(&path, r#"{"unbind_actions":["open_layer_popup"]}"#).unwrap();
+        let keymap = load_keymap_for_test(&path).unwrap();
+        assert_eq!(
+            keymap.action_state(Action::OpenCategoryModal),
+            ActionBindingState::Disabled
+        );
+        let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        let resolved = keymap.resolve_key_event(InputContext::Main, enter).unwrap();
+        assert_eq!(resolved.action, Action::Confirm);
+        assert_eq!(resolved.source, ResolvedActionSource::Direct);
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn inherited_aliases_follow_declared_conditions() {
+        let keymap = default_keymap();
+        let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        let escape = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        let today = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE);
+        let detach = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE);
+
+        assert_eq!(
+            keymap
+                .resolve_key_event(InputContext::Main, enter)
+                .unwrap()
+                .action,
+            Action::OpenCategoryModal
+        );
+        assert_eq!(
+            keymap
+                .resolve_key_event(InputContext::Main, escape)
+                .unwrap()
+                .action,
+            Action::SwitchToNone
+        );
+        assert_eq!(
+            keymap
+                .resolve_key_event(InputContext::Main, today)
+                .unwrap()
+                .action,
+            Action::ReportToday,
+            "detach is directly bound, so target-unbound alias must not apply"
+        );
+        assert_eq!(
+            keymap
+                .resolve_key_event(InputContext::Report, detach)
+                .unwrap()
+                .action,
+            Action::ReportToday
+        );
+    }
+
+    #[test]
+    fn alias_can_be_removed_and_target_can_be_bound() {
+        let path = unique_path("strata_keymap_alias_override");
+        fs::write(
+            &path,
+            r#"{
+              "keymap":{"ctrl-l":"open_layer_popup"},
+              "contextual_aliases":{"main.cancel":null}
+            }"#,
+        )
+        .unwrap();
+        let keymap = load_keymap_for_test(&path).unwrap();
+        let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        let escape = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        assert_eq!(
+            keymap
+                .resolve_key_event(InputContext::Main, enter)
+                .unwrap()
+                .action,
+            Action::Confirm,
+            "bound target disables target-unbound alias"
+        );
+        assert_eq!(
+            keymap
+                .resolve_key_event(InputContext::Main, escape)
+                .unwrap()
+                .action,
+            Action::Cancel,
+            "removed alias leaves source action unchanged"
+        );
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn atlas_unbind_and_disable_persist_distinct_states() {
+        let path = unique_path("strata_keymap_atlas_states");
+        let unbound = set_action_unbound(&path, Action::OpenReportModal).unwrap();
+        assert_eq!(
+            unbound.keymap.action_state(Action::OpenReportModal),
+            ActionBindingState::Unbound
+        );
+        let disabled = set_action_binding(&path, Action::OpenReportModal, None).unwrap();
+        assert_eq!(
+            disabled.keymap.action_state(Action::OpenReportModal),
+            ActionBindingState::Disabled
+        );
+        fs::remove_file(path).ok();
     }
 }
