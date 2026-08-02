@@ -27,6 +27,7 @@ jobs:
           python tools/sediment001d2-apply.py
           python tools/sediment001d2-fix.py
           python tools/sediment001d2-lint-fix.py
+          python tools/sediment001d2-schema-fix.py
       - name: Format
         run: cargo fmt --all
       - name: Check formatting
