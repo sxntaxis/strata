@@ -394,6 +394,13 @@ pub fn try_load_sessions_from_csv(
                 row,
                 message: format!("invalid session ID '{id_raw}': {error}"),
             })?;
+        if id == 0 {
+            return Err(StorageError::InvalidCsvData {
+                file: "time_log.csv",
+                row,
+                message: "session ID 0 is reserved".to_string(),
+            });
+        }
         if !seen_ids.insert(id) {
             return Err(StorageError::InvalidCsvData {
                 file: "time_log.csv",
@@ -983,6 +990,15 @@ mod tests {
                 .contains("invalid session ID 'not-an-id'")
         );
 
+        let zero_id_path = unique_path("strata_sessions_zero_id", "csv");
+        fs::write(
+            &zero_id_path,
+            "id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds\n0,2026-08-01,0,idle,break,10:00:00,11:00:00,3600\n",
+        )
+        .unwrap();
+        let zero_id = try_load_sessions_from_csv(&zero_id_path, &categories).unwrap_err();
+        assert!(zero_id.to_string().contains("session ID 0 is reserved"));
+
         let duplicate_path = unique_path("strata_sessions_duplicate_id", "csv");
         fs::write(
             &duplicate_path,
@@ -1006,6 +1022,7 @@ mod tests {
         );
 
         fs::remove_file(malformed_id_path).ok();
+        fs::remove_file(zero_id_path).ok();
         fs::remove_file(duplicate_path).ok();
         fs::remove_file(elapsed_path).ok();
     }

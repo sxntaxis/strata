@@ -1,7 +1,10 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, FixedOffset, NaiveDate, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{CategoryId, OperationalDayPolicy, Session};
+use crate::{
+    domain::{CategoryId, OperationalDayPolicy, Session},
+    temporal,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) enum LegacyTransitionKind {
@@ -52,10 +55,24 @@ impl LegacySessionReceipt {
             self.operational_day_start_minutes,
         ) {
             (None, None) => Ok(None),
-            (Some(utc_offset_seconds), Some(start_minutes)) => Ok(Some(OperationalDayPolicy {
-                utc_offset_seconds,
-                start_minutes,
-            })),
+            (Some(utc_offset_seconds), Some(start_minutes)) => {
+                if FixedOffset::east_opt(utc_offset_seconds).is_none() {
+                    return Err(format!(
+                        "legacy transition session {} has invalid UTC offset {}",
+                        self.id, utc_offset_seconds
+                    ));
+                }
+                if start_minutes > 1439 {
+                    return Err(format!(
+                        "legacy transition session {} has invalid operational-day start minute {}",
+                        self.id, start_minutes
+                    ));
+                }
+                Ok(Some(OperationalDayPolicy {
+                    utc_offset_seconds,
+                    start_minutes,
+                }))
+            }
             _ => Err(format!(
                 "legacy transition session {} has incomplete operational-day policy",
                 self.id
@@ -63,7 +80,100 @@ impl LegacySessionReceipt {
         }
     }
 
+    fn validate_payload(&self) -> Result<(), String> {
+        if self.id == 0 {
+            return Err("legacy transition session ID 0 is reserved".to_string());
+        }
+        if self.elapsed_seconds == 0 {
+            return Err(format!(
+                "legacy transition session {} has zero elapsed seconds",
+                self.id
+            ));
+        }
+        let started_at_utc = self.started_at_utc.ok_or_else(|| {
+            format!(
+                "legacy transition session {} has no authoritative start timestamp",
+                self.id
+            )
+        })?;
+        let ended_at_utc = self.ended_at_utc.ok_or_else(|| {
+            format!(
+                "legacy transition session {} has no authoritative end timestamp",
+                self.id
+            )
+        })?;
+        let policy = self.operational_day_policy()?.ok_or_else(|| {
+            format!(
+                "legacy transition session {} has no operational-day policy",
+                self.id
+            )
+        })?;
+        let elapsed = i64::try_from(self.elapsed_seconds).map_err(|_| {
+            format!(
+                "legacy transition session {} duration exceeds chrono range",
+                self.id
+            )
+        })?;
+        let expected_end = started_at_utc
+            .checked_add_signed(ChronoDuration::seconds(elapsed))
+            .ok_or_else(|| {
+                format!(
+                    "legacy transition session {} end exceeds chrono range",
+                    self.id
+                )
+            })?;
+        if ended_at_utc != expected_end {
+            return Err(format!(
+                "legacy transition session {} timestamps do not conserve {} elapsed seconds",
+                self.id, self.elapsed_seconds
+            ));
+        }
+
+        let start_civil = temporal::civil_from_policy(started_at_utc, policy)?;
+        let end_civil = temporal::civil_from_policy(ended_at_utc, policy)?;
+        let expected_start_time = start_civil.format("%H:%M:%S").to_string();
+        let expected_end_time = end_civil.format("%H:%M:%S").to_string();
+        if self.start_time != expected_start_time || self.end_time != expected_end_time {
+            return Err(format!(
+                "legacy transition session {} civil clock labels do not match authoritative UTC",
+                self.id
+            ));
+        }
+
+        let cutoff =
+            NaiveTime::from_num_seconds_from_midnight_opt(u32::from(policy.start_minutes) * 60, 0)
+                .ok_or_else(|| {
+                    format!(
+                        "legacy transition session {} has invalid operational-day cutoff",
+                        self.id
+                    )
+                })?;
+        let mut expected_day = end_civil.date_naive();
+        if end_civil.time() < cutoff {
+            expected_day = expected_day.pred_opt().ok_or_else(|| {
+                format!(
+                    "legacy transition session {} operational day is outside chrono range",
+                    self.id
+                )
+            })?;
+        }
+        let recorded_day = NaiveDate::parse_from_str(&self.date, "%Y-%m-%d").map_err(|error| {
+            format!(
+                "legacy transition session {} has invalid operational day '{}': {error}",
+                self.id, self.date
+            )
+        })?;
+        if recorded_day != expected_day {
+            return Err(format!(
+                "legacy transition session {} operational day {} does not match authoritative end projection {}",
+                self.id, recorded_day, expected_day
+            ));
+        }
+        Ok(())
+    }
+
     pub(crate) fn to_session(&self) -> Result<Session, String> {
+        self.validate_payload()?;
         Ok(Session {
             id: self.id,
             date: self.date.clone(),
@@ -116,36 +226,90 @@ impl LegacyTransitionReceipt {
         if self.kind != LegacyTransitionKind::Switch {
             return Err("unsupported legacy transition kind".to_string());
         }
+        if self.resulting_active.category_id == self.expected_previous_category_id {
+            return Err(format!(
+                "legacy switch receipt {} does not change category",
+                self.operation_id
+            ));
+        }
         if self.resulting_active.started_at_utc != self.transition_at_utc {
             return Err(format!(
                 "legacy switch receipt {} has inconsistent resulting start time",
                 self.operation_id
             ));
         }
-        if let Some(completed) = &self.completed_session {
-            if completed.category_id != self.expected_previous_category_id {
+        if self.transition_at_utc < self.expected_previous_started_at_utc {
+            return Err(format!(
+                "legacy switch receipt {} transitions before its previous active start",
+                self.operation_id
+            ));
+        }
+
+        let whole_elapsed = usize::try_from(
+            (self.transition_at_utc - self.expected_previous_started_at_utc).num_seconds(),
+        )
+        .map_err(|_| {
+            format!(
+                "legacy switch receipt {} duration exceeds this platform's range",
+                self.operation_id
+            )
+        })?;
+
+        match (whole_elapsed, self.completed_session.as_ref()) {
+            (0, None) => {}
+            (0, Some(_)) => {
                 return Err(format!(
-                    "legacy switch receipt {} completed the wrong category",
+                    "legacy switch receipt {} stores a completed row for a zero-whole-second transition",
                     self.operation_id
                 ));
             }
-            if completed.started_at_utc != Some(self.expected_previous_started_at_utc) {
+            (_, None) => {
                 return Err(format!(
-                    "legacy switch receipt {} has inconsistent previous start time",
-                    self.operation_id
+                    "legacy switch receipt {} omits {} completed whole seconds",
+                    self.operation_id, whole_elapsed
                 ));
             }
-            if completed.ended_at_utc != Some(self.transition_at_utc) {
-                return Err(format!(
-                    "legacy switch receipt {} has inconsistent completion time",
-                    self.operation_id
-                ));
-            }
-            if completed.elapsed_seconds == 0 {
-                return Err(format!(
-                    "legacy switch receipt {} stores a zero-work completed row",
-                    self.operation_id
-                ));
+            (expected_elapsed, Some(completed)) => {
+                completed.validate_payload()?;
+                if completed.category_id != self.expected_previous_category_id {
+                    return Err(format!(
+                        "legacy switch receipt {} completed the wrong category",
+                        self.operation_id
+                    ));
+                }
+                if completed.elapsed_seconds != expected_elapsed {
+                    return Err(format!(
+                        "legacy switch receipt {} completed {} seconds but its active boundary owns {}",
+                        self.operation_id, completed.elapsed_seconds, expected_elapsed
+                    ));
+                }
+                if completed.ended_at_utc != Some(self.transition_at_utc) {
+                    return Err(format!(
+                        "legacy switch receipt {} has inconsistent completion time",
+                        self.operation_id
+                    ));
+                }
+                let elapsed = i64::try_from(expected_elapsed).map_err(|_| {
+                    format!(
+                        "legacy switch receipt {} duration exceeds chrono range",
+                        self.operation_id
+                    )
+                })?;
+                let expected_completed_start = self
+                    .transition_at_utc
+                    .checked_sub_signed(ChronoDuration::seconds(elapsed))
+                    .ok_or_else(|| {
+                        format!(
+                            "legacy switch receipt {} completed start exceeds chrono range",
+                            self.operation_id
+                        )
+                    })?;
+                if completed.started_at_utc != Some(expected_completed_start) {
+                    return Err(format!(
+                        "legacy switch receipt {} completed start does not preserve its whole-second interval",
+                        self.operation_id
+                    ));
+                }
             }
         }
         Ok(())
@@ -187,7 +351,7 @@ pub(crate) fn reconcile_completed_session(
 
 #[cfg(test)]
 mod tests {
-    use chrono::{TimeZone, Utc};
+    use chrono::{TimeZone, Timelike, Utc};
 
     use super::*;
 
@@ -242,6 +406,58 @@ mod tests {
         wrong_transition.resulting_active.started_at_utc =
             Utc.with_ymd_and_hms(2026, 8, 2, 17, 0, 1).unwrap();
         assert!(wrong_transition.validate_switch_boundaries().is_err());
+    }
+
+    #[test]
+    fn subsecond_monotonic_remainder_replays_with_canonical_whole_second_start() {
+        let previous_start = Utc
+            .with_ymd_and_hms(2026, 8, 2, 16, 0, 0)
+            .unwrap()
+            .with_nanosecond(100_000_000)
+            .unwrap();
+        let transition = previous_start + ChronoDuration::milliseconds(5_900);
+        let mut completed = session(7, "work");
+        completed.elapsed_seconds = 5;
+        completed.started_at_utc = Some(transition - ChronoDuration::seconds(5));
+        completed.ended_at_utc = Some(transition);
+        completed.start_time = "10:00:01".to_string();
+        completed.end_time = "10:00:06".to_string();
+
+        let mut receipt = switch_receipt(Some(LegacySessionReceipt::from_session(&completed)));
+        receipt.expected_previous_started_at_utc = previous_start;
+        receipt.transition_at_utc = transition;
+        receipt.resulting_active.started_at_utc = transition;
+        receipt.validate_switch_boundaries().unwrap();
+    }
+
+    #[test]
+    fn receipt_requires_completed_row_exactly_when_whole_seconds_exist() {
+        let missing = switch_receipt(None);
+        assert!(
+            missing
+                .validate_switch_boundaries()
+                .unwrap_err()
+                .contains("omits 3600 completed whole seconds")
+        );
+
+        let previous_start = Utc
+            .with_ymd_and_hms(2026, 8, 2, 16, 0, 0)
+            .unwrap()
+            .with_nanosecond(100_000_000)
+            .unwrap();
+        let transition = previous_start + ChronoDuration::milliseconds(500);
+        let mut unexpected = switch_receipt(Some(LegacySessionReceipt::from_session(&session(
+            7, "work",
+        ))));
+        unexpected.expected_previous_started_at_utc = previous_start;
+        unexpected.transition_at_utc = transition;
+        unexpected.resulting_active.started_at_utc = transition;
+        assert!(
+            unexpected
+                .validate_switch_boundaries()
+                .unwrap_err()
+                .contains("zero-whole-second transition")
+        );
     }
 
     #[test]
