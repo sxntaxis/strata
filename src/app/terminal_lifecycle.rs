@@ -59,16 +59,12 @@ impl TerminalCleanup {
         record_restore_execution();
 
         let mut failures = Vec::new();
-        if restore_raw_mode
-            && let Err(error) = disable_raw_mode()
-        {
+        if restore_raw_mode && let Err(error) = disable_raw_mode() {
             failures.push(format!("disable raw mode: {error}"));
         }
 
         let mut stdout = io::stdout();
-        if leave_alternate_screen
-            && let Err(error) = execute!(stdout, LeaveAlternateScreen)
-        {
+        if leave_alternate_screen && let Err(error) = execute!(stdout, LeaveAlternateScreen) {
             failures.push(format!("leave alternate screen: {error}"));
         }
         if let Err(error) = execute!(stdout, Show) {
@@ -230,20 +226,14 @@ fn compose_primary_error(
 }
 
 pub(super) fn maybe_inject_runtime_io_fault(stage: &str) -> io::Result<()> {
-    if cfg!(debug_assertions)
-        && std::env::var("STRATA_TEST_TUI_FAULT").as_deref() == Ok(stage)
-    {
-        return Err(io::Error::other(format!(
-            "injected TUI {stage} failure"
-        )));
+    if cfg!(debug_assertions) && std::env::var("STRATA_TEST_TUI_FAULT").as_deref() == Ok(stage) {
+        return Err(io::Error::other(format!("injected TUI {stage} failure")));
     }
     Ok(())
 }
 
 pub(super) fn maybe_inject_runtime_panic() {
-    if cfg!(debug_assertions)
-        && std::env::var("STRATA_TEST_TUI_FAULT").as_deref() == Ok("panic")
-    {
+    if cfg!(debug_assertions) && std::env::var("STRATA_TEST_TUI_FAULT").as_deref() == Ok("panic") {
         panic!("injected TUI panic");
     }
 }
@@ -308,7 +298,11 @@ mod tests {
             Err(io::Error::other("cleanup failed")),
         )
         .unwrap_err();
-        assert!(error.to_string().contains("application finalization failed"));
+        assert!(
+            error
+                .to_string()
+                .contains("application finalization failed")
+        );
         assert!(error.to_string().contains("cleanup failed"));
     }
 }

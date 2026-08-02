@@ -6,12 +6,8 @@ use std::{
 };
 
 use chrono::{DateTime, Duration as ChronoDuration, SecondsFormat, Utc};
-use crossterm::{
-    event::{self, Event},
-    execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
-};
-use ratatui::{Terminal, backend::CrosstermBackend, layout::Rect};
+use crossterm::event::{self, Event};
+use ratatui::layout::Rect;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -41,11 +37,13 @@ mod persistence_recovery;
 mod render_views;
 mod report_modal_view;
 mod report_state;
+mod terminal_lifecycle;
 mod time_format;
 mod ui_helpers;
 mod view_style;
 
 use persistence_recovery::{PersistenceOperation, PersistenceRecoveryState, RecoveryAction};
+use terminal_lifecycle::{ManagedTerminal, TerminalSession};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum UiMode {
@@ -1625,39 +1623,35 @@ impl App {
         Some(ratio.clamp(0.0, 1.0))
     }
 
-    fn persist_runtime_checkpoint(&mut self) {
+    fn build_runtime_checkpoint(&self) -> Result<DetachedRuntimeCheckpoint, String> {
         if self.checkpoint_recovery_active {
-            return;
+            return Err("checkpoint recovery is still active".to_string());
         }
         if !self.simulation.pending_mutations.is_empty() {
-            self.record_storage_result_for::<()>(
-                PersistenceOperation::CheckpointSave,
-                RecoveryAction::FlushCurrentState,
-                Err("runtime checkpoint cannot be written while mutations are pending".to_string()),
+            return Err(
+                "runtime checkpoint cannot be written while mutations are pending".to_string(),
             );
-            return;
         }
+
         let active_category_id = self.time_tracker.active_category_id();
         let active_description = self
             .time_tracker
             .category_description_by_id(active_category_id)
             .unwrap_or_default()
             .to_string();
+        let spawn_accumulator_nanos =
+            u64::try_from(self.simulation.spawn_accumulator.as_nanos())
+                .map_err(|_| "spawn accumulator exceeds checkpoint range".to_string())?;
+        let physics_accumulator_nanos =
+            u64::try_from(self.simulation.physics_accumulator.as_nanos())
+                .map_err(|_| "physics accumulator exceeds checkpoint range".to_string())?;
 
-        let checkpoint = DetachedRuntimeCheckpoint {
+        Ok(DetachedRuntimeCheckpoint {
             schema_version: DetachedRuntimeCheckpoint::VERSION,
             detached_at_utc: Utc::now(),
             simulation_time_utc: self.simulation.simulation_time_utc,
-            spawn_accumulator_nanos: self
-                .simulation
-                .spawn_accumulator
-                .as_nanos()
-                .min(u64::MAX as u128) as u64,
-            physics_accumulator_nanos: self
-                .simulation
-                .physics_accumulator
-                .as_nanos()
-                .min(u64::MAX as u128) as u64,
+            spawn_accumulator_nanos,
+            physics_accumulator_nanos,
             active_category_id: active_category_id.0,
             active_description,
             active_session_started_at_utc: self.session.active_session_started_at_utc,
@@ -1665,33 +1659,45 @@ impl App {
             pending_mutations: Vec::new(),
             recovery_target_utc: None,
             legacy_recovery_committed: false,
-        };
+        })
+    }
 
+    fn try_write_runtime_checkpoint(&self) -> Result<(), String> {
+        let checkpoint = self.build_runtime_checkpoint()?;
         if let Some(database_path) = self.sqlite_database_path.clone() {
-            let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
-                self.record_storage_result::<()>(Err(
-                    "SQLite runtime has no active stable identity to checkpoint".to_string(),
-                ));
-                return;
-            };
-            let result = sqlite::save_tui_checkpoint(
+            let expected_stable_id = self
+                .session
+                .active_session_stable_id
+                .as_deref()
+                .ok_or_else(|| {
+                    "SQLite runtime has no active stable identity to checkpoint".to_string()
+                })?;
+            sqlite::save_tui_checkpoint(
                 &database_path,
-                &expected_stable_id,
+                expected_stable_id,
                 checkpoint.detached_at_utc,
                 checkpoint.simulation_time_utc,
                 &checkpoint,
-            );
-            self.record_storage_result_for(
-                PersistenceOperation::CheckpointSave,
-                RecoveryAction::DetachAndExit,
-                result,
-            );
+            )
         } else {
-            let path = storage::get_detached_runtime_path();
-            if let Err(error) = storage::write_json_atomic(&path, &checkpoint) {
-                self.record_storage_result::<()>(Err(error));
-            }
+            storage::write_json_atomic(&storage::get_detached_runtime_path(), &checkpoint)
         }
+    }
+
+    fn try_emergency_runtime_checkpoint(&self) -> Result<(), String> {
+        self.try_write_runtime_checkpoint()
+    }
+
+    fn persist_runtime_checkpoint(&mut self) {
+        if self.checkpoint_recovery_active {
+            return;
+        }
+        let result = self.try_write_runtime_checkpoint();
+        self.record_storage_result_for(
+            PersistenceOperation::CheckpointSave,
+            RecoveryAction::DetachAndExit,
+            result,
+        );
     }
 
     fn clear_detached_checkpoint(&mut self) {
@@ -1998,17 +2004,10 @@ impl App {
     }
 }
 
-pub fn run_ui(loaded: keybindings::LoadedKeybindings) -> Result<(), io::Error> {
-    let (width, height) = crossterm::terminal::size()?;
-    let mut app = App::new(width, height, loaded).map_err(io::Error::other)?;
-
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
-
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-
+fn run_application_loop(
+    app: &mut App,
+    terminal: &mut ManagedTerminal,
+) -> Result<Option<String>, io::Error> {
     let physics_rate = Duration::from_millis(TIME_SETTINGS.physics_ms);
     let tick_rate = Duration::from_millis(TIME_SETTINGS.tick_ms);
     let render_rate = Duration::from_millis(1000 / TIME_SETTINGS.target_fps);
@@ -2044,21 +2043,24 @@ pub fn run_ui(loaded: keybindings::LoadedKeybindings) -> Result<(), io::Error> {
             }
 
             if last_render.elapsed() >= render_rate && app.render_needed {
-                terminal.draw(|f| {
-                    app.draw_frame(f);
+                terminal_lifecycle::maybe_inject_runtime_io_fault("draw")?;
+                terminal.draw(|frame| {
+                    app.draw_frame(frame);
                 })?;
                 app.render_needed = false;
                 last_render = Instant::now();
             }
 
-            if event::poll(Duration::from_millis(RUNTIME_LOOP_SETTINGS.input_poll_ms))?
-                && let Event::Key(key) = event::read()?
-            {
-                if app.handle_key(key) {
-                    break;
-                }
-                if app.detach_requested {
-                    break;
+            terminal_lifecycle::maybe_inject_runtime_io_fault("poll")?;
+            if event::poll(Duration::from_millis(RUNTIME_LOOP_SETTINGS.input_poll_ms))? {
+                terminal_lifecycle::maybe_inject_runtime_io_fault("read")?;
+                if let Event::Key(key) = event::read()? {
+                    if app.handle_key(key) {
+                        break;
+                    }
+                    if app.detach_requested {
+                        break;
+                    }
                 }
             }
         }
@@ -2111,14 +2113,30 @@ pub fn run_ui(loaded: keybindings::LoadedKeybindings) -> Result<(), io::Error> {
         break 'runtime;
     }
 
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
+    Ok(runtime_error)
+}
 
-    if let Some(error) = runtime_error {
-        return Err(io::Error::other(error));
+pub fn run_ui(loaded: keybindings::LoadedKeybindings) -> Result<(), io::Error> {
+    let (width, height) = crossterm::terminal::size()?;
+    let mut app = App::new(width, height, loaded).map_err(io::Error::other)?;
+    let mut terminal_session = TerminalSession::enter()?;
+    terminal_lifecycle::maybe_inject_runtime_panic();
+
+    match run_application_loop(&mut app, terminal_session.terminal_mut()) {
+        Ok(application_error) => {
+            let cleanup_result = terminal_session.restore();
+            terminal_lifecycle::finish_normal_run(application_error, cleanup_result)
+        }
+        Err(primary) => {
+            let checkpoint_result = app.try_emergency_runtime_checkpoint();
+            let cleanup_result = terminal_session.restore();
+            Err(terminal_lifecycle::compose_runtime_failure(
+                primary,
+                checkpoint_result,
+                cleanup_result,
+            ))
+        }
     }
-    Ok(())
 }
 
 #[cfg(test)]
