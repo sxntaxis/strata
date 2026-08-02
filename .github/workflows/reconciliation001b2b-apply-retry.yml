@@ -1,0 +1,67 @@
+name: reconciliation001b2b-apply-retry
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    if: github.head_ref == 'reconciliation/001b2b-legacy-finish-receipts'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: reconciliation/001b2b-legacy-finish-receipts
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Apply RECONCILIATION-001B2B
+        run: python tools/reconciliation001b2b-apply.py
+      - name: Complete generated constructors and remove obsolete writer
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          app_path = Path('src/app.rs')
+          app = app_path.read_text()
+          old = '            legacy_transition: Some(receipt),\n        }'
+          new = '            legacy_transition: Some(receipt),\n            legacy_finish: None,\n        }'
+          if old not in app:
+              raise SystemExit('switch fixture constructor anchor not found')
+          app_path.write_text(app.replace(old, new, 1))
+
+          storage_path = Path('src/storage.rs')
+          storage = storage_path.read_text()
+          obsolete = '''pub fn save_categories_to_csv(path: &Path, categories: &[Category]) -> Result<(), String> {
+              save_category_catalog_to_csv(path, categories, &[])
+          }
+
+          '''
+          if obsolete not in storage:
+              raise SystemExit('obsolete category writer anchor not found')
+          storage_path.write_text(storage.replace(obsolete, '', 1))
+          PY
+      - name: Remove temporary machinery
+        run: |
+          rm -f tools/reconciliation001b2b-apply.py
+          rm -f .github/workflows/reconciliation001b2b-apply.yml
+          rm -f .github/workflows/reconciliation001b2b-apply-retry.yml
+      - name: Format
+        run: cargo fmt --all
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Strict Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Test
+        run: cargo test --all-targets --all-features
+      - name: Commit clean implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(reconciliation-001b2b): add legacy finish receipts"
+          git push origin HEAD:reconciliation/001b2b-legacy-finish-receipts
