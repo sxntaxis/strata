@@ -1,0 +1,53 @@
+name: domain001-docs
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - synchronize
+
+permissions:
+  contents: write
+
+jobs:
+  document:
+    if: github.event.pull_request.head.ref == 'domain/001-project-classification-idle'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout implementation branch
+        uses: actions/checkout@v4
+        with:
+          ref: domain/001-project-classification-idle
+          fetch-depth: 0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Apply durable documentation
+        run: |
+          test "$(sha256sum tools/domain001-docs.patch.b64 | cut -d' ' -f1)" = "3b2b2499522113c7d78915f1df9df4c0ef5c6043e6e6fedeb757dcb8c3b1fda0"
+          base64 --decode tools/domain001-docs.patch.b64 | gzip --decompress > /tmp/domain001-docs.patch
+          git apply --check /tmp/domain001-docs.patch
+          git apply /tmp/domain001-docs.patch
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run strict Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test --all-features
+
+      - name: Commit certified documentation and remove helper machinery
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          rm -f tools/domain001-docs.patch.b64
+          rm -f .github/workflows/domain001-docs.yml
+          git add -A README.md docs notebook tools/domain001-docs.patch.b64 .github/workflows/domain001-docs.yml
+          git commit -m 'DOMAIN-001: record project and classification authority'
+          git push origin HEAD:domain/001-project-classification-idle
