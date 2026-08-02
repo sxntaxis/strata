@@ -30,28 +30,36 @@ Make every keystroke and process exit resolve through one visible, testable cont
 
 ### INTERACTION-001A — report description edit mode
 
-Status: active.
-Issue: #19.
+Status: implemented and certified in PR #56.
+Issue completed: #19.
 
-- add an explicit report-log edit state with stable session identity and draft text;
-- use Confirm to enter editing from a selected log row;
-- while editing, plain text and Unicode modify only the draft;
-- Enter commits once; Esc cancels the complete draft;
-- modified global emergency bindings remain deliberate;
-- failed commit preserves the draft and visible recovery state;
+- report-log view is read-only;
+- Confirm enters edit mode for one stable session identity;
+- the persisted description is copied into a complete draft;
+- unmodified command letters, spaces, and Unicode edit only the draft;
+- Enter requests one persistence commit;
+- Esc discards the complete draft;
+- only a configured modified Quit remains deliberate emergency behavior;
+- SQLite and legacy-file memory change only after persistence succeeds;
+- failed commit retains the draft and visible recovery state;
 - deletion remains a separate command;
-- tests cover command precedence, Unicode, cancel, commit, and failed persistence.
+- report UI displays VIEW versus EDIT state and a draft cursor;
+- modal close/reset discards uncommitted drafts;
+- Quit from report context returns an application exit decision.
+
+Accepted authority is recorded in `docs/INTERACTION_AUTHORITY.md` and STRATA-D034 through STRATA-D035.
 
 ### INTERACTION-001B — terminal lifecycle guard
 
+Status: next.
 Issue: #20.
 
-- introduce one RAII owner for raw mode, alternate screen, and cursor restoration;
+- introduce one RAII owner for raw mode, alternate screen, mouse capture, and cursor restoration;
 - separate terminal restoration from application finalization;
 - preserve the original runtime error while attaching cleanup/recovery context;
 - attempt an emergency checkpoint on draw, poll, or read failure;
 - add panic restoration without claiming persistence success;
-- certify PTY state after quit, detach, error, and panic.
+- certify PTY state after quit, detach, runtime error, and panic.
 
 ### INTERACTION-001C — keymap truth
 
@@ -66,4 +74,4 @@ Issue: #24.
 
 ## Current edge
 
-Implement INTERACTION-001A only. Do not redesign keymap fallback semantics inside the edit-mode unit except where a modified emergency binding must remain deliberately reachable while editing.
+Implement INTERACTION-001B. Explicit text editing is now authoritative; the next risk is process-wide terminal custody. Every successful, failed, or panicking TUI path must restore the host terminal exactly once while preserving the original application error and recovery evidence.
