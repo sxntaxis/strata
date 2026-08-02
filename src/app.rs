@@ -1978,6 +1978,7 @@ impl App {
 
         self.checkpoint_recovery_active = false;
         self.checkpoint_recovery_payload = None;
+        self.reconcile_all_daily_contributions();
     }
 
     fn next_blink_interval(&self) -> i32 {
