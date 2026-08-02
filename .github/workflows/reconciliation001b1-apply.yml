@@ -23,7 +23,10 @@ jobs:
         with:
           components: rustfmt, clippy
       - name: Apply RECONCILIATION-001B1
-        run: python tools/reconciliation001b1-apply.py
+        run: |
+          python tools/reconciliation001b1-prep.py
+          python tools/reconciliation001b1-apply.py
+          rm -f tools/reconciliation001b1-prep.py
       - name: Format
         run: cargo fmt --all
       - name: Check formatting
