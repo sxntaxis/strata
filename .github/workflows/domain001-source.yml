@@ -1,0 +1,31 @@
+name: domain001-source
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    if: github.event.pull_request.head.ref == 'domain/001-project-classification-idle'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: domain/001-project-classification-idle
+          fetch-depth: 0
+      - name: Pack exact source tree
+        run: git archive --format=tar.gz --output=strata-domain001-source.tar.gz HEAD
+      - name: Upload source tree
+        uses: actions/upload-artifact@v4
+        with:
+          name: strata-domain001-source
+          path: strata-domain001-source.tar.gz
+          if-no-files-found: error
