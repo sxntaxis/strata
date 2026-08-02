@@ -51,6 +51,6 @@ jobs:
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add src tests/config_authority.rs
+          git add src tests
           git commit -m 'TEMPORAL-002: allocate interval boundaries honestly'
           git push origin HEAD:temporal/002-interval-boundaries
