@@ -47,6 +47,8 @@ Detailed rationale and unresolved implications live in `notebook/decisions/DECIS
 | STRATA-D038 | Every action has exactly one configured state: Bound, Unbound, or Disabled. Null physical-key entries remove only that key; `unbind_actions` means Disabled; contradictory bound-and-disabled configuration fails closed. | implemented and certified |
 | STRATA-D039 | One context-aware resolver owns direct and contextual key routing. Ctrl-C Quit is the sole separate mandatory key, cannot be configured, and remains under persistence-recovery custody; F1 is an ordinary configurable default. | implemented and certified |
 | STRATA-D040 | The command atlas and palette must expose the same reachable action graph as runtime: no invented fallback keys, disabled actions are unavailable, aliases are named with conditions, and editable controls distinguish Disable from Unbind. | implemented and certified |
+| STRATA-D041 | A persisted session category reference must resolve to active or archived metadata. Malformed or unknown identities fail closed with the original value preserved; no authority may reinterpret an unresolved reference as intentional idle. | implemented and certified |
+| STRATA-D042 | Category retirement changes availability, not historical meaning. Stable ID, name, description, color, karma effect, tags, report visibility, sediment meaning, and migration state survive archive and restore under both SQLite and legacy-file authority. | implemented and certified |
 
 ## Explicitly unresolved
 
@@ -61,4 +63,5 @@ The following are not accepted decisions:
 - user-facing crash uncertainty beyond current recovery controls;
 - configurable quantum migration rules;
 - complete profile switching and isolation semantics under issue #15;
+- category merge/reassignment and permanent destructive deletion under issue #13;
 - future adoption of IANA timezone/DST semantics, if any; the implemented authority is fixed-offset.
