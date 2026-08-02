@@ -30,22 +30,16 @@ jobs:
           from pathlib import Path
           path = Path("src/sqlite/tui_runtime.rs")
           text = path.read_text()
-          old = '''        loaded_categories: LoadedCategories {
-              categories: active_categories,
-              next_category_id: max_category_id.saturating_add(1).max(1),
-          },
-          loaded_sessions: LoadedSessions {
-          '''
-          new = '''        loaded_categories: LoadedCategories {
-              categories: active_categories,
-              archived_categories: archived_categories.clone(),
-              next_category_id: max_category_id.saturating_add(1).max(1),
-          },
-          loaded_sessions: LoadedSessions {
-          '''
-          if old not in text:
-              raise SystemExit("SQLite TUI category constructor was not found")
-          path.write_text(text.replace(old, new, 1))
+          anchor = "            categories: active_categories,\n"
+          if text.count(anchor) != 1:
+              raise SystemExit(f"expected one SQLite TUI category field, found {text.count(anchor)}")
+          path.write_text(
+              text.replace(
+                  anchor,
+                  anchor + "            archived_categories: archived_categories.clone(),\n",
+                  1,
+              )
+          )
           PY
       - name: Format
         run: cargo fmt --all
