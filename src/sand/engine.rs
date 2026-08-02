@@ -19,6 +19,12 @@ pub struct SandStateGrain {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PendingGrainRun {
+    pub category_id: u64,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SandState {
     pub version: u8,
     pub grid_width: usize,
@@ -32,10 +38,13 @@ pub struct SandState {
     pub rng_state: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_grains: Vec<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_runs: Vec<PendingGrainRun>,
 }
 
 impl SandState {
-    pub const VERSION: u8 = 1;
+    pub const VERSION: u8 = 2;
+    pub const LEGACY_VERSION: u8 = 1;
 }
 
 fn default_sweep_left_to_right() -> bool {
@@ -44,6 +53,12 @@ fn default_sweep_left_to_right() -> bool {
 
 fn default_rng_state() -> u64 {
     0x9E37_79B9_7F4A_7C15
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PendingRun {
+    category_id: CategoryId,
+    count: usize,
 }
 
 pub struct SandEngine {
@@ -55,7 +70,7 @@ pub struct SandEngine {
     frame_count: usize,
     sweep_left_to_right: bool,
     rng_state: u64,
-    pending_grains: VecDeque<CategoryId>,
+    pending_runs: VecDeque<PendingRun>,
     pub grain_count: usize,
 }
 
@@ -73,7 +88,7 @@ impl SandEngine {
             frame_count: 0,
             sweep_left_to_right: true,
             rng_state: rand::random::<u64>() | 1,
-            pending_grains: VecDeque::new(),
+            pending_runs: VecDeque::new(),
             grain_count: 0,
         }
     }
@@ -92,14 +107,36 @@ impl SandEngine {
     }
 
     pub fn spawn(&mut self, category_id: CategoryId) {
-        self.pending_grains.push_back(category_id);
-        self.grain_count += 1;
+        self.add_logical_grains(category_id, 1)
+            .expect("single-grain logical count must fit usize");
+    }
+
+    pub fn add_logical_grains(
+        &mut self,
+        category_id: CategoryId,
+        count: usize,
+    ) -> Result<(), String> {
+        if count == 0 {
+            return Ok(());
+        }
+
+        let next_total = self
+            .grain_count
+            .checked_add(count)
+            .ok_or_else(|| "logical sediment count exceeds the supported range".to_string())?;
+        Self::append_pending_run(&mut self.pending_runs, category_id, count)?;
+        self.grain_count = next_total;
         self.flush_pending_grains();
+        Ok(())
+    }
+
+    pub fn pending_grain_count(&self) -> usize {
+        self.pending_runs.iter().map(|run| run.count).sum()
     }
 
     #[cfg(test)]
-    fn pending_grain_count(&self) -> usize {
-        self.pending_grains.len()
+    fn pending_run_count(&self) -> usize {
+        self.pending_runs.len()
     }
 
     pub fn physical_grain_count(&self) -> usize {
@@ -111,27 +148,64 @@ impl SandEngine {
     }
 
     fn refresh_logical_grain_count(&mut self) {
-        self.grain_count = self.physical_grain_count() + self.pending_grains.len();
+        self.grain_count = self
+            .physical_grain_count()
+            .checked_add(self.pending_grain_count())
+            .expect("validated logical sediment count must fit usize");
+    }
+
+    fn append_pending_run(
+        runs: &mut VecDeque<PendingRun>,
+        category_id: CategoryId,
+        count: usize,
+    ) -> Result<(), String> {
+        if count == 0 {
+            return Ok(());
+        }
+
+        if let Some(last) = runs.back_mut()
+            && last.category_id == category_id
+        {
+            last.count = last
+                .count
+                .checked_add(count)
+                .ok_or_else(|| "pending sediment run exceeds the supported range".to_string())?;
+            return Ok(());
+        }
+
+        runs.push_back(PendingRun { category_id, count });
+        Ok(())
     }
 
     fn flush_pending_grains(&mut self) {
-        if self.capacity() == 0 {
+        if self.capacity() == 0 || self.pending_runs.is_empty() {
             return;
         }
 
-        let width = self.grid[0].len();
-        while let Some(category_id) = self.pending_grains.front().copied() {
-            let start = self.random_index(width);
-            let insertion = (0..width)
-                .map(|offset| (start + offset) % width)
-                .find(|&x| self.grid[0][x].is_none());
+        let mut free_columns = self.grid[0]
+            .iter()
+            .enumerate()
+            .filter_map(|(x, cell)| cell.is_none().then_some(x))
+            .collect::<Vec<_>>();
 
-            let Some(x) = insertion else {
-                break;
-            };
-
+        while !free_columns.is_empty() && !self.pending_runs.is_empty() {
+            let free_index = self.random_index(free_columns.len());
+            let x = free_columns.swap_remove(free_index);
+            let category_id = self
+                .pending_runs
+                .front()
+                .expect("pending run exists")
+                .category_id;
             self.grid[0][x] = Some(category_id);
-            self.pending_grains.pop_front();
+
+            let exhausted = {
+                let run = self.pending_runs.front_mut().expect("pending run exists");
+                run.count -= 1;
+                run.count == 0
+            };
+            if exhausted {
+                self.pending_runs.pop_front();
+            }
         }
     }
 
@@ -316,7 +390,7 @@ impl SandEngine {
                 *cell = None;
             }
         }
-        self.pending_grains.clear();
+        self.pending_runs.clear();
         self.grain_count = 0;
     }
 
@@ -329,8 +403,8 @@ impl SandEngine {
             }
         }
 
-        self.pending_grains
-            .retain(|pending| *pending != category_id);
+        self.pending_runs
+            .retain(|run| run.category_id != category_id);
         self.refresh_logical_grain_count();
     }
 
@@ -359,15 +433,20 @@ impl SandEngine {
 
         let mut pending_removed = 0usize;
         if removed < count {
-            let mut retained = VecDeque::with_capacity(self.pending_grains.len());
-            while let Some(category) = self.pending_grains.pop_front() {
-                if category == category_id && removed + pending_removed < count {
-                    pending_removed += 1;
-                } else {
-                    retained.push_back(category);
+            let mut remaining = count - removed;
+            for run in &mut self.pending_runs {
+                if remaining == 0 {
+                    break;
                 }
+                if run.category_id != category_id {
+                    continue;
+                }
+                let take = run.count.min(remaining);
+                run.count -= take;
+                remaining -= take;
+                pending_removed += take;
             }
-            self.pending_grains = retained;
+            self.pending_runs.retain(|run| run.count > 0);
         }
 
         if removed > 0 {
@@ -382,7 +461,7 @@ impl SandEngine {
     pub fn snapshot_state(&self) -> SandState {
         let grid_height = self.grid.len();
         let grid_width = self.grid.first().map_or(0, |row| row.len());
-        let mut grains = Vec::with_capacity(self.grain_count);
+        let mut grains = Vec::with_capacity(self.physical_grain_count());
 
         for (y, row) in self.grid.iter().enumerate() {
             for (x, cell) in row.iter().enumerate() {
@@ -404,16 +483,20 @@ impl SandEngine {
             frame_count: self.frame_count,
             sweep_left_to_right: self.sweep_left_to_right,
             rng_state: self.rng_state,
-            pending_grains: self
-                .pending_grains
+            pending_grains: Vec::new(),
+            pending_runs: self
+                .pending_runs
                 .iter()
-                .map(|category_id| category_id.0)
+                .map(|run| PendingGrainRun {
+                    category_id: run.category_id.0,
+                    count: run.count,
+                })
                 .collect(),
         }
     }
 
     pub fn restore_state(&mut self, state: &SandState, valid_category_ids: &HashSet<CategoryId>) {
-        if state.version != SandState::VERSION {
+        if state.version != SandState::VERSION && state.version != SandState::LEGACY_VERSION {
             return;
         }
 
@@ -440,22 +523,50 @@ impl SandEngine {
             restored[grain.y][grain.x] = Some(normalized_id);
         }
 
-        self.grid = restored;
-        self.grid_width_dots = state.grid_width;
-        self.grid_height_dots = state.grid_height;
-        self.pending_grains = state
-            .pending_grains
-            .iter()
-            .map(|category_id| {
-                let category_id = CategoryId::new(*category_id);
-                if valid_category_ids.contains(&category_id) {
+        let mut pending_runs = VecDeque::new();
+        let append_serialized_run =
+            |runs: &mut VecDeque<PendingRun>, category_id: u64, count: usize| {
+                let category_id = CategoryId::new(category_id);
+                let normalized_id = if valid_category_ids.contains(&category_id) {
                     category_id
                 } else {
                     none_id
-                }
+                };
+                Self::append_pending_run(runs, normalized_id, count)
+            };
+
+        let pending_result = if state.version == SandState::LEGACY_VERSION {
+            state.pending_grains.iter().try_for_each(|category_id| {
+                append_serialized_run(&mut pending_runs, *category_id, 1)
             })
-            .collect();
-        self.refresh_logical_grain_count();
+        } else {
+            state.pending_runs.iter().try_for_each(|run| {
+                append_serialized_run(&mut pending_runs, run.category_id, run.count)
+            })
+        };
+        if pending_result.is_err() {
+            return;
+        }
+
+        let physical_count = restored
+            .iter()
+            .flat_map(|row| row.iter())
+            .filter(|cell| cell.is_some())
+            .count();
+        let pending_count = pending_runs
+            .iter()
+            .try_fold(0usize, |total, run| total.checked_add(run.count));
+        let Some(logical_count) =
+            pending_count.and_then(|pending| physical_count.checked_add(pending))
+        else {
+            return;
+        };
+
+        self.grid = restored;
+        self.grid_width_dots = state.grid_width;
+        self.grid_height_dots = state.grid_height;
+        self.pending_runs = pending_runs;
+        self.grain_count = logical_count;
         self.frame_count = state.frame_count;
         self.sweep_left_to_right = state.sweep_left_to_right;
         self.rng_state = if state.rng_state == 0 {
@@ -504,7 +615,7 @@ mod tests {
         engine.grid[0][0] = Some(CategoryId::new(1));
         engine.grid[10][12] = Some(CategoryId::new(2));
         engine.grid[31][23] = Some(CategoryId::new(1));
-        engine.pending_grains.push_back(CategoryId::new(2));
+        SandEngine::append_pending_run(&mut engine.pending_runs, CategoryId::new(2), 1).unwrap();
         engine.grain_count = 4;
         engine.frame_count = 17;
         engine.sweep_left_to_right = false;
@@ -786,7 +897,14 @@ mod conservation_tests {
         engine.spawn(CategoryId::new(2));
 
         let state = engine.snapshot_state();
-        assert_eq!(state.pending_grains, vec![2]);
+        assert!(state.pending_grains.is_empty());
+        assert_eq!(
+            state.pending_runs,
+            vec![super::PendingGrainRun {
+                category_id: 2,
+                count: 1,
+            }]
+        );
 
         let mut restored = SandEngine::new(2, 1);
         restored.restore_state(
@@ -796,6 +914,131 @@ mod conservation_tests {
 
         assert_eq!(restored.pending_grain_count(), 1);
         assert_eq!(restored.grain_count, state.grains.len() + 1);
-        assert_eq!(restored.snapshot_state().pending_grains, vec![2]);
+        assert_eq!(restored.snapshot_state().pending_runs, state.pending_runs);
+    }
+
+    #[cfg(test)]
+    mod compressed_mass_tests {
+        use std::collections::HashSet;
+
+        use crate::domain::CategoryId;
+        use crate::sand::{PendingGrainRun, SandEngine, SandState, SandStateGrain};
+
+        #[test]
+        fn billion_grains_use_one_pending_run() {
+            let mut engine = SandEngine::new(1, 1);
+            for cell in &mut engine.grid[0] {
+                *cell = Some(CategoryId::new(0));
+            }
+            engine.grain_count = engine.grid[0].len();
+
+            engine
+                .add_logical_grains(CategoryId::new(7), 1_000_000_000)
+                .unwrap();
+
+            assert_eq!(engine.pending_run_count(), 1);
+            assert_eq!(engine.pending_grain_count(), 1_000_000_000);
+            assert_eq!(engine.grain_count, engine.grid[0].len() + 1_000_000_000);
+            assert_eq!(engine.snapshot_state().pending_runs[0].count, 1_000_000_000);
+        }
+
+        #[test]
+        fn adjacent_categories_merge_without_losing_fifo_transitions() {
+            let mut engine = SandEngine::new(1, 1);
+            for cell in &mut engine.grid[0] {
+                *cell = Some(CategoryId::new(0));
+            }
+            engine.grain_count = engine.grid[0].len();
+
+            engine.add_logical_grains(CategoryId::new(1), 5).unwrap();
+            engine.add_logical_grains(CategoryId::new(1), 7).unwrap();
+            engine.add_logical_grains(CategoryId::new(2), 3).unwrap();
+            engine.add_logical_grains(CategoryId::new(1), 2).unwrap();
+
+            assert_eq!(
+                engine.snapshot_state().pending_runs,
+                vec![
+                    PendingGrainRun {
+                        category_id: 1,
+                        count: 12
+                    },
+                    PendingGrainRun {
+                        category_id: 2,
+                        count: 3
+                    },
+                    PendingGrainRun {
+                        category_id: 1,
+                        count: 2
+                    },
+                ]
+            );
+        }
+
+        #[test]
+        fn legacy_pending_vector_migrates_to_version_two_runs() {
+            let legacy = SandState {
+                version: SandState::LEGACY_VERSION,
+                grid_width: 2,
+                grid_height: 2,
+                grains: vec![SandStateGrain {
+                    x: 0,
+                    y: 1,
+                    category_id: 1,
+                }],
+                frame_count: 4,
+                sweep_left_to_right: true,
+                rng_state: 9,
+                pending_grains: vec![2, 2, 1],
+                pending_runs: Vec::new(),
+            };
+            let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1), CategoryId::new(2)]);
+            let mut engine = SandEngine::new(1, 1);
+            engine.restore_state(&legacy, &valid);
+            let migrated = engine.snapshot_state();
+
+            assert_eq!(migrated.version, SandState::VERSION);
+            assert!(migrated.pending_grains.is_empty());
+            assert_eq!(
+                migrated.pending_runs,
+                vec![
+                    PendingGrainRun {
+                        category_id: 2,
+                        count: 2
+                    },
+                    PendingGrainRun {
+                        category_id: 1,
+                        count: 1
+                    },
+                ]
+            );
+            assert_eq!(engine.grain_count, 4);
+        }
+
+        #[test]
+        fn category_removal_is_exact_across_compressed_runs() {
+            let mut engine = SandEngine::new(1, 1);
+            for cell in &mut engine.grid[0] {
+                *cell = Some(CategoryId::new(0));
+            }
+            engine.grain_count = engine.grid[0].len();
+            engine.add_logical_grains(CategoryId::new(3), 10).unwrap();
+            engine.add_logical_grains(CategoryId::new(4), 2).unwrap();
+            engine.add_logical_grains(CategoryId::new(3), 5).unwrap();
+
+            assert_eq!(engine.remove_category_grains(CategoryId::new(3), 12), 12);
+            assert_eq!(
+                engine.snapshot_state().pending_runs,
+                vec![
+                    PendingGrainRun {
+                        category_id: 4,
+                        count: 2
+                    },
+                    PendingGrainRun {
+                        category_id: 3,
+                        count: 3
+                    },
+                ]
+            );
+        }
     }
 }

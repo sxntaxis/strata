@@ -912,6 +912,7 @@ mod tests {
             sweep_left_to_right: false,
             rng_state: 12345,
             pending_grains: vec![3],
+            pending_runs: Vec::new(),
         };
 
         save_sand_state(&path, &state).unwrap();

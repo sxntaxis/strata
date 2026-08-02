@@ -1151,6 +1151,7 @@ mod tests {
             sweep_left_to_right: true,
             rng_state: 9,
             pending_grains: Vec::new(),
+            pending_runs: Vec::new(),
         };
         save_sand_state(&path, &state).unwrap();
         save_daily_snapshot(&path, "2026-08-01", &state).unwrap();
