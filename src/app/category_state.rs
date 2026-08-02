@@ -174,23 +174,6 @@ impl App {
         }
     }
 
-    pub(super) fn delete_daily_sand_snapshot(&mut self, day: NaiveDate) {
-        if let Some(database_path) = self.sqlite_database_path.clone() {
-            let day = day.format("%Y-%m-%d").to_string();
-            let result = sqlite::delete_tui_daily_snapshot(&database_path, &day);
-            self.record_storage_result_for(
-                PersistenceOperation::DailySnapshotDelete,
-                RecoveryAction::FlushCurrentState,
-                result,
-            );
-        } else {
-            let path = storage::get_sand_history_path_for_day(day);
-            if let Err(error) = storage::delete_file_if_exists(&path) {
-                self.record_storage_result::<()>(Err(error));
-            }
-        }
-    }
-
     pub(super) fn sync_modal_description_from_selection(&mut self) {
         if self.is_on_insert_space() {
             self.modal_description.clear();

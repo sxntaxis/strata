@@ -5,15 +5,15 @@ state: active
 created: 2026-08-01
 updated: 2026-08-02
 authority: working
-summary: SEDIMENT-001C2 is complete; sediment mass, topology, viewport behavior, and runtime recovery are conserved.
-next: Implement SEDIMENT-001D for issue #18: explicit immutable snapshot kinds and provenance.
+summary: SEDIMENT-001D1 is complete; historical artifacts have explicit identity and immutable rendering.
+next: Implement SEDIMENT-001D2 for issue #18: authoritative daily contributions, revision comparison, invalidation, and legacy disposition.
 ---
 
 # NOW — Strata
 
 ## Current phase
 
-The SQLite migration program, AUTHORITY-001, TEMPORAL-001, TEMPORAL-002, DOMAIN-001, REPORT-001, SEDIMENT-001A, SEDIMENT-001B, SEDIMENT-001C1, and SEDIMENT-001C2 are complete. Strata now has durable persistence, explicit clock and boundary semantics, preserved project/category identity, truthful report/export projections, lossless sediment ingress, viewport-independent topology, compressed logical mass, and bounded retry-safe runtime recovery.
+The SQLite migration program, AUTHORITY-001, TEMPORAL-001, TEMPORAL-002, DOMAIN-001, REPORT-001, SEDIMENT-001A, SEDIMENT-001B, SEDIMENT-001C1, SEDIMENT-001C2, and SEDIMENT-001D1 are complete. Strata now has durable persistence, explicit time and classification authority, truthful report/export projections, conserved sediment mass and topology, bounded recovery, typed snapshot identity, and immutable historical viewing.
 
 The project is completing **sediment conservation**.
 
@@ -24,74 +24,69 @@ The project is completing **sediment conservation**.
 - Idle continues depositing sediment but is omitted from ordinary active-time accounting.
 - Project and category are independent session axes.
 - A CLI work session requires explicit category classification.
-- Strata is general-purpose rather than freelancing-specific.
 - Exact chronological history and accountable sedimentary history are both meaningful.
 - Sediment is product function and artwork, not disposable decoration.
 - One grain currently represents one elapsed second.
-- Braille-cell color mixing is intentional.
 - Every due grain exists exactly once as placed or pending logical mass.
-- Terminal-cell dimensions and Braille-dot grid dimensions are separate units.
-- The persisted logical grid owns canonical topology; terminal resize is projection only.
-- Pending logical mass may be compressed into ordered category/count runs without changing count, identity, or FIFO category order.
-- Runtime recovery may add missed logical mass but cannot replay unbounded physics or relax checkpoint topology.
+- Terminal dimensions are projection state, not canonical sediment dimensions.
+- Pending mass may be compressed without changing count, identity, or FIFO category order.
+- Runtime recovery may add missed mass but cannot replay unbounded physics or relax topology.
+- Cumulative checkpoints, daily contributions, and derived previews are distinct artifacts.
+- Historical viewing is immutable and cannot persist or advance a preview.
 
 ## Verified technical baseline
 
 - SQLite schema version 5 is authoritative after explicit activation.
-- CLI and TUI share repository, runtime-coordination, configuration, temporal, and session-domain boundaries.
-- Canonical sessions remain single identities while reports allocate exact overlap slices across operational days.
-- Project and category survive legacy/SQLite lifecycle, TUI synchronization, custody export, JSON, and ICS.
-- Reports accept inclusive custom operational-day ranges.
-- Reports and general exports include active time by default as explicit provisional state; `--completed-only` selects committed history.
-- Report and export ordering has deterministic tie-breakers.
-- JSON schema version 2 carries stable UIDs, provisional state, and UTC endpoints.
-- ICS uses authoritative UTC chronology, stable UIDs, RFC 5545-safe serialization, and independent parser certification.
-- Idle is excluded from ordinary active-time totals and ICS work events while remaining part of sediment history.
+- CLI and TUI share repository, configuration, temporal, session-domain, and recovery boundaries.
+- Reports use exact operational-day overlap slices and explicit provisional active state.
+- JSON and ICS exports have deterministic ordering and authoritative UTC chronology.
 - Sediment rendering emits one Braille character per drawable terminal cell.
-- Randomized live ingress examines available physical columns before blockage.
-- Fully blocked grains remain category-preserving pending mass and survive persistence/restore.
-- `grain_count` accounts for placed plus pending logical mass.
-- Terminal resize leaves canonical dimensions, coordinates, category neighborhoods, pending order, frame count, sweep direction, and RNG state unchanged.
-- `SandState` schema version 2 stores ordered pending category/count runs and migrates version 1 vectors.
-- A billion blocked or recovered grains require one run rather than a billion allocations.
-- Exact periodic event counts and accumulator remainders are calculated without iterative replay.
+- Blocked and detached elapsed mass remains category-preserving pending mass.
+- Canonical coordinates and engine metadata survive terminal resize and recovery.
+- `SandState` v2 stores ordered pending category/count runs and migrates v1 vectors.
+- Billion-grain blocked or recovered intervals require one run rather than linear allocation.
 - Runtime checkpoints cover autosave, detach, terminal closure, and crash recovery.
-- Bounded recovery restores canonical topology and appends detached mass as compressed pending runs.
-- Missed physics frames are not replayed and no relaxed catch-up topology is installed.
-- SQLite recovery publication is atomic and committed evidence remains reclaimable until replaced by a fresh checkpoint.
-- Legacy-file recovery uses deterministic target and committed markers for overwrite-safe retry.
-- Normal shutdown retires pending or committed checkpoint evidence but protects recovering or quarantined evidence.
-- Checkpoints with queued mutations fail closed because stable cross-authority mutation receipts are not defined.
-- Persistence, temporal, projection, sediment, and recovery failures remain fail-closed and evidence-preserving.
+- Recovery publication is bounded, topology-preserving, atomic/reclaimable in SQLite, and deterministic in legacy-file authority.
+- Snapshot envelopes record kind, day, source revision, provenance, idle policy, reconstruction status, and `SandState`.
+- Legacy bare daily payloads are classified as cumulative legacy evidence.
+- A cumulative artifact cannot satisfy a daily-contribution request.
+- Missing or incompatible daily artifacts fall back to marked in-memory ledger-derived previews.
+- Repeated historical rendering is deterministic and does not advance physics or mutate source state.
+- Report UI exposes artifact kind, reconstruction status, and idle policy.
+- Viewing or rebuilding a derived preview performs no persistence mutation.
+- Persistence, temporal, projection, sediment, recovery, and snapshot failures remain fail-closed.
 
 ## Completed post-migration units
 
-- **AUTHORITY-001** — issue #21: shared validated settings and fail-closed CLI/TUI startup configuration.
+- **AUTHORITY-001** — issue #21: shared validated settings and fail-closed startup.
 - **TEMPORAL-001** — issue #25: clock roles, discontinuity handling, fixed-offset civil authority, and reproducible history.
-- **TEMPORAL-002** — issues #4, #23, #27: overlap allocation, removal of false sunrise semantics, and zero-transition policy.
-- **DOMAIN-001** — issues #2, #12: persisted project identity, explicit category requirement, and completed idle vocabulary migration.
-- **REPORT-001** — issues #1, #3, #14, #17, #28: truthful ranges/help, provisional active projection, valid ICS, and deterministic ordering.
-- **SEDIMENT-001A** — issues #16, #26: dimension truth, exact Braille output width, complete ingress scanning, and durable pending mass.
-- **SEDIMENT-001B** — issue #7: canonical logical canvas, projection-only resize, exact topology preservation, and direct canonical restore.
-- **SEDIMENT-001C1** — issue #6 prerequisite: compressed pending runs, `SandState` v2 migration, bounded bulk addition, and exact periodic arithmetic.
-- **SEDIMENT-001C2** — issue #6: runtime checkpoints, bounded topology-preserving recovery, atomic/reclaimable evidence, and safe shutdown retirement.
+- **TEMPORAL-002** — issues #4, #23, #27: overlap allocation, false-sunrise removal, and zero-transition policy.
+- **DOMAIN-001** — issues #2, #12: project/category identity, explicit classification, and idle vocabulary.
+- **REPORT-001** — issues #1, #3, #14, #17, #28: truthful ranges/help, provisional projection, valid ICS, and deterministic ordering.
+- **SEDIMENT-001A** — issues #16, #26: dimension truth, exact Braille width, complete ingress, and durable pending mass.
+- **SEDIMENT-001B** — issue #7: canonical canvas and projection-only resize.
+- **SEDIMENT-001C1** — issue #6 prerequisite: compressed runs and exact periodic arithmetic.
+- **SEDIMENT-001C2** — issue #6: bounded topology-preserving recovery and protected evidence.
+- **SEDIMENT-001D1** — issue #18 prerequisite: typed snapshot kinds, provenance, derived fallback, immutable viewing, and visible status.
 
 Complete profile isolation remains open under issue #15. Project CRUD, TUI project selection, project-grouped reporting, and a TUI custom-range editor remain future work.
 
 ## Active sequence
 
-1. **SEDIMENT-001D** — issue #18: explicit immutable historical snapshot kinds and provenance.
-2. **INTERACTION-001** — issues #19, #20, #24: explicit edit modes, terminal lifecycle guard, truthful keybinding policy.
-3. Reconcile remaining partially satisfied issues #5, #10, #13 and later domain/profile work.
+1. **SEDIMENT-001D2** — issue #18: authoritative daily-contribution persistence, source-revision comparison, mutation invalidation, and legacy-row disposition.
+2. **INTERACTION-001** — issues #19, #20, #24: explicit edit modes, terminal lifecycle guard, and truthful keybinding policy.
+3. Reconcile partially satisfied issues #5, #10, #13 and later domain/profile work.
 
 ## Current risks
 
-- Historical sediment artifacts do not yet declare whether they are cumulative checkpoints, daily contributions, or derived previews.
-- Historical viewing and session mutation do not yet have one explicit invalidation/provenance contract.
-- Queued checkpoint mutations have no stable cross-authority receipt identity and therefore fail closed.
+- Persisted daily rows still contain cumulative live state rather than typed daily contributions.
+- Persisted daily artifacts are not yet compared against ledger-derived source revisions.
+- Session edits/deletions do not yet invalidate every affected operational day under one explicit contract.
+- Legacy cumulative daily rows do not yet have final archive/migration/removal disposition.
+- Queued checkpoint mutations have no stable cross-authority receipt identity and fail closed.
 - Interaction edit modes and terminal cleanup remain incompletely enforced.
 - Complete profile switching/isolation remains open.
 
 ## Next
 
-Implement **SEDIMENT-001D** for issue #18. Define immutable snapshot kinds and source provenance, separate persisted historical artifacts from derived previews, specify mutation invalidation/rebuild rules, and make idle inclusion and reconstruction status explicit without creating a competing sediment authority.
+Implement **SEDIMENT-001D2** for issue #18. Persist typed daily contributions derived from canonical session slices, trust them only when source revisions match, rebuild all days affected by mutation, and disposition legacy cumulative daily rows without losing evidence or elevating derived previews into a competing authority.

@@ -2,13 +2,13 @@
 
 Status: partially implemented and certified
 Program: SEDIMENT-001
-Current completed unit: SEDIMENT-001C2
+Current completed unit: SEDIMENT-001D1
 Issues completed: #6, #7, #16, #26
 Last reviewed: 2026-08-02
 
 ## Purpose
 
-Sediment is accountable visual history derived from elapsed time. Chronological sessions remain the exact time authority, while sediment preserves its own explicit mass, category, topology, recovery, and projection obligations.
+Sediment is accountable visual history derived from elapsed time. Chronological sessions remain the exact time authority, while sediment preserves explicit mass, category, topology, recovery, snapshot, and projection obligations.
 
 The SEDIMENT-001 program covers ingress, viewport projection, detached recovery, and historical snapshot identity. This document records accepted sediment authority as each bounded unit becomes certified.
 
@@ -86,82 +86,99 @@ Periodic event counts and accumulator remainders use checked integer nanosecond 
 
 ## Runtime checkpoint lifecycle
 
-Runtime checkpoints cover detach, terminal closure, crash, and periodic autosave recovery. They preserve:
-
-- canonical `SandState`;
-- active category and description;
-- active-session start UTC;
-- simulation UTC;
-- spawn and physics accumulator remainders;
-- one recovery-attempt target UTC when recovery is in flight.
+Runtime checkpoints cover detach, terminal closure, crash, and periodic autosave recovery. They preserve canonical `SandState`, active classification, active-session start UTC, simulation UTC, accumulator remainders, and one recovery-attempt target UTC.
 
 A checkpoint is claimed before derivation. SQLite changes `pending` or `committed` evidence to `recovering`; legacy-file authority persists the recovery target in the checkpoint payload. Invalid or unsupported evidence remains present and startup fails closed.
 
-Checkpoint validation rejects:
+Checkpoint validation rejects unsupported schemas, future or non-monotonic timestamps, missing or mismatched identities, unavailable category identities, duplicate or out-of-bounds coordinates, invalid accumulators, arithmetic overflow, and legacy checkpoints containing queued mutations.
 
-- unsupported checkpoint or sediment schemas;
-- future or non-monotonic timestamps;
-- missing or mismatched active-session identity;
-- unavailable active, placed, or pending category identities;
-- duplicate or out-of-bounds grain coordinates;
-- invalid periodic accumulators;
-- arithmetic overflow;
-- legacy checkpoints containing queued mutations.
-
-New runtime checkpoints are not written while queued mutations exist. Old checkpoints that already contain queued mutations are retained and rejected because those mutations do not have one stable cross-authority receipt identity. SEDIMENT-001C2 does not claim to replay them safely.
+New runtime checkpoints are not written while queued mutations exist. Old checkpoints that already contain queued mutations are retained and rejected because those mutations do not have one stable cross-authority receipt identity.
 
 ## Bounded detached recovery
 
-Recovery restores the checkpoint canvas and metadata directly. It then:
+Recovery restores the checkpoint canvas and metadata directly. It calculates elapsed time and exact periodic remainders, appends missed category mass as compressed pending runs, preserves all checkpoint coordinates and engine metadata, and never replays missed physics or installs a relaxed topology.
 
-1. calculates elapsed time to a persisted recovery target;
-2. calculates exact due spawn count and accumulator remainders;
-3. appends missed category mass as compressed pending runs;
-4. preserves all pre-checkpoint coordinates, frame count, sweep direction, and RNG state;
-5. records skipped physics-event count for proof, but does not replay those frames or install a relaxed topology;
-6. resumes ordinary live simulation only after recovered state is durably published.
-
-Work is proportional to validation input and pending-run changes, not detached duration. Extreme gaps therefore remain bounded.
-
-SQLite publishes recovered sediment, daily snapshot, active-session continuity, and checkpoint status in its existing atomic recovery transaction. `committed` evidence remains reclaimable after interruption; a successful startup replaces it with a fresh `pending` runtime checkpoint. Reclaiming committed evidence re-derives from its preserved base to the new startup time and overwrites the authoritative recovered state, so elapsed time advances without duplicate mass.
-
-Legacy-file authority writes the fixed recovery target before derivation, atomically publishes current state and daily snapshot, and marks checkpoint evidence committed. If interruption occurs before a fresh checkpoint replaces that marker, reopening re-derives from the preserved base and deterministically overwrites the published state.
+SQLite publishes recovered sediment, daily snapshot, active-session continuity, and checkpoint status atomically. Committed evidence remains reclaimable until a fresh pending checkpoint replaces it. Legacy-file authority persists a fixed recovery target and committed marker so retry deterministically overwrites from the preserved base rather than adding duplicate mass.
 
 Normal shutdown may retire `pending` or `committed` checkpoint evidence. It refuses to clear `recovering` or `quarantined` evidence.
 
-Successful bounded recovery creates no synthetic replay backlog and performs no catch-up topology replacement.
+## Snapshot identity
 
-## Certification for SEDIMENT-001A
+A `SedimentSnapshot` envelope gives historical artifacts an explicit semantic identity. Its schema records:
 
-SEDIMENT-001A proves complete ingress scanning, blocked-grain conservation, pending-state round-trip, exact output dimensions, and propagation of explicit geometry units.
+- snapshot kind;
+- optional operational day;
+- source revision;
+- provenance;
+- idle-inclusion policy;
+- reconstruction status;
+- canonical `SandState` payload.
 
-## Certification for SEDIMENT-001B
+The accepted kinds are:
 
-SEDIMENT-001B proves exact logical-state preservation across shrink/expand and repeated oscillation, hidden-grain reappearance, direct canonical restore, and removal of destructive resize behavior.
+- `CumulativeCheckpoint` — authentic canonical sediment as of a capture point;
+- `DailyContribution` — sediment mass attributed to exactly one operational day;
+- `DerivedPreview` — deterministic visualization reconstructed from chronological ledger truth for viewing only.
 
-## Certification for SEDIMENT-001C1
+These kinds are not interchangeable. In particular, cumulative sediment captured under a historical `daily` storage key is classified as `CumulativeCheckpoint` with `LegacyDailyRow` provenance. It cannot silently satisfy a request for one day's contribution.
 
-SEDIMENT-001C1 proves billion-grain compression, ordered run merging, bounded ingress work, exact category removal, schema migration, overflow refusal, and long-duration periodic arithmetic without replay.
+When no compatible daily contribution exists, the report builds an in-memory `DerivedPreview` from the selected day's canonical session slices. The preview records `SessionLedger` provenance, `reconstructed = true`, and an explicit idle policy. Its source revision changes when the ordered day-owned chronology changes.
 
-## Certification for SEDIMENT-001C2
+SEDIMENT-001D1 does not overwrite, delete, or reclassify persisted legacy daily rows. Their final custody and authoritative daily-contribution replacement belong to SEDIMENT-001D2.
 
-SEDIMENT-001C2 proves:
+## Immutable historical viewing
 
-- exact short-gap mass and accumulator remainder;
-- billion-second recovery as one compressed run;
-- preservation of checkpoint coordinates and engine metadata;
-- malformed-state and invalid-period refusal;
-- backward-compatible checkpoint schema fields;
-- reclaimable committed SQLite evidence and atomic publication;
-- safe retirement of `pending` checkpoints on normal shutdown;
-- protection of `recovering` evidence from shutdown clearing;
-- successful normal TUI exit and post-commit reload retry;
-- formatting, strict Clippy, 153 unit tests, 9 CLI lifecycle tests, 6 configuration tests, 1 report-help test, 12 SQLite/TUI process tests, 2 temporal tests, and doc tests.
+Historical viewing is a projection-only operation:
+
+- the snapshot envelope and `SandState` remain immutable;
+- rendering creates a fresh viewport engine and restores the artifact into it;
+- only presentation dimensions adapt to the current terminal;
+- physics `update()` is never called;
+- repeated rendering at the same viewport returns identical lines;
+- render cache identity includes the serialized artifact and viewport, not merely physical grain-vector length;
+- report UI labels the artifact as cumulative, daily, or derived and marks reconstruction and idle policy visibly;
+- viewing or rebuilding an in-memory preview performs no persistence write or deletion.
+
+Report viewing therefore cannot become a competing mutable sediment authority.
+
+## Certification
+
+### SEDIMENT-001A
+
+Proves complete ingress scanning, blocked-grain conservation, pending-state round-trip, exact output dimensions, and explicit geometry units.
+
+### SEDIMENT-001B
+
+Proves exact logical-state preservation across resize, hidden-grain reappearance, direct canonical restore, and removal of destructive resize behavior.
+
+### SEDIMENT-001C1
+
+Proves billion-grain compression, ordered run merging, bounded ingress work, exact category removal, schema migration, overflow refusal, and long-duration periodic arithmetic without replay.
+
+### SEDIMENT-001C2
+
+Proves bounded topology-preserving recovery, exact short/extreme gap mass, reclaimable atomic evidence, safe normal shutdown retirement, and protection of unresolved recovery evidence.
+
+### SEDIMENT-001D1
+
+Proves:
+
+- all three snapshot kinds are distinct and serializable;
+- legacy bare daily `SandState` is classified as cumulative legacy evidence;
+- cumulative evidence cannot substitute for a daily contribution;
+- repeated historical rendering is deterministic and leaves coordinates, pending runs, frame count, sweep direction, and RNG unchanged;
+- source revision changes with chronology material;
+- incompatible or missing daily artifacts fall back to a marked derived preview without persistence mutation;
+- formatting, strict Clippy, and the complete all-features suite pass.
 
 ## Remaining SEDIMENT-001 authority
 
-The remaining contract is:
+SEDIMENT-001D2 / issue #18 remains responsible for:
 
-- explicit immutable snapshot kinds and provenance — SEDIMENT-001D / issue #18.
+- authoritative persistence of `DailyContribution` envelopes;
+- source-revision comparison and stale-artifact rebuilding;
+- correct edit/delete invalidation across all affected operational days;
+- explicit archive, migration, or removal disposition for legacy cumulative daily rows;
+- certification that persisted daily artifacts and in-memory previews cannot diverge silently.
 
-Until SEDIMENT-001D is certified, historical snapshot meaning remains the final incomplete part of sediment authority.
+Until D2 is certified, snapshot identity and immutable viewing are authoritative, but daily-contribution persistence and mutation invalidation are not complete.

@@ -25,7 +25,10 @@ use crate::{
         operational_day_key_for_utc, set_runtime_settings,
     },
     keybindings,
-    sand::{RecoveryTiming, SandEngine, SandState, SandStateGrain, recover_detached_sediment},
+    sand::{
+        RecoveryTiming, SandEngine, SandState, SandStateGrain, SedimentSnapshot,
+        recover_detached_sediment,
+    },
     sqlite, storage, temporal,
 };
 
@@ -172,9 +175,9 @@ struct App {
     report_logs_category_id: Option<CategoryId>,
     report_log_selected_index: usize,
     report_snapshot_end_day: Option<String>,
-    report_snapshot_state: Option<crate::sand::SandState>,
+    report_snapshot_artifact: Option<SedimentSnapshot>,
     report_snapshot_preview_key: Option<String>,
-    report_snapshot_preview_engine: Option<SandEngine>,
+    report_snapshot_preview_lines: Option<Vec<ratatui::text::Line<'static>>>,
     simulation: SimulationState,
     detach_requested: bool,
     keymap: keybindings::Keymap,
@@ -297,9 +300,9 @@ impl App {
             report_logs_category_id: None,
             report_log_selected_index: 0,
             report_snapshot_end_day: None,
-            report_snapshot_state: None,
+            report_snapshot_artifact: None,
             report_snapshot_preview_key: None,
-            report_snapshot_preview_engine: None,
+            report_snapshot_preview_lines: None,
             simulation: SimulationState {
                 simulation_time_utc: Utc::now(),
                 spawn_accumulator: Duration::ZERO,
@@ -503,9 +506,9 @@ impl App {
         self.report_logs_category_id = None;
         self.report_log_selected_index = 0;
         self.report_snapshot_end_day = None;
-        self.report_snapshot_state = None;
+        self.report_snapshot_artifact = None;
         self.report_snapshot_preview_key = None;
-        self.report_snapshot_preview_engine = None;
+        self.report_snapshot_preview_lines = None;
         self.focus_none_report_row();
         self.render_needed = true;
     }
@@ -515,9 +518,9 @@ impl App {
         self.report_logs_category_id = None;
         self.report_log_selected_index = 0;
         self.report_snapshot_end_day = None;
-        self.report_snapshot_state = None;
+        self.report_snapshot_artifact = None;
         self.report_snapshot_preview_key = None;
-        self.report_snapshot_preview_engine = None;
+        self.report_snapshot_preview_lines = None;
         self.render_needed = true;
     }
 

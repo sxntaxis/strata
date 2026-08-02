@@ -81,11 +81,17 @@ impl App {
             ),
         ])
         .alignment(Alignment::Center);
+        let snapshot_bottom_title = Line::from(Span::styled(
+            self.report_snapshot_status_label(),
+            Style::default().fg(Color::DarkGray),
+        ))
+        .alignment(Alignment::Left);
 
         let frame_block = Block::default()
             .title(interval_title)
             .title(center_title)
             .title(total_title)
+            .title_bottom(snapshot_bottom_title)
             .title_bottom(period_bottom_title)
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
