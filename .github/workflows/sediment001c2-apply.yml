@@ -28,15 +28,14 @@ jobs:
           from pathlib import Path
           path = Path('tools/sediment001c2-apply.py')
           source = path.read_text()
-          block = '''replace_once(
-    "src/app.rs",
-    "#[derive(Clone, Debug, Serialize, Deserialize)]\\nstruct QueuedMutationRecord",
-    "#[derive(Clone, Debug, Serialize, Deserialize)]\\nstruct QueuedMutationRecord",
-)
-'''
-          if block not in source:
+          needle = 'replace_once(\n    "src/app.rs",\n    "#[derive(Clone, Debug, Serialize, Deserialize)]\\\\nstruct QueuedMutationRecord"'
+          start = source.find(needle)
+          if start < 0:
               raise SystemExit('inert queued-mutation anchor was not found')
-          path.write_text(source.replace(block, '', 1))
+          end = source.find('\n)\n', start)
+          if end < 0:
+              raise SystemExit('inert queued-mutation anchor was not terminated')
+          path.write_text(source[:start] + source[end + 3:])
           PY
           python tools/sediment001c2-apply.py
       - name: Format
