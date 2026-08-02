@@ -23,7 +23,18 @@ jobs:
         with:
           components: rustfmt, clippy
       - name: Apply SEDIMENT-001C1
-        run: python tools/sediment001c1-apply.py
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/sand/mod.rs')
+          source = path.read_text()
+          old = 'mod engine;\n\n#[allow(unused_imports)]\npub use engine::{SandEngine, SandState, SandStateGrain};'
+          new = 'mod engine;\n\npub use engine::{SandEngine, SandState, SandStateGrain};'
+          if old not in source:
+              raise SystemExit('sand module normalization anchor not found')
+          path.write_text(source.replace(old, new, 1))
+          PY
+          python tools/sediment001c1-apply.py
       - name: Format
         run: cargo fmt --all
       - name: Check formatting
