@@ -10,6 +10,36 @@ if old_anchor not in text or old_model not in text:
     raise SystemExit("action-model patch strings were not found")
 text = text.replace(old_anchor, new_anchor, 1).replace(old_model, new_model, 1)
 
+state_label_impl = '''impl ActionBindingState {
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Bound => "bound",
+            Self::Unbound => "unbound",
+            Self::Disabled => "disabled",
+        }
+    }
+}
+
+'''
+if state_label_impl not in text:
+    raise SystemExit("unused action-state label implementation was not found")
+text = text.replace(state_label_impl, "", 1)
+
+old_test_resolver = '''    pub(crate) fn action_for_key_event(&self, event: KeyEvent) -> Option<Action> {
+        self.resolve_key_event(InputContext::Other, event)
+            .map(|resolved| resolved.action)
+    }
+'''
+new_test_resolver = '''    #[cfg(test)]
+    pub(crate) fn action_for_key_event(&self, event: KeyEvent) -> Option<Action> {
+        self.resolve_key_event(InputContext::Other, event)
+            .map(|resolved| resolved.action)
+    }
+'''
+if old_test_resolver not in text:
+    raise SystemExit("test compatibility resolver was not found")
+text = text.replace(old_test_resolver, new_test_resolver, 1)
+
 old_alias_insert = '''anchor = "pub(crate) fn default_keymap() -> Keymap {\\n"
 if text.count(anchor) != 1:
     raise SystemExit("default keymap anchor not found")
@@ -22,6 +52,46 @@ text = text[:position] + default_aliases + text[position:]
 if old_alias_insert not in text:
     raise SystemExit("default alias insertion block was not found")
 text = text.replace(old_alias_insert, new_alias_insert, 1)
+
+old_binding_writer = '''pub(crate) fn set_action_binding(
+    path: &Path,
+    action: Action,
+    binding: Option<KeyBinding>,
+) -> Result<LoadedKeybindings, String> {
+    let mut config = load_config_or_default(path)?;
+'''
+new_binding_writer = '''pub(crate) fn set_action_binding(
+    path: &Path,
+    action: Action,
+    binding: Option<KeyBinding>,
+) -> Result<LoadedKeybindings, String> {
+    if binding.is_some_and(KeyBinding::is_mandatory_quit) {
+        return Err("Ctrl-C is mandatory Quit policy and cannot be rebound".to_string());
+    }
+    let mut config = load_config_or_default(path)?;
+'''
+if old_binding_writer not in text:
+    raise SystemExit("action binding writer was not found")
+text = text.replace(old_binding_writer, new_binding_writer, 1)
+
+mandatory_test_marker = '''    #[test]
+    fn mandatory_ctrl_c_is_separate_from_configured_quit_state() {
+'''
+mandatory_writer_test = '''    #[test]
+    fn atlas_writer_rejects_mandatory_ctrl_c_before_persisting() {
+        let path = unique_path("strata_keymap_mandatory_writer");
+        let ctrl_c = KeyBinding::parse("ctrl-c").unwrap();
+        let error = set_action_binding(&path, Action::OpenReportModal, Some(ctrl_c)).unwrap_err();
+        assert!(error.contains("mandatory Quit policy"));
+        assert!(!path.exists(), "invalid mandatory override must not be persisted");
+    }
+
+    #[test]
+    fn mandatory_ctrl_c_is_separate_from_configured_quit_state() {
+'''
+if mandatory_test_marker not in text:
+    raise SystemExit("mandatory policy test insertion point was not found")
+text = text.replace(mandatory_test_marker, mandatory_writer_test, 1)
 
 old_effective_replace = '''if text.count(old_effective) != 1:
     raise SystemExit("effective key fallback block not found")
