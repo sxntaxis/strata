@@ -1,8 +1,8 @@
 ---
 id: SEDIMENT-001C2
 kind: work
-state: active
-authority: working
+state: completed
+authority: accepted
 created: 2026-08-02
 updated: 2026-08-02
 ---
@@ -11,41 +11,60 @@ updated: 2026-08-02
 
 ## Issue
 
-Issue #6: detached recovery currently replays missed spawn and physics events, relaxes a replacement topology, and does not provide one equivalent retry-safe evidence lifecycle across SQLite and legacy-file authority.
+Issue #6: detached recovery replayed missed spawn and physics events, relaxed a replacement topology, and lacked one equivalent retry-safe evidence lifecycle across SQLite and legacy-file authority.
 
-## Selected contract
+## Accepted contract
 
-- A checkpoint is claimed and validated before recovery changes authoritative state.
-- The checkpoint's canonical sediment topology is restored directly.
-- Recovery uses a fixed target UTC recorded before publication so retries derive the same result from the same checkpoint evidence.
-- Elapsed contribution is segmented only by persisted mutation events; work is proportional to mutation count and current ingress width, never detached duration.
-- Each segment calculates due spawn count and accumulator remainder through checked periodic arithmetic.
-- Missed grains are added through compressed category/count runs.
-- Missed physics frames are not replayed and do not relax restored topology. Their accumulator remainder advances exactly; ordinary live physics resumes afterward.
-- Persisted category switches and clearing mutations are applied once in recorded chronological order.
-- SQLite publishes recovered sediment, daily snapshot, active-session continuity, and checkpoint commit through its existing atomic recovery transaction, then clears committed evidence.
-- Legacy-file recovery keeps the checkpoint until deterministic recovered state and snapshot are durably published. A fixed recovery target makes retry after partial publication idempotent.
-- Invalid schema, future timestamps, stale active identity, impossible accumulator state, overflow, or malformed mutation order fail closed without deleting evidence.
+- Runtime checkpoints cover periodic autosave, detach, terminal closure, and crash recovery.
+- A checkpoint is claimed and validated before recovered state is published.
+- The checkpoint's canonical sediment topology and engine metadata restore directly.
+- A recovery target UTC is persisted before the first recovery publication.
+- Elapsed contribution is calculated once with checked periodic arithmetic.
+- Missed grains are appended as compressed category/count runs.
+- Missed physics frames are counted but never replayed; only the accumulator remainder advances.
+- Recovery work is independent of detached duration apart from validation and compact run changes.
+- SQLite publishes recovered sediment, daily snapshot, active-session continuity, and checkpoint status atomically.
+- Committed SQLite evidence remains reclaimable until successful startup replaces it with a fresh pending checkpoint.
+- Legacy-file recovery persists the target before derivation and a committed marker after deterministic state publication.
+- Reopening committed evidence re-derives from the preserved base to the new startup time and overwrites authoritative recovered state rather than adding to it.
+- Normal shutdown may retire pending or committed evidence, but recovering and quarantined evidence remain protected.
+- Invalid schemas, timestamps, identities, coordinates, accumulators, and arithmetic fail closed without deleting unresolved evidence.
 - Successful startup has no synthetic replay backlog and no relaxed catch-up replacement topology.
 
-## Acceptance proofs
+## Queued-mutation boundary
+
+This unit does not claim stable queued-mutation replay.
+
+- New runtime checkpoints are refused while mutations are pending.
+- Legacy checkpoints that already contain queued mutations fail closed and retain evidence.
+- A future implementation would require one stable receipt identity and equivalent idempotent semantics across SQLite and legacy-file authority.
+
+## Certified proofs
 
 - short gaps produce exact mass and accumulator remainder;
-- extreme gaps produce bounded run count and bounded execution work;
-- pre-detach grain coordinates and topology remain exact;
-- category changes split recovered mass at the correct timestamps;
-- clear mutations operate once and in order;
-- repeated reopen after success adds no duplicate mass;
-- interruption before commit retains reclaimable evidence;
-- interruption after deterministic legacy publication but before checkpoint deletion retries to the same state;
-- stale, future, malformed, and mismatched checkpoints fail closed;
-- SQLite recovery remains atomic and reclaimable;
-- legacy and SQLite paths follow equivalent claim → derive → publish → clear semantics;
-- all prior persistence, temporal, report, sediment, CLI, and TUI gates remain green.
+- a billion-second gap produces one compressed pending run;
+- pre-checkpoint grain coordinates, frame count, sweep direction, and RNG state remain exact;
+- malformed sediment and invalid periodic inputs fail closed;
+- checkpoint schema fields remain backward-compatible;
+- committed SQLite evidence is reclaimable and published atomically;
+- pending checkpoints can be retired on normal shutdown;
+- recovering evidence cannot be cleared by normal shutdown;
+- normal activated TUI exit succeeds;
+- post-commit reload retry preserves committed history and exits;
+- formatting and strict Clippy pass with all targets and features;
+- 153 unit tests, 9 CLI lifecycle tests, 6 configuration tests, 1 report-help test, 12 SQLite/TUI process tests, 2 temporal tests, and doc tests pass.
+
+## Durable authority
+
+- `docs/SEDIMENT_AUTHORITY.md` records runtime checkpoint custody and bounded recovery semantics;
+- `docs/ARCHITECTURE.md` assigns recovery custody to application orchestration plus SQLite/file persistence;
+- STRATA-D028 and STRATA-D029 constrain recovery and evidence retirement;
+- `notebook/work/SEDIMENT-001.md` advances to snapshot identity.
 
 ## Boundaries
 
-- No attempt is made to reconstruct every missed visual physics frame.
+- No missed visual physics frames are reconstructed.
 - No global relaxation or catch-up topology replacement is permitted.
+- No queued-mutation replay without stable receipts.
 - No historical snapshot-kind redesign; that remains SEDIMENT-001D / issue #18.
 - No new user-facing recovery editor or conflict UI.
