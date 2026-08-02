@@ -28,17 +28,22 @@ Chronological ledger truth remains the exact time authority. Sediment preserves 
 
 ### SEDIMENT-001A — dimensions and ingress
 
-Issues: #16, #26.
+Status: implemented and certified in PR #50.
+Issues completed: #16, #26.
 
-- establish explicit terminal-cell and dot-grid dimension vocabulary;
-- render one Braille character per terminal cell;
-- scan all ingress columns before reporting blockage;
-- retain blocked grains in a category-preserving pending reservoir;
-- persist and restore pending logical mass;
-- certify arbitrary ingress occupancy, full blockage, and exact output dimensions.
+- explicit terminal-cell and dot-grid dimension vocabulary;
+- exactly one Braille character per terminal cell;
+- complete randomized ingress scan before physical blockage;
+- category-preserving pending reservoir for blocked grains;
+- placed-plus-pending logical mass accounting;
+- backward-compatible persistence and restore of pending mass;
+- coverage for arbitrary ingress occupancy, full blockage, round-trip identity, and exact output dimensions.
+
+Accepted authority is recorded in `docs/SEDIMENT_AUTHORITY.md` and STRATA-D023 through STRATA-D024.
 
 ### SEDIMENT-001B — logical canvas and viewport projection
 
+Status: next.
 Issue: #7.
 
 - separate canonical logical sediment dimensions from current viewport dimensions;
@@ -69,4 +74,4 @@ Issue: #18.
 
 ## Current edge
 
-Implement SEDIMENT-001A only. Do not solve resize, recovery, or snapshot semantics through temporary engine behavior that would constrain their later authority incorrectly.
+Implement SEDIMENT-001B. The current engine still treats viewport dimensions as canonical storage and runs resize repacking/gravity. Replace that coupling without weakening the placed/pending mass authority established by 001A.
