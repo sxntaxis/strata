@@ -380,21 +380,27 @@ pub fn try_load_sessions_from_csv(
     let boundary_start_index = 11 + shift;
 
     let mut loaded = default_sessions_loaded();
+    let mut seen_ids = HashSet::new();
 
     for (index, record) in reader.records().enumerate() {
         let row = index + 2;
         let record = record?;
 
-        let Some(id_raw) = record.get(0) else {
-            continue;
-        };
-        let id: usize = match id_raw.parse() {
-            Ok(id) => id,
-            Err(_) => {
-                eprintln!("Warning: Invalid session ID '{}', skipping", id_raw);
-                continue;
-            }
-        };
+        let id_raw = record.get(0).unwrap_or_default();
+        let id = id_raw
+            .parse::<usize>()
+            .map_err(|error| StorageError::InvalidCsvData {
+                file: "time_log.csv",
+                row,
+                message: format!("invalid session ID '{id_raw}': {error}"),
+            })?;
+        if !seen_ids.insert(id) {
+            return Err(StorageError::InvalidCsvData {
+                file: "time_log.csv",
+                row,
+                message: format!("duplicate session ID {id}"),
+            });
+        }
 
         let category_raw = record.get(2).unwrap_or_default();
         let category_value =
@@ -479,6 +485,16 @@ pub fn try_load_sessions_from_csv(
             (None, None, None)
         };
 
+        let elapsed_raw = record.get(elapsed_index).unwrap_or_default();
+        let elapsed_seconds =
+            elapsed_raw
+                .parse::<usize>()
+                .map_err(|error| StorageError::InvalidCsvData {
+                    file: "time_log.csv",
+                    row,
+                    message: format!("invalid elapsed seconds '{elapsed_raw}': {error}"),
+                })?;
+
         loaded.sessions.push(Session {
             id,
             date: record.get(1).unwrap_or_default().to_string(),
@@ -493,10 +509,7 @@ pub fn try_load_sessions_from_csv(
                 .to_string(),
             start_time: record.get(start_time_index).unwrap_or_default().to_string(),
             end_time: record.get(end_time_index).unwrap_or_default().to_string(),
-            elapsed_seconds: record
-                .get(elapsed_index)
-                .and_then(|value| value.parse::<usize>().ok())
-                .unwrap_or(0),
+            elapsed_seconds,
             started_at_utc,
             ended_at_utc,
             operational_day_policy,
@@ -951,6 +964,50 @@ mod tests {
 
         fs::remove_file(legacy_path).ok();
         fs::remove_file(catalog_path).ok();
+    }
+
+    #[test]
+    fn malformed_duplicate_session_ids_and_elapsed_fail_closed() {
+        let categories = default_categories_loaded().categories;
+
+        let malformed_id_path = unique_path("strata_sessions_malformed_id", "csv");
+        fs::write(
+            &malformed_id_path,
+            "id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds\nnot-an-id,2026-08-01,0,idle,break,10:00:00,11:00:00,3600\n",
+        )
+        .unwrap();
+        let malformed_id = try_load_sessions_from_csv(&malformed_id_path, &categories).unwrap_err();
+        assert!(
+            malformed_id
+                .to_string()
+                .contains("invalid session ID 'not-an-id'")
+        );
+
+        let duplicate_path = unique_path("strata_sessions_duplicate_id", "csv");
+        fs::write(
+            &duplicate_path,
+            "id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds\n1,2026-08-01,0,idle,first,10:00:00,11:00:00,3600\n1,2026-08-01,0,idle,second,11:00:00,12:00:00,3600\n",
+        )
+        .unwrap();
+        let duplicate = try_load_sessions_from_csv(&duplicate_path, &categories).unwrap_err();
+        assert!(duplicate.to_string().contains("duplicate session ID 1"));
+
+        let elapsed_path = unique_path("strata_sessions_malformed_elapsed", "csv");
+        fs::write(
+            &elapsed_path,
+            "id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds\n1,2026-08-01,0,idle,break,10:00:00,11:00:00,not-seconds\n",
+        )
+        .unwrap();
+        let elapsed = try_load_sessions_from_csv(&elapsed_path, &categories).unwrap_err();
+        assert!(
+            elapsed
+                .to_string()
+                .contains("invalid elapsed seconds 'not-seconds'")
+        );
+
+        fs::remove_file(malformed_id_path).ok();
+        fs::remove_file(duplicate_path).ok();
+        fs::remove_file(elapsed_path).ok();
     }
 
     #[test]
