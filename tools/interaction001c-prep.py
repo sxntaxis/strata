@@ -76,5 +76,15 @@ atlas_start = text.index("# Atlas tests: defaults now report aliases separately"
 atlas_end = text.index("path.write_text(text)", atlas_start)
 text = text[:atlas_start] + text[atlas_end:]
 
+keymap_replace_start = text.index('replace_between(\n    "src/keybindings.rs"')
+keymap_replace_end = text.index("\n)\n\n# Configuration fields", keymap_replace_start) + 3
+text = (
+    text[:keymap_replace_start]
+    + "path.write_text(text)\n"
+    + text[keymap_replace_start:keymap_replace_end]
+    + "text = path.read_text()\n"
+    + text[keymap_replace_end:]
+)
+
 path.write_text(text)
 Path(__file__).unlink(missing_ok=True)
