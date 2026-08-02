@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-08-02
 authority: working
-summary: Persistence, temporal, domain, and report/export authority are complete; sediment conservation now leads the frontier.
-next: Implement SEDIMENT-001 for issues #6, #7, #16, #18, and #26 without weakening chronological ledger truth.
+summary: SEDIMENT-001 is active; dimension truth and lossless ingress are the first conservation edge.
+next: Complete SEDIMENT-001A for issues #16 and #26, then continue to viewport-independent logical sediment.
 ---
 
 # NOW — Strata
@@ -69,4 +69,4 @@ Complete profile isolation remains open under issue #15. Project CRUD, TUI proje
 
 ## Next
 
-Implement **SEDIMENT-001**. Reconcile issues #6, #7, #16, #18, and #26 around one conserved logical sediment model. The visual projection may adapt to terminal geometry, but it must not silently create, discard, or reclassify accountable elapsed mass.
+Complete **SEDIMENT-001A**. Establish explicit terminal-cell versus dot-grid dimensions and retain every blocked due grain as pending logical mass. Then continue to SEDIMENT-001B without treating the current viewport as canonical storage.

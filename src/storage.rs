@@ -911,6 +911,7 @@ mod tests {
             frame_count: 12,
             sweep_left_to_right: false,
             rng_state: 12345,
+            pending_grains: vec![3],
         };
 
         save_sand_state(&path, &state).unwrap();

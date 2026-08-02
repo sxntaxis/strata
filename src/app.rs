@@ -1342,7 +1342,8 @@ impl App {
             .catchup_visual_engine
             .as_ref()
             .map(|engine| {
-                engine.width != expected_grid_width || engine.height != expected_grid_height
+                engine.grid_width_dots != expected_grid_width
+                    || engine.grid_height_dots != expected_grid_height
             })
             .unwrap_or(true);
         if should_recreate {
@@ -1404,6 +1405,7 @@ impl App {
             grid_height: state.grid_height,
             grains: projected_grains,
             frame_count: state.frame_count,
+            pending_grains: state.pending_grains.clone(),
             sweep_left_to_right: state.sweep_left_to_right,
             rng_state: state.rng_state,
         }
