@@ -22,7 +22,7 @@ Make every keystroke and process exit resolve through one visible, testable cont
 - All text characters, including ordinary command letters and Unicode, are available inside edit mode.
 - Terminal restoration runs exactly once on normal quit, detach, runtime error, and panic.
 - Runtime failure attempts explicit checkpoint recovery without hiding the original error.
-- Configured, disabled, and mandatory actions are semantically distinct.
+- Configured, unbound, disabled, contextual, and mandatory actions are semantically distinct.
 - No action is reachable through an undocumented fallback.
 - The command atlas displays runtime truth.
 
@@ -35,34 +35,35 @@ Issue completed: #19.
 
 - report-log view is read-only;
 - Confirm enters edit mode for one stable session identity;
-- the persisted description is copied into a complete draft;
-- unmodified command letters, spaces, and Unicode edit only the draft;
-- Enter requests one persistence commit;
-- Esc discards the complete draft;
-- only a configured modified Quit remains deliberate emergency behavior;
-- SQLite and legacy-file memory change only after persistence succeeds;
+- the persisted description becomes a complete draft;
+- command letters, spaces, and Unicode edit only the draft;
+- Enter commits once; Esc discards the draft;
+- persistence succeeds before memory changes;
 - failed commit retains the draft and visible recovery state;
 - deletion remains a separate command;
-- report UI displays VIEW versus EDIT state and a draft cursor;
-- modal close/reset discards uncommitted drafts;
+- the UI displays VIEW versus EDIT state;
 - Quit from report context returns an application exit decision.
 
-Accepted authority is recorded in `docs/INTERACTION_AUTHORITY.md` and STRATA-D034 through STRATA-D035.
+Accepted authority: STRATA-D034 through STRATA-D035.
 
 ### INTERACTION-001B — terminal lifecycle guard
 
-Status: next.
-Issue: #20.
+Status: implemented and certified in PR #57.
+Issue completed: #20.
 
-- introduce one RAII owner for raw mode, alternate screen, mouse capture, and cursor restoration;
-- separate terminal restoration from application finalization;
-- preserve the original runtime error while attaching cleanup/recovery context;
-- attempt an emergency checkpoint on draw, poll, or read failure;
-- add panic restoration without claiming persistence success;
-- certify PTY state after quit, detach, runtime error, and panic.
+- one RAII terminal session owns raw mode, alternate screen, cursor, flushing, and ratatui terminal state;
+- explicit close, Drop, startup failure, and panic converge on one exactly-once restoration boundary;
+- draw, poll, and read errors attempt one direct emergency checkpoint;
+- primary runtime error kind and text remain authoritative;
+- checkpoint and cleanup outcomes are attached only as context;
+- panic restores terminal state without claiming persistence success;
+- Linux PTY tests certify unchanged termios state and one restoration execution on quit, detach, draw/poll/read failure, and panic.
+
+Accepted authority: STRATA-D036 through STRATA-D037.
 
 ### INTERACTION-001C — keymap truth
 
+Status: next.
 Issue: #24.
 
 - preserve explicit Bound, Unbound, and Disabled action state;
@@ -74,4 +75,4 @@ Issue: #24.
 
 ## Current edge
 
-Implement INTERACTION-001B. Explicit text editing is now authoritative; the next risk is process-wide terminal custody. Every successful, failed, or panicking TUI path must restore the host terminal exactly once while preserving the original application error and recovery evidence.
+Implement INTERACTION-001C. Editing and host-terminal custody are now explicit. The remaining interaction risk is keymap truth: runtime behavior, configuration, contextual aliases, mandatory emergency controls, and the command atlas must describe the same reachable actions without hidden defaults.
