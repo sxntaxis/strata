@@ -1,7 +1,7 @@
 use std::{
     collections::{HashSet, VecDeque},
     io,
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{Duration, Instant, SystemTime},
 };
 
@@ -21,6 +21,10 @@ use crate::{
         operational_day_key_for_utc, set_runtime_settings,
     },
     keybindings::{self, Action, ActionBindingState, KeyBinding},
+    legacy_transition::{
+        LegacyActiveReceipt, LegacySessionReceipt, LegacyTransitionKind, LegacyTransitionReceipt,
+        reconcile_completed_session,
+    },
     sand::{
         RecoveryTiming, SandEngine, SandState, SandStateGrain, SedimentSnapshot,
         recover_detached_sediment,
@@ -147,13 +151,123 @@ struct DetachedRuntimeCheckpoint {
     recovery_target_utc: Option<DateTime<Utc>>,
     #[serde(default)]
     legacy_recovery_committed: bool,
+    #[serde(default)]
+    legacy_transition: Option<LegacyTransitionReceipt>,
 }
 
 impl DetachedRuntimeCheckpoint {
-    const VERSION: u8 = 2;
+    const VERSION: u8 = 3;
+    const PREVIOUS_VERSION: u8 = 2;
     const LEGACY_VERSION: u8 = 1;
 }
 
+fn transition_operation_id(
+    kind: &str,
+    expected_stable_id: &str,
+    at_utc: DateTime<Utc>,
+    discriminator: &str,
+) -> String {
+    format!(
+        "{}:{}:{}:{}",
+        kind,
+        expected_stable_id,
+        at_utc.to_rfc3339_opts(SecondsFormat::Nanos, true),
+        discriminator
+    )
+}
+
+fn validate_legacy_switch_checkpoint(
+    checkpoint: &DetachedRuntimeCheckpoint,
+    receipt: &LegacyTransitionReceipt,
+) -> Result<(), String> {
+    if checkpoint.schema_version != DetachedRuntimeCheckpoint::VERSION {
+        return Err(format!(
+            "legacy transition receipt requires checkpoint schema {}, found {}; evidence retained",
+            DetachedRuntimeCheckpoint::VERSION,
+            checkpoint.schema_version
+        ));
+    }
+    receipt.validate_switch_boundaries()?;
+    let expected_identity = format!(
+        "legacy:{}:{}",
+        receipt.expected_previous_category_id,
+        receipt
+            .expected_previous_started_at_utc
+            .to_rfc3339_opts(SecondsFormat::Nanos, true)
+    );
+    let expected_operation_id = transition_operation_id(
+        "legacy-switch",
+        &expected_identity,
+        receipt.transition_at_utc,
+        &receipt.resulting_active.category_id.to_string(),
+    );
+    if receipt.operation_id != expected_operation_id {
+        return Err(format!(
+            "legacy switch receipt operation ID {} is inconsistent; evidence retained",
+            receipt.operation_id
+        ));
+    }
+    if checkpoint.active_category_id != receipt.resulting_active.category_id
+        || checkpoint.active_description != receipt.resulting_active.description
+        || checkpoint.active_session_started_at_utc != Some(receipt.resulting_active.started_at_utc)
+    {
+        return Err(format!(
+            "legacy switch receipt {} does not match its resulting checkpoint generation",
+            receipt.operation_id
+        ));
+    }
+    Ok(())
+}
+
+fn publish_legacy_switch_replay(
+    tracker: &TimeTracker,
+    archived_categories: &[Category],
+    checkpoint: &mut DetachedRuntimeCheckpoint,
+    receipt: &LegacyTransitionReceipt,
+    sessions_path: &Path,
+    categories_path: &Path,
+    checkpoint_path: &Path,
+) -> Result<TimeTracker, String> {
+    let mut staged_tracker = tracker.clone();
+    reconcile_completed_session(
+        &mut staged_tracker.sessions,
+        &mut staged_tracker.session_id_counter,
+        receipt.completed_session.as_ref(),
+    )?;
+    let previous_category_id = CategoryId::new(receipt.expected_previous_category_id);
+    if !staged_tracker.set_category_description_by_id(previous_category_id, String::new()) {
+        return Err(format!(
+            "legacy switch receipt {} references unavailable previous category {}",
+            receipt.operation_id, receipt.expected_previous_category_id
+        ));
+    }
+    let resulting_category_id = CategoryId::new(receipt.resulting_active.category_id);
+    if !staged_tracker.set_category_description_by_id(
+        resulting_category_id,
+        receipt.resulting_active.description.clone(),
+    ) {
+        return Err(format!(
+            "legacy switch receipt {} references unavailable resulting category {}",
+            receipt.operation_id, receipt.resulting_active.category_id
+        ));
+    }
+
+    let mut catalog = staged_tracker.categories_for_storage();
+    catalog.extend(archived_categories.iter().cloned());
+    storage::save_sessions_to_csv(sessions_path, &staged_tracker.sessions, &catalog)?;
+    storage::save_category_catalog_to_csv(
+        categories_path,
+        &staged_tracker.categories_for_storage(),
+        archived_categories,
+    )?;
+
+    checkpoint.legacy_transition = None;
+    checkpoint.schema_version = DetachedRuntimeCheckpoint::VERSION;
+    storage::write_json_atomic(checkpoint_path, checkpoint)?;
+    Ok(staged_tracker)
+}
+
+#[derive(Clone)]
 struct SessionState {
     blink_state: i32,
     active_session_stable_id: Option<String>,
@@ -465,12 +579,8 @@ impl App {
                 );
                 return;
             };
-            let operation_id = self.transition_operation_id(
-                "reset",
-                &expected_stable_id,
-                started_at_utc,
-                "active",
-            );
+            let operation_id =
+                transition_operation_id("reset", &expected_stable_id, started_at_utc, "active");
             let next_stable_id = format!("tui-active:{operation_id}");
             let result = sqlite::reset_tui_active_session(
                 &database_path,
@@ -1082,7 +1192,7 @@ impl App {
                 .category_description_by_id(category_id)
                 .unwrap_or_default()
                 .to_string();
-            let operation_id = self.transition_operation_id(
+            let operation_id = transition_operation_id(
                 "switch",
                 &expected_stable_id,
                 interval.ended_at_utc,
@@ -1130,19 +1240,39 @@ impl App {
             return !self.has_persistence_recovery();
         }
 
+        let previous_tracker = self.time_tracker.clone();
+        let previous_session = self.session.clone();
+        let previous_category_id = self.time_tracker.active_category_id();
+        let Some(previous_started_at_utc) = self.session.active_session_started_at_utc else {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::ActiveSwitch,
+                RecoveryAction::ReloadAuthority,
+                Err("legacy runtime has no active UTC start timestamp to switch".to_string()),
+            );
+            return false;
+        };
+        let previous_session_count = self.time_tracker.sessions.len();
+
         if self
             .end_active_session_at(switched_at_utc, clock_mode)
             .is_none()
         {
             return false;
         }
-        self.persist_sessions();
+        let completed_session = self
+            .time_tracker
+            .sessions
+            .get(previous_session_count)
+            .map(LegacySessionReceipt::from_session);
 
         if !self.time_tracker.set_active_category_by_id(category_id) {
+            self.time_tracker = previous_tracker;
+            self.session = previous_session;
             return false;
         }
-
         if let Err(error) = self.begin_transition_session(switched_at_utc, clock_mode) {
+            self.time_tracker = previous_tracker;
+            self.session = previous_session;
             self.record_storage_result_for::<()>(
                 PersistenceOperation::ActiveStart,
                 RecoveryAction::ReloadAuthority,
@@ -1150,26 +1280,76 @@ impl App {
             );
             return false;
         }
+
+        let resulting_description = self
+            .time_tracker
+            .category_description_by_id(category_id)
+            .unwrap_or_default()
+            .to_string();
+        let expected_identity = format!(
+            "legacy:{}:{}",
+            previous_category_id.0,
+            previous_started_at_utc.to_rfc3339_opts(SecondsFormat::Nanos, true)
+        );
+        let operation_id = transition_operation_id(
+            "legacy-switch",
+            &expected_identity,
+            switched_at_utc,
+            &category_id.0.to_string(),
+        );
+        let receipt = LegacyTransitionReceipt {
+            version: LegacyTransitionReceipt::VERSION,
+            operation_id,
+            kind: LegacyTransitionKind::Switch,
+            expected_previous_category_id: previous_category_id.0,
+            expected_previous_started_at_utc: previous_started_at_utc,
+            transition_at_utc: switched_at_utc,
+            completed_session,
+            resulting_active: LegacyActiveReceipt {
+                category_id: category_id.0,
+                description: resulting_description,
+                started_at_utc: switched_at_utc,
+            },
+        };
+        let mut prepared_checkpoint = match self.build_runtime_checkpoint() {
+            Ok(checkpoint) => checkpoint,
+            Err(error) => {
+                self.time_tracker = previous_tracker;
+                self.session = previous_session;
+                self.record_storage_result_for::<()>(
+                    PersistenceOperation::CheckpointSave,
+                    RecoveryAction::ReloadAuthority,
+                    Err(error),
+                );
+                return false;
+            }
+        };
+        prepared_checkpoint.legacy_transition = Some(receipt);
+        if let Err(error) =
+            storage::write_json_atomic(&storage::get_detached_runtime_path(), &prepared_checkpoint)
+        {
+            self.time_tracker = previous_tracker;
+            self.session = previous_session;
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::CheckpointSave,
+                RecoveryAction::ReloadAuthority,
+                Err(error),
+            );
+            return false;
+        }
+
+        self.persist_sessions();
+        if self.has_persistence_recovery() {
+            return false;
+        }
+        self.persist_categories();
+        if self.has_persistence_recovery() {
+            return false;
+        }
         self.sync_drift_idle_state();
         self.refresh_active_runtime_checkpoint();
 
         !self.has_persistence_recovery()
-    }
-
-    fn transition_operation_id(
-        &self,
-        kind: &str,
-        expected_stable_id: &str,
-        at_utc: DateTime<Utc>,
-        discriminator: &str,
-    ) -> String {
-        format!(
-            "{}:{}:{}:{}",
-            kind,
-            expected_stable_id,
-            at_utc.to_rfc3339_opts(SecondsFormat::Nanos, true),
-            discriminator
-        )
     }
 
     fn simulation_backlog_duration_at(&self, now_utc: DateTime<Utc>) -> Duration {
@@ -1672,6 +1852,7 @@ impl App {
             pending_mutations: Vec::new(),
             recovery_target_utc: None,
             legacy_recovery_committed: false,
+            legacy_transition: None,
         })
     }
 
@@ -1736,6 +1917,33 @@ impl App {
         }
     }
 
+    fn reconcile_legacy_transition_receipt(
+        &mut self,
+        checkpoint: &mut DetachedRuntimeCheckpoint,
+    ) -> Result<(), String> {
+        let Some(receipt) = checkpoint.legacy_transition.clone() else {
+            return Ok(());
+        };
+        if self.sqlite_database_path.is_some() {
+            return Err(
+                "legacy transition receipt appeared under SQLite authority; evidence retained"
+                    .to_string(),
+            );
+        }
+        validate_legacy_switch_checkpoint(checkpoint, &receipt)?;
+        let staged_tracker = publish_legacy_switch_replay(
+            &self.time_tracker,
+            &self.archived_categories,
+            checkpoint,
+            &receipt,
+            &storage::get_time_log_path(),
+            &storage::get_categories_path(),
+            &storage::get_detached_runtime_path(),
+        )?;
+        self.time_tracker = staged_tracker;
+        Ok(())
+    }
+
     fn restore_from_detached_checkpoint(&mut self) -> bool {
         let (mut checkpoint, was_committed): (DetachedRuntimeCheckpoint, bool) =
             if let Some(database_path) = self.sqlite_database_path.clone() {
@@ -1775,9 +1983,21 @@ impl App {
                 }
             };
 
+        if self.sqlite_database_path.is_none()
+            && let Err(error) = self.reconcile_legacy_transition_receipt(&mut checkpoint)
+        {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::CheckpointRecovery,
+                RecoveryAction::ReloadAuthority,
+                Err(error),
+            );
+            return false;
+        }
+
         self.checkpoint_recovery_active = true;
 
         if checkpoint.schema_version != DetachedRuntimeCheckpoint::VERSION
+            && checkpoint.schema_version != DetachedRuntimeCheckpoint::PREVIOUS_VERSION
             && checkpoint.schema_version != DetachedRuntimeCheckpoint::LEGACY_VERSION
         {
             if let Some(database_path) = self.sqlite_database_path.clone() {
@@ -2191,6 +2411,7 @@ mod bounded_checkpoint_tests {
             pending_mutations: Vec::new(),
             recovery_target_utc: None,
             legacy_recovery_committed: false,
+            legacy_transition: None,
         }
     }
 
@@ -2252,5 +2473,265 @@ mod category_catalog_tests {
         assert!(ids.contains(&DRIFT_CATEGORY_ID.0));
         assert!(ids.contains(&1));
         assert!(ids.contains(&7));
+    }
+}
+
+#[cfg(test)]
+mod legacy_switch_replay_tests {
+    use std::{fs, path::PathBuf, time::SystemTime};
+
+    use chrono::{TimeZone, Utc};
+    use ratatui::style::Color;
+
+    use super::{
+        DetachedRuntimeCheckpoint, publish_legacy_switch_replay, transition_operation_id,
+        validate_legacy_switch_checkpoint,
+    };
+    use crate::{
+        domain::{
+            Category, CategoryId, DRIFT_CATEGORY_ID, OperationalDayPolicy, Session, TimeTracker,
+        },
+        legacy_transition::{
+            LegacyActiveReceipt, LegacySessionReceipt, LegacyTransitionKind,
+            LegacyTransitionReceipt,
+        },
+        sand::SandState,
+        storage,
+    };
+
+    fn unique_dir(label: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        std::env::temp_dir().join(format!("strata-{label}-{}-{stamp}", std::process::id()))
+    }
+
+    fn category(id: u64, name: &str, description: &str) -> Category {
+        Category {
+            id: CategoryId::new(id),
+            name: name.to_string(),
+            color: if id == DRIFT_CATEGORY_ID.0 {
+                Color::White
+            } else {
+                crate::constants::COLORS[((id - 1) as usize) % crate::constants::COLORS.len()]
+            },
+            description: description.to_string(),
+            karma_effect: if id == DRIFT_CATEGORY_ID.0 { 0 } else { 1 },
+        }
+    }
+
+    fn categories(before_switch: bool) -> Vec<Category> {
+        vec![
+            category(DRIFT_CATEGORY_ID.0, "idle", ""),
+            category(1, "Previous", if before_switch { "focus" } else { "" }),
+            category(2, "Next", "next task"),
+        ]
+    }
+
+    fn completed_session() -> Session {
+        Session {
+            id: 1,
+            date: "2026-08-02".to_string(),
+            category_id: CategoryId::new(1),
+            project: String::new(),
+            description: "focus".to_string(),
+            start_time: "10:00:00".to_string(),
+            end_time: "11:00:00".to_string(),
+            elapsed_seconds: 3600,
+            started_at_utc: Some(Utc.with_ymd_and_hms(2026, 8, 2, 16, 0, 0).unwrap()),
+            ended_at_utc: Some(Utc.with_ymd_and_hms(2026, 8, 2, 17, 0, 0).unwrap()),
+            operational_day_policy: Some(OperationalDayPolicy {
+                utc_offset_seconds: -21600,
+                start_minutes: 360,
+            }),
+        }
+    }
+
+    fn receipt() -> LegacyTransitionReceipt {
+        let previous_start = Utc.with_ymd_and_hms(2026, 8, 2, 16, 0, 0).unwrap();
+        let transition = Utc.with_ymd_and_hms(2026, 8, 2, 17, 0, 0).unwrap();
+        let expected_identity = format!(
+            "legacy:1:{}",
+            previous_start.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
+        );
+        LegacyTransitionReceipt {
+            version: LegacyTransitionReceipt::VERSION,
+            operation_id: transition_operation_id(
+                "legacy-switch",
+                &expected_identity,
+                transition,
+                "2",
+            ),
+            kind: LegacyTransitionKind::Switch,
+            expected_previous_category_id: 1,
+            expected_previous_started_at_utc: previous_start,
+            transition_at_utc: transition,
+            completed_session: Some(LegacySessionReceipt::from_session(&completed_session())),
+            resulting_active: LegacyActiveReceipt {
+                category_id: 2,
+                description: "next task".to_string(),
+                started_at_utc: transition,
+            },
+        }
+    }
+
+    fn checkpoint(receipt: LegacyTransitionReceipt) -> DetachedRuntimeCheckpoint {
+        let transition = receipt.transition_at_utc;
+        DetachedRuntimeCheckpoint {
+            schema_version: DetachedRuntimeCheckpoint::VERSION,
+            detached_at_utc: transition,
+            simulation_time_utc: transition,
+            spawn_accumulator_nanos: 0,
+            physics_accumulator_nanos: 0,
+            active_category_id: 2,
+            active_description: "next task".to_string(),
+            active_session_started_at_utc: Some(transition),
+            sand_state: SandState {
+                version: SandState::VERSION,
+                grid_width: 2,
+                grid_height: 4,
+                grains: Vec::new(),
+                frame_count: 0,
+                sweep_left_to_right: true,
+                rng_state: 1,
+                pending_grains: Vec::new(),
+                pending_runs: Vec::new(),
+            },
+            pending_mutations: Vec::new(),
+            recovery_target_utc: None,
+            legacy_recovery_committed: false,
+            legacy_transition: Some(receipt),
+        }
+    }
+
+    fn load_tracker(
+        categories_path: &std::path::Path,
+        sessions_path: &std::path::Path,
+    ) -> TimeTracker {
+        let loaded_categories = storage::try_load_categories_from_csv(categories_path).unwrap();
+        let mut catalog = loaded_categories.categories.clone();
+        catalog.extend(loaded_categories.archived_categories.iter().cloned());
+        let loaded_sessions = storage::try_load_sessions_from_csv(sessions_path, &catalog).unwrap();
+        let mut tracker = TimeTracker::new();
+        tracker.apply_loaded_state(
+            loaded_categories.categories,
+            loaded_categories.next_category_id,
+            loaded_sessions.sessions,
+            loaded_sessions.next_session_id,
+        );
+        tracker
+    }
+
+    fn assert_converged(
+        categories_path: &std::path::Path,
+        sessions_path: &std::path::Path,
+        checkpoint_path: &std::path::Path,
+    ) {
+        let loaded_categories = storage::try_load_categories_from_csv(categories_path).unwrap();
+        let previous = loaded_categories
+            .categories
+            .iter()
+            .find(|category| category.id == CategoryId::new(1))
+            .unwrap();
+        let next = loaded_categories
+            .categories
+            .iter()
+            .find(|category| category.id == CategoryId::new(2))
+            .unwrap();
+        assert_eq!(previous.description, "");
+        assert_eq!(next.description, "next task");
+
+        let mut catalog = loaded_categories.categories.clone();
+        catalog.extend(loaded_categories.archived_categories.iter().cloned());
+        let loaded_sessions = storage::try_load_sessions_from_csv(sessions_path, &catalog).unwrap();
+        assert_eq!(loaded_sessions.sessions.len(), 1);
+        assert_eq!(loaded_sessions.sessions[0].id, 1);
+        assert_eq!(loaded_sessions.sessions[0].elapsed_seconds, 3600);
+
+        let checkpoint: DetachedRuntimeCheckpoint = storage::read_json(checkpoint_path).unwrap();
+        assert!(checkpoint.legacy_transition.is_none());
+    }
+
+    #[test]
+    fn every_persisted_switch_kill_point_converges_without_duplicate_time() {
+        for phase in 0..3 {
+            let dir = unique_dir(&format!("legacy-switch-phase-{phase}"));
+            fs::create_dir_all(&dir).unwrap();
+            let categories_path = dir.join("categories.csv");
+            let sessions_path = dir.join("time_log.csv");
+            let checkpoint_path = dir.join("detached_runtime.json");
+            let receipt = receipt();
+            let checkpoint = checkpoint(receipt.clone());
+
+            let seeded_categories = categories(phase < 2);
+            storage::save_category_catalog_to_csv(&categories_path, &seeded_categories, &[])
+                .unwrap();
+            if phase >= 1 {
+                storage::save_sessions_to_csv(
+                    &sessions_path,
+                    &[completed_session()],
+                    &seeded_categories,
+                )
+                .unwrap();
+            }
+            storage::write_json_atomic(&checkpoint_path, &checkpoint).unwrap();
+
+            let tracker = load_tracker(&categories_path, &sessions_path);
+            let mut loaded_checkpoint: DetachedRuntimeCheckpoint =
+                storage::read_json(&checkpoint_path).unwrap();
+            validate_legacy_switch_checkpoint(&loaded_checkpoint, &receipt).unwrap();
+            let replayed = publish_legacy_switch_replay(
+                &tracker,
+                &[],
+                &mut loaded_checkpoint,
+                &receipt,
+                &sessions_path,
+                &categories_path,
+                &checkpoint_path,
+            )
+            .unwrap();
+            assert_eq!(replayed.sessions.len(), 1);
+            assert_converged(&categories_path, &sessions_path, &checkpoint_path);
+            fs::remove_dir_all(dir).ok();
+        }
+    }
+
+    #[test]
+    fn failed_catalog_publication_retains_receipt_after_session_converges() {
+        let dir = unique_dir("legacy-switch-catalog-failure");
+        fs::create_dir_all(&dir).unwrap();
+        let categories_path = dir.join("categories-as-directory");
+        let sessions_path = dir.join("time_log.csv");
+        let checkpoint_path = dir.join("detached_runtime.json");
+        fs::create_dir_all(&categories_path).unwrap();
+
+        let receipt = receipt();
+        let mut checkpoint = checkpoint(receipt.clone());
+        storage::write_json_atomic(&checkpoint_path, &checkpoint).unwrap();
+        let mut tracker = TimeTracker::new();
+        tracker.apply_loaded_state(categories(true), 3, Vec::new(), 1);
+
+        let error = match publish_legacy_switch_replay(
+            &tracker,
+            &[],
+            &mut checkpoint,
+            &receipt,
+            &sessions_path,
+            &categories_path,
+            &checkpoint_path,
+        ) {
+            Ok(_) => panic!("catalog publication unexpectedly succeeded"),
+            Err(error) => error,
+        };
+        assert!(!error.is_empty());
+
+        let disk_checkpoint: DetachedRuntimeCheckpoint =
+            storage::read_json(&checkpoint_path).unwrap();
+        assert!(disk_checkpoint.legacy_transition.is_some());
+        let loaded_sessions =
+            storage::try_load_sessions_from_csv(&sessions_path, &categories(true)).unwrap();
+        assert_eq!(loaded_sessions.sessions.len(), 1);
+        fs::remove_dir_all(dir).ok();
     }
 }

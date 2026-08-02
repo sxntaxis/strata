@@ -518,6 +518,7 @@ impl CategoryStore {
     }
 }
 
+#[derive(Clone)]
 pub struct TimeTracker {
     pub sessions: Vec<Session>,
     category_store: CategoryStore,

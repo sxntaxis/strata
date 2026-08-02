@@ -14,7 +14,7 @@ terminal lifecycle + application orchestration + explicit interaction modes
     ↓
 domain time, category, session, report, recovery, and snapshot rules
     ↓
-SQLite repository/runtime coordination + legacy catalog/checkpoint custody + sediment simulation
+SQLite repository/runtime coordination + legacy catalog/checkpoint/receipt custody + sediment simulation
 ```
 
 Current responsibility map:
@@ -23,11 +23,12 @@ Current responsibility map:
 - `src/lib.rs` — shared CLI/TUI invocation and startup authority.
 - `src/cli.rs` — command lifecycle, reports, exports, migration, and maintenance.
 - `src/keybindings.rs` — validated runtime/time settings plus configured Bound/Unbound/Disabled action state, mandatory key policy, contextual aliases, and the shared input resolver.
-- `src/domain.rs` — canonical sessions, project/category identity, operational-day allocation, and reports.
+- `src/domain.rs` — canonical sessions, project/category identity, operational-day allocation, reports, and cloneable staged legacy transition state.
 - `src/temporal.rs` — monotonic/wall reconciliation, fixed-offset civil policy, and exact overlap slicing.
+- `src/legacy_transition.rs` — schema-versioned legacy transition receipts, completed-session payload validation, and exact/idempotent session reconciliation.
 - `src/sqlite.rs` and `src/sqlite/**` — schema migrations, category archival, repositories, active/checkpoint transition transactions, checkpoint custody, deterministic interchange, backup/restore, and fault certification.
-- `src/storage.rs` — XDG paths, strict legacy active/archived category catalog, session-reference validation, atomic file helpers, legacy runtime checkpoint files, and custody-separated contribution files.
-- `src/app.rs` and `src/app/**` — TUI orchestration, active/archived category projections, semantic-edge checkpoint refresh, explicit modal/edit state, persistence reconciliation, bounded recovery, historical artifact selection, context selection, resolver execution, palette/atlas projection, and rendering.
+- `src/storage.rs` — XDG paths, strict legacy active/archived category catalog, strict session identity/reference validation, atomic file helpers, legacy runtime checkpoint files, and custody-separated contribution files.
+- `src/app.rs` and `src/app/**` — TUI orchestration, active/archived category projections, semantic-edge checkpoint refresh, legacy switch receipt publication/replay, explicit modal/edit state, persistence reconciliation, bounded recovery, historical artifact selection, context selection, resolver execution, palette/atlas projection, and rendering.
 - `src/app/terminal_lifecycle.rs` — raw-mode/alternate-screen RAII, process-wide panic restoration, exactly-once cleanup, runtime failure composition, and debug fault certification.
 - `src/sand/engine.rs` — canonical logical grains, compressed pending mass, physics, viewport projection, and Braille rendering.
 - `src/sand/recovery.rs` — bounded recovery arithmetic and topology-preserving detached contribution.
@@ -78,9 +79,22 @@ A runtime checkpoint belongs to one active-session generation.
 - SQLite startup validates checkpoint identity against authoritative active state before applying recovery payload state; incompatible evidence is quarantined.
 - Application orchestration immediately publishes current-generation evidence after successful switch, reset, or persisted active-description change.
 - Unrelated category metadata does not trigger checkpoint publication.
-- Legacy authority also refreshes evidence at those semantic edges, but its sessions and checkpoint remain separate files and therefore do not yet form an atomic transition.
 
-The partial recovery contract and remaining issue #10 boundary are recorded in `docs/RECOVERY_AUTHORITY.md`.
+Legacy switch transitions use a certified multi-file receipt protocol:
+
+1. stage the resulting state;
+2. publish schema-3 checkpoint evidence with a deterministic switch receipt;
+3. publish completed session history;
+4. publish category-description authority;
+5. clear the receipt only after convergence.
+
+Prepared-checkpoint failure rolls back staged memory. Once the receipt is durable, startup replays missing effects idempotently, exact-matches already published sessions, rejects conflicts, and retains the receipt after later publication failures. The real publication helper is certified from receipt-only, receipt-plus-session, and receipt-plus-session-plus-catalog crash states.
+
+Whole-second ledger semantics own the completed row. Subsecond monotonic remainder is compatible with a canonical completed start of `switch UTC - whole elapsed seconds`; it is not required to equal the original wall start exactly.
+
+Legacy reset and finish remain outside this certified receipt boundary.
+
+The recovery contract and remaining issue #10 boundary are recorded in `docs/RECOVERY_AUTHORITY.md`.
 
 ### Reports and exports
 
@@ -162,6 +176,10 @@ Owns stable category identity, active/archived state, historical display metadat
 
 Owns the current stable active-session identity and its transition receipts. Checkpoint evidence may describe that generation but cannot replace authoritative active identity or survive a completed transition under a stale stable ID.
 
+### Legacy transition receipt
+
+Owns replay of one prepared multi-file transition. It may exact-match or publish the recorded completed row and metadata effects, but it cannot reinterpret elapsed duration, invent a missing category, accept conflicting history, or retire itself before every named authority converges.
+
 ### Runtime recovery
 
 Owns checkpoint evidence and exact elapsed contribution since the checkpoint. It may add mass and advance accumulator remainders, but may not replay unbounded physics, relax topology, discard protected evidence, or apply payload state to a different active generation.
@@ -184,13 +202,13 @@ The terminal guard owns host-terminal acquisition and restoration. The applicati
 
 ### Interface
 
-TUI and CLI translate user intent and present state. Neither may own an independent ledger, reinterpret authority, mutate canonical sediment to fit the terminal, advance historical artifacts while viewing them, mutate history through ambiguous focus, invent fallback input routes, mislabel unreachable commands, silently convert unresolved categories to idle, apply stale checkpoint identity, or leave the host terminal in application mode after control exits Strata.
+TUI and CLI translate user intent and present state. Neither may own an independent ledger, reinterpret authority, mutate canonical sediment to fit the terminal, advance historical artifacts while viewing them, mutate history through ambiguous focus, invent fallback input routes, mislabel unreachable commands, silently convert unresolved categories to idle, apply stale checkpoint identity, clear an unresolved transition receipt, or leave the host terminal in application mode after control exits Strata.
 
 ## Current architectural frontier
 
-Persistence, temporal, domain, report, sediment, interaction, cross-authority category integrity, and active/checkpoint generation coherence are complete. The next priorities are:
+Persistence, temporal, domain, report, sediment, interaction, cross-authority category integrity, active/checkpoint generation coherence, and legacy switch replay are complete. The next priorities are:
 
-1. implement RECONCILIATION-001B2: stable legacy transition receipts, kill-point replay certification, initial active-start evidence, and visible recovery cutoff semantics for issue #10;
+1. implement RECONCILIATION-001B2B: stable legacy reset/finish receipts, initial active-start evidence, exact transition-edge sediment reconciliation, and visible recovery cutoff semantics for issue #10;
 2. design the explicit merge/reassignment and permanent-deletion remainder of issue #13;
 3. later domain/UI distinction work under issue #22;
 4. later profile authority, including complete isolation and deliberate switching under issue #15.
@@ -208,6 +226,6 @@ Persistence, temporal, domain, report, sediment, interaction, cross-authority ca
 - An unbound action is not a disabled action.
 - An archived category is not deleted history.
 - An unresolved category reference is not idle.
-- A refreshed legacy checkpoint is not an atomic multi-file transition receipt.
+- A switch receipt is not authority for reset or finish.
 - A checkpoint without visible cutoff semantics is not proof of exact post-capture elapsed time.
 - CSV, JSON, and ICS are external adapters, not canonical domain models.
