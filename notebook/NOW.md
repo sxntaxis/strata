@@ -5,15 +5,15 @@ state: active
 created: 2026-08-01
 updated: 2026-08-02
 authority: working
-summary: SEDIMENT-001A is complete; lossless logical mass and explicit dimension units are certified.
-next: Implement SEDIMENT-001B for issue #7: viewport-independent canonical sediment and non-destructive resize.
+summary: SEDIMENT-001A and 001B are complete; logical mass and topology now survive ingress blockage and terminal resize.
+next: Implement SEDIMENT-001C for issue #6: bounded, retry-safe detached recovery.
 ---
 
 # NOW — Strata
 
 ## Current phase
 
-The SQLite migration program, AUTHORITY-001, TEMPORAL-001, TEMPORAL-002, DOMAIN-001, REPORT-001, and SEDIMENT-001A are complete. Strata now has durable persistence, explicit clock and boundary semantics, preserved project/category identity, truthful deterministic report/export projections, and lossless sediment ingress with explicit geometry units.
+The SQLite migration program, AUTHORITY-001, TEMPORAL-001, TEMPORAL-002, DOMAIN-001, REPORT-001, SEDIMENT-001A, and SEDIMENT-001B are complete. Strata now has durable persistence, explicit clock and boundary semantics, preserved project/category identity, truthful deterministic report/export projections, lossless sediment ingress, and canonical sediment topology independent of terminal geometry.
 
 The project is implementing **sediment conservation**.
 
@@ -31,6 +31,7 @@ The project is implementing **sediment conservation**.
 - Braille-cell color mixing is intentional.
 - Every due grain exists exactly once as placed or pending logical mass.
 - Terminal-cell dimensions and Braille-dot grid dimensions are separate units.
+- The persisted logical grid owns canonical topology; terminal resize is projection only.
 
 ## Verified technical baseline
 
@@ -48,6 +49,11 @@ The project is implementing **sediment conservation**.
 - Randomized ingress scans every physical column before declaring blockage.
 - Fully blocked grains remain category-preserving pending mass and survive persistence/restore.
 - `grain_count` accounts for placed plus pending logical mass.
+- Terminal shrink crops presentation without deleting or repacking hidden grains.
+- Terminal expansion pads presentation without stretching or relocating canonical grains.
+- Resize leaves canonical dimensions, coordinates, category neighborhoods, pending order, frame count, sweep direction, and RNG state unchanged.
+- Persisted sediment restores its canonical dimensions on any opening viewport.
+- The destructive resize module and resize-triggered gravity path are removed.
 - Persistence, temporal, projection, and sediment-state failures remain fail-closed and recoverable.
 
 ## Completed post-migration units
@@ -58,25 +64,25 @@ The project is implementing **sediment conservation**.
 - **DOMAIN-001** — issues #2, #12: persisted project identity, explicit category requirement, and completed idle vocabulary migration.
 - **REPORT-001** — issues #1, #3, #14, #17, #28: truthful ranges/help, provisional active projection, valid ICS, and deterministic ordering.
 - **SEDIMENT-001A** — issues #16, #26: dimension-unit truth, exact Braille output width, complete ingress scanning, and durable pending logical mass.
+- **SEDIMENT-001B** — issue #7: canonical logical canvas, projection-only resize, exact topology preservation, and direct canonical restore.
 
 Complete profile isolation remains open under issue #15. Project CRUD, TUI project selection, project-grouped reporting, and a TUI custom-range editor remain future work.
 
 ## Active sequence
 
-1. **SEDIMENT-001B** — issue #7: canonical logical sediment independent of viewport and non-destructive resize.
-2. **SEDIMENT-001C** — issue #6: bounded, retry-safe detached recovery.
-3. **SEDIMENT-001D** — issue #18: explicit immutable historical snapshot kinds and provenance.
-4. **INTERACTION-001** — issues #19, #20, #24: explicit edit modes, terminal lifecycle guard, truthful keybinding policy.
-5. Reconcile remaining partially satisfied issues #5, #10, #13 and later domain/profile work.
+1. **SEDIMENT-001C** — issue #6: bounded, retry-safe detached recovery.
+2. **SEDIMENT-001D** — issue #18: explicit immutable historical snapshot kinds and provenance.
+3. **INTERACTION-001** — issues #19, #20, #24: explicit edit modes, terminal lifecycle guard, truthful keybinding policy.
+4. Reconcile remaining partially satisfied issues #5, #10, #13 and later domain/profile work.
 
 ## Current risks
 
-- The live viewport still owns the current physical grid dimensions and resize still repacks/mutates canonical topology.
 - Detached catch-up still replays simulation work rather than applying bounded logical mass.
+- Recovery evidence and sediment/session commit do not yet have one explicit retry-safe transaction contract.
 - Historical snapshots do not yet have explicit kinds and immutable provenance.
 - Interaction edit modes and terminal cleanup remain incompletely enforced.
 - Complete profile switching/isolation remains open.
 
 ## Next
 
-Implement **SEDIMENT-001B** for issue #7. Separate canonical logical sediment from the current viewport, make shrink non-destructive, preserve hidden topology for later expansion, and remove resize-triggered canonical gravity/repacking without weakening the placed/pending mass authority established by SEDIMENT-001A.
+Implement **SEDIMENT-001C** for issue #6. Restore committed canonical topology directly, calculate detached elapsed contribution once, add the missed category mass through bounded work, and retain recovery evidence until sediment and session state commit together without duplication or loss across repeated reopen.

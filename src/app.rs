@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     constants::{
         APP_LAYOUT_SETTINGS, BLINK_SETTINGS, CATCHUP_SETTINGS, FACE_SETTINGS,
-        RUNTIME_LOOP_SETTINGS, SAND_ENGINE, TIME_SETTINGS,
+        RUNTIME_LOOP_SETTINGS, TIME_SETTINGS,
     },
     domain::{
         Category, CategoryId, DRIFT_CATEGORY_DISPLAY_NAME, DRIFT_CATEGORY_ID, FirstDayOfWeek,
@@ -1333,18 +1333,13 @@ impl App {
             return None;
         }
 
-        let expected_grid_width = cell_width * SAND_ENGINE.dot_width as u16;
-        let expected_grid_height = cell_height * SAND_ENGINE.dot_height as u16;
         let visual_cadence = Duration::from_millis(CATCHUP_SETTINGS.visual_refresh_ms);
 
         let should_recreate = self
             .simulation
             .catchup_visual_engine
             .as_ref()
-            .map(|engine| {
-                engine.grid_width_dots != expected_grid_width
-                    || engine.grid_height_dots != expected_grid_height
-            })
+            .map(|engine| engine.cell_width != cell_width || engine.cell_height != cell_height)
             .unwrap_or(true);
         if should_recreate {
             self.simulation.catchup_visual_engine = Some(SandEngine::new(cell_width, cell_height));

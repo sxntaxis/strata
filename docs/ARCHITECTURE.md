@@ -30,7 +30,7 @@ Current responsibility map:
 - `src/sqlite.rs` and `src/sqlite/**` — schema migration, authoritative repositories, CLI/TUI adapters, runtime coordination, failure certification, deterministic interchange, backup/restore, and legacy-evidence custody.
 - `src/storage.rs` — XDG paths, pre-activation legacy compatibility, migration input, and atomic file helpers.
 - `src/app.rs` and `src/app/**` — TUI orchestration, interaction, rendering, reports, modals, and persistence-recovery controls.
-- `src/sand/**` — logical grains, physics, resizing, snapshots, and Braille rendering.
+- `src/sand/**` — canonical logical grains, physics, pending ingress, viewport projection, snapshots, and Braille rendering.
 
 ## Authority state
 
@@ -112,7 +112,18 @@ SEDIMENT-001A establishes the first sediment-conservation primitives:
 - placed plus pending mass is persisted through `SandState`, SQLite, detached checkpoints, catch-up projections, report previews, and legacy JSON compatibility;
 - clearing and category removal apply to both placed and pending forms.
 
-Viewport-independent topology, bounded detached recovery, and immutable snapshot kinds remain SEDIMENT-001B through 001D. The evolving accepted contract is `docs/SEDIMENT_AUTHORITY.md`.
+SEDIMENT-001B separates canonical sediment from terminal geometry:
+
+- the persisted logical dot grid owns canonical dimensions, grain coordinates, category neighborhoods, and topology;
+- `cell_width` and `cell_height` are presentation-only viewport state;
+- terminal resize changes only viewport dimensions and cannot invoke gravity, repacking, ingress placement, or logical-state mutation;
+- rendering uses a horizontally centered, bottom-aligned crop/pad projection over the canonical grid;
+- grains outside a smaller viewport remain recoverable and reappear when the viewport expands;
+- restore installs persisted canonical dimensions and coordinates directly, independent of the opening terminal size;
+- repeated no-time-elapsed viewport oscillation is exactly idempotent at the `SandState` level;
+- the former destructive resize module and edge-band policy are removed.
+
+Bounded detached recovery and immutable snapshot kinds remain SEDIMENT-001C and 001D. The evolving accepted contract is `docs/SEDIMENT_AUTHORITY.md`.
 
 ## Truth boundaries
 
@@ -122,7 +133,7 @@ Owns exact elapsed intervals, timestamps, layers, project identity, notes, opera
 
 ### Sediment formation
 
-Owns accountable visual history. Total represented duration and per-layer mass must be conserved exactly. Topology, contours, color composition, neighborhoods, and broad chronology require explicit preservation contracts.
+Owns accountable visual history. Total represented duration and per-layer mass must be conserved exactly. Canonical topology, contours, color composition, neighborhoods, and broad chronology are independent of the current viewport.
 
 ### Reports and balance
 
@@ -130,13 +141,13 @@ Are projections over chronological truth. They may omit idle or apply user-defin
 
 ### Interface
 
-TUI and CLI translate user intent and present state. Neither may maintain an independent ledger, independently reinterpret configuration, or silently select a different profile.
+TUI and CLI translate user intent and present state. Neither may maintain an independent ledger, independently reinterpret configuration, silently select a different profile, or mutate canonical sediment merely to fit the terminal.
 
 ## Current architectural frontier
 
-Persistence, startup configuration, clock authority, interval boundaries, session classification, report/export projection correctness, sediment dimension units, and lossless ingress are no longer the primary risks. The next programs are:
+Persistence, startup configuration, clock authority, interval boundaries, session classification, report/export projection correctness, sediment dimension units, lossless ingress, and viewport-independent topology are no longer the primary risks. The next programs are:
 
-1. complete viewport-independent sediment topology, bounded recovery, and snapshot identity;
+1. complete bounded detached recovery and snapshot identity;
 2. complete interaction-mode and terminal-lifecycle contracts.
 
 Complete profile isolation and deliberate runtime profile switching remain separate work under issue #15.
@@ -146,4 +157,5 @@ Complete profile isolation and deliberate runtime profile switching remain separ
 - GitHub issues describe defects and proposals; they do not override accepted product doctrine.
 - Notebook research remains working memory until promoted.
 - Sediment snapshots and report output are projections, not substitutes for their owning state.
+- Terminal dimensions are presentation state, not canonical sediment dimensions.
 - CSV, JSON, and ICS are external adapters, not canonical domain models.

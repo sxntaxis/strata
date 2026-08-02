@@ -394,8 +394,8 @@ impl App {
 
         day_sessions.sort_by(|a, b| a.2.cmp(&b.2).then(a.3.cmp(&b.3)).then(a.4.cmp(&b.4)));
 
-        let grid_width = self.sand_engine.grid_width_dots as usize;
-        let grid_height = self.sand_engine.grid_height_dots as usize;
+        let grid_width = self.sand_engine.grid_width_dots;
+        let grid_height = self.sand_engine.grid_height_dots;
         let capacity = grid_width.saturating_mul(grid_height);
         if capacity == 0 {
             return None;
