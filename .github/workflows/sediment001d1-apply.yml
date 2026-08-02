@@ -23,7 +23,9 @@ jobs:
         with:
           components: rustfmt, clippy
       - name: Apply SEDIMENT-001D1
-        run: python tools/sediment001d1-apply.py
+        run: |
+          python tools/sediment001d1-apply.py
+          python tools/sediment001d1-fix.py
       - name: Format
         run: cargo fmt --all
       - name: Check formatting
