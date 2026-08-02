@@ -23,7 +23,7 @@ The original issue descriptions predate the completed SQLite migration. Their ac
 | #2, #12 | Completed by DOMAIN-001: project/category identity, explicit classification, and idle vocabulary. | none |
 | #1, #3, #14, #17, #28 | Completed by REPORT-001: truthful ranges/help, provisional active projection, valid ICS, and deterministic ordering. | none |
 | #5 | Completed by RECONCILIATION-001A: malformed or unknown legacy session category IDs fail closed, retain the original value for repair, and are never reinterpreted as idle. | none |
-| #10 | Partially completed by RECONCILIATION-001B1: SQLite switch/reset/finish now retire prior checkpoint generations transactionally; incompatible evidence blocks transitions; startup validates checkpoint identity; switch/reset/active-description changes refresh current evidence immediately. Remaining scope is stable legacy transition receipts, initial active-start/checkpoint coherence, kill-point certification, and explicit recovery-cutoff/uncertainty presentation. | RECONCILIATION-001B2 |
+| #10 | Partially completed by RECONCILIATION-001B1 and B2A: SQLite active/checkpoint generations are transactional; incompatible evidence blocks transitions; startup validates checkpoint identity; semantic-edge refresh is immediate; legacy switches now publish a prepared schema-3 receipt and replay session/catalog effects idempotently from every durable kill point. Remaining scope is legacy reset/finish receipts, initial active-start/checkpoint coherence, exact transition-edge sediment reconciliation, and explicit recovery-cutoff/uncertainty presentation. | RECONCILIATION-001B2B |
 | #13 | Historical data-loss defect completed by RECONCILIATION-001A: active/archived metadata, reports, sand, tags, restore, and migration retain stable meaning under SQLite and legacy authority. Remaining scope is explicit merge/reassignment plus permanent-deletion policy and tests. | DOMAIN-002 or dedicated category-merge unit |
 | #6, #7, #16, #18, #26 | Completed by SEDIMENT-001: conserved mass/topology/recovery and truthful immutable historical artifacts. | none |
 | #19 | Completed by INTERACTION-001A: explicit report-log edit mode, stable-ID draft, atomic commit, full cancel, and command/text separation. | none |
@@ -33,12 +33,13 @@ The original issue descriptions predate the completed SQLite migration. Their ac
 
 ## Immediate action
 
-Implement RECONCILIATION-001B2 for issue #10:
+Implement RECONCILIATION-001B2B for issue #10:
 
-1. define stable legacy transition receipts for switch, reset, and finish;
-2. publish and replay each transition idempotently across separate session/checkpoint files;
-3. certify process death between every publication point;
+1. define stable legacy reset and finish receipts without weakening the accepted switch contract;
+2. replay those transitions idempotently across every separate authority publication;
+3. certify process death between each publication point;
 4. reconcile the initial active-start/checkpoint window;
-5. expose checkpoint capture, recovery target, reconstructed duration, and deterministic cutoff policy in the recovery interface.
+5. bind transition-edge sediment contribution to the same authoritative boundary;
+6. expose checkpoint capture, recovery target, reconstructed duration, and deterministic cutoff policy in the recovery interface.
 
 After issue #10 reaches evidence-based closure, return to the merge/reassignment transaction required to complete issue #13.
