@@ -31,16 +31,17 @@ Detailed rationale and unresolved implications live in `notebook/decisions/DECIS
 | STRATA-D022 | Report/export ordering is deterministic; ICS uses stable identities and authoritative UTC chronology with RFC 5545-safe serialization, and fails closed rather than inventing timestamps. | implemented and certified |
 | STRATA-D023 | Every due sediment grain is conserved logical mass in exactly one placed or pending form; physical ingress blockage never authorizes loss, and category identity persists in either form. | implemented and certified |
 | STRATA-D024 | Terminal-cell dimensions and Braille-dot grid dimensions are separate named units; rendering emits one Braille character per drawable terminal cell while simulation and persistence operate in dot-grid units. | implemented and certified |
+| STRATA-D025 | The persisted logical dot grid owns canonical sediment topology; terminal resizing is a centered, bottom-aligned projection-only operation and cannot mutate, repack, relax, or discard logical history. | implemented and certified |
 
 ## Explicitly unresolved
 
 The following are not accepted decisions:
 
-- final vertical chronology semantics;
+- final vertical chronology semantics beyond the accepted bottom-aligned viewport projection;
 - flat layers versus optional context or relationships;
 - final `Karma`/balance terminology;
 - clearing and formation lifecycle beyond placed/pending mass conservation;
-- viewport-independent sediment topology and resizing;
+- future zoom, compression, panning, or explicit canonical-canvas migration;
 - bounded detached catch-up and recovery semantics;
 - immutable historical snapshot kinds and provenance;
 - user-facing crash uncertainty beyond current recovery mechanics;
