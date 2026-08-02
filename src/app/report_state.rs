@@ -248,25 +248,11 @@ impl App {
         true
     }
 
-    pub(super) fn append_to_selected_report_session_tag(&mut self, ch: char) -> bool {
-        self.update_selected_report_session_tag(|description| description.push(ch))
-    }
-
-    pub(super) fn backspace_selected_report_session_tag(&mut self) -> bool {
-        self.update_selected_report_session_tag(|description| {
-            description.pop();
-        })
-    }
-
-    fn update_selected_report_session_tag<F>(&mut self, mutator: F) -> bool
-    where
-        F: FnOnce(&mut String),
-    {
+    pub(super) fn begin_report_log_edit(&mut self) -> bool {
         let logs = self.report_current_logs();
         if logs.is_empty() {
             return false;
         }
-
         let selected = self.report_log_selected_index.min(logs.len() - 1);
         let Some(row) = logs.get(selected) else {
             return false;
@@ -274,15 +260,37 @@ impl App {
         let Some(session_id) = row.session_id else {
             return false;
         };
+        self.report_log_edit = Some(super::ReportLogEditState {
+            session_id,
+            draft: row.description.clone(),
+        });
+        self.render_needed = true;
+        true
+    }
 
-        let mut description = row.description.clone();
-        mutator(&mut description);
+    pub(super) fn cancel_report_log_edit(&mut self) {
+        self.report_log_edit = None;
+        self.render_needed = true;
+    }
+
+    pub(super) fn commit_report_log_edit(&mut self) -> bool {
+        let Some(edit) = self.report_log_edit.clone() else {
+            return false;
+        };
+        if !self
+            .time_tracker
+            .sessions
+            .iter()
+            .any(|session| session.id == edit.session_id)
+        {
+            return false;
+        }
 
         if let Some(database_path) = self.sqlite_database_path.clone() {
             let result = crate::sqlite::update_tui_session_description(
                 &database_path,
-                session_id,
-                &description,
+                edit.session_id,
+                &edit.draft,
             );
             if self
                 .record_storage_result_for(
@@ -292,19 +300,49 @@ impl App {
                 )
                 .is_none()
             {
+                retain_report_edit_after_commit(&mut self.report_log_edit, false);
+                self.render_needed = true;
                 return false;
             }
-        }
-        if !self
-            .time_tracker
-            .set_session_description_by_id(session_id, description)
-        {
-            return false;
+            if !self
+                .time_tracker
+                .set_session_description_by_id(edit.session_id, edit.draft)
+            {
+                return false;
+            }
+        } else {
+            let mut sessions = self.time_tracker.sessions.clone();
+            let Some(session) = sessions
+                .iter_mut()
+                .find(|session| session.id == edit.session_id)
+            else {
+                return false;
+            };
+            session.description = edit.draft.clone();
+            let categories = self.time_tracker.categories_for_storage();
+            let result = crate::storage::save_sessions_to_csv(
+                &crate::storage::get_time_log_path(),
+                &sessions,
+                &categories,
+            )
+            .map_err(|error| error.to_string());
+            if self
+                .record_storage_result_for(
+                    PersistenceOperation::SessionEdit,
+                    RecoveryAction::ReloadAuthority,
+                    result,
+                )
+                .is_none()
+            {
+                retain_report_edit_after_commit(&mut self.report_log_edit, false);
+                self.render_needed = true;
+                return false;
+            }
+            self.time_tracker.sessions = sessions;
         }
 
-        if self.sqlite_database_path.is_none() {
-            self.persist_sessions();
-        }
+        retain_report_edit_after_commit(&mut self.report_log_edit, true);
+        self.render_needed = true;
         true
     }
 
@@ -469,5 +507,38 @@ impl App {
         } else if self.report_log_selected_index >= row_count {
             self.report_log_selected_index = row_count - 1;
         }
+    }
+}
+
+fn retain_report_edit_after_commit(edit: &mut Option<super::ReportLogEditState>, committed: bool) {
+    if committed {
+        *edit = None;
+    }
+}
+
+#[cfg(test)]
+mod report_edit_state_tests {
+    use super::retain_report_edit_after_commit;
+    use crate::app::ReportLogEditState;
+
+    #[test]
+    fn failed_commit_retains_complete_draft() {
+        let original = ReportLogEditState {
+            session_id: 42,
+            draft: "draft 世界".to_string(),
+        };
+        let mut edit = Some(original.clone());
+        retain_report_edit_after_commit(&mut edit, false);
+        assert_eq!(edit, Some(original));
+    }
+
+    #[test]
+    fn successful_commit_closes_edit_mode() {
+        let mut edit = Some(ReportLogEditState {
+            session_id: 42,
+            draft: "done".to_string(),
+        });
+        retain_report_edit_after_commit(&mut edit, true);
+        assert_eq!(edit, None);
     }
 }

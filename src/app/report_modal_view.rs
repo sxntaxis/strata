@@ -86,8 +86,21 @@ impl App {
             Style::default().fg(Color::DarkGray),
         ))
         .alignment(Alignment::Left);
+        let interaction_bottom_title = if self.report_logs_category_id.is_some() {
+            let label = if self.report_log_edit.is_some() {
+                "EDIT DESCRIPTION · Enter commit · Esc cancel"
+            } else {
+                "VIEW · Enter edit · Esc back"
+            };
+            Some(
+                Line::from(Span::styled(label, Style::default().fg(Color::Gray)))
+                    .alignment(Alignment::Right),
+            )
+        } else {
+            None
+        };
 
-        let frame_block = Block::default()
+        let mut frame_block = Block::default()
             .title(interval_title)
             .title(center_title)
             .title(total_title)
@@ -96,6 +109,9 @@ impl App {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(border_color));
+        if let Some(interaction_bottom_title) = interaction_bottom_title {
+            frame_block = frame_block.title_bottom(interaction_bottom_title);
+        }
 
         f.render_widget(ratatui::widgets::Clear, modal_rect);
         f.render_widget(frame_block.clone(), modal_rect);
@@ -249,7 +265,13 @@ impl App {
                     String::new()
                 };
 
-                let tag = self.truncate_label(row.description.trim(), tag_width);
+                let displayed_description = self
+                    .report_log_edit
+                    .as_ref()
+                    .filter(|edit| row.session_id == Some(edit.session_id))
+                    .map(|edit| format!("{}▏", edit.draft))
+                    .unwrap_or_else(|| row.description.trim().to_string());
+                let tag = self.truncate_label(&displayed_description, tag_width);
                 let tag_cell = format!("{tag:<width$}", width = tag_width);
 
                 let time_text = self.truncate_label(

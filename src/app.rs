@@ -89,6 +89,12 @@ struct PaletteEntry {
     hint: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ReportLogEditState {
+    session_id: usize,
+    draft: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum QueuedMutation {
     SwitchLayer(CategoryId),
@@ -174,6 +180,7 @@ struct App {
     report_period_offset: usize,
     report_logs_category_id: Option<CategoryId>,
     report_log_selected_index: usize,
+    report_log_edit: Option<ReportLogEditState>,
     report_snapshot_end_day: Option<String>,
     report_snapshot_artifact: Option<SedimentSnapshot>,
     report_snapshot_preview_key: Option<String>,
@@ -299,6 +306,7 @@ impl App {
             report_period_offset: 0,
             report_logs_category_id: None,
             report_log_selected_index: 0,
+            report_log_edit: None,
             report_snapshot_end_day: None,
             report_snapshot_artifact: None,
             report_snapshot_preview_key: None,
@@ -505,6 +513,7 @@ impl App {
         self.report_period_offset = 0;
         self.report_logs_category_id = None;
         self.report_log_selected_index = 0;
+        self.report_log_edit = None;
         self.report_snapshot_end_day = None;
         self.report_snapshot_artifact = None;
         self.report_snapshot_preview_key = None;
@@ -517,6 +526,7 @@ impl App {
         self.ui_mode = UiMode::Main;
         self.report_logs_category_id = None;
         self.report_log_selected_index = 0;
+        self.report_log_edit = None;
         self.report_snapshot_end_day = None;
         self.report_snapshot_artifact = None;
         self.report_snapshot_preview_key = None;

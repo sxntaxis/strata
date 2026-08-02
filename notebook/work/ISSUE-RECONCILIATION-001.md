@@ -23,13 +23,12 @@ The original issue descriptions predate the completed SQLite migration. Their ac
 | #2, #12 | Completed by DOMAIN-001: project/category identity, explicit classification, and idle vocabulary. | none |
 | #1, #3, #14, #17, #28 | Completed by REPORT-001: truthful ranges/help, provisional active projection, valid ICS, and deterministic ordering. | none |
 | #5, #10, #13 | SQLite integrity, active authority, and category archival likely satisfy substantial portions; verify every criterion before closing or rewriting. | reconciliation audit |
-| #6 | Completed by SEDIMENT-001C1/C2: compressed mass and bounded topology-preserving recovery. | none |
-| #7 | Completed by SEDIMENT-001B: canonical logical canvas and projection-only resize. | none |
-| #16, #26 | Completed by SEDIMENT-001A: lossless ingress, explicit geometry units, and exact Braille viewport dimensions. | none |
-| #18 | Completed by SEDIMENT-001D1/D2: typed snapshot identity, immutable viewing, revision-matched daily contributions, mutation/recovery reconciliation, and legacy evidence custody. | none |
-| #19, #20, #24 | Interaction modes, terminal cleanup, and keymap truth remain independent of SQLite. | INTERACTION-001 |
+| #6, #7, #16, #18, #26 | Completed by SEDIMENT-001: conserved mass/topology/recovery and truthful immutable historical artifacts. | none |
+| #19 | Completed by INTERACTION-001A: explicit report-log edit mode, stable-ID draft, atomic commit, full cancel, and command/text separation. | none |
+| #20 | Terminal cleanup and runtime/panic failure custody remain open. | INTERACTION-001B |
+| #24 | Keymap state, direct F1 behavior, contextual aliases, and atlas/runtime parity remain open. | INTERACTION-001C |
 | #22 | Active draft versus category metadata remains a domain/UI distinction. | DOMAIN-002 |
 
 ## Immediate action
 
-Implement INTERACTION-001 for issues #19, #20, and #24. Establish explicit edit-mode ownership, process-wide terminal restoration, and certified parity between configured bindings and runtime behavior.
+Implement INTERACTION-001B for issue #20. Establish one process-wide terminal lifecycle guard and certify restoration plus emergency checkpoint behavior on normal, error, detach, and panic paths.

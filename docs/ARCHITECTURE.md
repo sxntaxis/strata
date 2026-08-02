@@ -10,7 +10,7 @@ TUI / CLI
     ↓
 shared invocation and validated startup configuration
     ↓
-application orchestration
+application orchestration and explicit interaction modes
     ↓
 domain time, category, session, report, recovery, and snapshot rules
     ↓
@@ -27,7 +27,7 @@ Current responsibility map:
 - `src/temporal.rs` — monotonic/wall reconciliation, fixed-offset civil policy, and exact overlap slicing.
 - `src/sqlite.rs` and `src/sqlite/**` — schema migrations, repositories, runtime transactions, checkpoint custody, deterministic interchange, backup/restore, and fault certification.
 - `src/storage.rs` — XDG paths, legacy-file authority, atomic file helpers, and custody-separated contribution files.
-- `src/app.rs` and `src/app/**` — TUI orchestration, persistence reconciliation, bounded recovery, historical artifact selection, interaction, and rendering.
+- `src/app.rs` and `src/app/**` — TUI orchestration, explicit modal/edit state, persistence reconciliation, bounded recovery, historical artifact selection, input routing, and rendering.
 - `src/sand/engine.rs` — canonical logical grains, compressed pending mass, physics, viewport projection, and Braille rendering.
 - `src/sand/recovery.rs` — bounded recovery arithmetic and topology-preserving detached contribution.
 - `src/sand/snapshot.rs` — snapshot kinds, exact daily contribution construction, provenance, revisions, selection, and immutable rendering.
@@ -57,52 +57,37 @@ Current responsibility map:
 - Ordering is deterministic.
 - JSON schema version 2 and RFC 5545-safe ICS use stable identities and authoritative UTC endpoints.
 
-### Sediment mass and topology
+### Sediment authority
 
 - Every due grain is exactly one placed or pending logical grain.
 - Pending mass uses ordered category/count runs.
 - Terminal-cell and Braille-dot dimensions are distinct.
 - The persisted logical grid owns canonical topology.
-- Resize is a centered, bottom-aligned projection-only operation.
-- Blockage, resize, persistence, restore, and recovery conserve total and per-category mass.
+- Resize is projection-only.
+- Runtime recovery is bounded, topology-preserving, and evidence-safe.
+- Historical artifacts have explicit cumulative, daily, or derived identity.
+- Historical viewing is immutable.
+- Daily contributions derive from exact canonical session slices and are trusted only on revision match.
+- SQLite schema version 6 and distinct legacy-file paths preserve old cumulative daily evidence without reinterpretation.
 
-### Runtime recovery
+The detailed sediment contract is `docs/SEDIMENT_AUTHORITY.md`.
 
-- Runtime checkpoints cover autosave, detach, terminal closure, and crash recovery.
-- Evidence is claimed and a fixed target is persisted before recovered publication.
-- Checkpoint topology and engine metadata restore directly.
-- Missed mass becomes compressed pending runs.
-- Missed physics is never replayed.
-- SQLite recovery publication is atomic and reclaimable.
-- Legacy-file retry is deterministic.
-- Recovery completion reconciles every operational day touched by canonical slices.
+### Explicit report editing
 
-### Historical sediment artifacts
+Report-log view and report-description editing are separate interaction modes.
 
-`SedimentSnapshot` distinguishes:
+- View mode is read-only and retains normal command routing.
+- Confirm on a persisted report row creates a draft owned by the stable session ID.
+- In edit mode, every unmodified character—including ordinary command letters, spaces, and Unicode—is draft text.
+- Enter requests one persistence commit; Esc discards the complete draft.
+- Modified input is ignored unless the configured keymap resolves it to deliberate emergency Quit.
+- SQLite updates canonical history transactionally before memory changes.
+- Legacy-file authority writes a cloned collection before memory changes.
+- Failed persistence retains the complete draft and enters visible recovery.
+- Description edits do not invalidate sediment contributions.
+- The report UI exposes VIEW versus EDIT state and renders the live draft with a cursor marker.
 
-- cumulative checkpoints;
-- daily contributions;
-- derived previews.
-
-Each artifact records day, revision, provenance, idle policy, reconstruction status, and `SandState`. Kinds are non-interchangeable. Historical viewing is immutable and never advances physics or writes persistence.
-
-### Daily contribution authority
-
-Persisted daily sediment is derived from exact canonical session slices rather than cumulative live state.
-
-- Idle inclusion is explicit.
-- Every second is conserved, with overflow represented as pending runs.
-- Source revision covers all sediment-relevant chronology and identity fields.
-- Persisted artifacts are trusted only on exact schema/kind/day/revision match.
-- Missing or stale authority yields an in-memory derived preview until reconciliation publishes the correct contribution.
-- Autosave, full-state flush, relevant deletion, and recovery completion reconcile authoritative contributions.
-- Cross-boundary session deletion rebuilds every touched day.
-- Description-only edits do not invalidate sediment.
-
-SQLite schema version 6 introduces `snapshot_kind = 'daily-contribution'` while preserving old `daily` rows. Legacy-file authority uses `.contribution.json` while preserving old daily JSON files. Legacy cumulative artifacts are archive-in-place evidence and never silently become new authority.
-
-The detailed contract is `docs/SEDIMENT_AUTHORITY.md`.
+The evolving interaction contract is `docs/INTERACTION_AUTHORITY.md`.
 
 ## Truth boundaries
 
@@ -122,17 +107,22 @@ Owns checkpoint evidence and exact elapsed contribution since the checkpoint. It
 
 Own semantic identity and provenance for persisted or derived visual artifacts. A derived preview is a read-only projection; a daily contribution becomes authority only through explicit typed persistence.
 
+### Interaction
+
+Input routing owns the distinction between navigation, commands, draft text, commit, cancel, and emergency control. A selected row does not become editable until an explicit edit-mode transition. Draft state is not canonical history until one successful commit.
+
 ### Interface
 
-TUI and CLI translate user intent and present state. Neither may own an independent ledger, reinterpret authority, mutate canonical sediment to fit the terminal, or advance historical artifacts while viewing them.
+TUI and CLI translate user intent and present state. Neither may own an independent ledger, reinterpret authority, mutate canonical sediment to fit the terminal, advance historical artifacts while viewing them, or mutate history through ambiguous focus.
 
 ## Current architectural frontier
 
-The sediment conservation program is complete. The next priorities are:
+Sediment conservation and explicit report editing are complete. The next priorities are:
 
-1. INTERACTION-001 — explicit edit modes, truthful keybinding behavior, and terminal lifecycle safety;
-2. reconciliation of partially satisfied issues #5, #10, and #13;
-3. later domain/profile work, including complete profile isolation under issue #15.
+1. INTERACTION-001B — process-wide terminal lifecycle restoration and runtime failure custody;
+2. INTERACTION-001C — complete keymap truth and command-atlas parity;
+3. reconciliation of partially satisfied issues #5, #10, and #13;
+4. later domain/profile work, including complete profile isolation under issue #15.
 
 ## Non-authority
 
@@ -141,4 +131,5 @@ The sediment conservation program is complete. The next priorities are:
 - Terminal dimensions are not canonical sediment dimensions.
 - A derived preview is not persisted authority.
 - Legacy cumulative daily rows/files are evidence, not daily contributions.
+- An uncommitted edit draft is not canonical session history.
 - CSV, JSON, and ICS are external adapters, not canonical domain models.
