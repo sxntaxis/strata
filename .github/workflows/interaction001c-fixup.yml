@@ -1,18 +1,18 @@
 name: interaction001c-fixup
 
 on:
-  push:
+  pull_request:
     branches:
-      - interaction/001c-keymap-truth
-    paths:
-      - tools/interaction001c-fixup.py
-      - .github/workflows/interaction001c-fixup.yml
+      - main
+    types:
+      - synchronize
 
 permissions:
   contents: write
 
 jobs:
   fixup:
+    if: github.event.pull_request.head.ref == 'interaction/001c-keymap-truth'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
