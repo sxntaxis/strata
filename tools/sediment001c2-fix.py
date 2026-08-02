@@ -31,6 +31,11 @@ module.write_text(source.replace(old, new, 1))
 
 recovery = Path("src/sand/recovery.rs")
 source = recovery.read_text()
+source = source.replace(
+    "use super::{SandEngine, SandState};",
+    "use super::{PendingGrainRun, SandEngine, SandState};",
+    1,
+)
 marker = """#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RecoveredSediment {
     pub state: SandState,
@@ -89,6 +94,45 @@ new_advance = """    let spawn = advance_periodic(
 if old_advance not in source:
     raise SystemExit("recovery periodic calls were not found")
 source = source.replace(old_advance, new_advance, 1)
+old_recovery = """    let mut engine = SandEngine::new(1, 1);
+    engine.restore_state(base_state, valid_category_ids);
+    engine.add_logical_grains(active_category_id, spawn.due_events)?;
+
+    Ok(RecoveredSediment {
+        state: engine.snapshot_state(),"""
+new_recovery = """    let mut engine = SandEngine::new(1, 1);
+    engine.restore_state(base_state, valid_category_ids);
+    let mut state = engine.snapshot_state();
+    let pending_mass = state.pending_runs.iter().try_fold(0usize, |total, run| {
+        total.checked_add(run.count)
+    });
+    let Some(existing_mass) = pending_mass.and_then(|pending| state.grains.len().checked_add(pending))
+    else {
+        return Err("recovery sediment mass exceeds the supported range".to_string());
+    };
+    if existing_mass.checked_add(spawn.due_events).is_none() {
+        return Err("recovered sediment mass exceeds the supported range".to_string());
+    }
+    if spawn.due_events > 0 {
+        if let Some(last) = state.pending_runs.last_mut()
+            && last.category_id == active_category_id.0
+        {
+            last.count = last.count.checked_add(spawn.due_events).ok_or_else(|| {
+                "recovered pending run exceeds the supported range".to_string()
+            })?;
+        } else {
+            state.pending_runs.push(PendingGrainRun {
+                category_id: active_category_id.0,
+                count: spawn.due_events,
+            });
+        }
+    }
+
+    Ok(RecoveredSediment {
+        state,"""
+if old_recovery not in source:
+    raise SystemExit("recovery mass insertion block was not found")
+source = source.replace(old_recovery, new_recovery, 1)
 source = source.replace(
     "use super::{PeriodicAdvance, advance_periodic, recover_detached_sediment};",
     "use super::{PeriodicAdvance, RecoveryTiming, advance_periodic, recover_detached_sediment};",
