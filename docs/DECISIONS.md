@@ -29,6 +29,8 @@ Detailed rationale and unresolved implications live in `notebook/decisions/DECIS
 | STRATA-D020 | Report ranges are inclusive operational-day projections over exact canonical overlap slices; reporting never fragments or mutates the owning session. | implemented and certified |
 | STRATA-D021 | The active interval is included by default in reports and exports as explicitly provisional state; `--completed-only` selects committed history. | implemented and certified |
 | STRATA-D022 | Report/export ordering is deterministic; ICS uses stable identities and authoritative UTC chronology with RFC 5545-safe serialization, and fails closed rather than inventing timestamps. | implemented and certified |
+| STRATA-D023 | Every due sediment grain is conserved logical mass in exactly one placed or pending form; physical ingress blockage never authorizes loss, and category identity persists in either form. | implemented and certified |
+| STRATA-D024 | Terminal-cell dimensions and Braille-dot grid dimensions are separate named units; rendering emits one Braille character per drawable terminal cell while simulation and persistence operate in dot-grid units. | implemented and certified |
 
 ## Explicitly unresolved
 
@@ -37,7 +39,10 @@ The following are not accepted decisions:
 - final vertical chronology semantics;
 - flat layers versus optional context or relationships;
 - final `Karma`/balance terminology;
-- clearing and formation lifecycle;
+- clearing and formation lifecycle beyond placed/pending mass conservation;
+- viewport-independent sediment topology and resizing;
+- bounded detached catch-up and recovery semantics;
+- immutable historical snapshot kinds and provenance;
 - user-facing crash uncertainty beyond current recovery mechanics;
 - configurable quantum migration rules;
 - complete profile switching and isolation semantics under issue #15;
