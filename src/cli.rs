@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, SecondsFormat, Utc};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 
@@ -11,8 +11,8 @@ use crate::{
     constants::COLORS,
     domain::{
         CategoryId, DRIFT_CATEGORY_CONFIG_NAME, OperationalDayPolicy, ReportPeriod, Session,
-        build_period_report, civil_time_for_utc, day_boundary_config, operational_day_key_for_utc,
-        runtime_settings,
+        build_period_report, build_report_for_date_range, civil_time_for_utc, day_boundary_config,
+        operational_day_key_for_utc, runtime_settings,
     },
     sqlite, storage, temporal,
 };
@@ -64,32 +64,56 @@ pub enum Cli {
         #[arg(
             long,
             help = "Show today's time",
-            conflicts_with_all = ["week", "month"]
+            conflicts_with_all = ["week", "month", "from", "to"]
         )]
         today: bool,
 
         #[arg(
             long,
-            help = "Show last 7 days",
-            conflicts_with_all = ["today", "month"]
+            help = "Show the current operational week",
+            conflicts_with_all = ["today", "month", "from", "to"]
         )]
         week: bool,
 
         #[arg(
             long,
-            help = "Show last 30 days",
-            conflicts_with_all = ["today", "week"]
+            help = "Show the current calendar month",
+            conflicts_with_all = ["today", "week", "from", "to"]
         )]
         month: bool,
+
+        #[arg(
+            long,
+            value_name = "YYYY-MM-DD",
+            requires = "to",
+            conflicts_with_all = ["today", "week", "month"],
+            help = "Inclusive first operational day"
+        )]
+        from: Option<NaiveDate>,
+
+        #[arg(
+            long,
+            value_name = "YYYY-MM-DD",
+            requires = "from",
+            conflicts_with_all = ["today", "week", "month"],
+            help = "Inclusive last operational day"
+        )]
+        to: Option<NaiveDate>,
+
+        #[arg(long, help = "Exclude the provisional active interval")]
+        completed_only: bool,
     },
 
-    #[command(about = "Export sessions")]
+    #[command(about = "Export completed and provisional sessions")]
     Export {
         #[arg(long, value_enum, help = "Export format")]
         format: ExportFormat,
 
         #[arg(long, short, help = "Output path")]
         out: Option<PathBuf>,
+
+        #[arg(long, help = "Exclude the provisional active interval")]
+        completed_only: bool,
     },
 
     #[command(about = "Validate and publish a verified SQLite migration candidate")]
@@ -294,7 +318,9 @@ pub struct ActiveSession {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionExport {
-    pub id: usize,
+    pub id: Option<usize>,
+    pub uid: String,
+    pub provisional: bool,
     pub date: String,
     pub category_id: u64,
     pub category_name: String,
@@ -303,6 +329,8 @@ pub struct SessionExport {
     pub start_time: String,
     pub end_time: String,
     pub elapsed_seconds: usize,
+    pub started_at_utc: Option<DateTime<Utc>>,
+    pub ended_at_utc: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -472,66 +500,109 @@ fn stop_session_legacy(accept_clock_jump: bool) -> Result<usize, String> {
     Ok(elapsed)
 }
 
-pub fn report(period: ReportPeriod) -> Result<(), String> {
+#[derive(Clone, Copy)]
+pub enum ReportSelection {
+    Preset(ReportPeriod),
+    Custom { start: NaiveDate, end: NaiveDate },
+}
+
+pub fn report(selection: ReportSelection, completed_only: bool) -> Result<(), String> {
     match sqlite::resolve_runtime_authority()? {
-        sqlite::RuntimeAuthority::LegacyFiles => report_legacy(period),
+        sqlite::RuntimeAuthority::LegacyFiles => report_legacy(selection, completed_only),
         sqlite::RuntimeAuthority::SqliteCli { database_path } => {
-            let snapshot = sqlite::read_cli_snapshot(&database_path)?;
-            let sessions = snapshot
-                .sessions
-                .iter()
-                .map(|session| session.as_domain_session())
-                .collect::<Vec<_>>();
-            let summary = build_period_report(&sessions, &snapshot.categories, period);
-            let title = match period {
-                ReportPeriod::Today => "Today's Report",
-                ReportPeriod::Week => "Weekly Report",
-                ReportPeriod::Month => "Monthly Report",
-            };
-            println!("{} ({})", title, summary.date);
-            println!("{}", "-".repeat(40));
-            for entry in &summary.entries {
-                println!(
-                    "{:20} {:02}:{:02}:{:02}",
-                    entry.category_name,
-                    entry.elapsed_seconds / 3600,
-                    (entry.elapsed_seconds % 3600) / 60,
-                    entry.elapsed_seconds % 60
-                );
-            }
-            println!("{}", "-".repeat(40));
-            println!(
-                "{:20} {:02}:{:02}:{:02}",
-                "TOTAL",
-                summary.total_seconds / 3600,
-                (summary.total_seconds % 3600) / 60,
-                summary.total_seconds % 60
-            );
-            Ok(())
+            report_sqlite(&database_path, selection, completed_only)
         }
     }
 }
 
-fn report_legacy(period: ReportPeriod) -> Result<(), String> {
+fn report_sqlite(
+    database_path: &Path,
+    selection: ReportSelection,
+    completed_only: bool,
+) -> Result<(), String> {
+    let snapshot = sqlite::read_cli_snapshot(database_path)?;
+    let snapshot_at = Utc::now();
+    let mut sessions = snapshot
+        .sessions
+        .iter()
+        .map(|session| session.as_domain_session())
+        .collect::<Vec<_>>();
+    if !completed_only
+        && let Some(active) = snapshot.active_session.as_ref()
+        && let Some(provisional) = provisional_session(
+            &active.project,
+            active.category_id,
+            &active.description,
+            active.started_at_utc,
+            snapshot_at,
+            sessions.iter().map(|session| session.id).max().unwrap_or(0) + 1,
+        )?
+    {
+        sessions.push(provisional);
+    }
+    print_report(&sessions, &snapshot.categories, selection, !completed_only)
+}
+
+fn report_legacy(selection: ReportSelection, completed_only: bool) -> Result<(), String> {
     let sessions_path = storage::get_time_log_path();
     let categories_path = storage::get_categories_path();
-
     let categories = storage::try_load_categories_from_csv(&categories_path)
         .map_err(|error| error.to_string())?
         .categories;
-    let sessions = storage::try_load_sessions_from_csv(&sessions_path, &categories)
+    let mut sessions = storage::try_load_sessions_from_csv(&sessions_path, &categories)
         .map_err(|error| error.to_string())?
         .sessions;
+    if !completed_only {
+        let active_path = storage::get_active_session_path();
+        if storage::file_exists(&active_path) {
+            let active: ActiveSession = storage::read_json(&active_path)?;
+            if let Some(provisional) = provisional_session(
+                &active.project,
+                active.category_id,
+                &active.description,
+                active.start_time,
+                Utc::now(),
+                sessions.iter().map(|session| session.id).max().unwrap_or(0) + 1,
+            )? {
+                sessions.push(provisional);
+            }
+        }
+    }
+    print_report(&sessions, &categories, selection, !completed_only)
+}
 
-    let summary = build_period_report(&sessions, &categories, period);
-
-    let title = match period {
-        ReportPeriod::Today => "Today's Report",
-        ReportPeriod::Week => "Weekly Report",
-        ReportPeriod::Month => "Monthly Report",
+fn print_report(
+    sessions: &[Session],
+    categories: &[crate::domain::Category],
+    selection: ReportSelection,
+    includes_provisional: bool,
+) -> Result<(), String> {
+    let (title, summary) = match selection {
+        ReportSelection::Preset(period) => {
+            let title = match period {
+                ReportPeriod::Today => "Today's Report".to_string(),
+                ReportPeriod::Week => "Weekly Report".to_string(),
+                ReportPeriod::Month => "Monthly Report".to_string(),
+            };
+            (title, build_period_report(sessions, categories, period))
+        }
+        ReportSelection::Custom { start, end } => {
+            if start > end {
+                return Err(format!(
+                    "Invalid report range: --from {start} is later than --to {end}"
+                ));
+            }
+            let label = format!("{start}..{end}");
+            (
+                "Custom Report".to_string(),
+                build_report_for_date_range(sessions, categories, start, end, label),
+            )
+        }
     };
-
     println!("{} ({})", title, summary.date);
+    if includes_provisional {
+        println!("Includes provisional active time; use --completed-only to exclude it.");
+    }
     println!("{}", "-".repeat(40));
     for entry in &summary.entries {
         println!(
@@ -550,15 +621,61 @@ fn report_legacy(period: ReportPeriod) -> Result<(), String> {
         (summary.total_seconds % 3600) / 60,
         summary.total_seconds % 60
     );
-
     Ok(())
 }
 
-pub fn export_data(format: ExportFormat, out_path: Option<PathBuf>) -> Result<(), String> {
+fn provisional_session(
+    project: &str,
+    category_id: u64,
+    description: &str,
+    started_at_utc: DateTime<Utc>,
+    snapshot_at: DateTime<Utc>,
+    id: usize,
+) -> Result<Option<Session>, String> {
+    let elapsed = snapshot_at
+        .signed_duration_since(started_at_utc)
+        .num_seconds();
+    if elapsed < 0 {
+        return Err(
+            "Active session starts in the future; provisional projection refused".to_string(),
+        );
+    }
+    if elapsed == 0 {
+        return Ok(None);
+    }
+    let elapsed_seconds = usize::try_from(elapsed)
+        .map_err(|_| "Active session duration exceeds this platform's limits".to_string())?;
+    let policy = OperationalDayPolicy::from_config(day_boundary_config());
+    let start_civil = civil_time_for_utc(started_at_utc);
+    let end_civil = civil_time_for_utc(snapshot_at);
+    Ok(Some(Session {
+        id,
+        date: operational_day_key_for_utc(snapshot_at)
+            .format("%Y-%m-%d")
+            .to_string(),
+        category_id: CategoryId::new(category_id),
+        project: project.to_string(),
+        description: description.to_string(),
+        start_time: start_civil.format("%H:%M:%S").to_string(),
+        end_time: end_civil.format("%H:%M:%S").to_string(),
+        elapsed_seconds,
+        started_at_utc: Some(started_at_utc),
+        ended_at_utc: Some(snapshot_at),
+        operational_day_policy: Some(policy),
+    }))
+}
+
+pub fn export_data(
+    format: ExportFormat,
+    out_path: Option<PathBuf>,
+    completed_only: bool,
+) -> Result<(), String> {
     match sqlite::resolve_runtime_authority()? {
-        sqlite::RuntimeAuthority::LegacyFiles => export_data_legacy(format, out_path),
+        sqlite::RuntimeAuthority::LegacyFiles => {
+            export_data_legacy(format, out_path, completed_only)
+        }
         sqlite::RuntimeAuthority::SqliteCli { database_path } => {
-            export_data_sqlite(&database_path, format, out_path)
+            export_data_sqlite(&database_path, format, out_path, completed_only)
         }
     }
 }
@@ -567,209 +684,313 @@ fn export_data_sqlite(
     database_path: &Path,
     format: ExportFormat,
     out_path: Option<PathBuf>,
+    completed_only: bool,
 ) -> Result<(), String> {
     let snapshot = sqlite::read_cli_snapshot(database_path)?;
-    let export = DataExport {
-        schema_version: 1,
-        exported_at: Utc::now(),
-        categories: snapshot
-            .categories
-            .iter()
-            .filter(|category| category.id.0 != 0)
-            .map(|category| {
-                let color_pos = COLORS
-                    .iter()
-                    .position(|&color| color == category.color)
-                    .unwrap_or(0);
-                CategoryExport {
-                    id: category.id.0,
-                    name: category.name.clone(),
-                    description: category.description.clone(),
-                    color_index: color_pos,
-                    karma_effect: category.karma_effect,
-                }
-            })
-            .collect(),
-        sessions: snapshot
-            .sessions
-            .iter()
-            .map(|session| SessionExport {
-                id: session.id,
-                date: session.date.clone(),
-                category_id: session.category_id,
-                category_name: session.category_name.clone(),
-                project: (!session.project.is_empty()).then(|| session.project.clone()),
-                description: session.description.clone(),
-                start_time: session.start_time.clone(),
-                end_time: session.end_time.clone(),
-                elapsed_seconds: session.elapsed_seconds,
-            })
-            .collect(),
-    };
-
-    match format {
-        ExportFormat::Json => {
-            let json = serde_json::to_string_pretty(&export).map_err(|error| error.to_string())?;
-            if let Some(path) = out_path {
-                storage::write_text_file(&path, &json)?;
-                println!("Exported to {}", path.display());
-            } else {
-                println!("{}", json);
-            }
-        }
-        ExportFormat::Ics => {
-            let mut ics = String::new();
-            ics.push_str("BEGIN:VCALENDAR\r\n");
-            ics.push_str("VERSION:2.0\r\n");
-            ics.push_str("PRODID:-//strata//time tracking//EN\r\n");
-            for session in &export.sessions {
-                if session.category_name == DRIFT_CATEGORY_CONFIG_NAME
-                    || session.elapsed_seconds == 0
-                {
-                    continue;
-                }
-                let dt_start = format_ics_datetime(&session.date, &session.start_time);
-                let dt_end = format_ics_datetime(&session.date, &session.end_time);
-                let uid = format!("strata-session-{}", session.id);
-                ics.push_str("BEGIN:VEVENT\r\n");
-                ics.push_str(&format!("UID:{}\r\n", uid));
-                ics.push_str(&format!("DTSTAMP:{}\r\n", format_ics_timestamp(Utc::now())));
-                ics.push_str(&format!("DTSTART:{}\r\n", dt_start));
-                ics.push_str(&format!("DTEND:{}\r\n", dt_end));
-                ics.push_str(&format!(
-                    "SUMMARY:{} - {}\r\n",
-                    session.project.as_deref().unwrap_or("Project"),
-                    session.category_name
-                ));
-                if !session.description.is_empty() {
-                    ics.push_str(&format!("DESCRIPTION:{}\r\n", session.description));
-                }
-                ics.push_str(&format!("CATEGORIES:{}\r\n", session.category_name));
-                ics.push_str("END:VEVENT\r\n");
-            }
-            ics.push_str("END:VCALENDAR\r\n");
-            if let Some(path) = out_path {
-                storage::write_text_file(&path, &ics)?;
-                println!("Exported to {}", path.display());
-            } else {
-                println!("{}", ics);
-            }
-        }
+    let snapshot_at = Utc::now();
+    let mut sessions = snapshot
+        .sessions
+        .iter()
+        .map(|session| SessionExport {
+            id: Some(session.id),
+            uid: format!("{}@strata", session.stable_id),
+            provisional: false,
+            date: session.date.clone(),
+            category_id: session.category_id,
+            category_name: session.category_name.clone(),
+            project: (!session.project.is_empty()).then(|| session.project.clone()),
+            description: session.description.clone(),
+            start_time: session.start_time.clone(),
+            end_time: session.end_time.clone(),
+            elapsed_seconds: session.elapsed_seconds,
+            started_at_utc: Some(session.started_at_utc),
+            ended_at_utc: Some(session.ended_at_utc),
+        })
+        .collect::<Vec<_>>();
+    if !completed_only
+        && let Some(active) = snapshot.active_session.as_ref()
+        && let Some(session) = provisional_session(
+            &active.project,
+            active.category_id,
+            &active.description,
+            active.started_at_utc,
+            snapshot_at,
+            0,
+        )?
+    {
+        sessions.push(session_export_from_domain(
+            session,
+            active.category_name.clone(),
+            format!("{}@strata", active.stable_id),
+            true,
+        ));
     }
-    Ok(())
+    let mut categories = snapshot
+        .categories
+        .iter()
+        .filter(|category| category.id.0 != 0)
+        .map(|category| {
+            let color_pos = COLORS
+                .iter()
+                .position(|&color| color == category.color)
+                .unwrap_or(0);
+            CategoryExport {
+                id: category.id.0,
+                name: category.name.clone(),
+                description: category.description.clone(),
+                color_index: color_pos,
+                karma_effect: category.karma_effect,
+            }
+        })
+        .collect::<Vec<_>>();
+    sort_exports(&mut categories, &mut sessions);
+    write_export(
+        DataExport {
+            schema_version: 2,
+            exported_at: snapshot_at,
+            categories,
+            sessions,
+        },
+        format,
+        out_path,
+    )
 }
 
-fn export_data_legacy(format: ExportFormat, out_path: Option<PathBuf>) -> Result<(), String> {
-    let sessions_path = storage::get_time_log_path();
+fn export_data_legacy(
+    format: ExportFormat,
+    out_path: Option<PathBuf>,
+    completed_only: bool,
+) -> Result<(), String> {
     let categories_path = storage::get_categories_path();
-
     let categories = storage::try_load_categories_from_csv(&categories_path)
         .map_err(|error| error.to_string())?
         .categories;
-    let sessions = storage::try_load_sessions_from_csv(&sessions_path, &categories)
+    let sessions_path = storage::get_time_log_path();
+    let completed = storage::try_load_sessions_from_csv(&sessions_path, &categories)
         .map_err(|error| error.to_string())?
         .sessions;
-
-    let export = DataExport {
-        schema_version: 1,
-        exported_at: Utc::now(),
-        categories: categories
-            .iter()
-            .skip(1)
-            .map(|c| {
-                let color_pos = COLORS.iter().position(|&col| col == c.color).unwrap_or(0);
-                CategoryExport {
-                    id: c.id.0,
-                    name: c.name.clone(),
-                    description: c.description.clone(),
-                    color_index: color_pos,
-                    karma_effect: c.karma_effect,
-                }
-            })
-            .collect(),
-        sessions: sessions
-            .iter()
-            .map(|s| {
-                let cat_name = categories
-                    .iter()
-                    .find(|c| c.id == s.category_id)
-                    .map(|c| c.name.as_str())
-                    .unwrap_or(DRIFT_CATEGORY_CONFIG_NAME)
-                    .to_string();
-                SessionExport {
-                    id: s.id,
-                    date: s.date.clone(),
-                    category_id: s.category_id.0,
-                    category_name: cat_name,
-                    project: (!s.project.is_empty()).then(|| s.project.clone()),
-                    description: s.description.clone(),
-                    start_time: s.start_time.clone(),
-                    end_time: s.end_time.clone(),
-                    elapsed_seconds: s.elapsed_seconds,
-                }
-            })
-            .collect(),
-    };
-
-    match format {
-        ExportFormat::Json => {
-            let json = serde_json::to_string_pretty(&export).map_err(|e| e.to_string())?;
-            if let Some(path) = out_path {
-                storage::write_text_file(&path, &json)?;
-                println!("Exported to {}", path.display());
-            } else {
-                println!("{}", json);
-            }
-        }
-        ExportFormat::Ics => {
-            let mut ics = String::new();
-            ics.push_str("BEGIN:VCALENDAR\r\n");
-            ics.push_str("VERSION:2.0\r\n");
-            ics.push_str("PRODID:-//strata//time tracking//EN\r\n");
-
-            for session in &export.sessions {
-                if session.category_name == DRIFT_CATEGORY_CONFIG_NAME
-                    || session.elapsed_seconds == 0
-                {
-                    continue;
-                }
-                let dt_start = format_ics_datetime(&session.date, &session.start_time);
-                let dt_end = format_ics_datetime(&session.date, &session.end_time);
-                let uid = format!("strata-session-{}", session.id);
-
-                ics.push_str("BEGIN:VEVENT\r\n");
-                ics.push_str(&format!("UID:{}\r\n", uid));
-                ics.push_str(&format!("DTSTAMP:{}\r\n", format_ics_timestamp(Utc::now())));
-                ics.push_str(&format!("DTSTART:{}\r\n", dt_start));
-                ics.push_str(&format!("DTEND:{}\r\n", dt_end));
-                ics.push_str(&format!(
-                    "SUMMARY:{} - {}\r\n",
-                    session.project.as_deref().unwrap_or("Project"),
-                    session.category_name
+    let snapshot_at = Utc::now();
+    let mut sessions = completed
+        .into_iter()
+        .map(|session| {
+            let category_name = category_name(&categories, session.category_id);
+            let uid = format!("legacy-session-{}@strata", session.id);
+            session_export_from_domain(session, category_name, uid, false)
+        })
+        .collect::<Vec<_>>();
+    if !completed_only {
+        let active_path = storage::get_active_session_path();
+        if storage::file_exists(&active_path) {
+            let active: ActiveSession = storage::read_json(&active_path)?;
+            if let Some(session) = provisional_session(
+                &active.project,
+                active.category_id,
+                &active.description,
+                active.start_time,
+                snapshot_at,
+                0,
+            )? {
+                sessions.push(session_export_from_domain(
+                    session,
+                    active.category_name,
+                    format!(
+                        "legacy-active-{}@strata",
+                        active
+                            .start_time
+                            .to_rfc3339_opts(SecondsFormat::Nanos, true)
+                    ),
+                    true,
                 ));
-                if !session.description.is_empty() {
-                    ics.push_str(&format!("DESCRIPTION:{}\r\n", session.description));
-                }
-                ics.push_str(&format!("CATEGORIES:{}\r\n", session.category_name));
-                ics.push_str("END:VEVENT\r\n");
-            }
-
-            ics.push_str("END:VCALENDAR\r\n");
-
-            if let Some(path) = out_path {
-                storage::write_text_file(&path, &ics)?;
-                println!("Exported to {}", path.display());
-            } else {
-                println!("{}", ics);
             }
         }
     }
+    let mut category_exports = categories
+        .iter()
+        .filter(|category| category.id.0 != 0)
+        .map(|category| CategoryExport {
+            id: category.id.0,
+            name: category.name.clone(),
+            description: category.description.clone(),
+            color_index: COLORS
+                .iter()
+                .position(|&color| color == category.color)
+                .unwrap_or(0),
+            karma_effect: category.karma_effect,
+        })
+        .collect::<Vec<_>>();
+    sort_exports(&mut category_exports, &mut sessions);
+    write_export(
+        DataExport {
+            schema_version: 2,
+            exported_at: snapshot_at,
+            categories: category_exports,
+            sessions,
+        },
+        format,
+        out_path,
+    )
+}
 
+fn category_name(categories: &[crate::domain::Category], category_id: CategoryId) -> String {
+    categories
+        .iter()
+        .find(|category| category.id == category_id)
+        .map(|category| category.name.clone())
+        .unwrap_or_else(|| DRIFT_CATEGORY_CONFIG_NAME.to_string())
+}
+
+fn session_export_from_domain(
+    session: Session,
+    category_name: String,
+    uid: String,
+    provisional: bool,
+) -> SessionExport {
+    SessionExport {
+        id: (!provisional).then_some(session.id),
+        uid,
+        provisional,
+        date: session.date,
+        category_id: session.category_id.0,
+        category_name,
+        project: (!session.project.is_empty()).then_some(session.project),
+        description: session.description,
+        start_time: session.start_time,
+        end_time: session.end_time,
+        elapsed_seconds: session.elapsed_seconds,
+        started_at_utc: session.started_at_utc,
+        ended_at_utc: session.ended_at_utc,
+    }
+}
+
+fn sort_exports(categories: &mut [CategoryExport], sessions: &mut [SessionExport]) {
+    categories.sort_by(|a, b| {
+        a.name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    sessions.sort_by(|a, b| {
+        a.started_at_utc
+            .cmp(&b.started_at_utc)
+            .then_with(|| a.ended_at_utc.cmp(&b.ended_at_utc))
+            .then_with(|| a.uid.cmp(&b.uid))
+    });
+}
+
+fn write_export(
+    export: DataExport,
+    format: ExportFormat,
+    out_path: Option<PathBuf>,
+) -> Result<(), String> {
+    let rendered = match format {
+        ExportFormat::Json => {
+            serde_json::to_string_pretty(&export).map_err(|error| error.to_string())?
+        }
+        ExportFormat::Ics => render_ics(&export)?,
+    };
+    if let Some(path) = out_path {
+        storage::write_text_file(&path, &rendered)?;
+        println!("Exported to {}", path.display());
+    } else {
+        print!("{rendered}");
+        if !rendered.ends_with('\n') {
+            println!();
+        }
+    }
     Ok(())
 }
 
-fn format_ics_datetime(date: &str, time: &str) -> String {
-    format!("{}T{}00", date.replace('-', ""), time.replace(':', ""))
+fn render_ics(export: &DataExport) -> Result<String, String> {
+    let mut lines = vec![
+        "BEGIN:VCALENDAR".to_string(),
+        "VERSION:2.0".to_string(),
+        "CALSCALE:GREGORIAN".to_string(),
+        "PRODID:-//sxntaxis//Strata//EN".to_string(),
+    ];
+    for session in &export.sessions {
+        if session.category_id == 0 || session.elapsed_seconds == 0 {
+            continue;
+        }
+        let started = session.started_at_utc.ok_or_else(|| {
+            format!(
+                "Session {} lacks authoritative UTC chronology and cannot be exported as ICS",
+                session.uid
+            )
+        })?;
+        let ended = session.ended_at_utc.ok_or_else(|| {
+            format!(
+                "Session {} lacks authoritative UTC chronology and cannot be exported as ICS",
+                session.uid
+            )
+        })?;
+        let summary = match session.project.as_deref() {
+            Some(project) => format!("{project} - {}", session.category_name),
+            None => session.category_name.clone(),
+        };
+        lines.push("BEGIN:VEVENT".to_string());
+        lines.push(format!("UID:{}", escape_ics_text(&session.uid)));
+        lines.push(format!(
+            "DTSTAMP:{}",
+            format_ics_timestamp(export.exported_at)
+        ));
+        lines.push(format!("DTSTART:{}", format_ics_timestamp(started)));
+        lines.push(format!("DTEND:{}", format_ics_timestamp(ended)));
+        lines.push(format!("SUMMARY:{}", escape_ics_text(&summary)));
+        if !session.description.is_empty() {
+            lines.push(format!(
+                "DESCRIPTION:{}",
+                escape_ics_text(&session.description)
+            ));
+        }
+        lines.push(format!(
+            "CATEGORIES:{}",
+            escape_ics_text(&session.category_name)
+        ));
+        if session.provisional {
+            lines.push("X-STRATA-PROVISIONAL:TRUE".to_string());
+        }
+        lines.push("END:VEVENT".to_string());
+    }
+    lines.push("END:VCALENDAR".to_string());
+    let mut output = String::new();
+    for line in lines {
+        output.push_str(&fold_ics_line(&line));
+        output.push_str("\r\n");
+    }
+    Ok(output)
+}
+
+fn escape_ics_text(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace("\r\n", "\\n")
+        .replace(['\r', '\n'], "\\n")
+        .replace(';', "\\;")
+        .replace(',', "\\,")
+}
+
+fn fold_ics_line(line: &str) -> String {
+    const LIMIT: usize = 75;
+    if line.len() <= LIMIT {
+        return line.to_string();
+    }
+    let mut output = String::new();
+    let mut remaining = line;
+    let mut first = true;
+    while !remaining.is_empty() {
+        let allowance = if first { LIMIT } else { LIMIT - 1 };
+        let mut end = remaining.len().min(allowance);
+        while !remaining.is_char_boundary(end) {
+            end -= 1;
+        }
+        if !first {
+            output.push_str("\r\n ");
+        }
+        output.push_str(&remaining[..end]);
+        remaining = &remaining[end..];
+        first = false;
+    }
+    output
 }
 
 fn format_ics_timestamp(dt: DateTime<Utc>) -> String {
@@ -1043,22 +1264,36 @@ pub fn run_command(cli: Cli) {
                 std::process::exit(1);
             }
         }
-        Cli::Report { week, month, .. } => {
-            let period = if month {
-                ReportPeriod::Month
-            } else if week {
-                ReportPeriod::Week
-            } else {
-                ReportPeriod::Today
+        Cli::Report {
+            week,
+            month,
+            from,
+            to,
+            completed_only,
+            ..
+        } => {
+            let selection = match (from, to) {
+                (Some(start), Some(end)) => ReportSelection::Custom { start, end },
+                (None, None) => ReportSelection::Preset(if month {
+                    ReportPeriod::Month
+                } else if week {
+                    ReportPeriod::Week
+                } else {
+                    ReportPeriod::Today
+                }),
+                _ => unreachable!("clap requires --from and --to together"),
             };
-
-            if let Err(e) = report(period) {
+            if let Err(e) = report(selection, completed_only) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
         }
-        Cli::Export { format, out } => {
-            if let Err(e) = export_data(format, out) {
+        Cli::Export {
+            format,
+            out,
+            completed_only,
+        } => {
+            if let Err(e) = export_data(format, out, completed_only) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
@@ -1192,5 +1427,101 @@ pub fn run_command(cli: Cli) {
                 std::process::exit(1);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod report_export_tests {
+    use super::*;
+
+    fn sample_export() -> DataExport {
+        DataExport {
+            schema_version: 2,
+            exported_at: DateTime::parse_from_rfc3339("2026-08-02T03:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+            categories: vec![],
+            sessions: vec![SessionExport {
+                id: Some(7),
+                uid: "session-7@strata".to_string(),
+                provisional: true,
+                date: "2026-08-01".to_string(),
+                category_id: 1,
+                category_name: "Work, Deep; Focus".to_string(),
+                project: None,
+                description: "line one\\line two\nthird line with a long Unicode description café música 日本語 that must fold safely without splitting UTF-8".to_string(),
+                start_time: "20:30:00".to_string(),
+                end_time: "21:30:00".to_string(),
+                elapsed_seconds: 3600,
+                started_at_utc: Some(
+                    DateTime::parse_from_rfc3339("2026-08-02T02:30:00Z")
+                        .unwrap()
+                        .with_timezone(&Utc),
+                ),
+                ended_at_utc: Some(
+                    DateTime::parse_from_rfc3339("2026-08-02T03:30:00Z")
+                        .unwrap()
+                        .with_timezone(&Utc),
+                ),
+            }],
+        }
+    }
+
+    #[test]
+    fn ics_uses_authoritative_utc_and_escapes_text() {
+        let ics = render_ics(&sample_export()).expect("ICS should render");
+        assert!(ics.starts_with("BEGIN:VCALENDAR\r\n"));
+        assert!(ics.ends_with("END:VCALENDAR\r\n"));
+        assert!(ics.contains("DTSTART:20260802T023000Z\r\n"));
+        assert!(ics.contains("DTEND:20260802T033000Z\r\n"));
+        assert!(ics.contains("SUMMARY:Work\\, Deep\\; Focus\r\n"));
+        assert!(ics.contains("DESCRIPTION:line one\\\\line two\\nthird line"));
+        assert!(ics.contains("X-STRATA-PROVISIONAL:TRUE\r\n"));
+        assert!(!ics.contains("SUMMARY:Project"));
+        for physical in ics.split("\r\n").filter(|line| !line.is_empty()) {
+            assert!(
+                physical.len() <= 75,
+                "unfolded line exceeds 75 octets: {physical}"
+            );
+        }
+    }
+
+    #[test]
+    fn deterministic_export_sort_has_complete_tie_breakers() {
+        let mut categories = vec![
+            CategoryExport {
+                id: 2,
+                name: "beta".into(),
+                description: String::new(),
+                color_index: 0,
+                karma_effect: 1,
+            },
+            CategoryExport {
+                id: 1,
+                name: "Alpha".into(),
+                description: String::new(),
+                color_index: 0,
+                karma_effect: 1,
+            },
+        ];
+        let mut sessions = vec![
+            SessionExport {
+                uid: "b@strata".into(),
+                ..sample_export().sessions[0].clone()
+            },
+            SessionExport {
+                uid: "a@strata".into(),
+                ..sample_export().sessions[0].clone()
+            },
+        ];
+        sort_exports(&mut categories, &mut sessions);
+        assert_eq!(
+            categories.iter().map(|c| c.id).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(
+            sessions.iter().map(|s| s.uid.as_str()).collect::<Vec<_>>(),
+            vec!["a@strata", "b@strata"]
+        );
     }
 }

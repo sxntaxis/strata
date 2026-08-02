@@ -21,7 +21,7 @@ The original issue descriptions predate the completed SQLite migration. Their ac
 | #15 | Complete profile identity, isolation, and deliberate runtime switching remain open. | AUTHORITY-002 or a later profile unit |
 | #4, #23, #27 | Completed by TEMPORAL-002: canonical-session overlap allocation, visible removal/migration of false sunrise semantics, and receipt-only zero transitions. | none |
 | #2, #12 | Completed by DOMAIN-001: project survives canonical history and exports; CLI classification is explicit; idle is deliberate and user-facing. | none |
-| #1, #14, #17, #28, #3 | Reporting and export semantics/documentation. | REPORT-001 |
+| #1, #3, #14, #17, #28 | Completed by REPORT-001: inclusive operational-day ranges, truthful calendar help, provisional active projection, valid ICS, and deterministic ordering. | none |
 | #5, #10, #13 | SQLite integrity, active authority, and category archival likely satisfy substantial portions; verify every criterion before closing or rewriting. | reconciliation audit |
 | #6, #7, #16, #18, #26 | Sediment conservation/topology/rendering remain conceptually coupled. | SEDIMENT-001 |
 | #19, #20, #24 | Interaction modes, terminal cleanup, and keymap truth remain independent of SQLite. | INTERACTION-001 |
@@ -29,4 +29,4 @@ The original issue descriptions predate the completed SQLite migration. Their ac
 
 ## Immediate action
 
-Implement REPORT-001 for issues #1, #14, #17, and #28. Canonical ledger, interval, project, and category truth are now stable; reporting and export projections must become complete without rewriting them.
+Implement SEDIMENT-001 for issues #6, #7, #16, #18, and #26. Reporting is now a truthful projection over stable ledger truth; sediment must gain an equally explicit conservation model without becoming a competing time authority.

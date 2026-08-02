@@ -345,3 +345,76 @@ fn unwritable_time_log_fails_stop_without_consuming_active_state() {
         log_before
     );
 }
+
+#[test]
+fn custom_ranges_and_active_projection_are_explicit() {
+    let profile = TestProfile::new("report-projection");
+    let start = profile.run(&[
+        "start",
+        "client-a",
+        "--category",
+        "Work",
+        "--desc",
+        "active work",
+    ]);
+    assert!(start.status.success(), "start failed: {}", stderr(&start));
+    profile.backdate_active_session(3);
+
+    let today_date = Utc::now().date_naive();
+    let from = (today_date - chrono::Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string();
+    let to = today_date.format("%Y-%m-%d").to_string();
+    let active = profile.run(&["report", "--from", &from, "--to", &to]);
+    assert!(
+        active.status.success(),
+        "custom report failed: {}",
+        stderr(&active)
+    );
+    let active_stdout = String::from_utf8_lossy(&active.stdout);
+    assert!(active_stdout.contains("Custom Report"));
+    assert!(active_stdout.contains("Includes provisional active time"));
+    assert!(
+        active_stdout.contains("Work"),
+        "custom report output:\n{active_stdout}"
+    );
+
+    let committed = profile.run(&["report", "--from", &from, "--to", &to, "--completed-only"]);
+    assert!(
+        committed.status.success(),
+        "completed-only report failed: {}",
+        stderr(&committed)
+    );
+    let committed_stdout = String::from_utf8_lossy(&committed.stdout);
+    assert!(!committed_stdout.contains("Includes provisional active time"));
+    assert!(committed_stdout.contains("00:00:00"));
+
+    let json = profile.run(&["export", "--format", "json"]);
+    assert!(
+        json.status.success(),
+        "active JSON export failed: {}",
+        stderr(&json)
+    );
+    let exported: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(exported["sessions"].as_array().unwrap().len(), 1);
+    assert_eq!(exported["sessions"][0]["provisional"], true);
+    assert_eq!(exported["sessions"][0]["project"], "client-a");
+
+    let completed_json = profile.run(&["export", "--format", "json", "--completed-only"]);
+    assert!(
+        completed_json.status.success(),
+        "completed JSON export failed: {}",
+        stderr(&completed_json)
+    );
+    let completed_export: serde_json::Value =
+        serde_json::from_slice(&completed_json.stdout).unwrap();
+    assert!(completed_export["sessions"].as_array().unwrap().is_empty());
+
+    let reversed = profile.run(&["report", "--from", "2026-07-15", "--to", "2026-07-01"]);
+    assert!(!reversed.status.success());
+    assert!(stderr(&reversed).contains("later than"));
+
+    let incomplete = profile.run(&["report", "--from", "2026-07-01"]);
+    assert!(!incomplete.status.success());
+    assert!(stderr(&incomplete).contains("--to"));
+}
