@@ -117,7 +117,19 @@ text = text.replace(
     "    thread,\n    time::{Duration, SystemTime, UNIX_EPOCH},",
     1,
 )
-old = """        child
+old = """        let mut stdin = child.stdin.take().expect("TUI stdin should exist");
+        for byte in input {
+            thread::sleep(Duration::from_millis(1_100));
+            stdin
+                .write_all(std::slice::from_ref(byte))
+                .expect("TUI input should be written");
+            stdin.flush().expect("TUI input should flush");
+        }
+        drop(stdin);
+        child.wait_with_output().expect("TUI process should finish")
+"""
+if old not in text:
+    old = """        child
             .stdin
             .take()
             .expect("TUI stdin should exist")
@@ -128,10 +140,18 @@ old = """        child
 new = """        let mut stdin = child.stdin.take().expect("TUI stdin should exist");
         for byte in input {
             thread::sleep(Duration::from_millis(1_100));
-            stdin
-                .write_all(std::slice::from_ref(byte))
-                .expect("TUI input should be written");
-            stdin.flush().expect("TUI input should flush");
+            if let Err(error) = stdin.write_all(std::slice::from_ref(byte)) {
+                if error.kind() == std::io::ErrorKind::BrokenPipe {
+                    break;
+                }
+                panic!("TUI input should be written: {error}");
+            }
+            if let Err(error) = stdin.flush() {
+                if error.kind() == std::io::ErrorKind::BrokenPipe {
+                    break;
+                }
+                panic!("TUI input should flush: {error}");
+            }
         }
         drop(stdin);
         child.wait_with_output().expect("TUI process should finish")
