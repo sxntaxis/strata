@@ -23,7 +23,9 @@ jobs:
         with:
           components: rustfmt, clippy
       - name: Apply INTERACTION-001C
-        run: python tools/interaction001c-apply.py
+        run: |
+          python tools/interaction001c-prep.py
+          python tools/interaction001c-apply.py
       - name: Format
         run: cargo fmt --all
       - name: Check formatting
