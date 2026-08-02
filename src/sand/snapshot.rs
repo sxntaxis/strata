@@ -63,6 +63,7 @@ impl SedimentSnapshot {
         }
     }
 
+    #[cfg(test)]
     pub fn daily_contribution(
         operational_day: String,
         source_revision: String,
@@ -118,10 +119,7 @@ impl SedimentSnapshot {
 
     pub fn render_cache_key(&self, width: u16, height: u16) -> String {
         let encoded = serde_json::to_vec(self).unwrap_or_default();
-        format!(
-            "{}:{width}:{height}",
-            stable_source_revision(&encoded)
-        )
+        format!("{}:{width}:{height}", stable_source_revision(&encoded))
     }
 
     pub fn render_immutable(
@@ -180,8 +178,8 @@ pub fn stable_source_revision(source: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        SedimentIdlePolicy, SedimentSnapshot, SedimentSnapshotKind,
-        SedimentSnapshotProvenance, select_daily_artifact, stable_source_revision,
+        SedimentIdlePolicy, SedimentSnapshot, SedimentSnapshotKind, SedimentSnapshotProvenance,
+        select_daily_artifact, stable_source_revision,
     };
     use crate::sand::{PendingGrainRun, SandState, SandStateGrain};
 
@@ -222,24 +220,30 @@ mod tests {
             false,
             state(),
         );
-        let derived = SedimentSnapshot::derived_preview(
-            "2026-08-01".to_string(),
-            "c".to_string(),
-            state(),
-        );
+        let derived =
+            SedimentSnapshot::derived_preview("2026-08-01".to_string(), "c".to_string(), state());
 
         assert_eq!(cumulative.kind, SedimentSnapshotKind::CumulativeCheckpoint);
         assert_eq!(daily.kind, SedimentSnapshotKind::DailyContribution);
         assert_eq!(derived.kind, SedimentSnapshotKind::DerivedPreview);
-        assert_ne!(serde_json::to_string(&cumulative).unwrap(), serde_json::to_string(&daily).unwrap());
-        assert_ne!(serde_json::to_string(&daily).unwrap(), serde_json::to_string(&derived).unwrap());
+        assert_ne!(
+            serde_json::to_string(&cumulative).unwrap(),
+            serde_json::to_string(&daily).unwrap()
+        );
+        assert_ne!(
+            serde_json::to_string(&daily).unwrap(),
+            serde_json::to_string(&derived).unwrap()
+        );
     }
 
     #[test]
     fn bare_legacy_daily_state_is_cumulative_evidence() {
         let legacy = SedimentSnapshot::legacy_daily_payload("2026-08-01".to_string(), state());
         assert_eq!(legacy.kind, SedimentSnapshotKind::CumulativeCheckpoint);
-        assert_eq!(legacy.provenance, SedimentSnapshotProvenance::LegacyDailyRow);
+        assert_eq!(
+            legacy.provenance,
+            SedimentSnapshotProvenance::LegacyDailyRow
+        );
         assert!(!legacy.reconstructed);
     }
 

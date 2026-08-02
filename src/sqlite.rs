@@ -36,7 +36,6 @@ pub(crate) use migration_command::{ControlledMigrationOptions, ControlledMigrati
 pub(crate) use tui_runtime::{
     archive_category as archive_tui_category, clear_checkpoint as clear_tui_checkpoint,
     commit_checkpoint_recovery as commit_tui_checkpoint_recovery,
-    delete_daily_snapshot as delete_tui_daily_snapshot,
     delete_drift_sessions_for_day as delete_tui_drift_sessions_for_day,
     delete_session as delete_tui_session, ensure_active_session as ensure_tui_active_session,
     finish_active_session as finish_tui_active_session, load_checkpoint as load_tui_checkpoint,

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::fmt::Write as _;
 
 use chrono::{Duration as ChronoDuration, NaiveDate};
 use ratatui::{prelude::Line, style::Color};
@@ -10,7 +10,9 @@ use crate::domain::{
     day_boundary_config, operational_day_key_now, report_period_date_bounds_with_offset,
     session_slices,
 };
-use crate::sand::{SandEngine, SandState, SandStateGrain};
+use crate::sand::{
+    SandState, SandStateGrain, SedimentSnapshot, select_daily_artifact, stable_source_revision,
+};
 
 use super::{App, PersistenceOperation, RecoveryAction};
 
@@ -134,44 +136,42 @@ impl App {
         _categories: &[Category],
     ) -> Option<Vec<Line<'static>>> {
         self.refresh_report_snapshot_cache();
-        let state = self.report_snapshot_state.clone()?;
-
-        let categories = self.report_categories();
-        let valid_category_ids: HashSet<CategoryId> =
-            categories.iter().map(|category| category.id).collect();
-
-        let cache_key = format!(
-            "{}:{}:{}:{}",
-            self.report_snapshot_end_day.as_deref().unwrap_or_default(),
-            width,
-            height,
-            state.grains.len()
-        );
+        let snapshot = self.report_snapshot_artifact.clone()?;
+        let cache_key = snapshot.render_cache_key(width, height);
 
         let should_rebuild_preview = self
             .report_snapshot_preview_key
             .as_deref()
             .map(|key| key != cache_key.as_str())
             .unwrap_or(true)
-            || self.report_snapshot_preview_engine.is_none();
+            || self.report_snapshot_preview_lines.is_none();
 
         if should_rebuild_preview {
-            let mut preview_engine = SandEngine::new(width, height);
-            preview_engine.restore_state(&state, &valid_category_ids);
-            self.report_snapshot_preview_engine = Some(preview_engine);
+            let categories = self.report_categories();
+            self.report_snapshot_preview_lines =
+                Some(snapshot.render_immutable(width, height, &categories));
             self.report_snapshot_preview_key = Some(cache_key);
         }
 
-        let preview_engine = self.report_snapshot_preview_engine.as_mut()?;
-        preview_engine.update();
-        Some(preview_engine.render(&categories))
+        self.report_snapshot_preview_lines.clone()
+    }
+
+    pub(super) fn report_snapshot_status_label(&self) -> String {
+        if !self.should_use_report_snapshot() {
+            return "live sediment".to_string();
+        }
+
+        self.report_snapshot_artifact
+            .as_ref()
+            .map(SedimentSnapshot::display_label)
+            .unwrap_or_else(|| "historical sediment unavailable".to_string())
     }
 
     pub(super) fn clear_report_snapshot_cache(&mut self) {
         self.report_snapshot_end_day = None;
-        self.report_snapshot_state = None;
+        self.report_snapshot_artifact = None;
         self.report_snapshot_preview_key = None;
-        self.report_snapshot_preview_engine = None;
+        self.report_snapshot_preview_lines = None;
     }
 
     pub(super) fn report_interval_end_day(&self) -> NaiveDate {
@@ -311,31 +311,27 @@ impl App {
             return;
         }
 
-        self.report_snapshot_end_day = Some(key);
-        self.report_snapshot_state = self
+        let persisted = self
             .load_daily_sand_snapshot(end_day)
-            .or_else(|| self.synthetic_snapshot_from_time_log(end_day));
+            .map(|state| SedimentSnapshot::legacy_daily_payload(key.clone(), state));
+        let derived = self.synthetic_snapshot_from_time_log(end_day);
+
+        self.report_snapshot_end_day = Some(key.clone());
+        self.report_snapshot_artifact = select_daily_artifact(&key, persisted, derived);
         self.report_snapshot_preview_key = None;
-        self.report_snapshot_preview_engine = None;
+        self.report_snapshot_preview_lines = None;
     }
 
     pub(super) fn rebuild_report_snapshot_for_interval_end_day(&mut self) {
         let end_day = self.report_interval_end_day();
         let key = end_day.format("%Y-%m-%d").to_string();
-        if let Some(state) = self.synthetic_snapshot_from_time_log(end_day) {
-            self.save_daily_sand_snapshot(end_day, &state);
-            self.report_snapshot_state = Some(state);
-        } else {
-            self.delete_daily_sand_snapshot(end_day);
-            self.report_snapshot_state = None;
-        }
-
+        self.report_snapshot_artifact = self.synthetic_snapshot_from_time_log(end_day);
         self.report_snapshot_end_day = Some(key);
         self.report_snapshot_preview_key = None;
-        self.report_snapshot_preview_engine = None;
+        self.report_snapshot_preview_lines = None;
     }
 
-    fn synthetic_snapshot_from_time_log(&self, day: NaiveDate) -> Option<SandState> {
+    fn synthetic_snapshot_from_time_log(&self, day: NaiveDate) -> Option<SedimentSnapshot> {
         let mut day_sessions: Vec<(u64, usize, String, String, usize)> = self
             .time_tracker
             .sessions
@@ -393,6 +389,16 @@ impl App {
         }
 
         day_sessions.sort_by(|a, b| a.2.cmp(&b.2).then(a.3.cmp(&b.3)).then(a.4.cmp(&b.4)));
+
+        let day_key = day.format("%Y-%m-%d").to_string();
+        let mut revision_material = format!("day={day_key}|idle=included|");
+        for (category_id, seconds, start, end, session_id) in &day_sessions {
+            let _ = write!(
+                revision_material,
+                "{category_id}:{seconds}:{start}:{end}:{session_id}|"
+            );
+        }
+        let source_revision = stable_source_revision(revision_material.as_bytes());
 
         let grid_width = self.sand_engine.grid_width_dots;
         let grid_height = self.sand_engine.grid_height_dots;
@@ -460,7 +466,7 @@ impl App {
             }
         }
 
-        Some(SandState {
+        let state = SandState {
             version: SandState::VERSION,
             grid_width,
             grid_height,
@@ -470,7 +476,13 @@ impl App {
             rng_state: 0,
             pending_grains: Vec::new(),
             pending_runs: Vec::new(),
-        })
+        };
+
+        Some(SedimentSnapshot::derived_preview(
+            day_key,
+            source_revision,
+            state,
+        ))
     }
 
     pub(super) fn clamp_report_selection(&mut self, row_count: usize) {
