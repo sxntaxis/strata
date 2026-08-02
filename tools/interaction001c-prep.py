@@ -53,14 +53,15 @@ if old_alias_insert not in text:
     raise SystemExit("default alias insertion block was not found")
 text = text.replace(old_alias_insert, new_alias_insert, 1)
 
-old_binding_writer = '''pub(crate) fn set_action_binding(
+binding_writer_patch = r'''text = text.replace(
+    """pub(crate) fn set_action_binding(
     path: &Path,
     action: Action,
     binding: Option<KeyBinding>,
 ) -> Result<LoadedKeybindings, String> {
     let mut config = load_config_or_default(path)?;
-'''
-new_binding_writer = '''pub(crate) fn set_action_binding(
+""",
+    """pub(crate) fn set_action_binding(
     path: &Path,
     action: Action,
     binding: Option<KeyBinding>,
@@ -69,10 +70,15 @@ new_binding_writer = '''pub(crate) fn set_action_binding(
         return Err("Ctrl-C is mandatory Quit policy and cannot be rebound".to_string());
     }
     let mut config = load_config_or_default(path)?;
+""",
+    1,
+)
+
 '''
-if old_binding_writer not in text:
-    raise SystemExit("action binding writer was not found")
-text = text.replace(old_binding_writer, new_binding_writer, 1)
+writer_anchor = "# Atlas editor can explicitly unbind without disabling.\n"
+if writer_anchor not in text:
+    raise SystemExit("action binding writer insertion point was not found")
+text = text.replace(writer_anchor, binding_writer_patch + writer_anchor, 1)
 
 mandatory_test_marker = '''    #[test]
     fn mandatory_ctrl_c_is_separate_from_configured_quit_state() {
