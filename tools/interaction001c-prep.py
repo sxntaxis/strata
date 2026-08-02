@@ -72,6 +72,23 @@ if old_today_replace not in text:
     raise SystemExit("main today replacement block was not found")
 text = text.replace(old_today_replace, new_today_replace, 1)
 
+old_row_replace = '''if text.count(old_row) != 1:
+    raise SystemExit("atlas row key label block not found")
+text = text.replace(old_row, new_row, 1)
+'''
+new_row_replace = '''row_start = text.index("                let keys = self.effective_keys_for_action(action);")
+row_end = text.index("\\n\\n                rows.push(self.selectable_row(", row_start)
+text = text[:row_start] + new_row + text[row_end:]
+'''
+if old_row_replace not in text:
+    raise SystemExit("atlas row replacement block was not found")
+text = text.replace(old_row_replace, new_row_replace, 1)
+text = text.replace(
+    '                let key_label = parts.join(" · ");',
+    '                let key_text = parts.join(" · ");',
+    1,
+)
+
 atlas_start = text.index("# Atlas tests: defaults now report aliases separately")
 atlas_end = text.index("path.write_text(text)", atlas_start)
 text = text[:atlas_start] + text[atlas_end:]
