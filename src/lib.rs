@@ -9,6 +9,7 @@ mod constants;
 #[allow(clippy::unnecessary_sort_by)]
 mod domain;
 mod keybindings;
+mod legacy_transition;
 #[allow(clippy::manual_checked_ops)]
 mod sand;
 #[allow(dead_code)]

@@ -182,8 +182,8 @@ mod tests {
         let receipt = LegacySessionReceipt::from_session(&session(7, "receipt"));
         let mut sessions = vec![session(7, "different")];
         let mut next_id = 8;
-        let error = reconcile_completed_session(&mut sessions, &mut next_id, Some(&receipt))
-            .unwrap_err();
+        let error =
+            reconcile_completed_session(&mut sessions, &mut next_id, Some(&receipt)).unwrap_err();
         assert!(error.contains("conflicts with existing history"));
         assert_eq!(sessions[0].description, "different");
     }
@@ -193,8 +193,8 @@ mod tests {
         let receipt = LegacySessionReceipt::from_session(&session(7, "receipt"));
         let mut sessions = vec![session(8, "newer")];
         let mut next_id = 9;
-        let error = reconcile_completed_session(&mut sessions, &mut next_id, Some(&receipt))
-            .unwrap_err();
+        let error =
+            reconcile_completed_session(&mut sessions, &mut next_id, Some(&receipt)).unwrap_err();
         assert!(error.contains("older than already published history"));
     }
 }
