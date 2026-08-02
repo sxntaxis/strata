@@ -1,8 +1,8 @@
 ---
 id: SEDIMENT-001C1
 kind: work
-state: active
-authority: working
+state: completed
+authority: accepted
 created: 2026-08-02
 updated: 2026-08-02
 ---
@@ -13,11 +13,11 @@ updated: 2026-08-02
 
 Establish the representation and arithmetic required for SEDIMENT-001C to recover arbitrarily long detached intervals without replaying or allocating one item per missed second.
 
-## Problem
+## Problem resolved
 
-The current pending reservoir stores one category ID per blocked grain. Replacing physics replay with a bulk loop would still be linear in detached duration and could allocate millions of entries after a long gap. That is not bounded recovery.
+The prior pending reservoir stored one category ID per blocked grain. Replacing physics replay with a bulk loop would still have remained linear in detached duration and could allocate millions of entries after a long gap. That was not bounded recovery.
 
-## Selected contract
+## Accepted contract
 
 - Pending logical grains are stored as ordered category/count runs.
 - Adjacent runs of the same category merge without losing FIFO category order.
@@ -30,7 +30,7 @@ The current pending reservoir stores one category ID per blocked grain. Replacin
 - Logical count overflow is rejected by the bulk API rather than wrapped or silently saturated.
 - Periodic tick arithmetic calculates due event counts and remainders with integer nanosecond arithmetic, independent of elapsed duration.
 
-## Acceptance proofs
+## Certified proofs
 
 - a billion pending grains require one compressed run;
 - adjacent same-category additions merge, while category transitions preserve order;
@@ -39,8 +39,16 @@ The current pending reservoir stores one category ID per blocked grain. Replacin
 - version 2 snapshot/restore preserves run order, counts, category identity, and total mass;
 - category clearing/removal operates exactly across compressed runs;
 - long-duration tick calculation returns exact due counts and accumulator remainder without iterative replay;
-- all existing sediment, persistence, temporal, report, CLI, and TUI tests remain green.
+- all existing sediment, persistence, temporal, report, CLI, and TUI tests remain green;
+- formatting and strict Clippy pass with all targets and features.
+
+## Durable authority
+
+- `docs/SEDIMENT_AUTHORITY.md` records compressed pending mass and exact periodic arithmetic;
+- `docs/ARCHITECTURE.md` assigns bounded mass representation to the sediment engine;
+- STRATA-D026 and STRATA-D027 constrain compression and recovery arithmetic;
+- `SandState` schema version 2 remains backward-compatible with version 1 pending vectors.
 
 ## Boundary
 
-This unit does not yet alter application startup, checkpoint claiming, recovery targets, or lifecycle behavior. SEDIMENT-001C2 will integrate these primitives into durable bounded checkpoint recovery and close issue #6.
+This unit does not alter application startup, checkpoint claiming, recovery targets, or lifecycle behavior and does not close issue #6. SEDIMENT-001C2 must integrate these primitives into durable bounded checkpoint recovery.
