@@ -13,6 +13,12 @@ updated: 2026-08-02
 
 Persist historical daily sediment as truthful typed contributions derived from canonical ledger slices, not as cumulative live-state copies.
 
+## Execution state
+
+Implementation branch: `sediment/001d2-daily-contribution-authority`.
+
+D1's typed envelope and immutable rendering are the fixed prerequisite. This unit owns persistence, revision validation, mutation invalidation, and legacy-row disposition only.
+
 ## Required contract
 
 - Persist `DailyContribution` envelopes under daily snapshot keys.
