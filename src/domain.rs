@@ -1092,7 +1092,7 @@ pub fn build_report_for_date(
     )
 }
 
-fn build_report_for_date_range(
+pub fn build_report_for_date_range(
     sessions: &[Session],
     categories: &[Category],
     start: NaiveDate,
@@ -1116,16 +1116,34 @@ fn build_report_for_date_range(
         }
     }
 
-    let mut entries: Vec<ReportEntry> = totals
+    let mut ordered: Vec<(CategoryId, ReportEntry)> = totals
         .into_iter()
         .filter_map(|(category_id, elapsed_seconds)| {
-            category_names.get(&category_id).map(|name| ReportEntry {
-                category_name: name.clone(),
-                elapsed_seconds,
+            category_names.get(&category_id).map(|name| {
+                (
+                    category_id,
+                    ReportEntry {
+                        category_name: name.clone(),
+                        elapsed_seconds,
+                    },
+                )
             })
         })
         .collect();
-    entries.sort_by(|a, b| b.elapsed_seconds.cmp(&a.elapsed_seconds));
+    ordered.sort_by(|(a_id, a), (b_id, b)| {
+        b.elapsed_seconds
+            .cmp(&a.elapsed_seconds)
+            .then_with(|| {
+                a.category_name
+                    .to_lowercase()
+                    .cmp(&b.category_name.to_lowercase())
+            })
+            .then_with(|| a_id.0.cmp(&b_id.0))
+    });
+    let entries = ordered
+        .into_iter()
+        .map(|(_, entry)| entry)
+        .collect::<Vec<_>>();
 
     let total_seconds = entries.iter().map(|entry| entry.elapsed_seconds).sum();
 

@@ -30,6 +30,7 @@ pub(crate) struct SqliteCliStopResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SqliteCliSession {
     pub id: usize,
+    pub stable_id: String,
     pub date: String,
     pub category_id: u64,
     pub category_name: String,
@@ -62,9 +63,20 @@ impl SqliteCliSession {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct SqliteCliActiveSession {
+    pub stable_id: String,
+    pub project: String,
+    pub category_id: u64,
+    pub category_name: String,
+    pub description: String,
+    pub started_at_utc: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct SqliteCliSnapshot {
     pub categories: Vec<Category>,
     pub sessions: Vec<SqliteCliSession>,
+    pub active_session: Option<SqliteCliActiveSession>,
 }
 
 pub(crate) fn start_session(
@@ -256,6 +268,7 @@ pub(crate) fn read_snapshot(database_path: &Path) -> Result<SqliteCliSnapshot, S
         };
         sessions.push(SqliteCliSession {
             id,
+            stable_id: record.stable_id,
             date: record.operational_day,
             category_id,
             category_name,
@@ -270,9 +283,40 @@ pub(crate) fn read_snapshot(database_path: &Path) -> Result<SqliteCliSnapshot, S
         });
     }
 
+    let active_session = repository
+        .active_session()
+        .map_err(|error| error.to_string())?
+        .map(|active| {
+            let category_id = u64::try_from(active.category_id).map_err(|_| {
+                format!(
+                    "Active session has category ID {} outside the supported range",
+                    active.category_id
+                )
+            })?;
+            let category_name = category_names
+                .get(&active.category_id)
+                .cloned()
+                .ok_or_else(|| {
+                    format!(
+                        "Active session references missing category {}",
+                        active.category_id
+                    )
+                })?;
+            Ok::<SqliteCliActiveSession, String>(SqliteCliActiveSession {
+                stable_id: active.stable_id,
+                project: active.project,
+                category_id,
+                category_name,
+                description: active.description,
+                started_at_utc: parse_utc(&active.started_at_utc)?,
+            })
+        })
+        .transpose()?;
+
     Ok(SqliteCliSnapshot {
         categories,
         sessions,
+        active_session,
     })
 }
 
