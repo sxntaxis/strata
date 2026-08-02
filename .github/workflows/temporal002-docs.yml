@@ -1,4 +1,4 @@
-name: temporal002-docs
+name: temporal002-docs-cleanup
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 jobs:
-  document:
+  cleanup:
     if: github.event.pull_request.head.ref == 'temporal/002-interval-boundaries'
     runs-on: ubuntu-latest
     steps:
@@ -21,27 +21,16 @@ jobs:
           ref: temporal/002-interval-boundaries
           fetch-depth: 0
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      - name: Remove documentation helper
+        run: rm -f tools/temporal002_docs.py
 
-      - name: Apply durable documentation
-        run: python tools/temporal002_docs.py
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Run strict Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: Run tests
-        run: cargo test --all-features
-
-      - name: Commit certified documentation
+      - name: Commit cleanup
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add README.md docs/ARCHITECTURE.md docs/DECISIONS.md docs/TEMPORAL_AUTHORITY.md notebook/NOW.md notebook/work/ISSUE-RECONCILIATION-001.md notebook/work/RELIABILITY-001-persistence-and-audit-remediation.md
-          git commit -m 'TEMPORAL-002: record interval authority'
+          git add -A tools/temporal002_docs.py
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m 'TEMPORAL-002: remove documentation helper'
           git push origin HEAD:temporal/002-interval-boundaries
