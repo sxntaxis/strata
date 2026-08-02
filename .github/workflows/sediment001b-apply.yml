@@ -47,6 +47,16 @@ jobs:
           render.write_text(source.replace(compact, normalized, 1))
           PY
           python tools/sediment001b-apply.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/app.rs')
+          source = path.read_text()
+          old = '        RUNTIME_LOOP_SETTINGS, SAND_ENGINE, TIME_SETTINGS,\n'
+          new = '        RUNTIME_LOOP_SETTINGS, TIME_SETTINGS,\n'
+          if old not in source:
+              raise SystemExit('obsolete SAND_ENGINE import was not found')
+          path.write_text(source.replace(old, new, 1))
+          PY
       - name: Format
         run: cargo fmt --all
       - name: Check formatting
