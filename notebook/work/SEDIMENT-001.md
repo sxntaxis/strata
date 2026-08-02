@@ -43,17 +43,24 @@ Accepted authority is recorded in `docs/SEDIMENT_AUTHORITY.md` and STRATA-D023 t
 
 ### SEDIMENT-001B — logical canvas and viewport projection
 
-Status: next.
-Issue: #7.
+Status: implemented and certified in PR #51.
+Issue completed: #7.
 
-- separate canonical logical sediment dimensions from current viewport dimensions;
-- make shrink a non-destructive view operation;
-- preserve hidden grains for later expansion;
-- remove resize-triggered global gravity and repacking from canonical history;
-- define topology-preservation tolerances and round-trip proofs.
+- persisted logical dot grid owns canonical dimensions and coordinates;
+- terminal dimensions are presentation-only viewport state;
+- shrink crops without deleting or repacking hidden grains;
+- expansion pads without stretching or relocating canonical grains;
+- projection is horizontally centered and bottom-aligned;
+- resize never invokes gravity, ingress placement, or topology rewriting;
+- restore preserves stored canonical dimensions on any opening viewport;
+- shrink/expand and repeated oscillation preserve exact `SandState`;
+- the destructive edge-band resize module is removed.
+
+Accepted authority is recorded in `docs/SEDIMENT_AUTHORITY.md` and STRATA-D025.
 
 ### SEDIMENT-001C — bounded detached recovery
 
+Status: next.
 Issue: #6.
 
 - restore committed topology directly;
@@ -74,4 +81,4 @@ Issue: #18.
 
 ## Current edge
 
-Implement SEDIMENT-001B. The current engine still treats viewport dimensions as canonical storage and runs resize repacking/gravity. Replace that coupling without weakening the placed/pending mass authority established by 001A.
+Implement SEDIMENT-001C. Canonical logical mass and topology are now independent of terminal geometry. Detached recovery must restore that state directly and add elapsed mass through a bounded, retry-safe operation rather than replaying every missed physics frame.
