@@ -1,0 +1,41 @@
+name: sediment001c1-apply
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - synchronize
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    if: github.event.pull_request.head.ref == 'sediment/001c1-compressed-recovery-mass'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: sediment/001c1-compressed-recovery-mass
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Apply SEDIMENT-001C1
+        run: python tools/sediment001c1-apply.py
+      - name: Format
+        run: cargo fmt --all
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Strict Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Test
+        run: cargo test --all-features
+      - name: Commit clean implementation
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'SEDIMENT-001C1: compress pending recovery mass'
+          git push origin HEAD:sediment/001c1-compressed-recovery-mass
