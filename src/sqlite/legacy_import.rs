@@ -19,7 +19,7 @@ use crate::{constants::COLORS, domain::DRIFT_CATEGORY_CONFIG_NAME};
 use super::SqliteRepository;
 
 const CATEGORIES_HEADER: [&str; 5] = ["id", "name", "description", "color_index", "karma_effect"];
-const SESSIONS_HEADER: [&str; 8] = [
+const LEGACY_SESSIONS_HEADER: [&str; 8] = [
     "id",
     "date",
     "category_id",
@@ -28,6 +28,20 @@ const SESSIONS_HEADER: [&str; 8] = [
     "start_time",
     "end_time",
     "elapsed_seconds",
+];
+const SESSIONS_HEADER: [&str; 12] = [
+    "id",
+    "date",
+    "category_id",
+    "category_name",
+    "description",
+    "start_time",
+    "end_time",
+    "elapsed_seconds",
+    "started_at_utc",
+    "ended_at_utc",
+    "boundary_utc_offset_seconds",
+    "boundary_start_minutes",
 ];
 
 #[derive(Debug, Clone)]
@@ -150,6 +164,8 @@ struct LegacySession {
     ended_at_utc: String,
     operational_day: String,
     elapsed_seconds: i64,
+    boundary_utc_offset_seconds: i32,
+    boundary_start_minutes: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -513,9 +529,11 @@ impl SqliteRepository {
                     ended_at_utc,
                     operational_day,
                     elapsed_seconds,
+                    boundary_utc_offset_seconds,
+                    boundary_start_minutes,
                     source,
                     legacy_import_id
-                 ) VALUES (?1, ?2, '', ?3, ?4, ?5, ?6, ?7, ?8, 'legacy-csv', ?9)",
+                 ) VALUES (?1, ?2, '', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'legacy-csv', ?11)",
                 params![
                     session.id,
                     session.stable_id,
@@ -525,6 +543,8 @@ impl SqliteRepository {
                     session.ended_at_utc,
                     session.operational_day,
                     session.elapsed_seconds,
+                    session.boundary_utc_offset_seconds,
+                    session.boundary_start_minutes,
                     import_id,
                 ],
             )?;
@@ -930,17 +950,28 @@ fn parse_sessions(
     fingerprint: &str,
 ) -> Result<Vec<LegacySession>, LegacyImportError> {
     let source = "time_log.csv";
-    let offset = FixedOffset::east_opt(options.utc_offset_seconds)
+    let default_offset = FixedOffset::east_opt(options.utc_offset_seconds)
         .ok_or_else(|| LegacyImportError::InvalidOptions("invalid fixed UTC offset".to_string()))?;
     let mut reader = ReaderBuilder::new()
         .has_headers(true)
         .flexible(false)
         .from_reader(Cursor::new(bytes));
-    validate_header(
-        source,
-        reader.headers().map_err(|error| csv_error(source, error))?,
-        &SESSIONS_HEADER,
-    )?;
+    let header = reader
+        .headers()
+        .map_err(|error| csv_error(source, error))?
+        .clone();
+    let has_temporal_provenance = header.iter().eq(SESSIONS_HEADER.iter().copied());
+    if !has_temporal_provenance && !header.iter().eq(LEGACY_SESSIONS_HEADER.iter().copied()) {
+        return Err(invalid(
+            source,
+            None,
+            format!(
+                "invalid header; expected '{}' or '{}'",
+                LEGACY_SESSIONS_HEADER.join(","),
+                SESSIONS_HEADER.join(",")
+            ),
+        ));
+    }
 
     let mut sessions = Vec::new();
     let mut ids = HashSet::new();
@@ -1002,15 +1033,86 @@ fn parse_sessions(
                 "elapsed seconds cannot be negative",
             ));
         }
-        let (started_at_utc, ended_at_utc) = reconstruct_absolute_times(
-            operational_day,
-            start_time,
-            end_time,
-            elapsed_seconds,
-            options.operational_day_start_minutes,
-            offset,
-        )
-        .map_err(|message| invalid(source, Some(row), message))?;
+
+        let (started_at_utc, ended_at_utc, boundary_utc_offset_seconds, boundary_start_minutes) =
+            if has_temporal_provenance {
+                let started = DateTime::parse_from_rfc3339(required_field(
+                    source,
+                    row,
+                    &record,
+                    8,
+                    "absolute start timestamp",
+                )?)
+                .map_err(|error| {
+                    invalid(
+                        source,
+                        Some(row),
+                        format!("invalid start timestamp: {error}"),
+                    )
+                })?
+                .with_timezone(&Utc);
+                let ended = DateTime::parse_from_rfc3339(required_field(
+                    source,
+                    row,
+                    &record,
+                    9,
+                    "absolute end timestamp",
+                )?)
+                .map_err(|error| {
+                    invalid(source, Some(row), format!("invalid end timestamp: {error}"))
+                })?
+                .with_timezone(&Utc);
+                let offset_seconds = parse_i64(source, row, &record, 10, "boundary UTC offset")?;
+                let offset_seconds = i32::try_from(offset_seconds)
+                    .map_err(|_| invalid(source, Some(row), "boundary UTC offset exceeds i32"))?;
+                if FixedOffset::east_opt(offset_seconds).is_none() {
+                    return Err(invalid(
+                        source,
+                        Some(row),
+                        "boundary UTC offset is unsupported",
+                    ));
+                }
+                let start_minutes = parse_i64(source, row, &record, 11, "boundary start minutes")?;
+                let start_minutes = u16::try_from(start_minutes).map_err(|_| {
+                    invalid(source, Some(row), "boundary start minutes exceeds u16")
+                })?;
+                if start_minutes > 1439 {
+                    return Err(invalid(
+                        source,
+                        Some(row),
+                        "boundary start minutes is outside 0..1439",
+                    ));
+                }
+                if (ended - started).num_seconds() != elapsed_seconds {
+                    return Err(invalid(
+                        source,
+                        Some(row),
+                        "absolute timestamps do not match elapsed_seconds",
+                    ));
+                }
+                (
+                    format_utc(started),
+                    format_utc(ended),
+                    offset_seconds,
+                    start_minutes,
+                )
+            } else {
+                let (started, ended) = reconstruct_absolute_times(
+                    operational_day,
+                    start_time,
+                    end_time,
+                    elapsed_seconds,
+                    options.operational_day_start_minutes,
+                    default_offset,
+                )
+                .map_err(|message| invalid(source, Some(row), message))?;
+                (
+                    started,
+                    ended,
+                    options.utc_offset_seconds,
+                    options.operational_day_start_minutes,
+                )
+            };
 
         sessions.push(LegacySession {
             id,
@@ -1021,6 +1123,8 @@ fn parse_sessions(
             ended_at_utc,
             operational_day: operational_day.format("%Y-%m-%d").to_string(),
             elapsed_seconds,
+            boundary_utc_offset_seconds,
+            boundary_start_minutes,
         });
     }
     sessions.sort_by_key(|session| session.id);

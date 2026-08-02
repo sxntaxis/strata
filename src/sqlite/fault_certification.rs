@@ -292,6 +292,9 @@ fn every_authoritative_persistence_family_rolls_back_or_remains_recoverable() {
             start_time: "12:00:00".to_string(),
             end_time: "13:00:00".to_string(),
             elapsed_seconds: 3600,
+            started_at_utc: None,
+            ended_at_utc: None,
+            operational_day_policy: None,
         }];
         runtime_coordination::with_test_fault("session-sync", "commit", "commit", || {
             tui_runtime::sync_sessions(path, &sessions)

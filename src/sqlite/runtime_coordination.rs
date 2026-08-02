@@ -94,7 +94,11 @@ pub(crate) fn finish_active_session(
 
     let active = query_active(&transaction)?.ok_or(CoordinationError::NoActiveSession)?;
     require_expected_active(&active, expected_active_stable_id)?;
-    let completed_session_id = insert_completed(&transaction, &active, completion)?;
+    let completed_session_id = if completion.elapsed_seconds > 0 {
+        Some(insert_completed(&transaction, &active, completion)?)
+    } else {
+        None
+    };
     delete_expected_active(&transaction, expected_active_stable_id)?;
     let acknowledged_at_utc = acknowledge_immediately.then_some(completion.ended_at_utc);
     insert_receipt(
@@ -103,7 +107,7 @@ pub(crate) fn finish_active_session(
         "finish",
         expected_active_stable_id,
         None,
-        Some(completed_session_id),
+        completed_session_id,
         completion.elapsed_seconds,
         completion.source,
         completion.ended_at_utc,
@@ -116,7 +120,7 @@ pub(crate) fn finish_active_session(
         operation_kind: "finish".to_string(),
         expected_active_stable_id: expected_active_stable_id.to_string(),
         resulting_active_stable_id: None,
-        completed_session_id: Some(completed_session_id),
+        completed_session_id,
         elapsed_seconds: completion.elapsed_seconds,
         source: completion.source.to_string(),
         applied_at_utc: completion.ended_at_utc.to_string(),
@@ -153,7 +157,11 @@ pub(crate) fn switch_active_session(
 
     let active = query_active(&transaction)?.ok_or(CoordinationError::NoActiveSession)?;
     require_expected_active(&active, expected_active_stable_id)?;
-    let completed_session_id = insert_completed(&transaction, &active, completion)?;
+    let completed_session_id = if completion.elapsed_seconds > 0 {
+        Some(insert_completed(&transaction, &active, completion)?)
+    } else {
+        None
+    };
     delete_expected_active(&transaction, expected_active_stable_id)?;
     insert_active(&transaction, next)?;
     insert_receipt(
@@ -162,7 +170,7 @@ pub(crate) fn switch_active_session(
         "switch",
         expected_active_stable_id,
         Some(next.stable_id),
-        Some(completed_session_id),
+        completed_session_id,
         completion.elapsed_seconds,
         completion.source,
         completion.ended_at_utc,
@@ -175,7 +183,7 @@ pub(crate) fn switch_active_session(
         operation_kind: "switch".to_string(),
         expected_active_stable_id: expected_active_stable_id.to_string(),
         resulting_active_stable_id: Some(next.stable_id.to_string()),
-        completed_session_id: Some(completed_session_id),
+        completed_session_id,
         elapsed_seconds: completion.elapsed_seconds,
         source: completion.source.to_string(),
         applied_at_utc: completion.ended_at_utc.to_string(),
@@ -693,6 +701,16 @@ fn validate_transition_inputs(
             "elapsed seconds cannot be negative".to_string(),
         ));
     }
+    if chrono::FixedOffset::east_opt(completion.boundary_utc_offset_seconds).is_none() {
+        return Err(CoordinationError::InvalidInput(
+            "boundary UTC offset is unsupported".to_string(),
+        ));
+    }
+    if completion.boundary_start_minutes > 1439 {
+        return Err(CoordinationError::InvalidInput(
+            "boundary start minute is outside 0..1439".to_string(),
+        ));
+    }
     Ok(())
 }
 
@@ -787,8 +805,10 @@ fn insert_completed(
     transaction.execute(
         "INSERT INTO sessions (
             stable_id, project, category_id, description, started_at_utc,
-            ended_at_utc, operational_day, elapsed_seconds, source, legacy_import_id
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL)",
+            ended_at_utc, operational_day, elapsed_seconds,
+            boundary_utc_offset_seconds, boundary_start_minutes,
+            source, legacy_import_id
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL)",
         params![
             active.stable_id,
             active.project,
@@ -798,6 +818,8 @@ fn insert_completed(
             completion.ended_at_utc,
             completion.operational_day,
             completion.elapsed_seconds,
+            completion.boundary_utc_offset_seconds,
+            completion.boundary_start_minutes,
             completion.source,
         ],
     )?;
@@ -943,6 +965,8 @@ mod tests {
             ended_at_utc: "2026-08-01T11:00:00Z",
             operational_day: "2026-08-01",
             elapsed_seconds: 3600,
+            boundary_utc_offset_seconds: -21600,
+            boundary_start_minutes: 360,
             source,
         }
     }
@@ -1202,6 +1226,77 @@ mod tests {
             .unwrap();
         assert_eq!(retained.0, 1);
         assert_eq!(retained.1, None);
+        drop(repository);
+        remove_database(&path);
+    }
+
+    #[test]
+    fn zero_finish_records_receipt_without_work_row() {
+        let path = database_path("zero-finish");
+        seed(&path, "active-zero");
+        let mut repository = SqliteRepository::open(&path).unwrap();
+        let completion = SessionCompletion {
+            ended_at_utc: "2026-08-01T10:00:00Z",
+            operational_day: "2026-08-01",
+            elapsed_seconds: 0,
+            boundary_utc_offset_seconds: -21600,
+            boundary_start_minutes: 360,
+            source: "tui-runtime",
+        };
+        let receipt = finish_active_session(
+            &mut repository,
+            "active-zero",
+            "finish:active-zero",
+            &completion,
+            true,
+        )
+        .unwrap();
+        assert_eq!(receipt.completed_session_id, None);
+        assert!(repository.list_sessions().unwrap().is_empty());
+        assert!(repository.active_session().unwrap().is_none());
+        drop(repository);
+        remove_database(&path);
+    }
+
+    #[test]
+    fn repeated_zero_switches_replace_active_without_work_rows() {
+        let path = database_path("zero-switches");
+        seed(&path, "active-a");
+        let mut repository = SqliteRepository::open(&path).unwrap();
+        let completion = SessionCompletion {
+            ended_at_utc: "2026-08-01T10:00:00Z",
+            operational_day: "2026-08-01",
+            elapsed_seconds: 0,
+            boundary_utc_offset_seconds: -21600,
+            boundary_start_minutes: 360,
+            source: "tui-runtime",
+        };
+        for (expected, next, operation) in [
+            ("active-a", "active-b", "switch:a:b"),
+            ("active-b", "active-c", "switch:b:c"),
+        ] {
+            let receipt = switch_active_session(
+                &mut repository,
+                expected,
+                operation,
+                &completion,
+                &NewActiveSession {
+                    stable_id: next,
+                    project: "",
+                    category_id: 1,
+                    description: "",
+                    started_at_utc: "2026-08-01T10:00:00Z",
+                    recovery_kind: "live",
+                },
+            )
+            .unwrap();
+            assert_eq!(receipt.completed_session_id, None);
+        }
+        assert!(repository.list_sessions().unwrap().is_empty());
+        assert_eq!(
+            repository.active_session().unwrap().unwrap().stable_id,
+            "active-c"
+        );
         drop(repository);
         remove_database(&path);
     }

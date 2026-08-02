@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Duration as ChronoDuration, FixedOffset, NaiveDate, NaiveTime, Utc};
 
-use crate::domain::{DayBoundaryConfig, DayBoundaryMode};
+use crate::domain::{DayBoundaryConfig, OperationalDayPolicy};
 
 pub(crate) const MAX_LIVE_CLOCK_SKEW: Duration = Duration::from_secs(5);
 pub(crate) const MAX_UNATTENDED_WALL_INTERVAL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
@@ -34,22 +34,137 @@ pub(crate) fn operational_day_from_utc(
     config: &DayBoundaryConfig,
 ) -> Result<NaiveDate, String> {
     let civil = civil_from_utc(timestamp, config)?;
-    let cutoff = match config.mode {
-        DayBoundaryMode::FixedHour | DayBoundaryMode::Sunrise => {
-            NaiveTime::from_hms_opt(config.fixed_hour, config.fixed_minute, 0).ok_or_else(|| {
-                format!(
-                    "configured operational-day cutoff {:02}:{:02} is invalid",
-                    config.fixed_hour, config.fixed_minute
-                )
-            })?
-        }
-    };
+    let cutoff =
+        NaiveTime::from_hms_opt(config.fixed_hour, config.fixed_minute, 0).ok_or_else(|| {
+            format!(
+                "configured operational-day cutoff {:02}:{:02} is invalid",
+                config.fixed_hour, config.fixed_minute
+            )
+        })?;
 
     let mut day = civil.date_naive();
     if civil.time() < cutoff {
         day -= ChronoDuration::days(1);
     }
     Ok(day)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct OperationalDaySlice {
+    pub operational_day: NaiveDate,
+    pub started_at_utc: DateTime<Utc>,
+    pub ended_at_utc: DateTime<Utc>,
+    pub elapsed_seconds: usize,
+}
+
+pub(crate) fn civil_from_policy(
+    timestamp: DateTime<Utc>,
+    policy: OperationalDayPolicy,
+) -> Result<DateTime<FixedOffset>, String> {
+    let offset = FixedOffset::east_opt(policy.utc_offset_seconds).ok_or_else(|| {
+        format!(
+            "operational-day UTC offset {} is invalid",
+            policy.utc_offset_seconds
+        )
+    })?;
+    Ok(timestamp.with_timezone(&offset))
+}
+
+fn operational_day_from_policy(
+    timestamp: DateTime<Utc>,
+    policy: OperationalDayPolicy,
+) -> Result<NaiveDate, String> {
+    if policy.start_minutes > 1439 {
+        return Err(format!(
+            "operational-day start minute {} is invalid",
+            policy.start_minutes
+        ));
+    }
+    let civil = civil_from_policy(timestamp, policy)?;
+    let cutoff =
+        NaiveTime::from_num_seconds_from_midnight_opt(u32::from(policy.start_minutes) * 60, 0)
+            .ok_or_else(|| "operational-day cutoff is invalid".to_string())?;
+    let mut day = civil.date_naive();
+    if civil.time() < cutoff {
+        day -= ChronoDuration::days(1);
+    }
+    Ok(day)
+}
+
+fn boundary_start_utc(
+    operational_day: NaiveDate,
+    policy: OperationalDayPolicy,
+) -> Result<DateTime<Utc>, String> {
+    let offset = FixedOffset::east_opt(policy.utc_offset_seconds).ok_or_else(|| {
+        format!(
+            "operational-day UTC offset {} is invalid",
+            policy.utc_offset_seconds
+        )
+    })?;
+    if policy.start_minutes > 1439 {
+        return Err(format!(
+            "operational-day start minute {} is invalid",
+            policy.start_minutes
+        ));
+    }
+    let cutoff =
+        NaiveTime::from_num_seconds_from_midnight_opt(u32::from(policy.start_minutes) * 60, 0)
+            .ok_or_else(|| "operational-day cutoff is invalid".to_string())?;
+    operational_day
+        .and_time(cutoff)
+        .and_local_timezone(offset)
+        .single()
+        .map(|value| value.with_timezone(&Utc))
+        .ok_or_else(|| "fixed-offset operational-day boundary is not unique".to_string())
+}
+
+pub(crate) fn allocate_operational_day_slices(
+    started_at_utc: DateTime<Utc>,
+    recorded_ended_at_utc: DateTime<Utc>,
+    elapsed_seconds: usize,
+    policy: OperationalDayPolicy,
+) -> Result<Vec<OperationalDaySlice>, String> {
+    if elapsed_seconds == 0 {
+        return Ok(Vec::new());
+    }
+    let elapsed = i64::try_from(elapsed_seconds)
+        .map_err(|_| "session duration exceeds chrono's supported range".to_string())?;
+    let ended_at_utc = started_at_utc
+        .checked_add_signed(ChronoDuration::seconds(elapsed))
+        .ok_or_else(|| "session end exceeds chrono's supported range".to_string())?;
+    if recorded_ended_at_utc < started_at_utc {
+        return Err("session end precedes its start".to_string());
+    }
+
+    let mut cursor = started_at_utc;
+    let mut slices = Vec::new();
+    while cursor < ended_at_utc {
+        let operational_day = operational_day_from_policy(cursor, policy)?;
+        let next_day = operational_day
+            .succ_opt()
+            .ok_or_else(|| "operational-day range exceeds chrono's supported dates".to_string())?;
+        let next_boundary = boundary_start_utc(next_day, policy)?;
+        let slice_end = ended_at_utc.min(next_boundary);
+        let seconds = (slice_end - cursor).num_seconds();
+        if seconds <= 0 {
+            return Err("operational-day allocation did not advance".to_string());
+        }
+        slices.push(OperationalDaySlice {
+            operational_day,
+            started_at_utc: cursor,
+            ended_at_utc: slice_end,
+            elapsed_seconds: usize::try_from(seconds)
+                .map_err(|_| "slice duration exceeds this platform's range".to_string())?,
+        });
+        cursor = slice_end;
+    }
+    let allocated: usize = slices.iter().map(|slice| slice.elapsed_seconds).sum();
+    if allocated != elapsed_seconds {
+        return Err(format!(
+            "operational-day allocation conserved {allocated} of {elapsed_seconds} seconds"
+        ));
+    }
+    Ok(slices)
 }
 
 pub(crate) fn checked_wall_interval(
@@ -125,7 +240,7 @@ mod tests {
 
     fn config(offset_seconds: i32) -> DayBoundaryConfig {
         DayBoundaryConfig {
-            mode: DayBoundaryMode::FixedHour,
+            mode: crate::domain::DayBoundaryMode::FixedHour,
             fixed_hour: 6,
             fixed_minute: 0,
             utc_offset_seconds: offset_seconds,
@@ -222,5 +337,40 @@ mod tests {
             civil_from_utc(timestamp, &europe).unwrap().time()
         );
         assert_eq!(persisted_day.to_string(), "2026-08-01");
+    }
+
+    #[test]
+    fn cross_boundary_allocation_conserves_seconds() {
+        let policy = OperationalDayPolicy {
+            utc_offset_seconds: -21600,
+            start_minutes: 360,
+        };
+        let start = Utc
+            .with_ymd_and_hms(2026, 8, 1, 11, 30, 0)
+            .single()
+            .unwrap();
+        let end = Utc
+            .with_ymd_and_hms(2026, 8, 1, 12, 30, 0)
+            .single()
+            .unwrap();
+        let slices = allocate_operational_day_slices(start, end, 3600, policy).unwrap();
+        assert_eq!(slices.len(), 2);
+        assert_eq!(slices[0].operational_day.to_string(), "2026-07-31");
+        assert_eq!(slices[0].elapsed_seconds, 1800);
+        assert_eq!(slices[1].operational_day.to_string(), "2026-08-01");
+        assert_eq!(slices[1].elapsed_seconds, 1800);
+    }
+
+    #[test]
+    fn exact_boundary_does_not_create_zero_slice() {
+        let policy = OperationalDayPolicy {
+            utc_offset_seconds: -21600,
+            start_minutes: 360,
+        };
+        let end = Utc.with_ymd_and_hms(2026, 8, 1, 12, 0, 0).single().unwrap();
+        let start = end - ChronoDuration::minutes(30);
+        let slices = allocate_operational_day_slices(start, end, 1800, policy).unwrap();
+        assert_eq!(slices.len(), 1);
+        assert_eq!(slices[0].operational_day.to_string(), "2026-07-31");
     }
 }

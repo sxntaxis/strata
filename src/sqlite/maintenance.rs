@@ -22,7 +22,7 @@ use super::{
 };
 
 const MAINTENANCE_REPORT_SCHEMA_VERSION: u8 = 1;
-const PORTABLE_BUNDLE_SCHEMA_VERSION: u8 = 1;
+const PORTABLE_BUNDLE_SCHEMA_VERSION: u8 = 2;
 const MANIFEST_FILENAME: &str = "manifest.json";
 const CATEGORIES_FILENAME: &str = "categories.csv";
 const CATEGORY_TAGS_FILENAME: &str = "category_tags.csv";
@@ -972,6 +972,8 @@ fn serialize_sessions(sessions: &[SessionRecord]) -> Result<Vec<u8>, Maintenance
             "ended_at_utc",
             "operational_day",
             "elapsed_seconds",
+            "boundary_utc_offset_seconds",
+            "boundary_start_minutes",
             "source",
         ],
     )?;
@@ -989,6 +991,14 @@ fn serialize_sessions(sessions: &[SessionRecord]) -> Result<Vec<u8>, Maintenance
                 session.ended_at_utc.clone(),
                 session.operational_day.clone(),
                 session.elapsed_seconds.to_string(),
+                session
+                    .boundary_utc_offset_seconds
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                session
+                    .boundary_start_minutes
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
                 session.source.clone(),
             ],
         )?;
@@ -1367,6 +1377,8 @@ fn parse_sessions(bytes: &[u8]) -> Result<Vec<SessionRecord>, MaintenanceError> 
             "ended_at_utc",
             "operational_day",
             "elapsed_seconds",
+            "boundary_utc_offset_seconds",
+            "boundary_start_minutes",
             "source",
         ],
     )?;
@@ -1387,7 +1399,19 @@ fn parse_sessions(bytes: &[u8]) -> Result<Vec<SessionRecord>, MaintenanceError> 
                 field(record, 8)?,
                 "elapsed_seconds",
             )?,
-            source: field(record, 9)?.to_string(),
+            boundary_utc_offset_seconds: optional_i64(
+                SESSIONS_FILENAME,
+                index,
+                field(record, 9)?,
+                "boundary_utc_offset_seconds",
+            )?,
+            boundary_start_minutes: optional_i64(
+                SESSIONS_FILENAME,
+                index,
+                field(record, 10)?,
+                "boundary_start_minutes",
+            )?,
+            source: field(record, 11)?.to_string(),
         });
     }
     Ok(sessions)
@@ -1770,8 +1794,9 @@ fn import_snapshot(
         transaction.execute(
             "INSERT INTO sessions(
                 id, stable_id, project, category_id, description, started_at_utc,
-                ended_at_utc, operational_day, elapsed_seconds, source
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                ended_at_utc, operational_day, elapsed_seconds,
+                boundary_utc_offset_seconds, boundary_start_minutes, source
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 session.id,
                 session.stable_id,
@@ -1782,6 +1807,8 @@ fn import_snapshot(
                 session.ended_at_utc,
                 session.operational_day,
                 session.elapsed_seconds,
+                session.boundary_utc_offset_seconds,
+                session.boundary_start_minutes,
                 session.source,
             ],
         )?;
@@ -2028,6 +2055,19 @@ fn parse_usize(
     })
 }
 
+fn optional_i64(
+    path: &str,
+    index: usize,
+    value: &str,
+    field_name: &str,
+) -> Result<Option<i64>, MaintenanceError> {
+    if value.is_empty() {
+        Ok(None)
+    } else {
+        parse_i64(path, index, value, field_name).map(Some)
+    }
+}
+
 fn optional_string(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
 }
@@ -2222,6 +2262,8 @@ mod tests {
                 ended_at_utc: "2026-08-01T16:00:00Z",
                 operational_day: "2026-08-01",
                 elapsed_seconds: 3600,
+                boundary_utc_offset_seconds: -21600,
+                boundary_start_minutes: 360,
                 source: "fixture",
             })
             .unwrap();

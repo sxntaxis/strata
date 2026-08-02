@@ -10,7 +10,10 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
     constants::COLORS,
-    domain::{Category, CategoryId, DRIFT_CATEGORY_CONFIG_NAME, Session, runtime_settings},
+    domain::{
+        Category, CategoryId, DRIFT_CATEGORY_CONFIG_NAME, OperationalDayPolicy, Session,
+        day_boundary_config, runtime_settings,
+    },
     sand::SandState,
     storage::{CategoryTagsState, LoadedCategories, LoadedSessions},
 };
@@ -92,14 +95,37 @@ pub(crate) fn load_state(database_path: &Path) -> Result<SqliteTuiState, String>
             )
         })?;
         max_session_id = max_session_id.max(id);
+        let started_at_utc = parse_utc(&row.started_at_utc)?;
+        let ended_at_utc = parse_utc(&row.ended_at_utc)?;
+        let operational_day_policy =
+            match (row.boundary_utc_offset_seconds, row.boundary_start_minutes) {
+                (Some(offset), Some(start_minutes)) => Some(OperationalDayPolicy {
+                    utc_offset_seconds: i32::try_from(offset).map_err(|_| {
+                        format!("Session {} boundary UTC offset is outside i32", row.id)
+                    })?,
+                    start_minutes: u16::try_from(start_minutes).map_err(|_| {
+                        format!("Session {} boundary start minute is outside u16", row.id)
+                    })?,
+                }),
+                (None, None) => None,
+                _ => {
+                    return Err(format!(
+                        "Session {} has partial boundary provenance",
+                        row.id
+                    ));
+                }
+            };
         sessions.push(Session {
             id,
             date: row.operational_day,
             category_id: CategoryId::new(category_id),
             description: row.description,
-            start_time: local_clock(&row.started_at_utc)?,
-            end_time: local_clock(&row.ended_at_utc)?,
+            start_time: local_clock(&row.started_at_utc, operational_day_policy)?,
+            end_time: local_clock(&row.ended_at_utc, operational_day_policy)?,
             elapsed_seconds,
+            started_at_utc: Some(started_at_utc),
+            ended_at_utc: Some(ended_at_utc),
+            operational_day_policy,
         });
     }
 
@@ -186,6 +212,7 @@ pub(crate) fn switch_active_session(
 ) -> Result<runtime_coordination::RuntimeTransitionReceipt, String> {
     let mut repository = open_cli_repository(database_path)?;
     let switched = timestamp(switched_at_utc);
+    let policy = OperationalDayPolicy::from_config(day_boundary_config());
     runtime_coordination::switch_active_session(
         &mut repository,
         expected_active_stable_id,
@@ -194,6 +221,8 @@ pub(crate) fn switch_active_session(
             ended_at_utc: &switched,
             operational_day,
             elapsed_seconds: as_i64(elapsed_seconds as u64, "elapsed seconds")?,
+            boundary_utc_offset_seconds: policy.utc_offset_seconds,
+            boundary_start_minutes: policy.start_minutes,
             source: "tui-runtime",
         },
         &NewActiveSession {
@@ -218,6 +247,7 @@ pub(crate) fn finish_active_session(
 ) -> Result<runtime_coordination::RuntimeTransitionReceipt, String> {
     let mut repository = open_cli_repository(database_path)?;
     let ended = timestamp(ended_at_utc);
+    let policy = OperationalDayPolicy::from_config(day_boundary_config());
     runtime_coordination::finish_active_session(
         &mut repository,
         expected_active_stable_id,
@@ -226,6 +256,8 @@ pub(crate) fn finish_active_session(
             ended_at_utc: &ended,
             operational_day,
             elapsed_seconds: as_i64(elapsed_seconds as u64, "elapsed seconds")?,
+            boundary_utc_offset_seconds: policy.utc_offset_seconds,
+            boundary_start_minutes: policy.start_minutes,
             source: "tui-runtime",
         },
         true,
@@ -880,13 +912,22 @@ fn category_sort_order(database_path: &Path, category_id: u64) -> i64 {
         .unwrap_or_else(|_| i64::try_from(category_id).unwrap_or(i64::MAX))
 }
 
-fn local_clock(timestamp_value: &str) -> Result<String, String> {
-    let utc = DateTime::parse_from_rfc3339(timestamp_value)
-        .map_err(|error| format!("Invalid SQLite timestamp '{timestamp_value}': {error}"))?
-        .with_timezone(&Utc);
-    let configured_offset = runtime_settings().day_boundary.utc_offset_seconds;
-    let offset = FixedOffset::east_opt(configured_offset)
-        .ok_or_else(|| format!("Configured UTC offset {configured_offset} is invalid"))?;
+fn parse_utc(timestamp_value: &str) -> Result<DateTime<Utc>, String> {
+    DateTime::parse_from_rfc3339(timestamp_value)
+        .map_err(|error| format!("Invalid SQLite timestamp '{timestamp_value}': {error}"))
+        .map(|value| value.with_timezone(&Utc))
+}
+
+fn local_clock(
+    timestamp_value: &str,
+    policy: Option<OperationalDayPolicy>,
+) -> Result<String, String> {
+    let utc = parse_utc(timestamp_value)?;
+    let offset_seconds = policy
+        .map(|value| value.utc_offset_seconds)
+        .unwrap_or_else(|| runtime_settings().day_boundary.utc_offset_seconds);
+    let offset = FixedOffset::east_opt(offset_seconds)
+        .ok_or_else(|| format!("Configured UTC offset {offset_seconds} is invalid"))?;
     Ok(utc.with_timezone(&offset).format("%H:%M:%S").to_string())
 }
 

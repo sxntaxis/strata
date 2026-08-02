@@ -688,10 +688,9 @@ fn parse_runtime_settings(config: &KeymapConfig, path: &Path) -> Result<RuntimeS
     if let Some(mode) = config.day_start_mode.as_deref() {
         settings.day_boundary.mode = match mode.trim().to_ascii_lowercase().as_str() {
             "fixed" | "fixed_hour" => DayBoundaryMode::FixedHour,
-            "sunrise" => DayBoundaryMode::Sunrise,
             _ => {
                 return Err(format!(
-                    "Invalid day_start_mode '{}' in {}. Expected 'fixed' or 'sunrise'",
+                    "Invalid day_start_mode '{}' in {}. Expected 'fixed'",
                     mode,
                     path.display()
                 ));
@@ -837,7 +836,26 @@ fn save_config(path: &Path, config: &KeymapConfig) -> Result<(), String> {
 }
 
 pub(crate) fn load_keybindings(path: &Path) -> Result<LoadedKeybindings, String> {
-    let config = load_config_or_default(path)?;
+    let mut config = load_config_or_default(path)?;
+    if config
+        .day_start_mode
+        .as_deref()
+        .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("sunrise"))
+    {
+        config.day_start_mode = Some("fixed".to_string());
+        save_config(path, &config).map_err(|error| {
+            format!(
+                "Failed migrating removed sunrise mode in {} to fixed-clock policy: {error}",
+                path.display()
+            )
+        })?;
+        eprintln!(
+            "Warning: migrated removed day_start_mode 'sunrise' in {} to fixed-clock policy at {:02}:{:02}; Strata never implemented solar sunrise calculation",
+            path.display(),
+            config.day_start_hour.unwrap_or(6),
+            config.day_start_minute.unwrap_or(0)
+        );
+    }
 
     let runtime_settings = parse_runtime_settings(&config, path)?;
     let time_log_path = parse_time_log_path(&config, path)?;
@@ -949,19 +967,6 @@ pub(crate) fn set_time_log_path(
 ) -> Result<LoadedKeybindings, String> {
     let mut config = load_config_or_default(path)?;
     config.time_log_path = time_log_path;
-    save_config(path, &config)?;
-    load_keybindings(path)
-}
-
-pub(crate) fn set_day_start_mode(
-    path: &Path,
-    mode: DayBoundaryMode,
-) -> Result<LoadedKeybindings, String> {
-    let mut config = load_config_or_default(path)?;
-    config.day_start_mode = Some(match mode {
-        DayBoundaryMode::FixedHour => "fixed".to_string(),
-        DayBoundaryMode::Sunrise => "sunrise".to_string(),
-    });
     save_config(path, &config)?;
     load_keybindings(path)
 }
@@ -1183,8 +1188,10 @@ mod tests {
         let loaded = load_keybindings(&path).expect("config should parse");
         assert_eq!(
             loaded.runtime_settings.day_boundary.mode,
-            DayBoundaryMode::Sunrise
+            DayBoundaryMode::FixedHour
         );
+        let migrated = fs::read_to_string(&path).expect("migrated config should be readable");
+        assert!(migrated.contains("\"day_start_mode\": \"fixed\""));
         assert_eq!(loaded.runtime_settings.day_boundary.fixed_hour, 5);
         assert_eq!(loaded.runtime_settings.day_boundary.fixed_minute, 45);
         assert_eq!(

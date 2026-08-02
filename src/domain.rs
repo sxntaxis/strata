@@ -42,12 +42,42 @@ pub struct Category {
     pub karma_effect: i8,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OperationalDayPolicy {
+    pub utc_offset_seconds: i32,
+    pub start_minutes: u16,
+}
+
+impl OperationalDayPolicy {
+    pub fn from_config(config: DayBoundaryConfig) -> Self {
+        let minutes = config
+            .fixed_hour
+            .saturating_mul(60)
+            .saturating_add(config.fixed_minute);
+        Self {
+            utc_offset_seconds: config.utc_offset_seconds,
+            start_minutes: u16::try_from(minutes).unwrap_or(0),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Session {
     pub id: usize,
     pub date: String,
     pub category_id: CategoryId,
     pub description: String,
+    pub start_time: String,
+    pub end_time: String,
+    pub elapsed_seconds: usize,
+    pub started_at_utc: Option<DateTime<Utc>>,
+    pub ended_at_utc: Option<DateTime<Utc>>,
+    pub operational_day_policy: Option<OperationalDayPolicy>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SessionSlice {
+    pub operational_day: NaiveDate,
     pub start_time: String,
     pub end_time: String,
     pub elapsed_seconds: usize,
@@ -101,7 +131,9 @@ pub struct LiveSessionPreview {
     pub category_id: CategoryId,
     pub description: String,
     pub elapsed_seconds: usize,
-    pub now_civil: DateTime<FixedOffset>,
+    pub started_at_utc: DateTime<Utc>,
+    pub ended_at_utc: DateTime<Utc>,
+    pub operational_day_policy: OperationalDayPolicy,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -114,7 +146,6 @@ pub enum ReportPeriod {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DayBoundaryMode {
     FixedHour,
-    Sunrise,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -673,7 +704,9 @@ impl TimeTracker {
             .map(|category| category.description.clone())
             .unwrap_or_default();
 
-        self.record_session_at(cat_id, &cat_description, elapsed, end_local);
+        if elapsed > 0 {
+            self.record_session_at(cat_id, &cat_description, elapsed, end_local);
+        }
 
         if let Some(category) = self.category_store.get_mut_by_id(cat_id) {
             category.description.clear();
@@ -693,7 +726,11 @@ impl TimeTracker {
         Tz: chrono::TimeZone,
         Tz::Offset: std::fmt::Display,
     {
+        if elapsed == 0 {
+            return;
+        }
         let end_utc = end_local.with_timezone(&Utc);
+        let start_utc = end_utc - ChronoDuration::seconds(elapsed as i64);
         let start_time = end_local.clone() - ChronoDuration::seconds(elapsed as i64);
         let today = operational_day_key_for_utc(end_utc)
             .format("%Y-%m-%d")
@@ -707,16 +744,21 @@ impl TimeTracker {
             start_time: start_time.format("%H:%M:%S").to_string(),
             end_time: end_local.format("%H:%M:%S").to_string(),
             elapsed_seconds: elapsed,
+            started_at_utc: Some(start_utc),
+            ended_at_utc: Some(end_utc),
+            operational_day_policy: Some(OperationalDayPolicy::from_config(day_boundary_config())),
         });
         self.session_id_counter += 1;
     }
 
     pub fn get_todays_time(&self) -> usize {
-        let today = operational_day_key_now().format("%Y-%m-%d").to_string();
+        let today = operational_day_key_now();
         self.sessions
             .iter()
-            .filter(|session| session.date == today && !is_drift_category_id(session.category_id))
-            .map(|session| session.elapsed_seconds)
+            .filter(|session| !is_drift_category_id(session.category_id))
+            .flat_map(session_slices)
+            .filter(|slice| slice.operational_day == today)
+            .map(|slice| slice.elapsed_seconds)
             .sum()
     }
 
@@ -724,11 +766,13 @@ impl TimeTracker {
         let cat_id = self
             .category_id_by_name(category_name)
             .unwrap_or(DRIFT_CATEGORY_ID);
-        let today = operational_day_key_now().format("%Y-%m-%d").to_string();
+        let today = operational_day_key_now();
         self.sessions
             .iter()
-            .filter(|session| session.date == today && session.category_id == cat_id)
-            .map(|session| session.elapsed_seconds)
+            .filter(|session| session.category_id == cat_id)
+            .flat_map(session_slices)
+            .filter(|slice| slice.operational_day == today)
+            .map(|slice| slice.elapsed_seconds)
             .sum()
     }
 
@@ -768,6 +812,77 @@ impl TimeTracker {
             !(is_drift_category_id(session.category_id) && session.date == day_key)
         });
     }
+}
+
+pub(crate) fn session_slices(session: &Session) -> Vec<SessionSlice> {
+    let complete = match (
+        session.started_at_utc,
+        session.ended_at_utc,
+        session.operational_day_policy,
+    ) {
+        (Some(started_at_utc), Some(ended_at_utc), Some(policy)) => {
+            Some((started_at_utc, ended_at_utc, policy))
+        }
+        _ => None,
+    };
+
+    if let Some((started_at_utc, ended_at_utc, policy)) = complete
+        && let Ok(slices) = temporal::allocate_operational_day_slices(
+            started_at_utc,
+            ended_at_utc,
+            session.elapsed_seconds,
+            policy,
+        )
+    {
+        return slices
+            .into_iter()
+            .map(|slice| SessionSlice {
+                operational_day: slice.operational_day,
+                start_time: temporal::civil_from_policy(slice.started_at_utc, policy)
+                    .map(|value| value.format("%H:%M:%S").to_string())
+                    .unwrap_or_else(|_| session.start_time.clone()),
+                end_time: temporal::civil_from_policy(slice.ended_at_utc, policy)
+                    .map(|value| value.format("%H:%M:%S").to_string())
+                    .unwrap_or_else(|_| session.end_time.clone()),
+                elapsed_seconds: slice.elapsed_seconds,
+            })
+            .collect();
+    }
+
+    let Some(day) = NaiveDate::parse_from_str(&session.date, "%Y-%m-%d").ok() else {
+        return Vec::new();
+    };
+    if session.elapsed_seconds == 0 {
+        return Vec::new();
+    }
+    vec![SessionSlice {
+        operational_day: day,
+        start_time: session.start_time.clone(),
+        end_time: session.end_time.clone(),
+        elapsed_seconds: session.elapsed_seconds,
+    }]
+}
+
+fn live_session_slices(live: &LiveSessionPreview) -> Vec<SessionSlice> {
+    temporal::allocate_operational_day_slices(
+        live.started_at_utc,
+        live.ended_at_utc,
+        live.elapsed_seconds,
+        live.operational_day_policy,
+    )
+    .unwrap_or_default()
+    .into_iter()
+    .map(|slice| SessionSlice {
+        operational_day: slice.operational_day,
+        start_time: temporal::civil_from_policy(slice.started_at_utc, live.operational_day_policy)
+            .map(|value| value.format("%H:%M:%S").to_string())
+            .unwrap_or_default(),
+        end_time: temporal::civil_from_policy(slice.ended_at_utc, live.operational_day_policy)
+            .map(|value| value.format("%H:%M:%S").to_string())
+            .unwrap_or_default(),
+        elapsed_seconds: slice.elapsed_seconds,
+    })
+    .collect()
 }
 
 pub fn build_today_report(sessions: &[Session], categories: &[Category]) -> ReportSummary {
@@ -927,16 +1042,12 @@ fn build_karma_report_for_date_range(
     }
 
     for session in sessions {
-        let Some(session_date) = NaiveDate::parse_from_str(&session.date, "%Y-%m-%d").ok() else {
-            continue;
-        };
-
-        if session_date < start || session_date > end {
-            continue;
-        }
-
         if let Some(idx) = by_id.get(&session.category_id).copied() {
-            entries[idx].elapsed_seconds += session.elapsed_seconds;
+            for slice in session_slices(session) {
+                if slice.operational_day >= start && slice.operational_day <= end {
+                    entries[idx].elapsed_seconds += slice.elapsed_seconds;
+                }
+            }
         }
     }
 
@@ -992,16 +1103,12 @@ fn build_report_for_date_range(
 
     let mut totals: HashMap<CategoryId, usize> = HashMap::new();
     for session in sessions {
-        let Some(session_date) = NaiveDate::parse_from_str(&session.date, "%Y-%m-%d").ok() else {
-            continue;
-        };
-
-        if session_date < start || session_date > end {
-            continue;
-        }
-
         if category_names.contains_key(&session.category_id) {
-            *totals.entry(session.category_id).or_insert(0) += session.elapsed_seconds;
+            for slice in session_slices(session) {
+                if slice.operational_day >= start && slice.operational_day <= end {
+                    *totals.entry(session.category_id).or_insert(0) += slice.elapsed_seconds;
+                }
+            }
         }
     }
 
@@ -1023,12 +1130,6 @@ fn build_report_for_date_range(
         entries,
         total_seconds,
     }
-}
-
-fn report_period_contains_today_with_offset(period: ReportPeriod, offset: usize) -> bool {
-    let today = operational_day_key_now();
-    let (start, end) = report_period_date_bounds_with_offset(period, offset);
-    today >= start && today <= end
 }
 
 fn category_karma_effect(categories: &[Category], category_id: CategoryId) -> i8 {
@@ -1093,17 +1194,22 @@ pub fn build_period_karma_report_with_live_and_offset(
 ) -> KarmaReportSummary {
     let mut summary = build_period_karma_report_with_offset(sessions, categories, period, offset);
 
-    if report_period_contains_today_with_offset(period, offset)
-        && let Some(live) = live_session
+    let (start, end) = report_period_date_bounds_with_offset(period, offset);
+    if let Some(live) = live_session
         && let Some(entry) = summary
             .entries
             .iter_mut()
             .find(|entry| entry.category_id == live.category_id)
     {
-        entry.elapsed_seconds += live.elapsed_seconds;
-        entry.karma_seconds += live.elapsed_seconds as isize * entry.karma_effect as isize;
-        summary.total_seconds += live.elapsed_seconds;
-        summary.total_karma_seconds += live.elapsed_seconds as isize * entry.karma_effect as isize;
+        let seconds: usize = live_session_slices(live)
+            .into_iter()
+            .filter(|slice| slice.operational_day >= start && slice.operational_day <= end)
+            .map(|slice| slice.elapsed_seconds)
+            .sum();
+        entry.elapsed_seconds += seconds;
+        entry.karma_seconds += seconds as isize * entry.karma_effect as isize;
+        summary.total_seconds += seconds;
+        summary.total_karma_seconds += seconds as isize * entry.karma_effect as isize;
     }
 
     sort_karma_entries_for_display(&mut summary.entries);
@@ -1123,53 +1229,42 @@ pub fn build_category_logs_for_period_with_offset(
 
     let mut logs: Vec<CategoryLogEntry> = sessions
         .iter()
-        .filter_map(|session| {
-            if session.category_id != category_id {
-                return None;
-            }
-
-            let session_date = NaiveDate::parse_from_str(&session.date, "%Y-%m-%d").ok()?;
-
-            if session_date < start || session_date > end {
-                return None;
-            }
-
-            Some(CategoryLogEntry {
-                session_id: Some(session.id),
-                date: session.date.clone(),
-                start_time: session.start_time.clone(),
-                end_time: session.end_time.clone(),
-                description: session.description.clone(),
-                elapsed_seconds: session.elapsed_seconds,
-                karma_effect,
-                karma_seconds: session.elapsed_seconds as isize * karma_effect as isize,
-            })
+        .filter(|session| session.category_id == category_id)
+        .flat_map(|session| {
+            session_slices(session)
+                .into_iter()
+                .filter(move |slice| slice.operational_day >= start && slice.operational_day <= end)
+                .map(move |slice| CategoryLogEntry {
+                    session_id: Some(session.id),
+                    date: slice.operational_day.format("%Y-%m-%d").to_string(),
+                    start_time: slice.start_time,
+                    end_time: slice.end_time,
+                    description: session.description.clone(),
+                    elapsed_seconds: slice.elapsed_seconds,
+                    karma_effect,
+                    karma_seconds: slice.elapsed_seconds as isize * karma_effect as isize,
+                })
         })
         .collect();
 
-    if report_period_contains_today_with_offset(period, offset)
-        && let Some(live) = live_session
+    if let Some(live) = live_session
         && live.category_id == category_id
-        && live.elapsed_seconds > 0
     {
-        let day = operational_day_key_for_utc(live.now_civil.with_timezone(&Utc))
-            .format("%Y-%m-%d")
-            .to_string();
-        let end_time = live.now_civil.format("%H:%M:%S").to_string();
-        let start_time = (live.now_civil - ChronoDuration::seconds(live.elapsed_seconds as i64))
-            .format("%H:%M:%S")
-            .to_string();
-
-        logs.push(CategoryLogEntry {
-            session_id: None,
-            date: day,
-            start_time,
-            end_time,
-            description: live.description.clone(),
-            elapsed_seconds: live.elapsed_seconds,
-            karma_effect,
-            karma_seconds: live.elapsed_seconds as isize * karma_effect as isize,
-        });
+        logs.extend(
+            live_session_slices(live)
+                .into_iter()
+                .filter(|slice| slice.operational_day >= start && slice.operational_day <= end)
+                .map(|slice| CategoryLogEntry {
+                    session_id: None,
+                    date: slice.operational_day.format("%Y-%m-%d").to_string(),
+                    start_time: slice.start_time,
+                    end_time: slice.end_time,
+                    description: live.description.clone(),
+                    elapsed_seconds: slice.elapsed_seconds,
+                    karma_effect,
+                    karma_seconds: slice.elapsed_seconds as isize * karma_effect as isize,
+                }),
+        );
     }
 
     logs.sort_by(|a, b| {
@@ -1398,6 +1493,9 @@ mod tests {
                 start_time: "09:00:00".to_string(),
                 end_time: "10:00:00".to_string(),
                 elapsed_seconds: 3600,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
             Session {
                 id: 2,
@@ -1407,6 +1505,9 @@ mod tests {
                 start_time: "10:00:00".to_string(),
                 end_time: "10:30:00".to_string(),
                 elapsed_seconds: 1800,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
             Session {
                 id: 3,
@@ -1416,6 +1517,9 @@ mod tests {
                 start_time: "11:00:00".to_string(),
                 end_time: "12:00:00".to_string(),
                 elapsed_seconds: 3600,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
             Session {
                 id: 4,
@@ -1425,6 +1529,9 @@ mod tests {
                 start_time: "09:00:00".to_string(),
                 end_time: "10:00:00".to_string(),
                 elapsed_seconds: 3600,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
         ];
 
@@ -1479,6 +1586,9 @@ mod tests {
                 start_time: "08:00:00".to_string(),
                 end_time: "09:00:00".to_string(),
                 elapsed_seconds: 3600,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
             Session {
                 id: 2,
@@ -1488,6 +1598,9 @@ mod tests {
                 start_time: "10:00:00".to_string(),
                 end_time: "10:30:00".to_string(),
                 elapsed_seconds: 1800,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
         ];
 
@@ -1561,6 +1674,9 @@ mod tests {
                 start_time: "08:00:00".to_string(),
                 end_time: "08:20:00".to_string(),
                 elapsed_seconds: 1200,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
             Session {
                 id: 2,
@@ -1570,6 +1686,9 @@ mod tests {
                 start_time: "09:00:00".to_string(),
                 end_time: "09:30:00".to_string(),
                 elapsed_seconds: 1800,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
         ];
 
@@ -1623,6 +1742,9 @@ mod tests {
                 start_time: "09:00:00".to_string(),
                 end_time: "10:00:00".to_string(),
                 elapsed_seconds: 3600,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
             Session {
                 id: 2,
@@ -1632,6 +1754,9 @@ mod tests {
                 start_time: "09:00:00".to_string(),
                 end_time: "09:30:00".to_string(),
                 elapsed_seconds: 1800,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
             Session {
                 id: 3,
@@ -1641,6 +1766,9 @@ mod tests {
                 start_time: "09:00:00".to_string(),
                 end_time: "11:00:00".to_string(),
                 elapsed_seconds: 7200,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
         ];
 
@@ -1690,6 +1818,9 @@ mod tests {
                 start_time: "08:00:00".to_string(),
                 end_time: "09:00:00".to_string(),
                 elapsed_seconds: 3600,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
             Session {
                 id: 2,
@@ -1699,6 +1830,9 @@ mod tests {
                 start_time: "10:00:00".to_string(),
                 end_time: "10:30:00".to_string(),
                 elapsed_seconds: 1800,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
             Session {
                 id: 3,
@@ -1708,6 +1842,9 @@ mod tests {
                 start_time: "12:00:00".to_string(),
                 end_time: "13:00:00".to_string(),
                 elapsed_seconds: 3600,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
         ];
 
@@ -1785,6 +1922,9 @@ mod tests {
                 start_time: "08:00:00".to_string(),
                 end_time: "08:20:00".to_string(),
                 elapsed_seconds: 1200,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
             Session {
                 id: 2,
@@ -1794,6 +1934,9 @@ mod tests {
                 start_time: "21:00:00".to_string(),
                 end_time: "21:10:00".to_string(),
                 elapsed_seconds: 600,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
             Session {
                 id: 3,
@@ -1803,6 +1946,9 @@ mod tests {
                 start_time: "10:00:00".to_string(),
                 end_time: "10:40:00".to_string(),
                 elapsed_seconds: 2400,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
         ];
 
@@ -1869,6 +2015,9 @@ mod tests {
             start_time: "09:00:00".to_string(),
             end_time: "09:10:00".to_string(),
             elapsed_seconds: 600,
+            started_at_utc: None,
+            ended_at_utc: None,
+            operational_day_policy: None,
         }];
 
         let summary =
@@ -1895,6 +2044,9 @@ mod tests {
                 start_time: "08:00:00".to_string(),
                 end_time: "08:10:00".to_string(),
                 elapsed_seconds: 600,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
             Session {
                 id: 2,
@@ -1904,6 +2056,9 @@ mod tests {
                 start_time: "08:00:00".to_string(),
                 end_time: "08:10:00".to_string(),
                 elapsed_seconds: 600,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
             Session {
                 id: 3,
@@ -1913,6 +2068,9 @@ mod tests {
                 start_time: "09:00:00".to_string(),
                 end_time: "09:10:00".to_string(),
                 elapsed_seconds: 600,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
         ];
 
@@ -1958,6 +2116,9 @@ mod tests {
                 start_time: "09:00:00".to_string(),
                 end_time: "09:10:00".to_string(),
                 elapsed_seconds: 600,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
             Session {
                 id: 2,
@@ -1967,6 +2128,9 @@ mod tests {
                 start_time: "10:00:00".to_string(),
                 end_time: "10:05:00".to_string(),
                 elapsed_seconds: 300,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
         ];
 
@@ -1998,6 +2162,9 @@ mod tests {
                 start_time: "09:00:00".to_string(),
                 end_time: "09:30:00".to_string(),
                 elapsed_seconds: 1800,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
             Session {
                 id: 2,
@@ -2007,6 +2174,9 @@ mod tests {
                 start_time: "10:00:00".to_string(),
                 end_time: "10:20:00".to_string(),
                 elapsed_seconds: 1200,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
         ];
 
@@ -2028,6 +2198,9 @@ mod tests {
                 start_time: "09:00:00".to_string(),
                 end_time: "09:30:00".to_string(),
                 elapsed_seconds: 1800,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
             Session {
                 id: 2,
@@ -2037,6 +2210,9 @@ mod tests {
                 start_time: "10:00:00".to_string(),
                 end_time: "10:20:00".to_string(),
                 elapsed_seconds: 1200,
+                started_at_utc: None,
+                ended_at_utc: None,
+                operational_day_policy: None,
             },
         ];
 
@@ -2044,5 +2220,77 @@ mod tests {
         assert_eq!(tracker.sessions[0].description, "focus");
         assert_eq!(tracker.sessions[1].description, "retro");
         assert!(!tracker.set_session_description_by_id(999, "none".to_string()));
+    }
+
+    #[test]
+    fn report_allocates_one_canonical_session_across_operational_days() {
+        let category = Category {
+            id: CategoryId::new(1),
+            name: "Work".to_string(),
+            color: COLORS[0],
+            description: String::new(),
+            karma_effect: 1,
+        };
+        let session = Session {
+            id: 1,
+            date: "2026-08-02".to_string(),
+            category_id: category.id,
+            description: "boundary work".to_string(),
+            start_time: "05:30:00".to_string(),
+            end_time: "06:30:00".to_string(),
+            elapsed_seconds: 3600,
+            started_at_utc: Some(
+                Utc.with_ymd_and_hms(2026, 8, 2, 11, 30, 0)
+                    .single()
+                    .unwrap(),
+            ),
+            ended_at_utc: Some(
+                Utc.with_ymd_and_hms(2026, 8, 2, 12, 30, 0)
+                    .single()
+                    .unwrap(),
+            ),
+            operational_day_policy: Some(OperationalDayPolicy {
+                utc_offset_seconds: -6 * 60 * 60,
+                start_minutes: 6 * 60,
+            }),
+        };
+
+        let first = build_report_for_date(
+            std::slice::from_ref(&session),
+            std::slice::from_ref(&category),
+            "2026-08-01",
+        );
+        let second = build_report_for_date(&[session], &[category], "2026-08-02");
+
+        assert_eq!(first.total_seconds, 1800);
+        assert_eq!(second.total_seconds, 1800);
+    }
+
+    #[test]
+    fn exact_boundary_end_creates_no_empty_next_day_slice() {
+        let session = Session {
+            id: 1,
+            date: "2026-08-01".to_string(),
+            category_id: CategoryId::new(1),
+            description: String::new(),
+            start_time: "05:30:00".to_string(),
+            end_time: "06:00:00".to_string(),
+            elapsed_seconds: 1800,
+            started_at_utc: Some(
+                Utc.with_ymd_and_hms(2026, 8, 2, 11, 30, 0)
+                    .single()
+                    .unwrap(),
+            ),
+            ended_at_utc: Some(Utc.with_ymd_and_hms(2026, 8, 2, 12, 0, 0).single().unwrap()),
+            operational_day_policy: Some(OperationalDayPolicy {
+                utc_offset_seconds: -6 * 60 * 60,
+                start_minutes: 6 * 60,
+            }),
+        };
+
+        let slices = session_slices(&session);
+        assert_eq!(slices.len(), 1);
+        assert_eq!(slices[0].operational_day.to_string(), "2026-08-01");
+        assert_eq!(slices[0].elapsed_seconds, 1800);
     }
 }

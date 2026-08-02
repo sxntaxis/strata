@@ -10,8 +10,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     constants::COLORS,
     domain::{
-        CategoryId, DRIFT_CATEGORY_CONFIG_NAME, DayBoundaryMode, ReportPeriod, Session,
-        build_period_report, civil_time_for_utc, operational_day_key_for_utc, runtime_settings,
+        CategoryId, DRIFT_CATEGORY_CONFIG_NAME, OperationalDayPolicy, ReportPeriod, Session,
+        build_period_report, civil_time_for_utc, day_boundary_config, operational_day_key_for_utc,
+        runtime_settings,
     },
     sqlite, storage, temporal,
 };
@@ -426,18 +427,22 @@ fn stop_session_legacy(accept_clock_jump: bool) -> Result<usize, String> {
         .to_string();
     let start_time = now - ChronoDuration::seconds(elapsed as i64);
 
-    let new_id = sessions.iter().map(|s| s.id).max().unwrap_or(0) + 1;
-    sessions.push(Session {
-        id: new_id,
-        date: today,
-        category_id: CategoryId::new(active_session.category_id),
-        description: active_session.description.clone(),
-        start_time: start_time.format("%H:%M:%S").to_string(),
-        end_time: now.format("%H:%M:%S").to_string(),
-        elapsed_seconds: elapsed,
-    });
-
-    storage::save_sessions_to_csv(&sessions_path, &sessions, &categories)?;
+    if elapsed > 0 {
+        let new_id = sessions.iter().map(|s| s.id).max().unwrap_or(0) + 1;
+        sessions.push(Session {
+            id: new_id,
+            date: today,
+            category_id: CategoryId::new(active_session.category_id),
+            description: active_session.description.clone(),
+            start_time: start_time.format("%H:%M:%S").to_string(),
+            end_time: now.format("%H:%M:%S").to_string(),
+            elapsed_seconds: elapsed,
+            started_at_utc: Some(active_session.start_time),
+            ended_at_utc: Some(interval.ended_at_utc),
+            operational_day_policy: Some(OperationalDayPolicy::from_config(day_boundary_config())),
+        });
+        storage::save_sessions_to_csv(&sessions_path, &sessions, &categories)?;
+    }
 
     storage::delete_file_if_exists(&session_path)?;
 
@@ -775,24 +780,16 @@ pub fn migrate_sqlite(
     let settings = runtime_settings();
     let resolved_day_start = match day_start_minutes {
         Some(value) => value,
-        None => match settings.day_boundary.mode {
-            DayBoundaryMode::FixedHour => {
-                let minutes = settings
-                    .day_boundary
-                    .fixed_hour
-                    .checked_mul(60)
-                    .and_then(|value| value.checked_add(settings.day_boundary.fixed_minute))
-                    .ok_or_else(|| "Configured operational-day boundary overflows".to_string())?;
-                u16::try_from(minutes)
-                    .map_err(|_| "Configured operational-day boundary is invalid".to_string())?
-            }
-            DayBoundaryMode::Sunrise => {
-                return Err(
-                    "Sunrise day boundaries require explicit --day-start-minutes for migration"
-                        .to_string(),
-                );
-            }
-        },
+        None => {
+            let minutes = settings
+                .day_boundary
+                .fixed_hour
+                .checked_mul(60)
+                .and_then(|value| value.checked_add(settings.day_boundary.fixed_minute))
+                .ok_or_else(|| "Configured operational-day boundary overflows".to_string())?;
+            u16::try_from(minutes)
+                .map_err(|_| "Configured operational-day boundary is invalid".to_string())?
+        }
     };
 
     let report = sqlite::run_controlled_migration(sqlite::ControlledMigrationOptions {

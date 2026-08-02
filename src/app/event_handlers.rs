@@ -223,9 +223,6 @@ impl App {
             super::AtlasOverlay::EditTimeLogPath { .. } => {
                 self.handle_atlas_time_log_input(key);
             }
-            super::AtlasOverlay::SelectDayStartMode { .. } => {
-                self.handle_atlas_day_start_dropdown(key);
-            }
             super::AtlasOverlay::SelectWeekStartDay { .. } => {
                 self.handle_atlas_week_start_dropdown(key);
             }
@@ -316,51 +313,6 @@ impl App {
         }
 
         self.atlas_overlay = Some(super::AtlasOverlay::EditTimeLogPath { input });
-        self.render_needed = true;
-    }
-
-    fn handle_atlas_day_start_dropdown(&mut self, key: KeyEvent) {
-        let Some(super::AtlasOverlay::SelectDayStartMode { mut selected }) =
-            self.atlas_overlay.take()
-        else {
-            return;
-        };
-
-        let options = Self::day_start_mode_options();
-        match key.code {
-            KeyCode::Esc => {
-                self.close_atlas_overlay();
-                return;
-            }
-            KeyCode::Up | KeyCode::Left => {
-                selected = if selected == 0 {
-                    options.len().saturating_sub(1)
-                } else {
-                    selected - 1
-                };
-            }
-            KeyCode::Down | KeyCode::Right => {
-                selected = (selected + 1) % options.len().max(1);
-            }
-            KeyCode::Enter => {
-                let mode = options.get(selected).copied().unwrap_or(options[0]);
-                let keymap_path = crate::storage::get_keymap_path();
-                match crate::keybindings::set_day_start_mode(&keymap_path, mode) {
-                    Ok(loaded) => {
-                        self.apply_loaded_keybindings(loaded);
-                        self.close_atlas_overlay();
-                    }
-                    Err(err) => {
-                        self.keymap_error = Some(err);
-                        self.close_atlas_overlay();
-                    }
-                }
-                return;
-            }
-            _ => {}
-        }
-
-        self.atlas_overlay = Some(super::AtlasOverlay::SelectDayStartMode { selected });
         self.render_needed = true;
     }
 

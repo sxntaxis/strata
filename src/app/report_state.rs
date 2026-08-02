@@ -1,13 +1,14 @@
 use std::collections::HashSet;
 
-use chrono::{Duration as ChronoDuration, NaiveDate, Utc};
+use chrono::{Duration as ChronoDuration, NaiveDate};
 use ratatui::{prelude::Line, style::Color};
 
 use crate::domain::{
     Category, CategoryId, CategoryLogEntry, DRIFT_CATEGORY_ID, KarmaReportSummary,
-    LiveSessionPreview, ReportPeriod, build_category_logs_for_period_with_offset,
-    build_period_karma_report_with_live_and_offset, civil_time_for_utc, operational_day_key_now,
-    report_period_date_bounds_with_offset,
+    LiveSessionPreview, OperationalDayPolicy, ReportPeriod,
+    build_category_logs_for_period_with_offset, build_period_karma_report_with_live_and_offset,
+    day_boundary_config, operational_day_key_now, report_period_date_bounds_with_offset,
+    session_slices,
 };
 use crate::sand::{SandEngine, SandState, SandStateGrain};
 
@@ -93,11 +94,15 @@ impl App {
             .map(ToString::to_string)
             .unwrap_or_default();
 
+        let started_at_utc = self.session.active_session_started_at_utc?;
+        let ended_at_utc = started_at_utc + ChronoDuration::seconds(elapsed_seconds as i64);
         Some(LiveSessionPreview {
             category_id,
             description,
             elapsed_seconds,
-            now_civil: civil_time_for_utc(Utc::now()),
+            started_at_utc,
+            ended_at_utc,
+            operational_day_policy: OperationalDayPolicy::from_config(day_boundary_config()),
         })
     }
 
@@ -331,38 +336,55 @@ impl App {
     }
 
     fn synthetic_snapshot_from_time_log(&self, day: NaiveDate) -> Option<SandState> {
-        let day_key = day.format("%Y-%m-%d").to_string();
         let mut day_sessions: Vec<(u64, usize, String, String, usize)> = self
             .time_tracker
             .sessions
             .iter()
-            .filter(|session| session.date == day_key && session.elapsed_seconds > 0)
-            .map(|session| {
-                (
-                    session.category_id.0,
-                    session.elapsed_seconds,
-                    session.start_time.clone(),
-                    session.end_time.clone(),
-                    session.id,
-                )
+            .flat_map(|session| {
+                session_slices(session)
+                    .into_iter()
+                    .filter(move |slice| slice.operational_day == day)
+                    .map(move |slice| {
+                        (
+                            session.category_id.0,
+                            slice.elapsed_seconds,
+                            slice.start_time,
+                            slice.end_time,
+                            session.id,
+                        )
+                    })
             })
             .collect();
 
         if day == operational_day_key_now()
             && let Some(live) = self.live_session_preview()
         {
-            let start_time = (live.now_civil
-                - ChronoDuration::seconds(live.elapsed_seconds as i64))
-            .format("%H:%M:%S")
-            .to_string();
-            let end_time = live.now_civil.format("%H:%M:%S").to_string();
-            day_sessions.push((
-                live.category_id.0,
-                live.elapsed_seconds,
-                start_time,
-                end_time,
-                usize::MAX,
-            ));
+            let preview = crate::domain::Session {
+                id: usize::MAX,
+                date: day.format("%Y-%m-%d").to_string(),
+                category_id: live.category_id,
+                description: live.description,
+                start_time: String::new(),
+                end_time: String::new(),
+                elapsed_seconds: live.elapsed_seconds,
+                started_at_utc: Some(live.started_at_utc),
+                ended_at_utc: Some(live.ended_at_utc),
+                operational_day_policy: Some(live.operational_day_policy),
+            };
+            day_sessions.extend(
+                session_slices(&preview)
+                    .into_iter()
+                    .filter(|slice| slice.operational_day == day)
+                    .map(|slice| {
+                        (
+                            preview.category_id.0,
+                            slice.elapsed_seconds,
+                            slice.start_time,
+                            slice.end_time,
+                            usize::MAX,
+                        )
+                    }),
+            );
         }
 
         if day_sessions.is_empty() {
