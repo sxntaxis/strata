@@ -35,6 +35,22 @@ if old_effective_replace not in text:
     raise SystemExit("effective key replacement block was not found")
 text = text.replace(old_effective_replace, new_effective_replace, 1)
 
+old_app_import = '''text = text.replace(
+    "    keybindings::{self, Action, ActionCategory, KeyBinding, Keymap},",
+    "    keybindings::{self, Action, ActionBindingState, ActionCategory, KeyBinding, Keymap},",
+    1,
+)
+'''
+new_app_import = '''text = text.replace(
+    "    keybindings,",
+    "    keybindings::{self, Action, ActionBindingState, KeyBinding},",
+    1,
+)
+'''
+if old_app_import not in text:
+    raise SystemExit("app keybinding import transformation was not found")
+text = text.replace(old_app_import, new_app_import, 1)
+
 old_confirm_replace = '''if text.count(old_main) != 1:
     raise SystemExit("main confirm fallback not found")
 text = text.replace(old_main, "            Action::Confirm => false,\\n", 1)
