@@ -7,6 +7,40 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use super::{App, PaletteCommand, QueuedMutation, ui_helpers};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReportEditKeyIntent {
+    Append(char),
+    Backspace,
+    Commit,
+    Cancel,
+    EmergencyQuit,
+    Ignore,
+}
+
+fn resolve_report_edit_key(
+    key: KeyEvent,
+    keymap: &crate::keybindings::Keymap,
+) -> ReportEditKeyIntent {
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+    {
+        return if keymap.action_for_key_event(key) == Some(Action::Quit) {
+            ReportEditKeyIntent::EmergencyQuit
+        } else {
+            ReportEditKeyIntent::Ignore
+        };
+    }
+
+    match key.code {
+        KeyCode::Esc => ReportEditKeyIntent::Cancel,
+        KeyCode::Enter => ReportEditKeyIntent::Commit,
+        KeyCode::Backspace | KeyCode::Delete => ReportEditKeyIntent::Backspace,
+        KeyCode::Char(character) => ReportEditKeyIntent::Append(character),
+        _ => ReportEditKeyIntent::Ignore,
+    }
+}
+
 impl App {
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> bool {
         if key.kind == KeyEventKind::Release {
@@ -17,27 +51,16 @@ impl App {
             return self.handle_persistence_recovery_key(key);
         }
 
+        if self.report_log_edit.is_some() {
+            return self.handle_report_log_edit_key(key);
+        }
+
         if self.show_command_palette {
             return self.handle_command_palette_key(key);
         }
 
         if self.show_keybindings_modal && self.atlas_overlay.is_some() {
             return self.handle_atlas_overlay_key(key);
-        }
-
-        if self.in_karma_modal() && self.report_logs_category_id.is_some() {
-            let is_text_like = matches!(
-                key.code,
-                KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Delete
-            ) && !key
-                .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
-
-            if is_text_like && self.keymap.action_for_key_event(key) != Some(Action::DeleteCategory)
-            {
-                self.handle_report_logs_text_input(key);
-                return false;
-            }
         }
 
         if let Some(action) = self.resolve_action(key) {
@@ -90,8 +113,7 @@ impl App {
         }
 
         if self.in_karma_modal() {
-            self.handle_report_modal_action(action);
-            return false;
+            return self.handle_report_modal_action(action);
         }
 
         self.handle_main_action(action)
@@ -564,7 +586,7 @@ impl App {
         }
     }
 
-    fn handle_report_modal_action(&mut self, action: Action) {
+    fn handle_report_modal_action(&mut self, action: Action) -> bool {
         let summary = self.report_rows();
         self.clamp_report_selection(summary.entries.len());
         let logs = self.report_current_logs();
@@ -584,8 +606,7 @@ impl App {
             }
             Action::Confirm => {
                 if in_logs_view {
-                    self.report_logs_category_id = None;
-                    self.report_log_selected_index = 0;
+                    handled = self.begin_report_log_edit();
                 } else if let Some(entry) = summary.entries.get(self.report_selected_index) {
                     self.report_logs_category_id = Some(entry.category_id);
                     self.report_log_selected_index = 0;
@@ -648,19 +669,14 @@ impl App {
                     handled = false;
                 }
             }
-            Action::Backspace => {
-                if in_logs_view {
-                    handled = self.backspace_selected_report_session_tag();
-                } else {
-                    handled = false;
-                }
-            }
+            Action::Quit => return true,
             _ => handled = false,
         }
 
         if handled {
             self.render_needed = true;
         }
+        false
     }
 
     fn handle_main_action(&mut self, action: Action) -> bool {
@@ -719,23 +735,101 @@ impl App {
         }
     }
 
-    fn handle_report_logs_text_input(&mut self, key: KeyEvent) {
-        if key
-            .modifiers
-            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-        {
-            return;
+    fn handle_report_log_edit_key(&mut self, key: KeyEvent) -> bool {
+        match resolve_report_edit_key(key, &self.keymap) {
+            ReportEditKeyIntent::Append(character) => {
+                if let Some(edit) = self.report_log_edit.as_mut() {
+                    edit.draft.push(character);
+                    self.render_needed = true;
+                }
+            }
+            ReportEditKeyIntent::Backspace => {
+                if let Some(edit) = self.report_log_edit.as_mut() {
+                    edit.draft.pop();
+                    self.render_needed = true;
+                }
+            }
+            ReportEditKeyIntent::Commit => {
+                self.commit_report_log_edit();
+            }
+            ReportEditKeyIntent::Cancel => {
+                self.cancel_report_log_edit();
+            }
+            ReportEditKeyIntent::EmergencyQuit => return true,
+            ReportEditKeyIntent::Ignore => {}
         }
+        false
+    }
+}
 
-        let edited = match key.code {
-            KeyCode::Char(c) => self.append_to_selected_report_session_tag(c),
-            KeyCode::Backspace => self.backspace_selected_report_session_tag(),
-            KeyCode::Delete => self.backspace_selected_report_session_tag(),
-            _ => false,
-        };
+#[cfg(test)]
+mod report_edit_tests {
+    use super::{ReportEditKeyIntent, resolve_report_edit_key};
+    use crate::keybindings::default_keymap;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-        if edited {
-            self.render_needed = true;
+    #[test]
+    fn plain_command_letters_are_text_only_in_edit_mode() {
+        let keymap = default_keymap();
+        for character in ['q', 'w', 'm', 't', 'k', 'd', 'x'] {
+            assert_eq!(
+                resolve_report_edit_key(
+                    KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
+                    &keymap,
+                ),
+                ReportEditKeyIntent::Append(character)
+            );
         }
+    }
+
+    #[test]
+    fn unicode_and_spaces_are_supported() {
+        let keymap = default_keymap();
+        assert_eq!(
+            resolve_report_edit_key(
+                KeyEvent::new(KeyCode::Char('界'), KeyModifiers::NONE),
+                &keymap,
+            ),
+            ReportEditKeyIntent::Append('界')
+        );
+        assert_eq!(
+            resolve_report_edit_key(
+                KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
+                &keymap,
+            ),
+            ReportEditKeyIntent::Append(' ')
+        );
+    }
+
+    #[test]
+    fn enter_commits_and_escape_cancels() {
+        let keymap = default_keymap();
+        assert_eq!(
+            resolve_report_edit_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), &keymap),
+            ReportEditKeyIntent::Commit
+        );
+        assert_eq!(
+            resolve_report_edit_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), &keymap),
+            ReportEditKeyIntent::Cancel
+        );
+    }
+
+    #[test]
+    fn configured_modified_quit_is_the_only_emergency_action() {
+        let keymap = default_keymap();
+        assert_eq!(
+            resolve_report_edit_key(
+                KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+                &keymap,
+            ),
+            ReportEditKeyIntent::EmergencyQuit
+        );
+        assert_eq!(
+            resolve_report_edit_key(
+                KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL),
+                &keymap,
+            ),
+            ReportEditKeyIntent::Ignore
+        );
     }
 }
