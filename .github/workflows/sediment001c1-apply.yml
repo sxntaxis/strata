@@ -35,6 +35,39 @@ jobs:
           path.write_text(source.replace(old, new, 1))
           PY
           python tools/sediment001c1-apply.py
+          python - <<'PY'
+          from pathlib import Path
+
+          engine = Path('src/sand/engine.rs')
+          source = engine.read_text()
+          source = source.replace(
+              '    pub fn pending_run_count(&self) -> usize {',
+              '    #[cfg(test)]\n    fn pending_run_count(&self) -> usize {',
+              1,
+          )
+          source = source.replace(
+              'use super::{PendingGrainRun, SandEngine, SandState, SandStateGrain};',
+              'use crate::sand::{PendingGrainRun, SandEngine, SandState, SandStateGrain};',
+              1,
+          )
+          engine.write_text(source)
+
+          module = Path('src/sand/mod.rs')
+          source = module.read_text()
+          old = (
+              'mod engine;\nmod recovery;\n\n'
+              'pub use engine::{PendingGrainRun, SandEngine, SandState, SandStateGrain};\n'
+              'pub(crate) use recovery::{PeriodicAdvance, advance_periodic};'
+          )
+          new = (
+              'mod engine;\n#[allow(dead_code)]\nmod recovery;\n\n'
+              '#[allow(unused_imports)]\n'
+              'pub use engine::{PendingGrainRun, SandEngine, SandState, SandStateGrain};'
+          )
+          if old not in source:
+              raise SystemExit('compressed sand module output was not found')
+          module.write_text(source.replace(old, new, 1))
+          PY
       - name: Format
         run: cargo fmt --all
       - name: Check formatting
