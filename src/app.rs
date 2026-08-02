@@ -495,7 +495,9 @@ impl App {
                 RecoveryAction::ReloadAuthority,
                 Err(error),
             );
+            return;
         }
+        self.refresh_active_runtime_checkpoint();
     }
 
     fn open_modal(&mut self) {
@@ -1124,7 +1126,8 @@ impl App {
             self.reload_sqlite_sessions();
             self.persist_categories();
             self.sync_drift_idle_state();
-            return true;
+            self.refresh_active_runtime_checkpoint();
+            return !self.has_persistence_recovery();
         }
 
         if self
@@ -1148,8 +1151,9 @@ impl App {
             return false;
         }
         self.sync_drift_idle_state();
+        self.refresh_active_runtime_checkpoint();
 
-        true
+        !self.has_persistence_recovery()
     }
 
     fn transition_operation_id(
@@ -1707,6 +1711,13 @@ impl App {
             RecoveryAction::DetachAndExit,
             result,
         );
+    }
+
+    fn refresh_active_runtime_checkpoint(&mut self) {
+        if self.session.active_session_started_at_utc.is_some() && !self.has_persistence_recovery()
+        {
+            self.persist_runtime_checkpoint();
+        }
     }
 
     fn clear_detached_checkpoint(&mut self) {
