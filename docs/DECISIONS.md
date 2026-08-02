@@ -51,6 +51,7 @@ Detailed rationale and unresolved implications live in `notebook/decisions/DECIS
 | STRATA-D042 | Category retirement changes availability, not historical meaning. Stable ID, name, description, color, karma effect, tags, report visibility, sediment meaning, and migration state survive archive and restore under both SQLite and legacy-file authority. | implemented and certified |
 | STRATA-D043 | An active-session transition and retirement of its prior checkpoint generation form one coherence boundary. SQLite switch, reset, and finish may retire only pending or committed evidence for the expected prior stable ID; incompatible evidence aborts the transaction before history changes. | implemented and certified |
 | STRATA-D044 | Checkpoint evidence must identify the authoritative active generation before recovery payload state is applied. Missing or mismatched identity is quarantined, and successful switch/reset/active-description changes publish current-generation evidence immediately at the semantic edge. | implemented and certified |
+| STRATA-D045 | A legacy switch is a receipt-governed multi-file transition: publish the resulting checkpoint and deterministic receipt first, replay session/catalog effects idempotently, and clear the receipt only after every authority converges. Whole-second ledger semantics—not exact subsecond wall-start equality—own the completed row. | implemented and certified |
 
 ## Explicitly unresolved
 
@@ -62,8 +63,9 @@ The following are not accepted decisions:
 - clearing and formation lifecycle beyond placed/pending mass conservation;
 - future zoom, compression, panning, or explicit canonical-canvas migration;
 - safe cross-authority replay of queued checkpoint mutations, if it is ever required;
-- stable legacy switch/reset/finish receipts across separate file publications;
+- stable legacy reset and finish receipts across separate file publications;
 - initial active-start/checkpoint atomicity or its explicit recovery policy;
+- exact sediment classification at active transition boundaries;
 - user-visible recovery cutoff, reconstruction, and uncertainty semantics under issue #10;
 - configurable quantum migration rules;
 - complete profile switching and isolation semantics under issue #15;
