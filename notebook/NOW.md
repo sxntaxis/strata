@@ -5,15 +5,15 @@ state: active
 created: 2026-08-01
 updated: 2026-08-02
 authority: working
-summary: Cross-authority category integrity is complete; unknown legacy references fail closed and archival preserves historical meaning, tags, sand, reports, restore, and migration.
-next: Reconcile issue #10 against active-session, checkpoint, receipt, emergency-export, and recovery authority.
+summary: Active-session and checkpoint generations are coherent under SQLite transitions and semantic-edge refresh; issue #10 now centers on legacy multi-file receipts, initial-start evidence, and visible cutoff semantics.
+next: Implement RECONCILIATION-001B2 with stable legacy transition receipts and kill-point recovery certification.
 ---
 
 # NOW — Strata
 
 ## Current phase
 
-The SQLite migration, startup authority, temporal, domain, reporting, sediment, interaction, and category-integrity programs are complete.
+The SQLite migration, startup authority, temporal, domain, reporting, sediment, interaction, category-integrity, and active/checkpoint generation-coherence programs are complete.
 
 Strata now has:
 
@@ -26,12 +26,14 @@ Strata now has:
 - exactly-once terminal restoration and runtime emergency checkpoint custody;
 - explicit Bound, Unbound, and Disabled action state with one truthful resolver;
 - mandatory recovery-safe Ctrl-C and configurable F1;
-- cross-authority active/archived category catalogs;
-- strict malformed/unknown session-category rejection without idle substitution;
-- archival that preserves stable ID, labels, descriptions, colors, karma, tags, reports, sand, and migration state;
-- backward-compatible five-column legacy category loading and six-column active/archived publication.
+- cross-authority active/archived category catalogs and strict reference integrity;
+- SQLite active switch/reset/finish transactions that retire prior checkpoint generations coherently;
+- protected recovering/quarantined evidence that blocks unsafe active transitions;
+- startup checkpoint identity validation before payload application;
+- immediate current-generation checkpoint refresh after switch, reset, and active-description mutation;
+- no unrelated checkpoint writes for color, ordering, karma, archive, restore, or inactive-description changes.
 
-The project is in **post-program issue reconciliation**.
+The project remains in **post-program issue reconciliation**.
 
 ## Verified technical baseline
 
@@ -43,12 +45,13 @@ The project is in **post-program issue reconciliation**.
 - Draw, poll, and read errors attempt direct emergency checkpoint publication while preserving the primary error.
 - Linux PTY tests certify unchanged termios state and exactly one restoration on quit, detach, draw/poll/read failure, and panic.
 - Contextual aliases are named and disabled actions are unreachable through keys, aliases, and the palette.
-- Legacy `categories.csv` accepts old active-only files and publishes active/archived state without a sidecar.
 - Legacy session loading rejects malformed and unknown category IDs with actionable row-scoped errors.
-- Session writing refuses unresolved category identities before publication.
-- Category archive/restore preserves the original identity and metadata.
-- Archived tags survive retirement, restart, and restore.
-- Legacy-to-SQLite migration preserves archived state and referenced session identity.
+- Category archive/restore preserves original identity, metadata, tags, reports, sand, and migration state.
+- SQLite active transitions validate expected active identity and checkpoint custody in one transaction.
+- Ordinary transitions may retire only pending/committed evidence for the expected prior stable ID.
+- Transition receipts remain idempotent and do not retire later checkpoint generations.
+- Missing or mismatched checkpoint identity fails closed before recovery payload application.
+- Legacy switch/reset and active-description paths replace stale checkpoint evidence immediately instead of waiting for autosave.
 
 ## Completed post-migration units
 
@@ -62,17 +65,20 @@ The project is in **post-program issue reconciliation**.
 - **INTERACTION-001B** — issue #20.
 - **INTERACTION-001C** — issue #24.
 - **RECONCILIATION-001A** — issue #5 and the historical data-loss portion of #13.
+- **RECONCILIATION-001B1** — partial issue #10: active/checkpoint generation coherence and semantic-edge refresh.
 
 ## Active sequence
 
-1. Reconcile issue #10 against active-session persistence, detached checkpoints, finish receipts, recovery claims, emergency checkpointing, and user-visible recovery behavior.
-2. Define the merge/reassignment and permanent-deletion transaction needed to complete the remaining acceptance criteria of issue #13.
+1. Implement RECONCILIATION-001B2: stable legacy switch/reset/finish receipts, idempotent multi-file replay, kill-point certification, initial active-start evidence, and user-visible recovery cutoff semantics.
+2. Define the merge/reassignment and permanent-deletion transaction needed to complete issue #13.
 3. Later domain/UI distinction work under issue #22.
 4. Later profile authority, including complete isolation and deliberate switching under issue #15.
 
 ## Current risks
 
-- Issue #10 may combine obsolete crash-recovery premises with a remaining user-facing uncertainty gap; every crash window needs direct evidence.
+- Legacy sessions and checkpoint evidence remain separate files; immediate refresh reduces but does not eliminate process-death inconsistency between publications.
+- SQLite initial active start and first checkpoint publication remain separate operations.
+- The recovery interface does not yet expose a complete deterministic cutoff and uncertainty statement for reconstructed elapsed time.
 - Issue #13 still lacks explicit category merge/reassignment and permanent-deletion transactions.
 - Queued checkpoint mutations have no stable cross-authority receipt identity and fail closed.
 - Complete profile switching/isolation remains open.
@@ -80,4 +86,4 @@ The project is in **post-program issue reconciliation**.
 
 ## Next
 
-Audit **issue #10** criterion by criterion. Map each crash window to active-session authority, checkpoint publication, finish receipts, recovery claims, emergency exports, and process tests. Close only guarantees supported by exact evidence; isolate any remaining recovery or UX defect into a bounded unit.
+Implement **RECONCILIATION-001B2**. The unit must create stable legacy transition receipts, replay switch/reset/finish idempotently across kill points, reconcile initial active-start evidence, and show checkpoint capture time, recovery target, reconstructed duration, and cutoff policy before issue #10 can close.

@@ -820,6 +820,35 @@ pub(crate) fn load_checkpoint<T: DeserializeOwned>(
     else {
         return Ok(None);
     };
+    let claimed_stable_id = match claimed.active_session_stable_id.as_deref() {
+        Some(stable_id) => stable_id,
+        None => {
+            runtime_coordination::quarantine_checkpoint(&mut repository)
+                .map_err(|error| error.to_string())?;
+            return Err(
+                "Runtime checkpoint has no active stable identity; evidence quarantined"
+                    .to_string(),
+            );
+        }
+    };
+    let authoritative_active = repository
+        .active_session()
+        .map_err(|error| error.to_string())?;
+    if authoritative_active
+        .as_ref()
+        .map(|active| active.stable_id.as_str())
+        != Some(claimed_stable_id)
+    {
+        runtime_coordination::quarantine_checkpoint(&mut repository)
+            .map_err(|error| error.to_string())?;
+        let actual = authoritative_active
+            .as_ref()
+            .map(|active| active.stable_id.as_str())
+            .unwrap_or("no active session");
+        return Err(format!(
+            "Runtime checkpoint active identity {claimed_stable_id} does not match authoritative active session {actual}; evidence quarantined"
+        ));
+    }
     match serde_json::from_str(&claimed.payload_json) {
         Ok(payload) => Ok(Some(SqliteClaimedCheckpoint {
             active_session_stable_id: claimed.active_session_stable_id,
@@ -1239,5 +1268,95 @@ mod tests {
                 .is_none()
         );
         std::fs::remove_file(path).ok();
+    }
+}
+
+#[cfg(test)]
+mod checkpoint_identity_tests {
+    use std::path::{Path, PathBuf};
+
+    use serde_json::Value;
+
+    use super::*;
+    use crate::sqlite::{
+        NewActiveSession, SqliteRepository, repository::NewCategoryRecord, runtime_coordination,
+    };
+
+    fn database_path() -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "strata-checkpoint-identity-{}-{}.sqlite3",
+            std::process::id(),
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ))
+    }
+
+    fn remove_database(path: &Path) {
+        std::fs::remove_file(path).ok();
+        std::fs::remove_file(format!("{}-wal", path.display())).ok();
+        std::fs::remove_file(format!("{}-shm", path.display())).ok();
+    }
+
+    #[test]
+    fn startup_quarantines_checkpoint_without_active_identity() {
+        let path = database_path();
+        let mut repository = SqliteRepository::open(&path).unwrap();
+        repository
+            .connection
+            .execute(
+                "UPDATE database_metadata SET value = 'sqlite-cli' WHERE key = 'storage_authority'",
+                [],
+            )
+            .unwrap();
+        repository
+            .create_category(&NewCategoryRecord {
+                name: "Work",
+                description: "",
+                color_index: 0,
+                balance_effect: 1,
+            })
+            .unwrap();
+        runtime_coordination::start_active_session(
+            &mut repository,
+            &NewActiveSession {
+                stable_id: "active-a",
+                project: "",
+                category_id: 1,
+                description: "",
+                started_at_utc: "2026-08-01T10:00:00Z",
+                recovery_kind: "live",
+            },
+        )
+        .unwrap();
+        runtime_coordination::save_checkpoint(
+            &mut repository,
+            "active-a",
+            "2026-08-01T10:01:00Z",
+            "2026-08-01T10:00:59Z",
+            "{}",
+        )
+        .unwrap();
+        repository
+            .connection
+            .execute(
+                "UPDATE runtime_checkpoint SET active_session_stable_id = NULL WHERE singleton = 1",
+                [],
+            )
+            .unwrap();
+        drop(repository);
+
+        let error = load_checkpoint::<Value>(&path).unwrap_err();
+        assert!(error.contains("has no active stable identity; evidence quarantined"));
+        let repository = SqliteRepository::open(&path).unwrap();
+        let status: String = repository
+            .connection
+            .query_row(
+                "SELECT status FROM runtime_checkpoint WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "quarantined");
+        drop(repository);
+        remove_database(&path);
     }
 }

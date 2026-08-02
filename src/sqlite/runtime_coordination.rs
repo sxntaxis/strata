@@ -95,6 +95,7 @@ pub(crate) fn finish_active_session(
 
     let active = query_active(&transaction)?.ok_or(CoordinationError::NoActiveSession)?;
     require_expected_active(&active, expected_active_stable_id)?;
+    retire_checkpoint_for_active_transition(&transaction, expected_active_stable_id)?;
     let completed_session_id = if completion.elapsed_seconds > 0 {
         Some(insert_completed(&transaction, &active, completion)?)
     } else {
@@ -158,6 +159,7 @@ pub(crate) fn switch_active_session(
 
     let active = query_active(&transaction)?.ok_or(CoordinationError::NoActiveSession)?;
     require_expected_active(&active, expected_active_stable_id)?;
+    retire_checkpoint_for_active_transition(&transaction, expected_active_stable_id)?;
     let completed_session_id = if completion.elapsed_seconds > 0 {
         Some(insert_completed(&transaction, &active, completion)?)
     } else {
@@ -219,6 +221,7 @@ pub(crate) fn reset_active_session(
 
     let active = query_active(&transaction)?.ok_or(CoordinationError::NoActiveSession)?;
     require_expected_active(&active, expected_active_stable_id)?;
+    retire_checkpoint_for_active_transition(&transaction, expected_active_stable_id)?;
     delete_expected_active(&transaction, expected_active_stable_id)?;
     insert_active(&transaction, next)?;
     insert_receipt(
@@ -810,6 +813,45 @@ fn validate_existing_receipt(
     Ok(receipt)
 }
 
+fn retire_checkpoint_for_active_transition(
+    transaction: &Transaction<'_>,
+    expected_active_stable_id: &str,
+) -> Result<(), CoordinationError> {
+    let checkpoint: Option<(String, Option<String>)> = transaction
+        .query_row(
+            "SELECT status, active_session_stable_id
+             FROM runtime_checkpoint WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let Some((status, active_session_stable_id)) = checkpoint else {
+        return Ok(());
+    };
+
+    let replaceable = matches!(status.as_str(), "pending" | "committed")
+        && active_session_stable_id.as_deref() == Some(expected_active_stable_id);
+    if !replaceable {
+        let actual_identity = active_session_stable_id
+            .as_deref()
+            .unwrap_or("no active identity");
+        return Err(CoordinationError::CheckpointConflict {
+            expected: format!(
+                "no checkpoint or pending/committed checkpoint for active session {expected_active_stable_id}"
+            ),
+            actual: format!("{status} for {actual_identity}"),
+        });
+    }
+
+    transaction.execute(
+        "DELETE FROM runtime_checkpoint
+         WHERE singleton = 1 AND status IN ('pending', 'committed')
+           AND active_session_stable_id = ?1",
+        params![expected_active_stable_id],
+    )?;
+    Ok(())
+}
+
 fn query_active(connection: &Connection) -> Result<Option<ActiveSessionRecord>, rusqlite::Error> {
     connection
         .query_row(
@@ -1144,6 +1186,162 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+        drop(repository);
+        remove_database(&path);
+    }
+
+    #[test]
+    fn active_transitions_atomically_retire_prior_checkpoint_generation() {
+        let path = database_path("transition-checkpoint-retirement");
+        seed(&path, "active-a");
+        let mut repository = SqliteRepository::open(&path).unwrap();
+        save_checkpoint(
+            &mut repository,
+            "active-a",
+            "2026-08-01T10:30:00Z",
+            "2026-08-01T10:29:59Z",
+            "{\"active\":\"a\"}",
+        )
+        .unwrap();
+        switch_active_session(
+            &mut repository,
+            "active-a",
+            "switch:a:b",
+            &completion("tui-runtime"),
+            &NewActiveSession {
+                stable_id: "active-b",
+                project: "",
+                category_id: 1,
+                description: "next",
+                started_at_utc: "2026-08-01T11:00:00Z",
+                recovery_kind: "live",
+            },
+        )
+        .unwrap();
+        assert!(repository.checkpoint().unwrap().is_none());
+
+        save_checkpoint(
+            &mut repository,
+            "active-b",
+            "2026-08-01T11:30:00Z",
+            "2026-08-01T11:29:59Z",
+            "{\"active\":\"b\"}",
+        )
+        .unwrap();
+        reset_active_session(
+            &mut repository,
+            "active-b",
+            "reset:b:c",
+            &NewActiveSession {
+                stable_id: "active-c",
+                project: "",
+                category_id: 1,
+                description: "reset",
+                started_at_utc: "2026-08-01T12:00:00Z",
+                recovery_kind: "live",
+            },
+            "2026-08-01T12:00:00Z",
+            "tui-runtime",
+        )
+        .unwrap();
+        assert!(repository.checkpoint().unwrap().is_none());
+
+        save_checkpoint(
+            &mut repository,
+            "active-c",
+            "2026-08-01T12:30:00Z",
+            "2026-08-01T12:29:59Z",
+            "{\"active\":\"c\"}",
+        )
+        .unwrap();
+        finish_active_session(
+            &mut repository,
+            "active-c",
+            "finish:active-c",
+            &SessionCompletion {
+                ended_at_utc: "2026-08-01T13:00:00Z",
+                operational_day: "2026-08-01",
+                elapsed_seconds: 3600,
+                boundary_utc_offset_seconds: -21600,
+                boundary_start_minutes: 360,
+                source: "tui-runtime",
+            },
+            true,
+        )
+        .unwrap();
+        assert!(repository.checkpoint().unwrap().is_none());
+        assert!(repository.active_session().unwrap().is_none());
+        drop(repository);
+        remove_database(&path);
+    }
+
+    #[test]
+    fn recovering_or_mismatched_checkpoint_blocks_active_transition() {
+        let path = database_path("transition-checkpoint-conflict");
+        seed(&path, "active-a");
+        let mut repository = SqliteRepository::open(&path).unwrap();
+        save_checkpoint(
+            &mut repository,
+            "active-a",
+            "2026-08-01T10:30:00Z",
+            "2026-08-01T10:29:59Z",
+            "{}",
+        )
+        .unwrap();
+        claim_checkpoint(&mut repository).unwrap().unwrap();
+        let error = switch_active_session(
+            &mut repository,
+            "active-a",
+            "switch:blocked",
+            &completion("tui-runtime"),
+            &NewActiveSession {
+                stable_id: "active-b",
+                project: "",
+                category_id: 1,
+                description: "",
+                started_at_utc: "2026-08-01T11:00:00Z",
+                recovery_kind: "live",
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            CoordinationError::CheckpointConflict { ref actual, .. }
+                if actual.contains("recovering")
+        ));
+        assert_eq!(
+            repository.active_session().unwrap().unwrap().stable_id,
+            "active-a"
+        );
+        assert!(repository.list_sessions().unwrap().is_empty());
+
+        repository
+            .connection
+            .execute(
+                "UPDATE runtime_checkpoint
+                 SET status = 'pending', active_session_stable_id = 'other-active'
+                 WHERE singleton = 1",
+                [],
+            )
+            .unwrap();
+        let error = finish_active_session(
+            &mut repository,
+            "active-a",
+            "finish:blocked",
+            &completion("tui-runtime"),
+            true,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            CoordinationError::CheckpointConflict { ref actual, .. }
+                if actual.contains("other-active")
+        ));
+        assert_eq!(
+            repository.active_session().unwrap().unwrap().stable_id,
+            "active-a"
+        );
+        assert!(repository.list_sessions().unwrap().is_empty());
         drop(repository);
         remove_database(&path);
     }

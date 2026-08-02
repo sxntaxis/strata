@@ -49,6 +49,8 @@ Detailed rationale and unresolved implications live in `notebook/decisions/DECIS
 | STRATA-D040 | The command atlas and palette must expose the same reachable action graph as runtime: no invented fallback keys, disabled actions are unavailable, aliases are named with conditions, and editable controls distinguish Disable from Unbind. | implemented and certified |
 | STRATA-D041 | A persisted session category reference must resolve to active or archived metadata. Malformed or unknown identities fail closed with the original value preserved; no authority may reinterpret an unresolved reference as intentional idle. | implemented and certified |
 | STRATA-D042 | Category retirement changes availability, not historical meaning. Stable ID, name, description, color, karma effect, tags, report visibility, sediment meaning, and migration state survive archive and restore under both SQLite and legacy-file authority. | implemented and certified |
+| STRATA-D043 | An active-session transition and retirement of its prior checkpoint generation form one coherence boundary. SQLite switch, reset, and finish may retire only pending or committed evidence for the expected prior stable ID; incompatible evidence aborts the transaction before history changes. | implemented and certified |
+| STRATA-D044 | Checkpoint evidence must identify the authoritative active generation before recovery payload state is applied. Missing or mismatched identity is quarantined, and successful switch/reset/active-description changes publish current-generation evidence immediately at the semantic edge. | implemented and certified |
 
 ## Explicitly unresolved
 
@@ -60,7 +62,9 @@ The following are not accepted decisions:
 - clearing and formation lifecycle beyond placed/pending mass conservation;
 - future zoom, compression, panning, or explicit canonical-canvas migration;
 - safe cross-authority replay of queued checkpoint mutations, if it is ever required;
-- user-facing crash uncertainty beyond current recovery controls;
+- stable legacy switch/reset/finish receipts across separate file publications;
+- initial active-start/checkpoint atomicity or its explicit recovery policy;
+- user-visible recovery cutoff, reconstruction, and uncertainty semantics under issue #10;
 - configurable quantum migration rules;
 - complete profile switching and isolation semantics under issue #15;
 - category merge/reassignment and permanent destructive deletion under issue #13;
