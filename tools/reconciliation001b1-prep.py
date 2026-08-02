@@ -51,5 +51,23 @@ text = text.replace(
     'assert!(error.contains("has no active stable identity; evidence quarantined"));',
     1,
 )
+authority_anchor = '''        let mut repository = SqliteRepository::open(&path).unwrap();
+        repository
+            .create_category(&NewCategoryRecord {
+'''
+authority_replacement = '''        let mut repository = SqliteRepository::open(&path).unwrap();
+        repository
+            .connection
+            .execute(
+                "UPDATE database_metadata SET value = 'sqlite-cli' WHERE key = 'storage_authority'",
+                [],
+            )
+            .unwrap();
+        repository
+            .create_category(&NewCategoryRecord {
+'''
+if authority_anchor not in text:
+    raise SystemExit("checkpoint fixture authority anchor not found")
+text = text.replace(authority_anchor, authority_replacement, 1)
 path.write_text(text)
 Path(__file__).unlink(missing_ok=True)
