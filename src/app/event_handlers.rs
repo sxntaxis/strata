@@ -1,7 +1,7 @@
 use crate::{
     constants::COLORS,
     domain::{CategoryId, DRIFT_CATEGORY_ID, ReportPeriod},
-    keybindings::Action,
+    keybindings::{Action, InputContext},
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
@@ -25,7 +25,7 @@ fn resolve_report_edit_key(
         .modifiers
         .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
     {
-        return if keymap.action_for_key_event(key) == Some(Action::Quit) {
+        return if keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
             ReportEditKeyIntent::EmergencyQuit
         } else {
             ReportEditKeyIntent::Ignore
@@ -45,6 +45,10 @@ impl App {
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> bool {
         if key.kind == KeyEventKind::Release {
             return false;
+        }
+
+        if self.keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
+            return true;
         }
 
         if self.has_persistence_recovery() {
@@ -75,10 +79,6 @@ impl App {
     }
 
     fn resolve_action(&self, key: KeyEvent) -> Option<Action> {
-        if matches!(key.code, KeyCode::F(1)) {
-            return Some(Action::ToggleKeybindingsHelp);
-        }
-
         if self.in_category_modal()
             && !self.show_keybindings_modal
             && matches!(key.code, KeyCode::Char('?'))
@@ -86,7 +86,16 @@ impl App {
             return None;
         }
 
-        self.keymap.action_for_key_event(key)
+        let context = if self.in_karma_modal() {
+            InputContext::Report
+        } else if self.in_category_modal() || self.show_keybindings_modal {
+            InputContext::Other
+        } else {
+            InputContext::Main
+        };
+        self.keymap
+            .resolve_key_event(context, key)
+            .map(|resolved| resolved.action)
     }
 
     fn route_action(&mut self, action: Action, key: KeyEvent) -> bool {
@@ -120,7 +129,11 @@ impl App {
     }
 
     fn handle_command_palette_key(&mut self, key: KeyEvent) -> bool {
-        if self.keymap.action_for_key_event(key) == Some(Action::ToggleCommandPalette) {
+        if self
+            .keymap
+            .resolve_key_event(InputContext::Other, key)
+            .is_some_and(|resolved| resolved.action == Action::ToggleCommandPalette)
+        {
             self.close_command_palette();
             return false;
         }
@@ -258,9 +271,22 @@ impl App {
             KeyCode::Esc => {
                 self.close_atlas_overlay();
             }
-            KeyCode::Backspace | KeyCode::Delete => {
+            KeyCode::Backspace => {
                 let keymap_path = crate::storage::get_keymap_path();
                 match crate::keybindings::set_action_binding(&keymap_path, action, None) {
+                    Ok(loaded) => {
+                        self.apply_loaded_keybindings(loaded);
+                        self.close_atlas_overlay();
+                    }
+                    Err(err) => {
+                        self.keymap_error = Some(err);
+                        self.close_atlas_overlay();
+                    }
+                }
+            }
+            KeyCode::Delete => {
+                let keymap_path = crate::storage::get_keymap_path();
+                match crate::keybindings::set_action_unbound(&keymap_path, action) {
                     Ok(loaded) => {
                         self.apply_loaded_keybindings(loaded);
                         self.close_atlas_overlay();
@@ -659,9 +685,6 @@ impl App {
             Action::ReportMonth => {
                 self.set_report_period(ReportPeriod::Month);
             }
-            Action::Detach => {
-                self.set_report_period(ReportPeriod::Today);
-            }
             Action::DeleteCategory => {
                 if in_logs_view {
                     handled = self.delete_selected_report_session();
@@ -698,16 +721,7 @@ impl App {
                 self.open_modal();
                 false
             }
-            Action::Confirm => {
-                if self
-                    .keymap
-                    .keys_for_action(Action::OpenCategoryModal)
-                    .is_empty()
-                {
-                    self.open_modal();
-                }
-                false
-            }
+            Action::Confirm => false,
             Action::SwitchToNone => {
                 self.queue_or_apply_mutation(QueuedMutation::SwitchLayer(DRIFT_CATEGORY_ID));
                 false
@@ -716,17 +730,8 @@ impl App {
                 self.detach_requested = true;
                 true
             }
-            Action::Cancel => {
-                if self.keymap.keys_for_action(Action::SwitchToNone).is_empty() {
-                    self.queue_or_apply_mutation(QueuedMutation::SwitchLayer(DRIFT_CATEGORY_ID));
-                }
-                false
-            }
+            Action::Cancel => false,
             Action::ReportToday => {
-                if self.keymap.keys_for_action(Action::Detach).is_empty() {
-                    self.detach_requested = true;
-                    return true;
-                }
                 self.open_report_modal();
                 self.set_report_period(ReportPeriod::Today);
                 false

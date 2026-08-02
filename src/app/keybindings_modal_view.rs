@@ -9,7 +9,7 @@ use ratatui::{
 use crate::{
     constants::ATLAS_LAYOUT_SETTINGS,
     domain::FirstDayOfWeek,
-    keybindings::{Action, ActionCategory},
+    keybindings::{Action, ActionBindingState, ActionCategory},
 };
 
 use super::{App, AtlasOverlay, AtlasSelectable, view_style};
@@ -199,15 +199,33 @@ impl App {
                 .copied()
                 .filter(|action| action.category() == category)
             {
-                let keys = self.effective_keys_for_action(action);
-                let key_text = if keys.is_empty() {
-                    "(unbound)".to_string()
-                } else {
-                    keys.into_iter()
-                        .map(|key| key.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                };
+                let direct = self.keymap.keys_for_action(action);
+                let mandatory = self.keymap.mandatory_keys_for_action(action);
+                let state = self.keymap_state_for_action(action);
+                let mut parts = Vec::new();
+                match state {
+                    ActionBindingState::Bound => parts.push(
+                        direct
+                            .into_iter()
+                            .map(|key| key.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    ),
+                    ActionBindingState::Unbound => parts.push("(unbound)".to_string()),
+                    ActionBindingState::Disabled => parts.push("(disabled)".to_string()),
+                }
+                if !mandatory.is_empty() {
+                    parts.push(format!(
+                        "{} [mandatory]",
+                        mandatory
+                            .into_iter()
+                            .map(|key| key.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+                parts.extend(self.contextual_labels_for_action(action));
+                let key_text = parts.join(" · ");
 
                 rows.push(self.selectable_row(
                     AtlasSelectable::Action(action),

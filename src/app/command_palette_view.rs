@@ -9,7 +9,7 @@ use ratatui::{
 use crate::{
     constants::{APP_LAYOUT_SETTINGS, COMMAND_PALETTE_SETTINGS},
     domain::ReportPeriod,
-    keybindings::Action,
+    keybindings::{Action, ActionBindingState},
 };
 
 use super::{App, PaletteCommand, PaletteEntry, view_style};
@@ -203,6 +203,20 @@ impl App {
             });
         }
 
+        entries.retain(|entry| match entry.command {
+            PaletteCommand::Action(action) => {
+                self.keymap.action_state(action) != ActionBindingState::Disabled
+            }
+            PaletteCommand::SetReportPeriod(period) => {
+                let action = match period {
+                    ReportPeriod::Today => Action::ReportToday,
+                    ReportPeriod::Week => Action::ReportWeek,
+                    ReportPeriod::Month => Action::ReportMonth,
+                };
+                self.keymap.action_state(action) != ActionBindingState::Disabled
+            }
+            PaletteCommand::SwitchLayer(_) => true,
+        });
         entries
     }
 
@@ -246,13 +260,17 @@ impl App {
 
     fn palette_hint_for_action(&self, action: Action) -> String {
         let keys = self.effective_keys_for_action(action);
-        if keys.is_empty() {
-            String::new()
-        } else {
-            keys.into_iter()
+        if !keys.is_empty() {
+            return keys
+                .into_iter()
                 .map(|key| key.to_string())
                 .collect::<Vec<_>>()
-                .join(", ")
+                .join(", ");
+        }
+        match self.keymap.action_state(action) {
+            ActionBindingState::Unbound => "unbound".to_string(),
+            ActionBindingState::Disabled => "disabled".to_string(),
+            ActionBindingState::Bound => String::new(),
         }
     }
 
