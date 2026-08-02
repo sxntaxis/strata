@@ -109,6 +109,27 @@ The current policy is a **fixed clock under a fixed UTC offset**, not an IANA ti
 
 A completed session remains one canonical ledger row. Reports project exact overlap slices at operational-day boundaries using the policy stored with that session, so a cross-boundary interval contributes only its overlapping seconds to each day without losing identity or creating empty exact-boundary fragments. Transitions whose whole-second duration is zero still complete or switch active state transactionally, but they do not create ordinary work rows. The full contract is recorded in [`docs/TEMPORAL_AUTHORITY.md`](docs/TEMPORAL_AUTHORITY.md).
 
+## Reporting and exports
+
+Reports are projections over canonical ledger truth. Preset reports use the current operational day, configured week-to-date, or calendar month-to-date. Custom ranges are inclusive operational-day ranges:
+
+```bash
+strata report --from 2026-07-01 --to 2026-07-15
+```
+
+A running interval is included by default as provisional time and is identified explicitly in report output and exports. Use committed history only when required:
+
+```bash
+strata report --today --completed-only
+strata export --format json --completed-only
+```
+
+JSON export schema version 2 includes stable event UIDs, authoritative UTC endpoints, and a `provisional` flag. ICS export uses those UTC endpoints and stable UIDs, emits CRLF-delimited RFC 5545 text with escaping and line folding, marks provisional events with `X-STRATA-PROVISIONAL:TRUE`, and excludes idle events. A legacy session without authoritative absolute chronology fails closed for ICS rather than inventing timestamps.
+
+Week reports follow the configured first day of week. The current week is week-to-date; prior week offsets in the TUI are complete calendar weeks. Month reports use calendar months: the current month is month-to-date and prior offsets are complete prior calendar months.
+
+The detailed contract is recorded in [`docs/REPORT_AUTHORITY.md`](docs/REPORT_AUTHORITY.md).
+
 ## Persistence authority
 
 Strata has two explicit authority phases:

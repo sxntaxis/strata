@@ -93,6 +93,19 @@ DOMAIN-001 establishes session-classification authority:
 
 The detailed contract is `docs/DOMAIN_AUTHORITY.md`.
 
+
+REPORT-001 establishes projection authority:
+
+- custom report ranges are inclusive operational-day ranges and consume exact canonical overlap slices;
+- the active interval is included by default as a provisional projection without mutating or finalizing it;
+- `--completed-only` selects committed history for reports and JSON/ICS exports;
+- report and export ordering has complete deterministic tie-breakers;
+- JSON schema version 2 exposes stable UIDs, provisional state, and authoritative UTC endpoints;
+- ICS uses stable UIDs and UTC endpoints, applies RFC 5545 escaping, CRLF delimiters, and line folding, marks provisional events explicitly, and fails closed when absolute chronology is unavailable;
+- idle remains excluded from ordinary reports and ICS work events.
+
+The detailed contract is `docs/REPORT_AUTHORITY.md`.
+
 ## Truth boundaries
 
 ### Chronological ledger
@@ -113,11 +126,10 @@ TUI and CLI translate user intent and present state. Neither may maintain an ind
 
 ## Current architectural frontier
 
-Persistence structure, startup configuration fallback, clock authority, interval boundaries, and session classification are no longer the primary risks. The next program is projection correctness:
+Persistence, startup configuration, clock authority, interval boundaries, session classification, and report/export projection correctness are no longer the primary risks. The next programs are:
 
-1. correct reporting ranges, provisional active time, ICS validity, and deterministic ordering;
-2. establish a conserved sediment model independent of viewport and mutable previews;
-3. complete interaction-mode and terminal-lifecycle contracts.
+1. establish a conserved sediment model independent of viewport and mutable previews;
+2. complete interaction-mode and terminal-lifecycle contracts.
 
 Complete profile isolation and deliberate runtime profile switching remain separate work under issue #15.
 

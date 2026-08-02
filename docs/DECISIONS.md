@@ -26,6 +26,9 @@ Detailed rationale and unresolved implications live in `notebook/decisions/DECIS
 | STRATA-D017 | Zero-whole-second finishes and switches are transactional transition events with receipts, not completed work rows or sediment. | implemented and certified |
 | STRATA-D018 | Project identity and category identity are independent canonical session axes; absent project remains empty rather than invented. | implemented and certified |
 | STRATA-D019 | CLI starts require explicit category classification; idle is explicitly selectable and omission never silently becomes idle. | implemented and certified |
+| STRATA-D020 | Report ranges are inclusive operational-day projections over exact canonical overlap slices; reporting never fragments or mutates the owning session. | implemented and certified |
+| STRATA-D021 | The active interval is included by default in reports and exports as explicitly provisional state; `--completed-only` selects committed history. | implemented and certified |
+| STRATA-D022 | Report/export ordering is deterministic; ICS uses stable identities and authoritative UTC chronology with RFC 5545-safe serialization, and fails closed rather than inventing timestamps. | implemented and certified |
 
 ## Explicitly unresolved
 

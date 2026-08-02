@@ -24,4 +24,4 @@ Notebook material becomes accepted authority only through explicit owner approva
 
 ## Current status
 
-The SQLite authority migration is complete. The active frontier is configuration/profile authority, followed by temporal correctness, reporting semantics, and sediment conservation.
+Persistence, temporal, domain, and report/export authority are complete. The active frontier is sediment conservation, followed by interaction-mode and terminal-lifecycle correctness.
