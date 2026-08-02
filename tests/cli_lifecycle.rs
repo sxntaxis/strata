@@ -137,6 +137,7 @@ fn start_stop_report_round_trip_uses_an_isolated_profile() {
 
     let log = fs::read_to_string(profile.time_log_path()).expect("time log should be readable");
     assert!(log.contains("Work"));
+    assert!(log.contains("study-session"));
     assert!(log.contains("Read chapter 4"));
 
     let report = profile.run(&["report", "--today"]);
@@ -148,6 +149,20 @@ fn start_stop_report_round_trip_uses_an_isolated_profile() {
     let stdout = String::from_utf8_lossy(&report.stdout);
     assert!(stdout.contains("Today's Report"));
     assert!(stdout.contains("Work"));
+
+    let json = profile.run(&["export", "--format", "json"]);
+    assert!(
+        json.status.success(),
+        "JSON export failed: {}",
+        stderr(&json)
+    );
+    let exported: serde_json::Value =
+        serde_json::from_slice(&json.stdout).expect("JSON export should parse");
+    assert_eq!(exported["sessions"][0]["project"], "study-session");
+
+    let ics = profile.run(&["export", "--format", "ics"]);
+    assert!(ics.status.success(), "ICS export failed: {}", stderr(&ics));
+    assert!(String::from_utf8_lossy(&ics.stdout).contains("SUMMARY:study-session - Work"));
 }
 
 #[test]
@@ -200,12 +215,44 @@ fn repeated_stop_fails_without_adding_a_duplicate_session() {
 }
 
 #[test]
+fn project_only_start_is_rejected_and_idle_is_explicit() {
+    let profile = TestProfile::new("explicit-classification");
+
+    let omitted = profile.run(&["start", "project-only"]);
+    assert!(!omitted.status.success());
+    let omitted_error = stderr(&omitted);
+    assert!(omitted_error.contains("--category <CATEGORY>"));
+    assert!(!profile.active_session_path().exists());
+
+    let idle = profile.run(&["start", "break", "--category", "idle"]);
+    assert!(
+        idle.status.success(),
+        "idle start failed: {}",
+        stderr(&idle)
+    );
+    assert!(String::from_utf8_lossy(&idle.stdout).contains("category 'idle'"));
+    profile.backdate_active_session(2);
+    let stop = profile.run(&["stop"]);
+    assert!(stop.status.success(), "idle stop failed: {}", stderr(&stop));
+
+    let report = profile.run(&["report", "--today"]);
+    assert!(
+        report.status.success(),
+        "report failed: {}",
+        stderr(&report)
+    );
+    let stdout = String::from_utf8_lossy(&report.stdout);
+    assert!(stdout.contains("TOTAL"));
+    assert!(stdout.contains("00:00:00"));
+}
+
+#[test]
 fn corrupt_categories_fail_start_without_creating_active_state() {
     let profile = TestProfile::new("corrupt-categories");
     let corrupt = "name,description\nWork,focus\n";
     fs::write(profile.categories_path(), corrupt).expect("corrupt categories should be written");
 
-    let start = profile.run(&["start", "unsafe-default"]);
+    let start = profile.run(&["start", "unsafe-default", "--category", "Work"]);
 
     assert!(!start.status.success());
     assert!(stderr(&start).contains("Invalid CSV schema"));

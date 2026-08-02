@@ -119,6 +119,7 @@ pub(crate) fn load_state(database_path: &Path) -> Result<SqliteTuiState, String>
             id,
             date: row.operational_day,
             category_id: CategoryId::new(category_id),
+            project: row.project,
             description: row.description,
             start_time: local_clock(&row.started_at_utc, operational_day_policy)?,
             end_time: local_clock(&row.ended_at_utc, operational_day_policy)?,
@@ -315,7 +316,7 @@ pub(crate) fn sync_categories(
         .map(|category| as_i64(category.id.0, "category ID"))
         .collect::<Result<BTreeSet<_>, _>>()?;
     if !current_ids.contains(&0) {
-        return Err("the active category set is missing the reserved drift category".to_string());
+        return Err("the active category set is missing the reserved idle category".to_string());
     }
     let active_id = as_i64(active_category_id.0, "active category ID")?;
     if !current_ids.contains(&active_id) {
@@ -510,7 +511,7 @@ pub(crate) fn sync_sessions(database_path: &Path, sessions: &[Session]) -> Resul
         .map_err(|error| error.to_string())?;
     let mut statement = transaction
         .prepare(
-            "SELECT id, category_id, operational_day, elapsed_seconds FROM sessions ORDER BY id",
+            "SELECT id, project, category_id, operational_day, elapsed_seconds FROM sessions ORDER BY id",
         )
         .map_err(|error| error.to_string())?;
     let stored = statement
@@ -518,9 +519,10 @@ pub(crate) fn sync_sessions(database_path: &Path, sessions: &[Session]) -> Resul
             Ok((
                 row.get::<_, i64>(0)?,
                 (
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, i64>(3)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
                 ),
             ))
         })
@@ -538,7 +540,11 @@ pub(crate) fn sync_sessions(database_path: &Path, sessions: &[Session]) -> Resul
         })?;
         let category_id = as_i64(session.category_id.0, "category ID")?;
         let elapsed = as_i64(session.elapsed_seconds as u64, "elapsed seconds")?;
-        if expected.0 != category_id || expected.1 != session.date || expected.2 != elapsed {
+        if expected.0 != session.project
+            || expected.1 != category_id
+            || expected.2 != session.date
+            || expected.3 != elapsed
+        {
             return Err(format!(
                 "TUI session {id} identity or chronology diverged from SQLite authority"
             ));
@@ -1050,6 +1056,10 @@ mod tests {
         drop(repository);
 
         let mut state = load_state(&path).unwrap();
+        assert_eq!(
+            state.loaded_sessions.sessions[0].project,
+            "preserved-project"
+        );
         state.loaded_sessions.sessions[0].description = "edited".to_string();
         sync_sessions(&path, &state.loaded_sessions.sessions).unwrap();
         let repository = open_cli_repository(&path).unwrap();

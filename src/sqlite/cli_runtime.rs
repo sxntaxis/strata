@@ -49,6 +49,7 @@ impl SqliteCliSession {
             id: self.id,
             date: self.date.clone(),
             category_id: CategoryId::new(self.category_id),
+            project: self.project.clone(),
             description: self.description.clone(),
             start_time: self.start_time.clone(),
             end_time: self.end_time.clone(),
@@ -70,20 +71,23 @@ pub(crate) fn start_session(
     database_path: &Path,
     project: String,
     description: Option<String>,
-    category_name: Option<String>,
+    category_name: String,
 ) -> Result<SqliteCliStartResult, String> {
     let mut repository = open_cli_repository(database_path)?;
 
     let categories = repository
         .list_categories(false)
         .map_err(|error| error.to_string())?;
-    let requested = category_name.unwrap_or_else(|| DRIFT_CATEGORY_CONFIG_NAME.to_string());
-    let category = if is_drift_name(&requested) || requested == "0" {
+    let requested = category_name.trim();
+    if requested.is_empty() {
+        return Err("Category is required; use --category idle for baseline time".to_string());
+    }
+    let category = if is_drift_name(requested) || requested == "0" {
         categories.iter().find(|category| category.id == 0)
     } else {
-        categories
-            .iter()
-            .find(|category| category.name == requested || category.id.to_string() == requested)
+        categories.iter().find(|category| {
+            category.name.eq_ignore_ascii_case(requested) || category.id.to_string() == requested
+        })
     }
     .ok_or_else(|| format!("Category '{requested}' not found"))?;
 

@@ -159,7 +159,7 @@ impl App {
             ),
             self.palette_action_entry(
                 Action::SwitchToNone,
-                "Switch layer: drift",
+                "Switch layer: idle",
                 &["drift", "idle", "none", "neutral"],
             ),
             self.palette_period_entry(ReportPeriod::Today, Action::ReportToday, "Karma range: day"),
@@ -176,7 +176,7 @@ impl App {
             ),
             self.palette_action_entry(
                 Action::ClearNoneSand,
-                "Clear drift sand",
+                "Clear idle sand",
                 &["clear", "drift", "none", "idle"],
             ),
             self.palette_action_entry(Action::Quit, "Quit Strata", &["exit", "close", "stop"]),

@@ -45,11 +45,26 @@ const LEGACY_SESSIONS_HEADER: [&str; 8] = [
     "end_time",
     "elapsed_seconds",
 ];
-const SESSIONS_HEADER: [&str; 12] = [
+const TEMPORAL_SESSIONS_HEADER: [&str; 12] = [
     "id",
     "date",
     "category_id",
     "category_name",
+    "description",
+    "start_time",
+    "end_time",
+    "elapsed_seconds",
+    "started_at_utc",
+    "ended_at_utc",
+    "boundary_utc_offset_seconds",
+    "boundary_start_minutes",
+];
+const SESSIONS_HEADER: [&str; 13] = [
+    "id",
+    "date",
+    "category_id",
+    "category_name",
+    "project",
     "description",
     "start_time",
     "end_time",
@@ -202,7 +217,7 @@ pub fn try_load_categories_from_csv(path: &Path) -> Result<LoadedCategories, Sto
         }
 
         let name = record.get(1).unwrap_or_default().trim().to_string();
-        if name.is_empty() || name.eq_ignore_ascii_case(DRIFT_CATEGORY_CONFIG_NAME) {
+        if name.is_empty() || crate::domain::is_drift_name(&name) {
             continue;
         }
 
@@ -256,18 +271,32 @@ pub fn try_load_sessions_from_csv(
 
     let mut reader = ReaderBuilder::new().has_headers(true).from_path(path)?;
     let headers = reader.headers()?.clone();
-    let has_temporal_provenance = csv_header_matches(&headers, &SESSIONS_HEADER);
+    let has_project = csv_header_matches(&headers, &SESSIONS_HEADER);
+    let has_temporal_provenance =
+        has_project || csv_header_matches(&headers, &TEMPORAL_SESSIONS_HEADER);
     if !has_temporal_provenance && !csv_header_matches(&headers, &LEGACY_SESSIONS_HEADER) {
         return Err(StorageError::InvalidCsvSchema {
             file: "time_log.csv",
             expected: format!(
-                "{} or {}",
+                "{}, {}, or {}",
                 LEGACY_SESSIONS_HEADER.join(","),
+                TEMPORAL_SESSIONS_HEADER.join(","),
                 SESSIONS_HEADER.join(",")
             ),
             found: csv_header_string(&headers),
         });
     }
+
+    let shift = usize::from(has_project);
+    let project_index = has_project.then_some(4);
+    let description_index = 4 + shift;
+    let start_time_index = 5 + shift;
+    let end_time_index = 6 + shift;
+    let elapsed_index = 7 + shift;
+    let absolute_start_index = 8 + shift;
+    let absolute_end_index = 9 + shift;
+    let boundary_offset_index = 10 + shift;
+    let boundary_start_index = 11 + shift;
 
     let mut loaded = default_sessions_loaded();
 
@@ -292,8 +321,8 @@ pub fn try_load_sessions_from_csv(
             .and_then(|raw| category_by_id.get(&raw).copied())
             .unwrap_or(DRIFT_CATEGORY_ID);
 
-        let provenance_is_empty =
-            (8..=11).all(|field| record.get(field).unwrap_or_default().trim().is_empty());
+        let provenance_is_empty = (absolute_start_index..=boundary_start_index)
+            .all(|field| record.get(field).unwrap_or_default().trim().is_empty());
         let (started_at_utc, ended_at_utc, operational_day_policy) = if has_temporal_provenance
             && provenance_is_empty
         {
@@ -310,18 +339,17 @@ pub fn try_load_sessions_from_csv(
                             message: format!("invalid {label} '{raw}': {error}"),
                         })
                 };
-            let started = parse_timestamp(8, "start timestamp")?;
-            let ended = parse_timestamp(9, "end timestamp")?;
-            let utc_offset_seconds =
-                record
-                    .get(10)
-                    .unwrap_or_default()
-                    .parse::<i32>()
-                    .map_err(|error| StorageError::InvalidCsvData {
-                        file: "time_log.csv",
-                        row,
-                        message: format!("invalid boundary UTC offset: {error}"),
-                    })?;
+            let started = parse_timestamp(absolute_start_index, "start timestamp")?;
+            let ended = parse_timestamp(absolute_end_index, "end timestamp")?;
+            let utc_offset_seconds = record
+                .get(boundary_offset_index)
+                .unwrap_or_default()
+                .parse::<i32>()
+                .map_err(|error| StorageError::InvalidCsvData {
+                    file: "time_log.csv",
+                    row,
+                    message: format!("invalid boundary UTC offset: {error}"),
+                })?;
             if chrono::FixedOffset::east_opt(utc_offset_seconds).is_none() {
                 return Err(StorageError::InvalidCsvData {
                     file: "time_log.csv",
@@ -329,16 +357,15 @@ pub fn try_load_sessions_from_csv(
                     message: format!("boundary UTC offset {utc_offset_seconds} is unsupported"),
                 });
             }
-            let start_minutes =
-                record
-                    .get(11)
-                    .unwrap_or_default()
-                    .parse::<u16>()
-                    .map_err(|error| StorageError::InvalidCsvData {
-                        file: "time_log.csv",
-                        row,
-                        message: format!("invalid boundary start minute: {error}"),
-                    })?;
+            let start_minutes = record
+                .get(boundary_start_index)
+                .unwrap_or_default()
+                .parse::<u16>()
+                .map_err(|error| StorageError::InvalidCsvData {
+                    file: "time_log.csv",
+                    row,
+                    message: format!("invalid boundary start minute: {error}"),
+                })?;
             if start_minutes > 1439 {
                 return Err(StorageError::InvalidCsvData {
                     file: "time_log.csv",
@@ -362,11 +389,18 @@ pub fn try_load_sessions_from_csv(
             id,
             date: record.get(1).unwrap_or_default().to_string(),
             category_id,
-            description: record.get(4).unwrap_or_default().to_string(),
-            start_time: record.get(5).unwrap_or_default().to_string(),
-            end_time: record.get(6).unwrap_or_default().to_string(),
+            project: project_index
+                .and_then(|field| record.get(field))
+                .unwrap_or_default()
+                .to_string(),
+            description: record
+                .get(description_index)
+                .unwrap_or_default()
+                .to_string(),
+            start_time: record.get(start_time_index).unwrap_or_default().to_string(),
+            end_time: record.get(end_time_index).unwrap_or_default().to_string(),
             elapsed_seconds: record
-                .get(7)
+                .get(elapsed_index)
                 .and_then(|value| value.parse::<usize>().ok())
                 .unwrap_or(0),
             started_at_utc,
@@ -450,6 +484,7 @@ pub fn save_sessions_to_csv(
                 session.date.clone(),
                 session.category_id.0.to_string(),
                 category_name.to_string(),
+                session.project.clone(),
                 session.description.clone(),
                 session.start_time.clone(),
                 session.end_time.clone(),
@@ -769,6 +804,7 @@ mod tests {
             id: 7,
             date: "2026-02-25".to_string(),
             category_id: CategoryId::new(2),
+            project: "Client A".to_string(),
             description: "plan, review".to_string(),
             start_time: "10:00:00".to_string(),
             end_time: "11:00:00".to_string(),
@@ -785,9 +821,50 @@ mod tests {
         assert_eq!(loaded.sessions[0].id, 7);
         assert_eq!(loaded.sessions[0].category_id, CategoryId::new(2));
         assert_eq!(loaded.sessions[0].elapsed_seconds, 3600);
+        assert_eq!(loaded.sessions[0].project, "Client A");
         assert_eq!(loaded.sessions[0].description, "plan, review");
 
         fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn test_legacy_session_headers_load_without_inventing_project() {
+        let categories = vec![
+            Category {
+                id: CategoryId::new(0),
+                name: "idle".to_string(),
+                color: Color::White,
+                description: String::new(),
+                karma_effect: 0,
+            },
+            Category {
+                id: CategoryId::new(1),
+                name: "Work".to_string(),
+                color: COLORS[0],
+                description: String::new(),
+                karma_effect: 1,
+            },
+        ];
+        let legacy_path = unique_path("strata_sessions_legacy_project", "csv");
+        fs::write(
+            &legacy_path,
+            "id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds\n1,2026-08-01,1,Work,legacy,10:00:00,11:00:00,3600\n",
+        )
+        .unwrap();
+        let legacy = load_sessions_from_csv(&legacy_path, &categories);
+        assert_eq!(legacy.sessions[0].project, "");
+
+        let temporal_path = unique_path("strata_sessions_temporal_project", "csv");
+        fs::write(
+            &temporal_path,
+            "id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds,started_at_utc,ended_at_utc,boundary_utc_offset_seconds,boundary_start_minutes\n1,2026-08-01,1,Work,temporal,10:00:00,11:00:00,3600,2026-08-01T16:00:00Z,2026-08-01T17:00:00Z,-21600,360\n",
+        )
+        .unwrap();
+        let temporal = load_sessions_from_csv(&temporal_path, &categories);
+        assert_eq!(temporal.sessions[0].project, "");
+
+        fs::remove_file(legacy_path).ok();
+        fs::remove_file(temporal_path).ok();
     }
 
     #[derive(Debug, Serialize, Deserialize, PartialEq)]

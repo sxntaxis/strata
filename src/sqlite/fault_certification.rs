@@ -288,6 +288,7 @@ fn every_authoritative_persistence_family_rolls_back_or_remains_recoverable() {
             id: 7,
             date: "2026-08-01".to_string(),
             category_id: CategoryId::new(1),
+            project: String::new(),
             description: "new".to_string(),
             start_time: "12:00:00".to_string(),
             end_time: "13:00:00".to_string(),

@@ -198,9 +198,9 @@ impl Action {
             Action::OpenCategoryModal => "Open layer pop-up from main view",
             Action::OpenReportModal => "Open karma pop-up from main view",
             Action::Detach => "Detach from main view (in karma pop-up: day range)",
-            Action::SwitchToNone => "Switch active layer to drift",
-            Action::ClearAllSand => "Clear all sand and reset drift timer",
-            Action::ClearNoneSand => "Clear only drift sand",
+            Action::SwitchToNone => "Switch active layer to idle",
+            Action::ClearAllSand => "Clear all sand and reset idle timer",
+            Action::ClearNoneSand => "Clear only idle sand",
             Action::ToggleKeybindingsHelp => "Open/close command atlas",
 
             Action::Up => "Move up / previous item",

@@ -354,6 +354,58 @@ fn activated_cli_uses_sqlite_without_legacy_dual_writes() {
 }
 
 #[test]
+fn activated_cli_requires_explicit_classification_and_allows_explicit_idle() {
+    let profile = TestProfile::new("explicit-classification");
+    profile.migrate();
+    let activation = profile.activate();
+    assert!(
+        activation.status.success(),
+        "activation failed: {}",
+        stderr(&activation)
+    );
+
+    let omitted = profile.run(&["start", "project-only"]);
+    assert!(!omitted.status.success());
+    assert!(stderr(&omitted).contains("--category <CATEGORY>"));
+    let connection = Connection::open(profile.database_path()).expect("database should open");
+    let active_count: i64 = connection
+        .query_row("SELECT count(*) FROM active_session", [], |row| row.get(0))
+        .expect("active count should be readable");
+    assert_eq!(active_count, 0);
+    drop(connection);
+
+    let idle = profile.run(&["start", "rest", "--category", "idle"]);
+    assert!(
+        idle.status.success(),
+        "idle start failed: {}",
+        stderr(&idle)
+    );
+    assert!(stdout(&idle).contains("category 'idle'"));
+    profile.backdate_sqlite_active_session(2);
+    let stop = profile.run(&["stop"]);
+    assert!(stop.status.success(), "idle stop failed: {}", stderr(&stop));
+
+    let connection = Connection::open(profile.database_path()).expect("database should open");
+    let completed: (String, i64) = connection
+        .query_row("SELECT project, category_id FROM sessions", [], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .expect("explicit idle session should persist");
+    assert_eq!(completed.0, "rest");
+    assert_eq!(completed.1, 0);
+    drop(connection);
+
+    let report = profile.run(&["report", "--today"]);
+    assert!(
+        report.status.success(),
+        "report failed: {}",
+        stderr(&report)
+    );
+    assert!(stdout(&report).contains("TOTAL"));
+    assert!(stdout(&report).contains("00:00:00"));
+}
+
+#[test]
 fn activated_tui_runs_and_persists_only_sqlite() {
     let profile = TestProfile::new("tui-cutover");
     let legacy_categories_before =

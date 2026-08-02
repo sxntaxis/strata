@@ -14,7 +14,10 @@ use rusqlite::{OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{constants::COLORS, domain::DRIFT_CATEGORY_CONFIG_NAME};
+use crate::{
+    constants::COLORS,
+    domain::{DRIFT_CATEGORY_CONFIG_NAME, is_drift_name},
+};
 
 use super::SqliteRepository;
 
@@ -29,11 +32,26 @@ const LEGACY_SESSIONS_HEADER: [&str; 8] = [
     "end_time",
     "elapsed_seconds",
 ];
-const SESSIONS_HEADER: [&str; 12] = [
+const TEMPORAL_SESSIONS_HEADER: [&str; 12] = [
     "id",
     "date",
     "category_id",
     "category_name",
+    "description",
+    "start_time",
+    "end_time",
+    "elapsed_seconds",
+    "started_at_utc",
+    "ended_at_utc",
+    "boundary_utc_offset_seconds",
+    "boundary_start_minutes",
+];
+const SESSIONS_HEADER: [&str; 13] = [
+    "id",
+    "date",
+    "category_id",
+    "category_name",
+    "project",
     "description",
     "start_time",
     "end_time",
@@ -158,6 +176,7 @@ struct LegacyCategory {
 struct LegacySession {
     id: i64,
     stable_id: String,
+    project: String,
     category_id: i64,
     description: String,
     started_at_utc: String,
@@ -533,10 +552,11 @@ impl SqliteRepository {
                     boundary_start_minutes,
                     source,
                     legacy_import_id
-                 ) VALUES (?1, ?2, '', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'legacy-csv', ?11)",
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'legacy-csv', ?12)",
                 params![
                     session.id,
                     session.stable_id,
+                    session.project,
                     session.category_id,
                     session.description,
                     session.started_at_utc,
@@ -884,9 +904,7 @@ fn parse_categories(bytes: &[u8]) -> Result<Vec<LegacyCategory>, LegacyImportErr
         let name = required_field(source, row, &record, 1, "category name")?
             .trim()
             .to_string();
-        if name.eq_ignore_ascii_case(DRIFT_CATEGORY_CONFIG_NAME)
-            || name.eq_ignore_ascii_case("idle")
-        {
+        if is_drift_name(&name) {
             return Err(invalid(
                 source,
                 Some(row),
@@ -960,18 +978,32 @@ fn parse_sessions(
         .headers()
         .map_err(|error| csv_error(source, error))?
         .clone();
-    let has_temporal_provenance = header.iter().eq(SESSIONS_HEADER.iter().copied());
+    let has_project = header.iter().eq(SESSIONS_HEADER.iter().copied());
+    let has_temporal_provenance =
+        has_project || header.iter().eq(TEMPORAL_SESSIONS_HEADER.iter().copied());
     if !has_temporal_provenance && !header.iter().eq(LEGACY_SESSIONS_HEADER.iter().copied()) {
         return Err(invalid(
             source,
             None,
             format!(
-                "invalid header; expected '{}' or '{}'",
+                "invalid header; expected '{}', '{}', or '{}'",
                 LEGACY_SESSIONS_HEADER.join(","),
+                TEMPORAL_SESSIONS_HEADER.join(","),
                 SESSIONS_HEADER.join(",")
             ),
         ));
     }
+
+    let shift = usize::from(has_project);
+    let project_index = has_project.then_some(4);
+    let description_index = 4 + shift;
+    let start_time_index = 5 + shift;
+    let end_time_index = 6 + shift;
+    let elapsed_index = 7 + shift;
+    let absolute_start_index = 8 + shift;
+    let absolute_end_index = 9 + shift;
+    let boundary_offset_index = 10 + shift;
+    let boundary_start_index = 11 + shift;
 
     let mut sessions = Vec::new();
     let mut ids = HashSet::new();
@@ -1013,7 +1045,12 @@ fn parse_sessions(
             )
         })?;
         let category_name = required_field(source, row, &record, 3, "category name")?;
-        if !category_name.eq_ignore_ascii_case(expected_category_name) {
+        let category_name_matches = if category_id == 0 {
+            is_drift_name(category_name)
+        } else {
+            category_name.eq_ignore_ascii_case(expected_category_name)
+        };
+        if !category_name_matches {
             return Err(invalid(
                 source,
                 Some(row),
@@ -1023,9 +1060,9 @@ fn parse_sessions(
             ));
         }
 
-        let start_time = parse_time(source, row, &record, 5, "start time")?;
-        let end_time = parse_time(source, row, &record, 6, "end time")?;
-        let elapsed_seconds = parse_i64(source, row, &record, 7, "elapsed seconds")?;
+        let start_time = parse_time(source, row, &record, start_time_index, "start time")?;
+        let end_time = parse_time(source, row, &record, end_time_index, "end time")?;
+        let elapsed_seconds = parse_i64(source, row, &record, elapsed_index, "elapsed seconds")?;
         if elapsed_seconds < 0 {
             return Err(invalid(
                 source,
@@ -1034,13 +1071,15 @@ fn parse_sessions(
             ));
         }
 
+        let provenance_is_empty = (absolute_start_index..=boundary_start_index)
+            .all(|field| record.get(field).unwrap_or_default().trim().is_empty());
         let (started_at_utc, ended_at_utc, boundary_utc_offset_seconds, boundary_start_minutes) =
-            if has_temporal_provenance {
+            if has_temporal_provenance && !provenance_is_empty {
                 let started = DateTime::parse_from_rfc3339(required_field(
                     source,
                     row,
                     &record,
-                    8,
+                    absolute_start_index,
                     "absolute start timestamp",
                 )?)
                 .map_err(|error| {
@@ -1055,14 +1094,20 @@ fn parse_sessions(
                     source,
                     row,
                     &record,
-                    9,
+                    absolute_end_index,
                     "absolute end timestamp",
                 )?)
                 .map_err(|error| {
                     invalid(source, Some(row), format!("invalid end timestamp: {error}"))
                 })?
                 .with_timezone(&Utc);
-                let offset_seconds = parse_i64(source, row, &record, 10, "boundary UTC offset")?;
+                let offset_seconds = parse_i64(
+                    source,
+                    row,
+                    &record,
+                    boundary_offset_index,
+                    "boundary UTC offset",
+                )?;
                 let offset_seconds = i32::try_from(offset_seconds)
                     .map_err(|_| invalid(source, Some(row), "boundary UTC offset exceeds i32"))?;
                 if FixedOffset::east_opt(offset_seconds).is_none() {
@@ -1072,7 +1117,13 @@ fn parse_sessions(
                         "boundary UTC offset is unsupported",
                     ));
                 }
-                let start_minutes = parse_i64(source, row, &record, 11, "boundary start minutes")?;
+                let start_minutes = parse_i64(
+                    source,
+                    row,
+                    &record,
+                    boundary_start_index,
+                    "boundary start minutes",
+                )?;
                 let start_minutes = u16::try_from(start_minutes).map_err(|_| {
                     invalid(source, Some(row), "boundary start minutes exceeds u16")
                 })?;
@@ -1117,8 +1168,15 @@ fn parse_sessions(
         sessions.push(LegacySession {
             id,
             stable_id: format!("legacy-{stable_prefix}-session-{id}"),
+            project: project_index
+                .and_then(|field| record.get(field))
+                .unwrap_or_default()
+                .to_string(),
             category_id,
-            description: record.get(4).unwrap_or_default().to_string(),
+            description: record
+                .get(description_index)
+                .unwrap_or_default()
+                .to_string(),
             started_at_utc,
             ended_at_utc,
             operational_day: operational_day.format("%Y-%m-%d").to_string(),
@@ -1144,7 +1202,12 @@ fn parse_active_session(
     let expected_name = category_names
         .get(&category_id)
         .ok_or_else(|| invalid(source, None, format!("unknown category ID {category_id}")))?;
-    if !active.category_name.eq_ignore_ascii_case(expected_name) {
+    let category_name_matches = if category_id == 0 {
+        is_drift_name(&active.category_name)
+    } else {
+        active.category_name.eq_ignore_ascii_case(expected_name)
+    };
+    if !category_name_matches {
         return Err(invalid(
             source,
             None,
@@ -1882,9 +1945,9 @@ mod tests {
             .unwrap();
             fs::write(
                 &self.paths.sessions_csv,
-                "id,date,category_id,category_name,description,start_time,end_time,elapsed_seconds\n\
-                 7,2026-07-31,1,Work,Late work,23:30:00,00:30:00,3600\n\
-                 8,2026-08-01,2,Break,Coffee,05:30:00,05:45:00,900\n",
+                "id,date,category_id,category_name,project,description,start_time,end_time,elapsed_seconds,started_at_utc,ended_at_utc,boundary_utc_offset_seconds,boundary_start_minutes\n\
+                 7,2026-07-31,1,Work,Client A,Late work,23:30:00,00:30:00,3600,,,,\n\
+                 8,2026-08-01,2,Break,Personal,Coffee,05:30:00,05:45:00,900,,,,\n",
             )
             .unwrap();
             fs::write(
@@ -2001,16 +2064,17 @@ mod tests {
         );
         assert_eq!(fixture.source_bytes(), before);
 
-        let first: (String, String) = repository
+        let first: (String, String, String) = repository
             .connection
             .query_row(
-                "SELECT started_at_utc, ended_at_utc FROM sessions WHERE id = 7",
+                "SELECT project, started_at_utc, ended_at_utc FROM sessions WHERE id = 7",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(first.0, "2026-08-01T05:30:00Z");
-        assert_eq!(first.1, "2026-08-01T06:30:00Z");
+        assert_eq!(first.0, "Client A");
+        assert_eq!(first.1, "2026-08-01T05:30:00Z");
+        assert_eq!(first.2, "2026-08-01T06:30:00Z");
         let second_start: String = repository
             .connection
             .query_row(
@@ -2020,6 +2084,13 @@ mod tests {
             )
             .unwrap();
         assert_eq!(second_start, "2026-08-02T11:30:00Z");
+        let second_project: String = repository
+            .connection
+            .query_row("SELECT project FROM sessions WHERE id = 8", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(second_project, "Personal");
 
         let repeat = repository.import_legacy(&plan).unwrap();
         assert_eq!(
