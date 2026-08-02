@@ -22,8 +22,8 @@ use crate::{
     },
     keybindings::{self, Action, ActionBindingState, KeyBinding},
     legacy_transition::{
-        LegacyActiveReceipt, LegacySessionReceipt, LegacyTransitionKind, LegacyTransitionReceipt,
-        reconcile_completed_session,
+        LegacyActiveReceipt, LegacyFinishReceipt, LegacySessionReceipt, LegacyTransitionKind,
+        LegacyTransitionReceipt, reconcile_completed_session,
     },
     sand::{
         RecoveryTiming, SandEngine, SandState, SandStateGrain, SedimentSnapshot,
@@ -153,6 +153,8 @@ struct DetachedRuntimeCheckpoint {
     legacy_recovery_committed: bool,
     #[serde(default)]
     legacy_transition: Option<LegacyTransitionReceipt>,
+    #[serde(default)]
+    legacy_finish: Option<LegacyFinishReceipt>,
 }
 
 impl DetachedRuntimeCheckpoint {
@@ -264,6 +266,89 @@ fn publish_legacy_switch_replay(
     checkpoint.legacy_transition = None;
     checkpoint.schema_version = DetachedRuntimeCheckpoint::VERSION;
     storage::write_json_atomic(checkpoint_path, checkpoint)?;
+    Ok(staged_tracker)
+}
+
+fn validate_legacy_finish_checkpoint(
+    checkpoint: &DetachedRuntimeCheckpoint,
+    receipt: &LegacyFinishReceipt,
+) -> Result<(), String> {
+    if checkpoint.schema_version != DetachedRuntimeCheckpoint::VERSION {
+        return Err(format!(
+            "legacy finish receipt requires checkpoint schema {}, found {}; evidence retained",
+            DetachedRuntimeCheckpoint::VERSION,
+            checkpoint.schema_version
+        ));
+    }
+    if checkpoint.legacy_transition.is_some() {
+        return Err(
+            "checkpoint contains both switch and finish receipts; evidence retained".to_string(),
+        );
+    }
+    receipt.validate_boundaries()?;
+    let expected_identity = format!(
+        "legacy:{}:{}",
+        receipt.expected_previous_category_id,
+        receipt
+            .expected_previous_started_at_utc
+            .to_rfc3339_opts(SecondsFormat::Nanos, true)
+    );
+    let expected_operation_id = transition_operation_id(
+        "legacy-finish",
+        &expected_identity,
+        receipt.finished_at_utc,
+        "complete",
+    );
+    if receipt.operation_id != expected_operation_id {
+        return Err(format!(
+            "legacy finish receipt operation ID {} is inconsistent; evidence retained",
+            receipt.operation_id
+        ));
+    }
+    if checkpoint.active_category_id != receipt.expected_previous_category_id
+        || checkpoint.active_description != receipt.expected_previous_description
+        || checkpoint.active_session_started_at_utc
+            != Some(receipt.expected_previous_started_at_utc)
+    {
+        return Err(format!(
+            "legacy finish receipt {} does not match its prior checkpoint generation",
+            receipt.operation_id
+        ));
+    }
+    Ok(())
+}
+
+fn publish_legacy_finish_replay(
+    tracker: &TimeTracker,
+    archived_categories: &[Category],
+    checkpoint: &DetachedRuntimeCheckpoint,
+    receipt: &LegacyFinishReceipt,
+    sessions_path: &Path,
+    categories_path: &Path,
+    sand_path: &Path,
+) -> Result<TimeTracker, String> {
+    let mut staged_tracker = tracker.clone();
+    reconcile_completed_session(
+        &mut staged_tracker.sessions,
+        &mut staged_tracker.session_id_counter,
+        receipt.completed_session.as_ref(),
+    )?;
+    let previous_category_id = CategoryId::new(receipt.expected_previous_category_id);
+    if !staged_tracker.set_category_description_by_id(previous_category_id, String::new()) {
+        return Err(format!(
+            "legacy finish receipt {} references unavailable previous category {}",
+            receipt.operation_id, receipt.expected_previous_category_id
+        ));
+    }
+    let mut catalog = staged_tracker.categories_for_storage();
+    catalog.extend(archived_categories.iter().cloned());
+    storage::save_sessions_to_csv(sessions_path, &staged_tracker.sessions, &catalog)?;
+    storage::save_category_catalog_to_csv(
+        categories_path,
+        &staged_tracker.categories_for_storage(),
+        archived_categories,
+    )?;
+    storage::save_sand_state(sand_path, &checkpoint.sand_state)?;
     Ok(staged_tracker)
 }
 
@@ -1086,6 +1171,95 @@ impl App {
         self.end_active_session_at(Utc::now(), SessionClockMode::LiveMonotonic)
     }
 
+    fn prepare_active_finish_for_exit(&mut self) -> Option<usize> {
+        if self.sqlite_database_path.is_some() {
+            return self.end_active_session_now();
+        }
+        let interval =
+            match self.reconciled_active_interval(Utc::now(), SessionClockMode::LiveMonotonic) {
+                Ok(interval) => interval,
+                Err(error) => {
+                    self.record_storage_result_for::<()>(
+                        PersistenceOperation::ActiveFinish,
+                        RecoveryAction::FinishAndExit,
+                        Err(error),
+                    );
+                    return None;
+                }
+            };
+        let previous_tracker = self.time_tracker.clone();
+        let previous_session = self.session.clone();
+        let previous_category_id = self.time_tracker.active_category_id();
+        let previous_description = self
+            .time_tracker
+            .category_description_by_id(previous_category_id)
+            .unwrap_or_default()
+            .to_string();
+        let Some(previous_started_at_utc) = self.session.active_session_started_at_utc else {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::ActiveFinish,
+                RecoveryAction::FinishAndExit,
+                Err("legacy runtime has no active UTC start timestamp to finish".to_string()),
+            );
+            return None;
+        };
+        let mut prepared_checkpoint = match self.build_runtime_checkpoint() {
+            Ok(checkpoint) => checkpoint,
+            Err(error) => {
+                self.record_storage_result_for::<()>(
+                    PersistenceOperation::CheckpointSave,
+                    RecoveryAction::FinishAndExit,
+                    Err(error),
+                );
+                return None;
+            }
+        };
+        let previous_session_count = self.time_tracker.sessions.len();
+        let ended_civil = civil_time_for_utc(interval.ended_at_utc);
+        let result = self
+            .time_tracker
+            .end_session_with_elapsed_at_local(interval.elapsed_seconds, ended_civil);
+        self.session.active_session_started_at_utc = None;
+        let completed_session = self
+            .time_tracker
+            .sessions
+            .get(previous_session_count)
+            .map(LegacySessionReceipt::from_session);
+        let expected_identity = format!(
+            "legacy:{}:{}",
+            previous_category_id.0,
+            previous_started_at_utc.to_rfc3339_opts(SecondsFormat::Nanos, true)
+        );
+        let receipt = LegacyFinishReceipt {
+            version: LegacyFinishReceipt::VERSION,
+            operation_id: transition_operation_id(
+                "legacy-finish",
+                &expected_identity,
+                interval.ended_at_utc,
+                "complete",
+            ),
+            expected_previous_category_id: previous_category_id.0,
+            expected_previous_description: previous_description,
+            expected_previous_started_at_utc: previous_started_at_utc,
+            finished_at_utc: interval.ended_at_utc,
+            completed_session,
+        };
+        prepared_checkpoint.legacy_finish = Some(receipt);
+        if let Err(error) =
+            storage::write_json_atomic(&storage::get_detached_runtime_path(), &prepared_checkpoint)
+        {
+            self.time_tracker = previous_tracker;
+            self.session = previous_session;
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::CheckpointSave,
+                RecoveryAction::FinishAndExit,
+                Err(error),
+            );
+            return None;
+        }
+        result
+    }
+
     fn end_active_session_at(
         &mut self,
         observed_end_utc: DateTime<Utc>,
@@ -1853,6 +2027,7 @@ impl App {
             recovery_target_utc: None,
             legacy_recovery_committed: false,
             legacy_transition: None,
+            legacy_finish: None,
         })
     }
 
@@ -1920,16 +2095,46 @@ impl App {
     fn reconcile_legacy_transition_receipt(
         &mut self,
         checkpoint: &mut DetachedRuntimeCheckpoint,
-    ) -> Result<(), String> {
-        let Some(receipt) = checkpoint.legacy_transition.clone() else {
-            return Ok(());
-        };
-        if self.sqlite_database_path.is_some() {
+    ) -> Result<bool, String> {
+        if self.sqlite_database_path.is_some()
+            && (checkpoint.legacy_transition.is_some() || checkpoint.legacy_finish.is_some())
+        {
             return Err(
                 "legacy transition receipt appeared under SQLite authority; evidence retained"
                     .to_string(),
             );
         }
+        if let Some(receipt) = checkpoint.legacy_finish.clone() {
+            validate_legacy_finish_checkpoint(checkpoint, &receipt)?;
+            let staged_tracker = publish_legacy_finish_replay(
+                &self.time_tracker,
+                &self.archived_categories,
+                checkpoint,
+                &receipt,
+                &storage::get_time_log_path(),
+                &storage::get_categories_path(),
+                &storage::get_sand_state_path(),
+            )?;
+            self.time_tracker = staged_tracker;
+            let valid_category_ids = self
+                .time_tracker
+                .categories_for_storage()
+                .into_iter()
+                .chain(self.archived_categories.iter().cloned())
+                .map(|category| category.id)
+                .collect::<HashSet<_>>();
+            self.sand_engine
+                .restore_state(&checkpoint.sand_state, &valid_category_ids);
+            self.reconcile_all_daily_contributions();
+            if let Some(recovery) = self.persistence_recovery.as_ref() {
+                return Err(recovery.failure.summary());
+            }
+            storage::delete_file_if_exists(&storage::get_detached_runtime_path())?;
+            return Ok(true);
+        }
+        let Some(receipt) = checkpoint.legacy_transition.clone() else {
+            return Ok(false);
+        };
         validate_legacy_switch_checkpoint(checkpoint, &receipt)?;
         let staged_tracker = publish_legacy_switch_replay(
             &self.time_tracker,
@@ -1941,7 +2146,7 @@ impl App {
             &storage::get_detached_runtime_path(),
         )?;
         self.time_tracker = staged_tracker;
-        Ok(())
+        Ok(false)
     }
 
     fn restore_from_detached_checkpoint(&mut self) -> bool {
@@ -1983,15 +2188,19 @@ impl App {
                 }
             };
 
-        if self.sqlite_database_path.is_none()
-            && let Err(error) = self.reconcile_legacy_transition_receipt(&mut checkpoint)
-        {
-            self.record_storage_result_for::<()>(
-                PersistenceOperation::CheckpointRecovery,
-                RecoveryAction::ReloadAuthority,
-                Err(error),
-            );
-            return false;
+        if self.sqlite_database_path.is_none() {
+            match self.reconcile_legacy_transition_receipt(&mut checkpoint) {
+                Ok(true) => return false,
+                Ok(false) => {}
+                Err(error) => {
+                    self.record_storage_result_for::<()>(
+                        PersistenceOperation::CheckpointRecovery,
+                        RecoveryAction::ReloadAuthority,
+                        Err(error),
+                    );
+                    return false;
+                }
+            }
         }
 
         self.checkpoint_recovery_active = true;
@@ -2331,9 +2540,12 @@ fn run_application_loop(
                 continue 'runtime;
             }
         } else {
-            app.end_active_session_now();
+            app.prepare_active_finish_for_exit();
             if !app.has_persistence_recovery() {
                 app.persist_sessions();
+            }
+            if !app.has_persistence_recovery() {
+                app.persist_categories();
             }
             if !app.has_persistence_recovery() {
                 app.persist_sand_state();
@@ -2412,6 +2624,7 @@ mod bounded_checkpoint_tests {
             recovery_target_utc: None,
             legacy_recovery_committed: false,
             legacy_transition: None,
+            legacy_finish: None,
         }
     }
 
@@ -2602,6 +2815,7 @@ mod legacy_switch_replay_tests {
             recovery_target_utc: None,
             legacy_recovery_committed: false,
             legacy_transition: Some(receipt),
+            legacy_finish: None,
         }
     }
 
@@ -2732,6 +2946,258 @@ mod legacy_switch_replay_tests {
         let loaded_sessions =
             storage::try_load_sessions_from_csv(&sessions_path, &categories(true)).unwrap();
         assert_eq!(loaded_sessions.sessions.len(), 1);
+        fs::remove_dir_all(dir).ok();
+    }
+}
+
+#[cfg(test)]
+mod legacy_finish_replay_tests {
+    use std::{fs, path::PathBuf, time::SystemTime};
+
+    use chrono::{TimeZone, Utc};
+    use ratatui::style::Color;
+
+    use super::{
+        DetachedRuntimeCheckpoint, publish_legacy_finish_replay, transition_operation_id,
+        validate_legacy_finish_checkpoint,
+    };
+    use crate::{
+        domain::{
+            Category, CategoryId, DRIFT_CATEGORY_ID, OperationalDayPolicy, Session, TimeTracker,
+        },
+        legacy_transition::{LegacyFinishReceipt, LegacySessionReceipt},
+        sand::SandState,
+        storage,
+    };
+
+    fn unique_dir(label: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        std::env::temp_dir().join(format!("strata-{label}-{}-{stamp}", std::process::id()))
+    }
+
+    fn category(id: u64, name: &str, description: &str) -> Category {
+        Category {
+            id: CategoryId::new(id),
+            name: name.to_string(),
+            color: if id == DRIFT_CATEGORY_ID.0 {
+                Color::White
+            } else {
+                crate::constants::COLORS[((id - 1) as usize) % crate::constants::COLORS.len()]
+            },
+            description: description.to_string(),
+            karma_effect: if id == DRIFT_CATEGORY_ID.0 { 0 } else { 1 },
+        }
+    }
+
+    fn categories(before_finish: bool) -> Vec<Category> {
+        vec![
+            category(DRIFT_CATEGORY_ID.0, "idle", ""),
+            category(1, "Work", if before_finish { "focus" } else { "" }),
+        ]
+    }
+
+    fn completed_session() -> Session {
+        Session {
+            id: 1,
+            date: "2026-08-02".to_string(),
+            category_id: CategoryId::new(1),
+            project: String::new(),
+            description: "focus".to_string(),
+            start_time: "10:00:00".to_string(),
+            end_time: "11:00:00".to_string(),
+            elapsed_seconds: 3600,
+            started_at_utc: Some(Utc.with_ymd_and_hms(2026, 8, 2, 16, 0, 0).unwrap()),
+            ended_at_utc: Some(Utc.with_ymd_and_hms(2026, 8, 2, 17, 0, 0).unwrap()),
+            operational_day_policy: Some(OperationalDayPolicy {
+                utc_offset_seconds: -21600,
+                start_minutes: 360,
+            }),
+        }
+    }
+
+    fn receipt() -> LegacyFinishReceipt {
+        let previous_start = Utc.with_ymd_and_hms(2026, 8, 2, 16, 0, 0).unwrap();
+        let finished = Utc.with_ymd_and_hms(2026, 8, 2, 17, 0, 0).unwrap();
+        let expected_identity = format!(
+            "legacy:1:{}",
+            previous_start.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
+        );
+        LegacyFinishReceipt {
+            version: LegacyFinishReceipt::VERSION,
+            operation_id: transition_operation_id(
+                "legacy-finish",
+                &expected_identity,
+                finished,
+                "complete",
+            ),
+            expected_previous_category_id: 1,
+            expected_previous_description: "focus".to_string(),
+            expected_previous_started_at_utc: previous_start,
+            finished_at_utc: finished,
+            completed_session: Some(LegacySessionReceipt::from_session(&completed_session())),
+        }
+    }
+
+    fn sand_state() -> SandState {
+        SandState {
+            version: SandState::VERSION,
+            grid_width: 2,
+            grid_height: 4,
+            grains: Vec::new(),
+            frame_count: 17,
+            sweep_left_to_right: true,
+            rng_state: 19,
+            pending_grains: Vec::new(),
+            pending_runs: Vec::new(),
+        }
+    }
+
+    fn checkpoint(receipt: LegacyFinishReceipt) -> DetachedRuntimeCheckpoint {
+        let finished = receipt.finished_at_utc;
+        DetachedRuntimeCheckpoint {
+            schema_version: DetachedRuntimeCheckpoint::VERSION,
+            detached_at_utc: finished,
+            simulation_time_utc: finished,
+            spawn_accumulator_nanos: 0,
+            physics_accumulator_nanos: 0,
+            active_category_id: 1,
+            active_description: "focus".to_string(),
+            active_session_started_at_utc: Some(receipt.expected_previous_started_at_utc),
+            sand_state: sand_state(),
+            pending_mutations: Vec::new(),
+            recovery_target_utc: None,
+            legacy_recovery_committed: false,
+            legacy_transition: None,
+            legacy_finish: Some(receipt),
+        }
+    }
+
+    fn load_tracker(
+        categories_path: &std::path::Path,
+        sessions_path: &std::path::Path,
+    ) -> TimeTracker {
+        let loaded_categories = storage::try_load_categories_from_csv(categories_path).unwrap();
+        let mut catalog = loaded_categories.categories.clone();
+        catalog.extend(loaded_categories.archived_categories.iter().cloned());
+        let loaded_sessions = storage::try_load_sessions_from_csv(sessions_path, &catalog).unwrap();
+        let mut tracker = TimeTracker::new();
+        tracker.apply_loaded_state(
+            loaded_categories.categories,
+            loaded_categories.next_category_id,
+            loaded_sessions.sessions,
+            loaded_sessions.next_session_id,
+        );
+        tracker
+    }
+
+    fn assert_converged(
+        categories_path: &std::path::Path,
+        sessions_path: &std::path::Path,
+        sand_path: &std::path::Path,
+    ) {
+        let loaded_categories = storage::try_load_categories_from_csv(categories_path).unwrap();
+        let work = loaded_categories
+            .categories
+            .iter()
+            .find(|category| category.id == CategoryId::new(1))
+            .unwrap();
+        assert_eq!(work.description, "");
+        let mut catalog = loaded_categories.categories.clone();
+        catalog.extend(loaded_categories.archived_categories.iter().cloned());
+        let loaded_sessions = storage::try_load_sessions_from_csv(sessions_path, &catalog).unwrap();
+        assert_eq!(loaded_sessions.sessions.len(), 1);
+        assert_eq!(loaded_sessions.sessions[0].id, 1);
+        assert_eq!(loaded_sessions.sessions[0].elapsed_seconds, 3600);
+        let persisted_sand = storage::load_sand_state(sand_path).unwrap();
+        assert_eq!(persisted_sand.frame_count, 17);
+        assert_eq!(persisted_sand.rng_state, 19);
+    }
+
+    #[test]
+    fn every_persisted_finish_kill_point_converges_without_duplicate_time() {
+        for phase in 0..4 {
+            let dir = unique_dir(&format!("legacy-finish-phase-{phase}"));
+            fs::create_dir_all(&dir).unwrap();
+            let categories_path = dir.join("categories.csv");
+            let sessions_path = dir.join("time_log.csv");
+            let sand_path = dir.join("sand_state.json");
+            let checkpoint_path = dir.join("detached_runtime.json");
+            let receipt = receipt();
+            let checkpoint = checkpoint(receipt.clone());
+
+            let seeded_categories = categories(phase < 2);
+            storage::save_category_catalog_to_csv(&categories_path, &seeded_categories, &[])
+                .unwrap();
+            if phase >= 1 {
+                storage::save_sessions_to_csv(
+                    &sessions_path,
+                    &[completed_session()],
+                    &seeded_categories,
+                )
+                .unwrap();
+            }
+            if phase >= 3 {
+                storage::save_sand_state(&sand_path, &sand_state()).unwrap();
+            }
+            storage::write_json_atomic(&checkpoint_path, &checkpoint).unwrap();
+
+            let tracker = load_tracker(&categories_path, &sessions_path);
+            validate_legacy_finish_checkpoint(&checkpoint, &receipt).unwrap();
+            let replayed = publish_legacy_finish_replay(
+                &tracker,
+                &[],
+                &checkpoint,
+                &receipt,
+                &sessions_path,
+                &categories_path,
+                &sand_path,
+            )
+            .unwrap();
+            assert_eq!(replayed.sessions.len(), 1);
+            assert_converged(&categories_path, &sessions_path, &sand_path);
+            let retained: DetachedRuntimeCheckpoint = storage::read_json(&checkpoint_path).unwrap();
+            assert!(retained.legacy_finish.is_some());
+            fs::remove_dir_all(dir).ok();
+        }
+    }
+
+    #[test]
+    fn failed_finish_catalog_publication_retains_receipt_after_session_converges() {
+        let dir = unique_dir("legacy-finish-catalog-failure");
+        fs::create_dir_all(&dir).unwrap();
+        let categories_path = dir.join("categories-as-directory");
+        let sessions_path = dir.join("time_log.csv");
+        let sand_path = dir.join("sand_state.json");
+        let checkpoint_path = dir.join("detached_runtime.json");
+        fs::create_dir_all(&categories_path).unwrap();
+        let receipt = receipt();
+        let checkpoint = checkpoint(receipt.clone());
+        storage::write_json_atomic(&checkpoint_path, &checkpoint).unwrap();
+        let mut tracker = TimeTracker::new();
+        tracker.apply_loaded_state(categories(true), 2, Vec::new(), 1);
+
+        let error = match publish_legacy_finish_replay(
+            &tracker,
+            &[],
+            &checkpoint,
+            &receipt,
+            &sessions_path,
+            &categories_path,
+            &sand_path,
+        ) {
+            Ok(_) => panic!("catalog publication unexpectedly succeeded"),
+            Err(error) => error,
+        };
+        assert!(!error.is_empty());
+        let retained: DetachedRuntimeCheckpoint = storage::read_json(&checkpoint_path).unwrap();
+        assert!(retained.legacy_finish.is_some());
+        let loaded_sessions =
+            storage::try_load_sessions_from_csv(&sessions_path, &categories(true)).unwrap();
+        assert_eq!(loaded_sessions.sessions.len(), 1);
+        assert!(!sand_path.exists());
         fs::remove_dir_all(dir).ok();
     }
 }

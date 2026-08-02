@@ -1,7 +1,7 @@
 # Recovery authority
 
 Status: partially implemented and certified
-Current completed unit: RECONCILIATION-001B2A
+Current completed unit: RECONCILIATION-001B2B
 Issue in progress: #10
 Last reviewed: 2026-08-02
 
@@ -97,6 +97,25 @@ Legacy session parsing rejects reserved ID `0`, malformed or duplicate IDs, malf
 
 Kill-point tests certify convergence from receipt-only, receipt-plus-session, and receipt-plus-session-plus-catalog states. A catalog failure after session publication leaves the receipt durable for retry.
 
+## Legacy finish transition receipts
+
+Normal legacy finish is also a prepared multi-file transition.
+
+Before mutating the active session, Strata publishes the prior-generation checkpoint with a deterministic finish receipt binding:
+
+- prior category, description, and UTC start;
+- canonical finish UTC;
+- optional completed session identity and full temporal payload;
+- the absence of a resulting active generation.
+
+If prepared receipt publication fails, the active session remains unchanged. Once durable, finish proceeds through completed history, cleared category-description state, canonical sediment, and every affected daily contribution. The checkpoint is removed only after all of those authorities converge.
+
+Startup recognizes a finish receipt before ordinary active recovery. It validates the prior checkpoint generation and whole-second boundaries, publishes missing effects idempotently, exact-matches an existing completed row, rejects conflict, reconciles every affected operational day, and deletes the receipt. A receipt-marked finished generation is never resumed as active.
+
+Kill-point tests certify receipt-only, receipt-plus-session, receipt-plus-session-plus-catalog, and receipt-plus-session-plus-catalog-plus-sand states. A later publication failure retains the receipt. Retry also reconciles all affected days before receipt deletion, including multi-day sessions.
+
+Normal legacy finish now persists the cleared active description. Legacy recovery flush and reload preserve active and archived category catalogs, archived session references, and archived sediment identities. Emergency recovery JSON schema 2 includes every category with an explicit `archived` flag.
+
 ## Bounded sediment recovery
 
 The bounded sediment rules in `docs/SEDIMENT_AUTHORITY.md` remain authoritative:
@@ -121,14 +140,14 @@ Mandatory Ctrl-C during visible persistence recovery exports current recovery ev
 
 ## Remaining legacy transitions
 
-Legacy reset and finish do not yet have the switch receipt contract. Immediate checkpoint refresh reduces stale exposure but does not certify every kill point for those operations.
+Legacy switch and normal finish now have certified receipt protocols. Clear-all/reset remains outside that boundary because it also mutates idle-session history and sediment state.
 
-Until B2B completes them:
+Until a dedicated reset unit completes it:
 
 - issue #10 remains open;
-- reset/finish multi-file atomicity is not claimed;
-- recovery must retain evidence and fail visibly rather than inventing a completed transition;
-- switch certification cannot be generalized to other transition kinds.
+- reset multi-file atomicity is not claimed;
+- recovery must retain evidence and fail visibly rather than inventing cleared history;
+- switch or finish certification cannot be generalized to reset.
 
 ## Initial active start
 
@@ -151,11 +170,11 @@ This presentation and policy remain unresolved. Recovery authority must not impl
 
 ## Certification
 
-RECONCILIATION-001B1 and RECONCILIATION-001B2A pass:
+RECONCILIATION-001B1, RECONCILIATION-001B2A, and RECONCILIATION-001B2B pass:
 
 - formatting;
 - strict Clippy with all targets/features and warnings denied;
-- 199 library tests;
+- 205 library tests;
 - 9 CLI lifecycle tests;
 - 6 configuration-authority tests;
 - 1 report-help regression test;
@@ -163,13 +182,13 @@ RECONCILIATION-001B1 and RECONCILIATION-001B2A pass:
 - 2 temporal-authority tests;
 - 3 terminal-lifecycle PTY process tests.
 
-Focused proofs cover transactional SQLite checkpoint retirement, protected recovery evidence, startup identity quarantine, immediate semantic-edge refresh, prepared legacy switch rollback, exact/idempotent session reconciliation, strict receipt payload validation, subsecond whole-second boundaries, all persisted switch kill points, and receipt retention after catalog-publication failure.
+Focused proofs cover transactional SQLite checkpoint retirement, protected recovery evidence, startup identity quarantine, immediate semantic-edge refresh, prepared legacy switch rollback, exact/idempotent session reconciliation, strict receipt payload validation, subsecond whole-second boundaries, all persisted switch and finish kill points, receipt retention after publication failure, multi-day finish reconciliation, archived-authority reload, and schema-2 emergency export custody.
 
 ## Unresolved boundary
 
 Full crash-recovery authority still requires:
 
-- stable legacy reset and finish receipts with kill-point replay certification;
+- a stable legacy clear-all/reset receipt with kill-point replay certification;
 - initial active-start/checkpoint coherence;
 - exact sediment classification at transition boundaries;
 - explicit user-visible recovery cutoff and uncertainty semantics;
