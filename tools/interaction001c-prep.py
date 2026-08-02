@@ -78,13 +78,47 @@ text = text[:atlas_start] + text[atlas_end:]
 
 keymap_replace_start = text.index('replace_between(\n    "src/keybindings.rs"')
 keymap_replace_end = text.index("\n)\n\n# Configuration fields", keymap_replace_start) + 3
+normalization = '''text = path.read_text()
+keymap_config = text.index("#[derive(Debug, Clone, Serialize, Deserialize)]\\nstruct KeymapConfig")
+impl_start = text.index("impl Keymap {")
+depth = 0
+impl_close = None
+for offset, character in enumerate(text[impl_start:keymap_config]):
+    if character == "{":
+        depth += 1
+    elif character == "}":
+        depth -= 1
+        if depth == 0:
+            impl_close = impl_start + offset + 1
+            break
+if impl_close is None:
+    raise SystemExit("generated Keymap implementation is not balanced")
+trailing = text[impl_close:keymap_config]
+if trailing.strip(" \\n\\t}"):
+    raise SystemExit("unexpected generated content after Keymap implementation")
+text = text[:impl_close] + "\\n\\n" + text[keymap_config:]
+'''
 text = (
     text[:keymap_replace_start]
     + "path.write_text(text)\n"
     + text[keymap_replace_start:keymap_replace_end]
-    + "text = path.read_text()\n"
+    + normalization
     + text[keymap_replace_end:]
 )
+
+old_cleanup = '''    ".github/workflows/interaction001c-apply.yml",
+    "tools/interaction001c-apply.py",
+    "tools/interaction001c.trigger",
+'''
+new_cleanup = '''    ".github/workflows/interaction001c-apply.yml",
+    "tools/interaction001c-apply.py",
+    "tools/interaction001c-prep.py",
+    "tools/interaction001c.trigger",
+    "tools/interaction001c.rerun4",
+'''
+if old_cleanup not in text:
+    raise SystemExit("temporary cleanup list was not found")
+text = text.replace(old_cleanup, new_cleanup, 1)
 
 path.write_text(text)
 Path(__file__).unlink(missing_ok=True)
