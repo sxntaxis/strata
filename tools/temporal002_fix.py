@@ -91,13 +91,6 @@ new = """    fn time_log_path(&self) -> PathBuf {
 if old not in text:
     raise SystemExit("lifecycle helper anchor not found")
 text = text.replace(old, new, 1)
-for anchor in [
-    "    assert_exists(&profile.active_session_path());\n\n    let stop = profile.run(&[\"stop\"]);",
-    "    assert!(start.status.success(), \"start failed: {}\", stderr(&start));\n\n    let first_stop = profile.run(&[\"stop\"]);",
-    "    assert!(start.status.success(), \"start failed: {}\", stderr(&start));\n\n    fs::write(profile.time_log_path(), EMPTY_TIME_LOG).expect(\"time log should be initialized\");",
-]:
-    if anchor not in text:
-        raise SystemExit(f"lifecycle test anchor not found: {anchor[:40]}")
 replacements = {
     "    assert_exists(&profile.active_session_path());\n\n    let stop = profile.run(&[\"stop\"]);":
         "    assert_exists(&profile.active_session_path());\n    profile.backdate_active_session(2);\n\n    let stop = profile.run(&[\"stop\"]);",
@@ -107,5 +100,88 @@ replacements = {
         "    assert!(start.status.success(), \"start failed: {}\", stderr(&start));\n    profile.backdate_active_session(2);\n\n    fs::write(profile.time_log_path(), EMPTY_TIME_LOG).expect(\"time log should be initialized\");",
 }
 for old, new in replacements.items():
+    if old not in text:
+        raise SystemExit(f"lifecycle test anchor not found: {old[:40]}")
     text = text.replace(old, new, 1)
 lifecycle.write_text(text)
+
+sqlite_process = Path("tests/sqlite_cli_authority.rs")
+text = sqlite_process.read_text()
+text = text.replace(
+    "use std::{\n",
+    "use chrono::{Duration as ChronoDuration, SecondsFormat, Utc};\nuse std::{\n",
+    1,
+)
+text = text.replace(
+    "    time::{SystemTime, UNIX_EPOCH},",
+    "    thread,\n    time::{Duration, SystemTime, UNIX_EPOCH},",
+    1,
+)
+old = """        child
+            .stdin
+            .take()
+            .expect("TUI stdin should exist")
+            .write_all(input)
+            .expect("TUI input should be written");
+        child.wait_with_output().expect("TUI process should finish")
+"""
+new = """        let mut stdin = child.stdin.take().expect("TUI stdin should exist");
+        for byte in input {
+            thread::sleep(Duration::from_millis(1_100));
+            stdin
+                .write_all(std::slice::from_ref(byte))
+                .expect("TUI input should be written");
+            stdin.flush().expect("TUI input should flush");
+        }
+        drop(stdin);
+        child.wait_with_output().expect("TUI process should finish")
+"""
+if old not in text:
+    raise SystemExit("timed TUI input anchor not found")
+text = text.replace(old, new, 1)
+old = """    fn legacy_time_log_path(&self) -> PathBuf {
+        self.data_home.join("strata/time_log.csv")
+    }
+
+    fn migrate(&self) {
+"""
+new = """    fn legacy_time_log_path(&self) -> PathBuf {
+        self.data_home.join("strata/time_log.csv")
+    }
+
+    fn backdate_sqlite_active_session(&self, seconds: i64) {
+        let connection = Connection::open(self.database_path()).expect("database should open");
+        let started_at = (Utc::now() - ChronoDuration::seconds(seconds))
+            .to_rfc3339_opts(SecondsFormat::Nanos, true);
+        let changed = connection
+            .execute(
+                "UPDATE active_session SET started_at_utc = ?1 WHERE singleton = 1",
+                [started_at],
+            )
+            .expect("active session should be backdated");
+        assert_eq!(changed, 1, "one active SQLite session should be backdated");
+    }
+
+    fn migrate(&self) {
+"""
+if old not in text:
+    raise SystemExit("SQLite process helper anchor not found")
+text = text.replace(old, new, 1)
+anchors = [
+    "    assert!(start.status.success(), \"start failed: {}\", stderr(&start));\n    assert!(!profile.legacy_active_path().exists());",
+    "    assert!(start.status.success(), \"start failed: {}\", stderr(&start));\n    let first_stop = profile.run(&[\"stop\"]);",
+]
+for anchor in anchors:
+    if anchor not in text:
+        raise SystemExit(f"SQLite process test anchor not found: {anchor[:50]}")
+text = text.replace(
+    anchors[0],
+    "    assert!(start.status.success(), \"start failed: {}\", stderr(&start));\n    profile.backdate_sqlite_active_session(2);\n    assert!(!profile.legacy_active_path().exists());",
+    1,
+)
+text = text.replace(
+    anchors[1],
+    "    assert!(start.status.success(), \"start failed: {}\", stderr(&start));\n    profile.backdate_sqlite_active_session(2);\n    let first_stop = profile.run(&[\"stop\"]);",
+    1,
+)
+sqlite_process.write_text(text)
