@@ -72,5 +72,9 @@ if old_today_replace not in text:
     raise SystemExit("main today replacement block was not found")
 text = text.replace(old_today_replace, new_today_replace, 1)
 
+atlas_start = text.index("# Atlas tests: defaults now report aliases separately")
+atlas_end = text.index("path.write_text(text)", atlas_start)
+text = text[:atlas_start] + text[atlas_end:]
+
 path.write_text(text)
 Path(__file__).unlink(missing_ok=True)
