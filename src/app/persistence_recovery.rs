@@ -336,13 +336,18 @@ impl App {
                 sqlite::delete_tui_daily_snapshot(&database_path, &operational_day)?;
             }
         } else {
-            storage::save_categories_to_csv(&storage::get_categories_path(), &categories)
-                .map_err(|error| error.to_string())?;
+            storage::save_category_catalog_to_csv(
+                &storage::get_categories_path(),
+                &categories,
+                &self.archived_categories,
+            )?;
             storage::save_category_tags(&storage::get_category_tags_path(), &self.category_tags)?;
+            let mut session_categories = categories.clone();
+            session_categories.extend(self.archived_categories.iter().cloned());
             storage::save_sessions_to_csv(
                 &storage::get_time_log_path(),
                 &self.time_tracker.sessions,
-                &categories,
+                &session_categories,
             )
             .map_err(|error| error.to_string())?;
             storage::save_sand_state(
@@ -456,8 +461,13 @@ impl App {
                 "recovery catch-up is not durably committed; checkpoint retained".to_string(),
             );
         }
-        if self.session.active_session_stable_id.is_some() {
-            self.end_active_session_now();
+        let has_active = if self.sqlite_database_path.is_some() {
+            self.session.active_session_stable_id.is_some()
+        } else {
+            self.session.active_session_started_at_utc.is_some()
+        };
+        if has_active {
+            self.prepare_active_finish_for_exit();
             if let Some(recovery) = self.persistence_recovery.as_ref() {
                 return Err(recovery.failure.summary());
             }

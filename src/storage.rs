@@ -528,10 +528,6 @@ pub fn try_load_sessions_from_csv(
     Ok(loaded)
 }
 
-pub fn save_categories_to_csv(path: &Path, categories: &[Category]) -> Result<(), String> {
-    save_category_catalog_to_csv(path, categories, &[])
-}
-
 pub fn save_category_catalog_to_csv(
     path: &Path,
     active_categories: &[Category],
@@ -913,7 +909,7 @@ mod tests {
             },
         ];
 
-        save_categories_to_csv(&path, &categories).unwrap();
+        save_category_catalog_to_csv(&path, &categories, &[]).unwrap();
         let loaded = load_categories_from_csv(&path);
 
         assert_eq!(loaded.categories.len(), 2);

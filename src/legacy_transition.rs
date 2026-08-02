@@ -80,7 +80,7 @@ impl LegacySessionReceipt {
         }
     }
 
-    fn validate_payload(&self) -> Result<(), String> {
+    pub(crate) fn validate_payload(&self) -> Result<(), String> {
         if self.id == 0 {
             return Err("legacy transition session ID 0 is reserved".to_string());
         }
@@ -316,6 +316,105 @@ impl LegacyTransitionReceipt {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct LegacyFinishReceipt {
+    pub version: u8,
+    pub operation_id: String,
+    pub expected_previous_category_id: u64,
+    pub expected_previous_description: String,
+    pub expected_previous_started_at_utc: DateTime<Utc>,
+    pub finished_at_utc: DateTime<Utc>,
+    pub completed_session: Option<LegacySessionReceipt>,
+}
+
+impl LegacyFinishReceipt {
+    pub(crate) const VERSION: u8 = 1;
+
+    pub(crate) fn validate_boundaries(&self) -> Result<(), String> {
+        if self.version != Self::VERSION {
+            return Err(format!(
+                "unsupported legacy finish receipt version {}",
+                self.version
+            ));
+        }
+        if self.finished_at_utc < self.expected_previous_started_at_utc {
+            return Err(format!(
+                "legacy finish receipt {} ends before its active start",
+                self.operation_id
+            ));
+        }
+        let whole_elapsed = usize::try_from(
+            (self.finished_at_utc - self.expected_previous_started_at_utc).num_seconds(),
+        )
+        .map_err(|_| {
+            format!(
+                "legacy finish receipt {} duration exceeds this platform's range",
+                self.operation_id
+            )
+        })?;
+        match (whole_elapsed, self.completed_session.as_ref()) {
+            (0, None) => Ok(()),
+            (0, Some(_)) => Err(format!(
+                "legacy finish receipt {} stores a completed row for a zero-whole-second finish",
+                self.operation_id
+            )),
+            (_, None) => Err(format!(
+                "legacy finish receipt {} omits {} completed whole seconds",
+                self.operation_id, whole_elapsed
+            )),
+            (expected_elapsed, Some(completed)) => {
+                completed.validate_payload()?;
+                if completed.category_id != self.expected_previous_category_id {
+                    return Err(format!(
+                        "legacy finish receipt {} completed the wrong category",
+                        self.operation_id
+                    ));
+                }
+                if completed.description != self.expected_previous_description {
+                    return Err(format!(
+                        "legacy finish receipt {} completed the wrong description",
+                        self.operation_id
+                    ));
+                }
+                if completed.elapsed_seconds != expected_elapsed {
+                    return Err(format!(
+                        "legacy finish receipt {} completed {} seconds but its active boundary owns {}",
+                        self.operation_id, completed.elapsed_seconds, expected_elapsed
+                    ));
+                }
+                if completed.ended_at_utc != Some(self.finished_at_utc) {
+                    return Err(format!(
+                        "legacy finish receipt {} has inconsistent completion time",
+                        self.operation_id
+                    ));
+                }
+                let elapsed = i64::try_from(expected_elapsed).map_err(|_| {
+                    format!(
+                        "legacy finish receipt {} duration exceeds chrono range",
+                        self.operation_id
+                    )
+                })?;
+                let expected_completed_start = self
+                    .finished_at_utc
+                    .checked_sub_signed(ChronoDuration::seconds(elapsed))
+                    .ok_or_else(|| {
+                        format!(
+                            "legacy finish receipt {} completed start exceeds chrono range",
+                            self.operation_id
+                        )
+                    })?;
+                if completed.started_at_utc != Some(expected_completed_start) {
+                    return Err(format!(
+                        "legacy finish receipt {} completed start does not preserve its whole-second interval",
+                        self.operation_id
+                    ));
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 pub(crate) fn reconcile_completed_session(
     sessions: &mut Vec<Session>,
     next_session_id: &mut usize,
@@ -457,6 +556,50 @@ mod tests {
                 .validate_switch_boundaries()
                 .unwrap_err()
                 .contains("zero-whole-second transition")
+        );
+    }
+
+    fn finish_receipt(completed_session: Option<LegacySessionReceipt>) -> LegacyFinishReceipt {
+        LegacyFinishReceipt {
+            version: LegacyFinishReceipt::VERSION,
+            operation_id: "legacy-finish:test".to_string(),
+            expected_previous_category_id: 4,
+            expected_previous_description: "work".to_string(),
+            expected_previous_started_at_utc: Utc.with_ymd_and_hms(2026, 8, 2, 16, 0, 0).unwrap(),
+            finished_at_utc: Utc.with_ymd_and_hms(2026, 8, 2, 17, 0, 0).unwrap(),
+            completed_session,
+        }
+    }
+
+    #[test]
+    fn finish_receipt_validates_completed_and_zero_second_boundaries() {
+        let completed = LegacySessionReceipt::from_session(&session(7, "work"));
+        finish_receipt(Some(completed))
+            .validate_boundaries()
+            .unwrap();
+
+        let start = Utc.with_ymd_and_hms(2026, 8, 2, 16, 0, 0).unwrap();
+        let mut zero = finish_receipt(None);
+        zero.expected_previous_started_at_utc = start;
+        zero.finished_at_utc = start + ChronoDuration::milliseconds(900);
+        zero.validate_boundaries().unwrap();
+    }
+
+    #[test]
+    fn finish_receipt_rejects_missing_or_wrong_completion() {
+        assert!(
+            finish_receipt(None)
+                .validate_boundaries()
+                .unwrap_err()
+                .contains("omits 3600 completed whole seconds")
+        );
+        let mut wrong = session(7, "other");
+        wrong.description = "other".to_string();
+        assert!(
+            finish_receipt(Some(LegacySessionReceipt::from_session(&wrong)))
+                .validate_boundaries()
+                .unwrap_err()
+                .contains("wrong description")
         );
     }
 
