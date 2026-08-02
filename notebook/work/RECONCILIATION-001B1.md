@@ -1,8 +1,8 @@
 ---
 id: RECONCILIATION-001B1
 kind: work
-state: active
-authority: working
+state: completed
+authority: accepted
 created: 2026-08-02
 updated: 2026-08-02
 ---
@@ -11,47 +11,100 @@ updated: 2026-08-02
 
 ## Issue
 
-Issue #10 is substantially improved by the SQLite active-session and bounded checkpoint programs, but crash-window reconciliation found remaining contradictions:
+Issue #10 was substantially improved by the SQLite active-session, finish-receipt, bounded checkpoint, persistence-recovery, and terminal-emergency programs. Criterion-by-criterion crash-window reconciliation nevertheless found concrete remaining contradictions:
 
-- a SQLite switch/reset can commit a new active stable ID while leaving a pending checkpoint bound to the previous ID;
-- the next checkpoint save then conflicts, and restart may claim stale evidence against the replacement active row;
-- legacy switches/resets do not refresh the runtime checkpoint immediately, so a crash can replay the pre-transition active session;
-- active description changes can remain newer than the checkpoint used on restart;
-- normal finish can leave stale checkpoint evidence if the process dies after the session transaction but before ordinary cleanup.
+- SQLite switch, reset, or finish could commit a replacement active generation while leaving checkpoint evidence bound to the prior stable ID;
+- the next checkpoint write could then conflict, and restart could attempt to claim stale evidence;
+- legacy switch and reset left a known pre-transition checkpoint as the latest recoverable payload until periodic autosave;
+- active description changes could be newer than the checkpoint used for restart recovery;
+- an early implementation audit forced checkpoint writes after unrelated category metadata changes, creating false recovery risk.
 
-## Selected contract
+## Accepted contract
 
-### Transition boundary
+### Coherent active generation
 
-Every successful active start, switch, reset, description update, and finish must leave active-session authority and checkpoint evidence in one coherent generation.
+A successful active-session switch, reset, or finish must not leave ordinary checkpoint evidence for the replaced active stable identity.
 
-- SQLite switch/reset retires checkpoint evidence for the expected prior stable ID inside the same transaction as the active-row transition.
-- SQLite finish retires checkpoint evidence for the completed stable ID inside the same transaction as the completed-session write and active-row removal.
-- A recovering or quarantined checkpoint cannot be silently retired by an ordinary transition.
-- Checkpoint identity mismatches fail closed before active history changes.
-- After a successful switch/reset/description update, the application immediately publishes a fresh checkpoint for the current active identity before accepting further input.
+SQLite now retires checkpoint evidence inside the same transaction as the active transition:
 
-### Legacy boundary
+- no checkpoint is valid;
+- `pending` or `committed` evidence is replaceable only when it names the expected prior stable ID;
+- `recovering` or `quarantined` evidence blocks the transition;
+- missing or mismatched active identity blocks the transition;
+- the transaction rolls back before completed history or replacement active state changes when checkpoint custody is incompatible.
 
-Legacy-file authority immediately replaces the runtime checkpoint after every successful active switch, reset, or active-description persistence. It must never leave a known stale pre-transition payload as the latest recoverable evidence.
+Idempotent transition receipts remain authoritative: a repeated operation with an existing matching receipt returns before attempting to retire a later checkpoint generation.
 
-This unit eliminates stale replay and checkpoint conflicts. A later B2 unit will certify the remaining unavoidable multi-file crash window with a stable legacy transition receipt and make the recovery cutoff policy explicitly visible.
+### Immediate checkpoint refresh
+
+After a successful active switch or reset, the application publishes a checkpoint for the new active identity immediately rather than waiting for the periodic autosave interval.
+
+After a persisted description edit, the application refreshes the checkpoint only when the edited category is the current active category. Unrelated color, order, karma, archive, restore, or inactive-description changes do not force a checkpoint write and cannot create false persistence recovery.
+
+If the immediate refresh fails after a successful active transition, Strata enters the existing visible persistence-recovery contract before accepting ordinary input. It does not report the transition as fully recoverable.
 
 ### Startup validation
 
-SQLite startup must reject or quarantine checkpoint evidence whose active stable ID does not match the authoritative active row. It may not install the checkpoint identity into memory and discover the conflict only during recovery commit.
+SQLite startup validates claimed checkpoint identity against authoritative active-session state before applying checkpoint payload recovery.
 
-## Acceptance proofs
+- missing active identity is quarantined and fails visibly;
+- mismatched active identity is quarantined and fails visibly;
+- malformed payload remains quarantined;
+- recovery never installs one identity and discovers the contradiction only at commit time.
 
-- switch with a pending checkpoint cannot leave the old stable ID recoverable;
-- reset with a pending checkpoint cannot leave the old stable ID recoverable;
-- finish with a pending checkpoint cannot resurrect a completed active session;
-- recovering/quarantined evidence blocks ordinary transition retirement;
-- checkpoint replacement failure after a successful transition enters visible persistence recovery;
-- legacy switch/reset/description paths refresh evidence immediately;
-- startup rejects mismatched active/checkpoint identity before applying sediment recovery;
-- all prior runtime coordination, checkpoint, sediment, interaction, category, CLI, TUI, and PTY gates remain green.
+SQLite schema and foreign-key integrity already prevent several fabricated mismatched states before the TUI checkpoint loader. Tests therefore exercise the reachable missing-identity corruption through an activated SQLite authority fixture.
 
-## Boundary
+### Legacy boundary
 
-This unit does not yet claim full issue #10 closure. RECONCILIATION-001B2 must add stable legacy transition receipts, certify kill-between-file-publications, and expose the chosen recovery cutoff policy to the user.
+Legacy-file authority immediately replaces the runtime checkpoint after every successful active switch, reset, or active-description persistence. It no longer knowingly leaves a stale pre-transition payload until autosave.
+
+This establishes current-generation coherence but does not make the multi-file transition atomic. A process death between legacy session publication and replacement checkpoint publication still requires a stable transition receipt and deterministic replay policy.
+
+## Bugs found and fixed
+
+1. SQLite switch/reset/finish could leave a stale checkpoint bound to the prior active stable ID.
+2. Recovering, quarantined, identity-less, or mismatched evidence did not participate in the active-transition transaction boundary.
+3. Legacy switch/reset did not refresh checkpoint evidence immediately.
+4. Active-description changes could remain newer than recovery evidence.
+5. Startup checkpoint identity validation occurred too late for malformed payloads.
+6. A broad first implementation refreshed checkpoints after every category persistence, including unrelated metadata, creating unnecessary writes and false-recovery exposure.
+7. The focused startup corruption fixture initially omitted activated SQLite authority metadata and therefore tested startup authority rejection instead of checkpoint quarantine; the fixture was corrected rather than weakening production validation.
+
+## Certified proofs
+
+- switch with a pending checkpoint cannot leave the prior stable ID recoverable;
+- reset with a pending checkpoint cannot leave the prior stable ID recoverable;
+- finish with a pending checkpoint cannot resurrect the completed active session;
+- recovering and mismatched evidence block active transitions without partial session mutation;
+- transition receipts remain idempotent across later checkpoint generations;
+- missing checkpoint identity is quarantined under activated SQLite authority;
+- successful switch/reset refreshes the current active checkpoint immediately;
+- active-description edits refresh recovery evidence while unrelated category metadata does not;
+- formatting passes;
+- strict Clippy with all targets/features and warnings denied passes;
+- 190 library tests pass;
+- 9 CLI lifecycle tests pass;
+- 6 configuration-authority tests pass;
+- 1 report-help regression test passes;
+- 12 SQLite/TUI process tests pass;
+- 2 temporal-authority tests pass;
+- 3 terminal-lifecycle PTY process tests pass.
+
+## Durable authority
+
+- `docs/RECOVERY_AUTHORITY.md` records active/checkpoint generation coherence and the remaining legacy transaction boundary;
+- `docs/ARCHITECTURE.md` assigns checkpoint retirement to runtime coordination transactions and semantic-edge refresh to application orchestration;
+- STRATA-D043 and STRATA-D044 constrain checkpoint generation transitions and startup identity validation;
+- `notebook/work/ISSUE-RECONCILIATION-001.md` records B1 as accepted partial satisfaction of issue #10.
+
+## Remaining boundary
+
+Issue #10 remains open. RECONCILIATION-001B2 must:
+
+- add stable legacy transition receipts for switch, reset, and finish;
+- certify process death between every legacy file publication;
+- replay or reconcile transitions idempotently without duplicate sessions;
+- address the initial active-start/checkpoint publication window;
+- make the recovery cutoff and reconstructed interval explicit and user-visible.
+
+B1 must not be cited as full crash-recovery closure.
