@@ -29,6 +29,7 @@ jobs:
 
       - name: Apply implementation patch
         run: |
+          sha256sum tools/temporal002.patch.b64.*
           cat tools/temporal002.patch.b64.* | base64 --decode | gzip --decompress > /tmp/temporal002.patch
           git apply --check /tmp/temporal002.patch
           git apply /tmp/temporal002.patch
