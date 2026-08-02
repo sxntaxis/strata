@@ -473,6 +473,10 @@ impl App {
             }
         }
         self.try_flush_current_state()?;
+        self.reconcile_all_daily_contributions();
+        if let Some(recovery) = self.persistence_recovery.as_ref() {
+            return Err(recovery.failure.summary());
+        }
         if let Some(database_path) = self.sqlite_database_path.clone() {
             sqlite::clear_tui_checkpoint(&database_path)?;
         } else {
