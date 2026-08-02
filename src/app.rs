@@ -25,7 +25,7 @@ use crate::{
         operational_day_key_for_utc, set_runtime_settings,
     },
     keybindings,
-    sand::{SandEngine, SandState, SandStateGrain},
+    sand::{RecoveryTiming, SandEngine, SandState, SandStateGrain, recover_detached_sediment},
     sqlite, storage, temporal,
 };
 
@@ -124,6 +124,15 @@ struct DetachedRuntimeCheckpoint {
     active_session_started_at_utc: Option<DateTime<Utc>>,
     sand_state: crate::sand::SandState,
     pending_mutations: Vec<QueuedMutationEventRecord>,
+    #[serde(default)]
+    recovery_target_utc: Option<DateTime<Utc>>,
+    #[serde(default)]
+    legacy_recovery_committed: bool,
+}
+
+impl DetachedRuntimeCheckpoint {
+    const VERSION: u8 = 2;
+    const LEGACY_VERSION: u8 = 1;
 }
 
 struct SessionState {
@@ -185,6 +194,7 @@ struct App {
     sqlite_database_path: Option<PathBuf>,
     archived_categories: Vec<Category>,
     checkpoint_recovery_active: bool,
+    checkpoint_recovery_payload: Option<DetachedRuntimeCheckpoint>,
     persistence_recovery: Option<PersistenceRecoveryState>,
     recovery_exit_requested: bool,
     recovery_exit_error: Option<String>,
@@ -320,6 +330,7 @@ impl App {
             sqlite_database_path,
             archived_categories,
             checkpoint_recovery_active: false,
+            checkpoint_recovery_payload: None,
             persistence_recovery: None,
             recovery_exit_requested: false,
             recovery_exit_error: None,
@@ -327,7 +338,7 @@ impl App {
 
         app.persist_category_tags();
 
-        if !app.restore_from_detached_checkpoint() {
+        if !app.restore_from_detached_checkpoint() && !app.has_persistence_recovery() {
             if let Some(active) = sqlite_active_session {
                 if !app
                     .time_tracker
@@ -352,6 +363,9 @@ impl App {
 
         app.sync_drift_idle_state();
         app.commit_checkpoint_recovery_if_ready();
+        if !app.has_persistence_recovery() {
+            app.persist_runtime_checkpoint();
+        }
         if let Some(recovery) = app.persistence_recovery.take() {
             return Err(recovery.failure.summary());
         }
@@ -1306,15 +1320,6 @@ impl App {
     }
 
     fn finalize_catchup_transition(&mut self) {
-        let settled = self.build_catchup_projection_state(&self.sand_engine.snapshot_state());
-        let valid_category_ids = self
-            .time_tracker
-            .categories_for_storage()
-            .into_iter()
-            .map(|category| category.id)
-            .collect::<HashSet<_>>();
-        self.sand_engine
-            .restore_state(&settled, &valid_category_ids);
         self.simulation.catchup_visual_engine = None;
         self.simulation.catchup_progress_anchor = None;
         self.simulation.catchup_visual_last_refresh = Instant::now();
@@ -1401,7 +1406,7 @@ impl App {
             grains: projected_grains,
             frame_count: state.frame_count,
             pending_grains: state.pending_grains.clone(),
-            pending_runs: Vec::new(),
+            pending_runs: state.pending_runs.clone(),
             sweep_left_to_right: state.sweep_left_to_right,
             rng_state: state.rng_state,
         }
@@ -1607,8 +1612,16 @@ impl App {
         Some(ratio.clamp(0.0, 1.0))
     }
 
-    fn persist_detached_checkpoint(&mut self) {
+    fn persist_runtime_checkpoint(&mut self) {
         if self.checkpoint_recovery_active {
+            return;
+        }
+        if !self.simulation.pending_mutations.is_empty() {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::CheckpointSave,
+                RecoveryAction::FlushCurrentState,
+                Err("runtime checkpoint cannot be written while mutations are pending".to_string()),
+            );
             return;
         }
         let active_category_id = self.time_tracker.active_category_id();
@@ -1619,7 +1632,7 @@ impl App {
             .to_string();
 
         let checkpoint = DetachedRuntimeCheckpoint {
-            schema_version: 1,
+            schema_version: DetachedRuntimeCheckpoint::VERSION,
             detached_at_utc: Utc::now(),
             simulation_time_utc: self.simulation.simulation_time_utc,
             spawn_accumulator_nanos: self
@@ -1636,23 +1649,9 @@ impl App {
             active_description,
             active_session_started_at_utc: self.session.active_session_started_at_utc,
             sand_state: self.sand_engine.snapshot_state(),
-            pending_mutations: self
-                .simulation
-                .pending_mutations
-                .iter()
-                .map(|event| QueuedMutationEventRecord {
-                    execute_at_utc: event.execute_at_utc,
-                    mutation: match event.mutation {
-                        QueuedMutation::SwitchLayer(category_id) => {
-                            QueuedMutationRecord::SwitchLayer {
-                                category_id: category_id.0,
-                            }
-                        }
-                        QueuedMutation::ClearAllSand => QueuedMutationRecord::ClearAllSand,
-                        QueuedMutation::ClearDriftSand => QueuedMutationRecord::ClearDriftSand,
-                    },
-                })
-                .collect(),
+            pending_mutations: Vec::new(),
+            recovery_target_utc: None,
+            legacy_recovery_committed: false,
         };
 
         if let Some(database_path) = self.sqlite_database_path.clone() {
@@ -1699,46 +1698,51 @@ impl App {
     }
 
     fn restore_from_detached_checkpoint(&mut self) -> bool {
-        let checkpoint: DetachedRuntimeCheckpoint = if let Some(database_path) =
-            self.sqlite_database_path.clone()
-        {
-            match sqlite::load_tui_checkpoint(&database_path) {
-                Ok(Some(claimed)) => {
-                    let Some(active_stable_id) = claimed.active_session_stable_id else {
-                        let _ = sqlite::quarantine_tui_checkpoint(&database_path);
-                        self.record_storage_result::<()>(Err(
-                            "SQLite recovery checkpoint has no active stable identity".to_string(),
-                        ));
+        let (mut checkpoint, was_committed): (DetachedRuntimeCheckpoint, bool) =
+            if let Some(database_path) = self.sqlite_database_path.clone() {
+                match sqlite::load_tui_checkpoint(&database_path) {
+                    Ok(Some(claimed)) => {
+                        let Some(active_stable_id) = claimed.active_session_stable_id else {
+                            let _ = sqlite::quarantine_tui_checkpoint(&database_path);
+                            self.record_storage_result::<()>(Err(
+                                "SQLite recovery checkpoint has no active stable identity"
+                                    .to_string(),
+                            ));
+                            return false;
+                        };
+                        self.session.active_session_stable_id = Some(active_stable_id);
+                        (claimed.payload, claimed.was_committed)
+                    }
+                    Ok(None) => return false,
+                    Err(error) => {
+                        self.record_storage_result::<()>(Err(error));
                         return false;
-                    };
-                    self.session.active_session_stable_id = Some(active_stable_id);
-                    self.checkpoint_recovery_active = true;
-                    claimed.payload
+                    }
                 }
-                Ok(None) => return false,
-                Err(error) => {
-                    self.record_storage_result::<()>(Err(error));
+            } else {
+                let path = storage::get_detached_runtime_path();
+                if !storage::file_exists(&path) {
                     return false;
                 }
-            }
-        } else {
-            let path = storage::get_detached_runtime_path();
-            if !storage::file_exists(&path) {
-                return false;
-            }
-            match storage::read_json(&path) {
-                Ok(value) => value,
-                Err(error) => {
-                    self.record_storage_result::<()>(Err(error));
-                    return false;
+                match storage::read_json::<DetachedRuntimeCheckpoint>(&path) {
+                    Ok(value) => {
+                        let committed = value.legacy_recovery_committed;
+                        (value, committed)
+                    }
+                    Err(error) => {
+                        self.record_storage_result::<()>(Err(error));
+                        return false;
+                    }
                 }
-            }
-        };
+            };
 
-        if checkpoint.schema_version != 1 {
+        self.checkpoint_recovery_active = true;
+
+        if checkpoint.schema_version != DetachedRuntimeCheckpoint::VERSION
+            && checkpoint.schema_version != DetachedRuntimeCheckpoint::LEGACY_VERSION
+        {
             if let Some(database_path) = self.sqlite_database_path.clone() {
                 let _ = sqlite::quarantine_tui_checkpoint(&database_path);
-                self.checkpoint_recovery_active = false;
             }
             self.record_storage_result::<()>(Err(format!(
                 "unsupported detached checkpoint schema {}",
@@ -1746,116 +1750,223 @@ impl App {
             )));
             return false;
         }
+        if !checkpoint.pending_mutations.is_empty() {
+            self.record_storage_result::<()>(Err(
+                "detached checkpoint contains queued mutations that cannot be recovered without a stable legacy receipt identity; evidence retained"
+                    .to_string(),
+            ));
+            return false;
+        }
+
+        let now_utc = Utc::now();
+        let target_utc = if was_committed || checkpoint.legacy_recovery_committed {
+            now_utc
+        } else {
+            checkpoint.recovery_target_utc.unwrap_or(now_utc)
+        };
+        if target_utc > now_utc {
+            self.record_storage_result::<()>(Err(format!(
+                "detached recovery target {target_utc} is in the future"
+            )));
+            return false;
+        }
+        if checkpoint.simulation_time_utc > checkpoint.detached_at_utc
+            || checkpoint.detached_at_utc > target_utc
+        {
+            self.record_storage_result::<()>(Err(
+                "detached checkpoint timestamps are not monotonic".to_string(),
+            ));
+            return false;
+        }
+
+        checkpoint.schema_version = DetachedRuntimeCheckpoint::VERSION;
+        checkpoint.recovery_target_utc = Some(target_utc);
+        checkpoint.legacy_recovery_committed = false;
+
+        let claim_persisted = if let Some(database_path) = self.sqlite_database_path.clone() {
+            let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
+                self.record_storage_result::<()>(Err(
+                    "SQLite recovery checkpoint has no stable identity".to_string(),
+                ));
+                return false;
+            };
+            self.record_storage_result_for(
+                PersistenceOperation::CheckpointRecovery,
+                RecoveryAction::CommitCheckpointRecovery,
+                sqlite::replace_tui_recovering_checkpoint(
+                    &database_path,
+                    &expected_stable_id,
+                    &checkpoint,
+                ),
+            )
+            .is_some()
+        } else {
+            let path = storage::get_detached_runtime_path();
+            self.record_storage_result_for(
+                PersistenceOperation::CheckpointRecovery,
+                RecoveryAction::CommitCheckpointRecovery,
+                storage::write_json_atomic(&path, &checkpoint),
+            )
+            .is_some()
+        };
+        if !claim_persisted {
+            return false;
+        }
+
+        let active_category_id = CategoryId::new(checkpoint.active_category_id);
+        if self
+            .time_tracker
+            .category_by_id(active_category_id)
+            .is_none()
+        {
+            self.record_storage_result::<()>(Err(format!(
+                "detached checkpoint references unavailable active category {}",
+                checkpoint.active_category_id
+            )));
+            return false;
+        }
+        let Some(started_at_utc) = checkpoint.active_session_started_at_utc else {
+            self.record_storage_result::<()>(Err(
+                "detached checkpoint has no active-session start timestamp".to_string(),
+            ));
+            return false;
+        };
+        if started_at_utc > target_utc {
+            self.record_storage_result::<()>(Err(
+                "detached checkpoint active session starts after its recovery target".to_string(),
+            ));
+            return false;
+        }
 
         let valid_category_ids = self
             .time_tracker
             .categories_for_storage()
             .into_iter()
+            .chain(self.archived_categories.iter().cloned())
             .map(|category| category.id)
             .collect::<HashSet<_>>();
-        self.sand_engine
-            .restore_state(&checkpoint.sand_state, &valid_category_ids);
+        let elapsed = match (target_utc - checkpoint.simulation_time_utc).to_std() {
+            Ok(elapsed) => elapsed,
+            Err(error) => {
+                self.record_storage_result::<()>(Err(format!(
+                    "invalid detached recovery interval: {error}"
+                )));
+                return false;
+            }
+        };
+        let recovered = match recover_detached_sediment(
+            &checkpoint.sand_state,
+            &valid_category_ids,
+            active_category_id,
+            RecoveryTiming {
+                elapsed,
+                spawn_accumulator: Duration::from_nanos(checkpoint.spawn_accumulator_nanos),
+                physics_accumulator: Duration::from_nanos(checkpoint.physics_accumulator_nanos),
+                spawn_period: Duration::from_millis(TIME_SETTINGS.tick_ms),
+                physics_period: Duration::from_millis(TIME_SETTINGS.physics_ms),
+            },
+        ) {
+            Ok(recovered) => recovered,
+            Err(error) => {
+                self.record_storage_result::<()>(Err(error));
+                return false;
+            }
+        };
 
-        let active_category_id = CategoryId::new(checkpoint.active_category_id);
+        self.sand_engine
+            .restore_state(&recovered.state, &valid_category_ids);
         if !self
             .time_tracker
             .set_active_category_by_id(active_category_id)
         {
-            let _ = self
-                .time_tracker
-                .set_active_category_by_id(DRIFT_CATEGORY_ID);
+            self.record_storage_result::<()>(Err(
+                "detached recovery could not select its active category".to_string(),
+            ));
+            return false;
         }
-        let active_id = self.time_tracker.active_category_id();
-        let _ = self
-            .time_tracker
-            .set_category_description_by_id(active_id, checkpoint.active_description);
-
-        if let Some(started_at) = checkpoint.active_session_started_at_utc {
-            if let Err(error) = self.begin_active_session_at(started_at, false) {
-                self.record_storage_result::<()>(Err(error));
-                return false;
-            }
-        } else {
-            self.begin_active_session_now();
+        let _ = self.time_tracker.set_category_description_by_id(
+            active_category_id,
+            checkpoint.active_description.clone(),
+        );
+        if let Err(error) = self.begin_active_session_at(started_at_utc, true) {
+            self.record_storage_result::<()>(Err(error));
+            return false;
         }
 
-        self.simulation.simulation_time_utc = checkpoint.simulation_time_utc;
-        self.simulation.spawn_accumulator =
-            Duration::from_nanos(checkpoint.spawn_accumulator_nanos);
-        self.simulation.physics_accumulator =
-            Duration::from_nanos(checkpoint.physics_accumulator_nanos);
-        self.simulation.pending_mutations = checkpoint
-            .pending_mutations
-            .into_iter()
-            .map(|event| QueuedMutationEvent {
-                execute_at_utc: event.execute_at_utc,
-                mutation: match event.mutation {
-                    QueuedMutationRecord::SwitchLayer { category_id } => {
-                        QueuedMutation::SwitchLayer(CategoryId::new(category_id))
-                    }
-                    QueuedMutationRecord::ClearAllSand => QueuedMutation::ClearAllSand,
-                    QueuedMutationRecord::ClearDriftSand => QueuedMutation::ClearDriftSand,
-                },
-            })
-            .collect();
-
-        self.simulation
-            .pending_mutations
-            .make_contiguous()
-            .sort_by(|a, b| a.execute_at_utc.cmp(&b.execute_at_utc));
-
-        if self.sqlite_database_path.is_none() {
-            self.clear_detached_checkpoint();
-        }
+        self.simulation.simulation_time_utc = target_utc;
+        self.simulation.spawn_accumulator = recovered.spawn_remainder;
+        self.simulation.physics_accumulator = recovered.physics_remainder;
+        self.simulation.pending_mutations.clear();
+        self.simulation.catchup_cadence_accumulator = Duration::ZERO;
+        self.simulation.catchup_visual_engine = None;
+        self.simulation.catchup_progress_anchor = None;
+        self.simulation.catchup_was_active = false;
+        self.checkpoint_recovery_payload = Some(checkpoint);
         true
     }
 
     fn commit_checkpoint_recovery_if_ready(&mut self) {
-        if !self.checkpoint_recovery_active
-            || self.is_catching_up()
-            || !self.simulation.pending_mutations.is_empty()
-        {
+        if !self.checkpoint_recovery_active {
             return;
         }
-        let Some(database_path) = self.sqlite_database_path.clone() else {
-            self.checkpoint_recovery_active = false;
-            return;
-        };
-        let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
+        let Some(mut checkpoint) = self.checkpoint_recovery_payload.clone() else {
             self.record_storage_result::<()>(Err(
-                "SQLite recovery has no active stable identity to commit".to_string(),
+                "checkpoint recovery payload is unavailable for commit".to_string(),
             ));
             return;
         };
         let state = self.sand_engine.snapshot_state();
-        let operational_day = crate::domain::operational_day_key_now()
+        let operational_day = operational_day_key_for_utc(self.simulation.simulation_time_utc)
             .format("%Y-%m-%d")
             .to_string();
-        if self
-            .record_storage_result_for(
-                PersistenceOperation::CheckpointRecovery,
-                RecoveryAction::CommitCheckpointRecovery,
-                sqlite::commit_tui_checkpoint_recovery(
-                    &database_path,
-                    &expected_stable_id,
-                    &operational_day,
-                    &state,
-                ),
-            )
-            .is_none()
-        {
-            return;
+
+        if let Some(database_path) = self.sqlite_database_path.clone() {
+            let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
+                self.record_storage_result::<()>(Err(
+                    "SQLite recovery has no active stable identity to commit".to_string(),
+                ));
+                return;
+            };
+            if self
+                .record_storage_result_for(
+                    PersistenceOperation::CheckpointRecovery,
+                    RecoveryAction::CommitCheckpointRecovery,
+                    sqlite::commit_tui_checkpoint_recovery(
+                        &database_path,
+                        &expected_stable_id,
+                        &operational_day,
+                        &state,
+                    ),
+                )
+                .is_none()
+            {
+                return;
+            }
+        } else {
+            if let Err(error) = self.try_flush_current_state() {
+                self.record_storage_result_for::<()>(
+                    PersistenceOperation::CheckpointRecovery,
+                    RecoveryAction::CommitCheckpointRecovery,
+                    Err(error),
+                );
+                return;
+            }
+            checkpoint.legacy_recovery_committed = true;
+            let path = storage::get_detached_runtime_path();
+            if self
+                .record_storage_result_for(
+                    PersistenceOperation::CheckpointRecovery,
+                    RecoveryAction::CommitCheckpointRecovery,
+                    storage::write_json_atomic(&path, &checkpoint),
+                )
+                .is_none()
+            {
+                return;
+            }
         }
-        if self
-            .record_storage_result_for(
-                PersistenceOperation::CheckpointClear,
-                RecoveryAction::FlushCurrentState,
-                sqlite::clear_tui_checkpoint(&database_path),
-            )
-            .is_some()
-        {
-            self.checkpoint_recovery_active = false;
-        }
+
+        self.checkpoint_recovery_active = false;
+        self.checkpoint_recovery_payload = None;
     }
 
     fn next_blink_interval(&self) -> i32 {
@@ -1901,6 +2012,9 @@ pub fn run_ui(loaded: keybindings::LoadedKeybindings) -> Result<(), io::Error> {
                     if !app.has_persistence_recovery() {
                         app.persist_daily_sand_snapshot();
                     }
+                    if !app.has_persistence_recovery() {
+                        app.persist_runtime_checkpoint();
+                    }
                     last_save = Instant::now();
                 }
 
@@ -1936,16 +2050,6 @@ pub fn run_ui(loaded: keybindings::LoadedKeybindings) -> Result<(), io::Error> {
             continue 'runtime;
         }
 
-        if app.checkpoint_recovery_active {
-            app.begin_manual_persistence_failure(
-                PersistenceOperation::CheckpointRecovery,
-                RecoveryAction::CommitCheckpointRecovery,
-                "recovery catch-up is not durably committed; checkpoint retained",
-            );
-            app.detach_requested = false;
-            continue 'runtime;
-        }
-
         if app.detach_requested {
             app.persist_sessions();
             if !app.has_persistence_recovery() {
@@ -1955,7 +2059,7 @@ pub fn run_ui(loaded: keybindings::LoadedKeybindings) -> Result<(), io::Error> {
                 app.persist_daily_sand_snapshot();
             }
             if !app.has_persistence_recovery() {
-                app.persist_detached_checkpoint();
+                app.persist_runtime_checkpoint();
             }
             if app.has_persistence_recovery() {
                 app.promote_recovery_action(RecoveryAction::DetachAndExit);
@@ -1993,4 +2097,70 @@ pub fn run_ui(loaded: keybindings::LoadedKeybindings) -> Result<(), io::Error> {
         return Err(io::Error::other(error));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod bounded_checkpoint_tests {
+    use super::DetachedRuntimeCheckpoint;
+    use crate::sand::SandState;
+    use chrono::{TimeZone, Utc};
+
+    fn checkpoint() -> DetachedRuntimeCheckpoint {
+        DetachedRuntimeCheckpoint {
+            schema_version: DetachedRuntimeCheckpoint::VERSION,
+            detached_at_utc: Utc.with_ymd_and_hms(2026, 8, 2, 12, 0, 0).unwrap(),
+            simulation_time_utc: Utc.with_ymd_and_hms(2026, 8, 2, 12, 0, 0).unwrap(),
+            spawn_accumulator_nanos: 0,
+            physics_accumulator_nanos: 0,
+            active_category_id: 0,
+            active_description: String::new(),
+            active_session_started_at_utc: Some(
+                Utc.with_ymd_and_hms(2026, 8, 2, 11, 0, 0).unwrap(),
+            ),
+            sand_state: SandState {
+                version: SandState::VERSION,
+                grid_width: 2,
+                grid_height: 4,
+                grains: Vec::new(),
+                frame_count: 0,
+                sweep_left_to_right: true,
+                rng_state: 1,
+                pending_grains: Vec::new(),
+                pending_runs: Vec::new(),
+            },
+            pending_mutations: Vec::new(),
+            recovery_target_utc: None,
+            legacy_recovery_committed: false,
+        }
+    }
+
+    #[test]
+    fn new_checkpoint_fields_are_backward_compatible() {
+        let value = serde_json::json!({
+            "schema_version": 1,
+            "detached_at_utc": "2026-08-02T12:00:00Z",
+            "simulation_time_utc": "2026-08-02T12:00:00Z",
+            "spawn_accumulator_nanos": 0,
+            "physics_accumulator_nanos": 0,
+            "active_category_id": 0,
+            "active_description": "",
+            "active_session_started_at_utc": "2026-08-02T11:00:00Z",
+            "sand_state": checkpoint().sand_state,
+            "pending_mutations": []
+        });
+        let decoded: DetachedRuntimeCheckpoint = serde_json::from_value(value).unwrap();
+        assert_eq!(decoded.recovery_target_utc, None);
+        assert!(!decoded.legacy_recovery_committed);
+    }
+
+    #[test]
+    fn committed_legacy_evidence_remains_explicit_in_payload() {
+        let mut value = checkpoint();
+        value.recovery_target_utc = Some(Utc.with_ymd_and_hms(2026, 8, 2, 13, 0, 0).unwrap());
+        value.legacy_recovery_committed = true;
+        let encoded = serde_json::to_string(&value).unwrap();
+        let decoded: DetachedRuntimeCheckpoint = serde_json::from_str(&encoded).unwrap();
+        assert!(decoded.legacy_recovery_committed);
+        assert_eq!(decoded.recovery_target_utc, value.recovery_target_utc);
+    }
 }

@@ -1,9 +1,31 @@
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
+
+use crate::domain::CategoryId;
+
+use super::{PendingGrainRun, SandEngine, SandState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PeriodicAdvance {
     pub due_events: usize,
     pub remainder: Duration,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RecoveredSediment {
+    pub state: SandState,
+    pub spawn_remainder: Duration,
+    pub physics_remainder: Duration,
+    pub added_grains: usize,
+    pub skipped_physics_events: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RecoveryTiming {
+    pub elapsed: Duration,
+    pub spawn_accumulator: Duration,
+    pub physics_accumulator: Duration,
+    pub spawn_period: Duration,
+    pub physics_period: Duration,
 }
 
 pub(crate) fn advance_periodic(
@@ -14,6 +36,9 @@ pub(crate) fn advance_periodic(
     let period_nanos = period.as_nanos();
     if period_nanos == 0 {
         return Err("periodic recovery interval must be non-zero".to_string());
+    }
+    if accumulator >= period {
+        return Err("periodic recovery accumulator must be smaller than its period".to_string());
     }
 
     let total_nanos = accumulator
@@ -34,10 +59,172 @@ pub(crate) fn advance_periodic(
     })
 }
 
+pub(crate) fn recover_detached_sediment(
+    base_state: &SandState,
+    valid_category_ids: &HashSet<CategoryId>,
+    active_category_id: CategoryId,
+    timing: RecoveryTiming,
+) -> Result<RecoveredSediment, String> {
+    validate_checkpoint_state(base_state, valid_category_ids)?;
+    if !valid_category_ids.contains(&active_category_id) {
+        return Err(format!(
+            "recovery active category {} does not exist",
+            active_category_id.0
+        ));
+    }
+
+    let spawn = advance_periodic(
+        timing.spawn_accumulator,
+        timing.elapsed,
+        timing.spawn_period,
+    )?;
+    let physics = advance_periodic(
+        timing.physics_accumulator,
+        timing.elapsed,
+        timing.physics_period,
+    )?;
+
+    let mut engine = SandEngine::new(1, 1);
+    engine.restore_state(base_state, valid_category_ids);
+    let mut state = engine.snapshot_state();
+    let pending_mass = state
+        .pending_runs
+        .iter()
+        .try_fold(0usize, |total, run| total.checked_add(run.count));
+    let Some(existing_mass) =
+        pending_mass.and_then(|pending| state.grains.len().checked_add(pending))
+    else {
+        return Err("recovery sediment mass exceeds the supported range".to_string());
+    };
+    if existing_mass.checked_add(spawn.due_events).is_none() {
+        return Err("recovered sediment mass exceeds the supported range".to_string());
+    }
+    if spawn.due_events > 0 {
+        if let Some(last) = state.pending_runs.last_mut()
+            && last.category_id == active_category_id.0
+        {
+            last.count = last
+                .count
+                .checked_add(spawn.due_events)
+                .ok_or_else(|| "recovered pending run exceeds the supported range".to_string())?;
+        } else {
+            state.pending_runs.push(PendingGrainRun {
+                category_id: active_category_id.0,
+                count: spawn.due_events,
+            });
+        }
+    }
+
+    Ok(RecoveredSediment {
+        state,
+        spawn_remainder: spawn.remainder,
+        physics_remainder: physics.remainder,
+        added_grains: spawn.due_events,
+        skipped_physics_events: physics.due_events,
+    })
+}
+
+fn validate_checkpoint_state(
+    state: &SandState,
+    valid_category_ids: &HashSet<CategoryId>,
+) -> Result<(), String> {
+    if state.version != SandState::VERSION && state.version != SandState::LEGACY_VERSION {
+        return Err(format!(
+            "unsupported sediment state schema {}",
+            state.version
+        ));
+    }
+    if state.grid_width == 0 || state.grid_height == 0 {
+        return Err("recovery sediment canvas must be non-empty".to_string());
+    }
+    if state.version == SandState::VERSION && !state.pending_grains.is_empty() {
+        return Err("version 2 sediment state contains legacy pending grains".to_string());
+    }
+    if state.version == SandState::LEGACY_VERSION && !state.pending_runs.is_empty() {
+        return Err("version 1 sediment state contains version 2 pending runs".to_string());
+    }
+
+    let mut occupied = HashSet::with_capacity(state.grains.len());
+    for grain in &state.grains {
+        if grain.x >= state.grid_width || grain.y >= state.grid_height {
+            return Err(format!(
+                "recovery grain ({}, {}) is outside {}x{} canvas",
+                grain.x, grain.y, state.grid_width, state.grid_height
+            ));
+        }
+        if !occupied.insert((grain.x, grain.y)) {
+            return Err(format!(
+                "recovery sediment contains duplicate coordinate ({}, {})",
+                grain.x, grain.y
+            ));
+        }
+        let category_id = CategoryId::new(grain.category_id);
+        if !valid_category_ids.contains(&category_id) {
+            return Err(format!(
+                "recovery grain references unavailable category {}",
+                grain.category_id
+            ));
+        }
+    }
+
+    for category_id in &state.pending_grains {
+        if !valid_category_ids.contains(&CategoryId::new(*category_id)) {
+            return Err(format!(
+                "recovery pending grain references unavailable category {category_id}"
+            ));
+        }
+    }
+    for run in &state.pending_runs {
+        if !valid_category_ids.contains(&CategoryId::new(run.category_id)) {
+            return Err(format!(
+                "recovery pending run references unavailable category {}",
+                run.category_id
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{PeriodicAdvance, advance_periodic};
-    use std::time::Duration;
+    use super::{PeriodicAdvance, RecoveryTiming, advance_periodic, recover_detached_sediment};
+    use crate::{
+        domain::CategoryId,
+        sand::{PendingGrainRun, SandState, SandStateGrain},
+    };
+    use std::{collections::HashSet, time::Duration};
+
+    fn categories() -> HashSet<CategoryId> {
+        HashSet::from([CategoryId::new(0), CategoryId::new(1), CategoryId::new(2)])
+    }
+
+    fn base_state() -> SandState {
+        SandState {
+            version: SandState::VERSION,
+            grid_width: 4,
+            grid_height: 4,
+            grains: vec![
+                SandStateGrain {
+                    x: 0,
+                    y: 3,
+                    category_id: 1,
+                },
+                SandStateGrain {
+                    x: 2,
+                    y: 2,
+                    category_id: 2,
+                },
+            ],
+            frame_count: 19,
+            sweep_left_to_right: false,
+            rng_state: 77,
+            pending_grains: Vec::new(),
+            pending_runs: vec![PendingGrainRun {
+                category_id: 1,
+                count: 3,
+            }],
+        }
+    }
 
     #[test]
     fn long_gap_is_counted_without_iterative_replay() {
@@ -72,7 +259,107 @@ mod tests {
     }
 
     #[test]
-    fn zero_period_is_rejected() {
+    fn zero_period_and_full_accumulator_are_rejected() {
         assert!(advance_periodic(Duration::ZERO, Duration::from_secs(1), Duration::ZERO).is_err());
+        assert!(
+            advance_periodic(
+                Duration::from_secs(1),
+                Duration::ZERO,
+                Duration::from_secs(1),
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn recovery_preserves_existing_topology_and_adds_exact_mass() {
+        let base = base_state();
+        let recovered = recover_detached_sediment(
+            &base,
+            &categories(),
+            CategoryId::new(2),
+            RecoveryTiming {
+                elapsed: Duration::from_millis(2_500),
+                spawn_accumulator: Duration::from_millis(750),
+                physics_accumulator: Duration::from_millis(20),
+                spawn_period: Duration::from_secs(1),
+                physics_period: Duration::from_millis(50),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(recovered.added_grains, 3);
+        assert_eq!(recovered.spawn_remainder, Duration::from_millis(250));
+        assert_eq!(recovered.physics_remainder, Duration::from_millis(20));
+        assert_eq!(recovered.skipped_physics_events, 50);
+        for original in &base.grains {
+            assert!(recovered.state.grains.contains(original));
+        }
+        assert_eq!(recovered.state.frame_count, base.frame_count);
+        assert_eq!(
+            recovered.state.sweep_left_to_right,
+            base.sweep_left_to_right
+        );
+        assert_eq!(recovered.state.rng_state, base.rng_state);
+        let before_mass = base.grains.len() + 3;
+        let after_mass = recovered.state.grains.len()
+            + recovered
+                .state
+                .pending_runs
+                .iter()
+                .map(|run| run.count)
+                .sum::<usize>();
+        assert_eq!(after_mass, before_mass + 3);
+    }
+
+    #[test]
+    fn extreme_gap_is_one_compressed_run_when_ingress_is_full() {
+        let mut base = base_state();
+        base.grains = (0..4)
+            .map(|x| SandStateGrain {
+                x,
+                y: 0,
+                category_id: 1,
+            })
+            .collect();
+        base.pending_runs.clear();
+        let recovered = recover_detached_sediment(
+            &base,
+            &categories(),
+            CategoryId::new(2),
+            RecoveryTiming {
+                elapsed: Duration::from_secs(1_000_000_000),
+                spawn_accumulator: Duration::ZERO,
+                physics_accumulator: Duration::ZERO,
+                spawn_period: Duration::from_secs(1),
+                physics_period: Duration::from_millis(50),
+            },
+        )
+        .unwrap();
+        assert_eq!(recovered.state.pending_runs.len(), 1);
+        assert_eq!(recovered.state.pending_runs[0].category_id, 2);
+        assert_eq!(recovered.state.pending_runs[0].count, 1_000_000_000);
+        assert_eq!(recovered.state.grains, base.grains);
+    }
+
+    #[test]
+    fn malformed_checkpoint_state_fails_closed() {
+        let mut invalid = base_state();
+        invalid.grains.push(invalid.grains[0].clone());
+        assert!(
+            recover_detached_sediment(
+                &invalid,
+                &categories(),
+                CategoryId::new(1),
+                RecoveryTiming {
+                    elapsed: Duration::ZERO,
+                    spawn_accumulator: Duration::ZERO,
+                    physics_accumulator: Duration::ZERO,
+                    spawn_period: Duration::from_secs(1),
+                    physics_period: Duration::from_millis(50),
+                },
+            )
+            .is_err()
+        );
     }
 }

@@ -788,6 +788,7 @@ pub(crate) fn delete_daily_snapshot(
 pub(crate) struct SqliteClaimedCheckpoint<T> {
     pub active_session_stable_id: Option<String>,
     pub payload: T,
+    pub was_committed: bool,
 }
 
 pub(crate) fn save_checkpoint<T: Serialize>(
@@ -822,6 +823,7 @@ pub(crate) fn load_checkpoint<T: DeserializeOwned>(
         Ok(payload) => Ok(Some(SqliteClaimedCheckpoint {
             active_session_stable_id: claimed.active_session_stable_id,
             payload,
+            was_committed: claimed.was_committed,
         })),
         Err(error) => {
             runtime_coordination::quarantine_checkpoint(&mut repository)
@@ -829,6 +831,21 @@ pub(crate) fn load_checkpoint<T: DeserializeOwned>(
             Err(format!("Invalid runtime checkpoint payload: {error}"))
         }
     }
+}
+
+pub(crate) fn replace_recovering_checkpoint<T: Serialize>(
+    database_path: &Path,
+    expected_active_stable_id: &str,
+    payload: &T,
+) -> Result<(), String> {
+    let mut repository = open_cli_repository(database_path)?;
+    let payload_json = serde_json::to_string(payload).map_err(|error| error.to_string())?;
+    runtime_coordination::replace_recovering_checkpoint_payload(
+        &mut repository,
+        expected_active_stable_id,
+        &payload_json,
+    )
+    .map_err(|error| error.to_string())
 }
 
 pub(crate) fn quarantine_checkpoint(database_path: &Path) -> Result<(), String> {

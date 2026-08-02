@@ -55,6 +55,7 @@ pub(crate) struct RuntimeTransitionReceipt {
 pub(crate) struct ClaimedCheckpoint {
     pub active_session_stable_id: Option<String>,
     pub payload_json: String,
+    pub was_committed: bool,
 }
 
 pub(crate) fn start_active_session(
@@ -407,6 +408,7 @@ pub(crate) fn claim_checkpoint(
             Ok(Some(ClaimedCheckpoint {
                 active_session_stable_id,
                 payload_json,
+                was_committed: false,
             }))
         }
         "recovering" => {
@@ -415,16 +417,22 @@ pub(crate) fn claim_checkpoint(
             Ok(Some(ClaimedCheckpoint {
                 active_session_stable_id,
                 payload_json,
+                was_committed: false,
             }))
         }
         "committed" => {
             transaction.execute(
-                "DELETE FROM runtime_checkpoint WHERE singleton = 1 AND status = 'committed'",
+                "UPDATE runtime_checkpoint SET status = 'recovering'
+                 WHERE singleton = 1 AND status = 'committed'",
                 [],
             )?;
             maybe_inject_test_fault("checkpoint-claim", "commit")?;
             transaction.commit()?;
-            Ok(None)
+            Ok(Some(ClaimedCheckpoint {
+                active_session_stable_id,
+                payload_json,
+                was_committed: true,
+            }))
         }
         "quarantined" => Err(CoordinationError::CheckpointConflict {
             expected: "pending, recovering, or committed".to_string(),
@@ -435,6 +443,50 @@ pub(crate) fn claim_checkpoint(
             actual: status,
         }),
     }
+}
+
+pub(crate) fn replace_recovering_checkpoint_payload(
+    repository: &mut SqliteRepository,
+    expected_active_stable_id: &str,
+    payload_json: &str,
+) -> Result<(), CoordinationError> {
+    let transaction = repository
+        .connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let record: Option<(String, Option<String>)> = transaction
+        .query_row(
+            "SELECT status, active_session_stable_id
+             FROM runtime_checkpoint WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let Some((status, active_session_stable_id)) = record else {
+        return Err(CoordinationError::CheckpointConflict {
+            expected: "recovering".to_string(),
+            actual: "missing".to_string(),
+        });
+    };
+    if status != "recovering" {
+        return Err(CoordinationError::CheckpointConflict {
+            expected: "recovering".to_string(),
+            actual: status,
+        });
+    }
+    if active_session_stable_id.as_deref() != Some(expected_active_stable_id) {
+        return Err(CoordinationError::ActiveSessionConflict {
+            expected: expected_active_stable_id.to_string(),
+            actual: active_session_stable_id.unwrap_or_else(|| "missing".to_string()),
+        });
+    }
+    transaction.execute(
+        "UPDATE runtime_checkpoint SET payload_json = ?1
+         WHERE singleton = 1 AND status = 'recovering'",
+        params![payload_json],
+    )?;
+    maybe_inject_test_fault("checkpoint-recovery-target", "commit")?;
+    transaction.commit()?;
+    Ok(())
 }
 
 pub(crate) fn quarantine_checkpoint(
@@ -565,9 +617,10 @@ pub(crate) fn clear_committed_checkpoint(
             transaction.commit()?;
             Ok(())
         }
-        Some("committed") => {
+        Some("pending" | "committed") => {
             transaction.execute(
-                "DELETE FROM runtime_checkpoint WHERE singleton = 1 AND status = 'committed'",
+                "DELETE FROM runtime_checkpoint
+                 WHERE singleton = 1 AND status IN ('pending', 'committed')",
                 [],
             )?;
             maybe_inject_test_fault("checkpoint-clear", "commit")?;
@@ -575,7 +628,7 @@ pub(crate) fn clear_committed_checkpoint(
             Ok(())
         }
         Some(actual) => Err(CoordinationError::CheckpointConflict {
-            expected: "committed or missing".to_string(),
+            expected: "pending, committed, or missing".to_string(),
             actual: actual.to_string(),
         }),
     }
@@ -1121,6 +1174,65 @@ mod tests {
             Some("active-a")
         );
         assert_eq!(claimed.payload_json, "{\"attempt\":2}");
+        drop(repository);
+        remove_database(&path);
+    }
+
+    #[test]
+    fn normal_shutdown_can_retire_pending_checkpoint() {
+        let path = database_path("pending-checkpoint-clear");
+        seed(&path, "active-a");
+        let mut repository = SqliteRepository::open(&path).unwrap();
+        save_checkpoint(
+            &mut repository,
+            "active-a",
+            "2026-08-01T11:00:00Z",
+            "2026-08-01T10:59:00Z",
+            "{\"schema_version\":2}",
+        )
+        .unwrap();
+
+        clear_committed_checkpoint(&mut repository).unwrap();
+
+        assert!(repository.checkpoint().unwrap().is_none());
+        assert_eq!(
+            repository.active_session().unwrap().unwrap().stable_id,
+            "active-a"
+        );
+        drop(repository);
+        remove_database(&path);
+    }
+
+    #[test]
+    fn shutdown_clear_refuses_recovering_checkpoint() {
+        let path = database_path("recovering-checkpoint-clear");
+        seed(&path, "active-a");
+        let mut repository = SqliteRepository::open(&path).unwrap();
+        save_checkpoint(
+            &mut repository,
+            "active-a",
+            "2026-08-01T11:00:00Z",
+            "2026-08-01T10:59:00Z",
+            "{\"schema_version\":2}",
+        )
+        .unwrap();
+        claim_checkpoint(&mut repository).unwrap().unwrap();
+
+        let error = clear_committed_checkpoint(&mut repository).unwrap_err();
+
+        assert!(matches!(
+            error,
+            CoordinationError::CheckpointConflict { ref actual, .. } if actual == "recovering"
+        ));
+        let status: String = repository
+            .connection
+            .query_row(
+                "SELECT status FROM runtime_checkpoint WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "recovering");
         drop(repository);
         remove_database(&path);
     }

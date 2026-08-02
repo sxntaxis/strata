@@ -33,20 +33,22 @@ Detailed rationale and unresolved implications live in `notebook/decisions/DECIS
 | STRATA-D024 | Terminal-cell dimensions and Braille-dot grid dimensions are separate named units; rendering emits one Braille character per drawable terminal cell while simulation and persistence operate in dot-grid units. | implemented and certified |
 | STRATA-D025 | The persisted logical dot grid owns canonical sediment topology; terminal resizing is a centered, bottom-aligned projection-only operation and cannot mutate, repack, relax, or discard logical history. | implemented and certified |
 | STRATA-D026 | Pending logical sediment is represented as ordered category/count runs; compression may reduce storage and work but cannot alter total mass, category identity, or FIFO category order. | implemented and certified |
-| STRATA-D027 | Recovery event counts and accumulator remainders are calculated with checked integer arithmetic; detached duration must not require one loop iteration or allocation per missed event. | implemented and certified prerequisite |
+| STRATA-D027 | Recovery event counts and accumulator remainders are calculated with checked integer arithmetic; detached duration must not require one loop iteration or allocation per missed event. | implemented and certified |
+| STRATA-D028 | Runtime recovery follows claim → persist target → derive bounded pending mass → publish → retain or replace evidence; it never replays missed physics or installs a relaxed replacement topology. | implemented and certified |
+| STRATA-D029 | Normal shutdown may retire only pending or committed checkpoint evidence; recovering and quarantined evidence remain protected. Runtime checkpoints are refused while mutations are queued, and legacy mutation-bearing evidence fails closed without stable receipts. | implemented and certified |
 
 ## Explicitly unresolved
 
 The following are not accepted decisions:
 
 - final vertical chronology semantics beyond the accepted bottom-aligned viewport projection;
-- flat layers versus optional context or relationships;
+- flat categories versus optional context or relationships;
 - final `Karma`/balance terminology;
 - clearing and formation lifecycle beyond placed/pending mass conservation;
 - future zoom, compression, panning, or explicit canonical-canvas migration;
-- checkpoint lifecycle integration for bounded detached recovery;
+- safe cross-authority replay of queued checkpoint mutations, if it is ever required;
 - immutable historical snapshot kinds and provenance;
-- user-facing crash uncertainty beyond current recovery mechanics;
+- user-facing crash uncertainty beyond current recovery controls;
 - configurable quantum migration rules;
 - complete profile switching and isolation semantics under issue #15;
 - future adoption of IANA timezone/DST semantics, if any; the implemented authority is fixed-offset.

@@ -199,24 +199,6 @@ impl App {
         }
     }
 
-    pub(super) fn begin_manual_persistence_failure(
-        &mut self,
-        operation: PersistenceOperation,
-        action: RecoveryAction,
-        detail: impl Into<String>,
-    ) {
-        if self.persistence_recovery.is_none() {
-            self.persistence_recovery = Some(PersistenceRecoveryState {
-                failure: PersistenceFailure::new(self, operation, detail),
-                action,
-                exported_path: None,
-                export_error: None,
-                exit_without_saving_armed: false,
-            });
-            self.render_needed = true;
-        }
-    }
-
     pub(super) fn has_persistence_recovery(&self) -> bool {
         self.persistence_recovery.is_some()
     }
@@ -326,7 +308,7 @@ impl App {
         }
     }
 
-    fn try_flush_current_state(&mut self) -> Result<(), String> {
+    pub(super) fn try_flush_current_state(&mut self) -> Result<(), String> {
         let categories = self.time_tracker.categories_for_storage();
         let mut state = self.sand_engine.snapshot_state();
         if is_drift_category_id(self.time_tracker.active_category_id()) {
@@ -484,7 +466,7 @@ impl App {
 
     fn try_detach_and_exit(&mut self) -> Result<(), String> {
         self.try_flush_current_state()?;
-        self.persist_detached_checkpoint();
+        self.persist_runtime_checkpoint();
         if let Some(recovery) = self.persistence_recovery.as_ref() {
             return Err(recovery.failure.summary());
         }

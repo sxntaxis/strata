@@ -21,7 +21,8 @@ Chronological ledger truth remains the exact time authority. Sediment preserves 
 - Total and per-category logical mass survive resize, persistence, restore, and interrupted recovery.
 - Terminal-cell dimensions and Braille-dot grid dimensions are distinct.
 - Viewport changes do not mutate canonical sediment merely to fit the screen.
-- Existing topology is not globally relaxed as a side effect of reopening or viewing history.
+- Recovery does not replay unbounded physics or relax checkpoint topology.
+- Unresolved recovery evidence is retained and fails closed.
 - Historical snapshot kinds are explicit and immutable while viewed.
 
 ## Certified sequence
@@ -36,10 +37,9 @@ Issues completed: #16, #26.
 - complete randomized ingress scan before physical blockage;
 - category-preserving pending reservoir for blocked grains;
 - placed-plus-pending logical mass accounting;
-- backward-compatible persistence and restore of pending mass;
-- coverage for arbitrary ingress occupancy, full blockage, round-trip identity, and exact output dimensions.
+- backward-compatible persistence and restore of pending mass.
 
-Accepted authority is recorded in `docs/SEDIMENT_AUTHORITY.md` and STRATA-D023 through STRATA-D024.
+Accepted authority: STRATA-D023 through STRATA-D024.
 
 ### SEDIMENT-001B — logical canvas and viewport projection
 
@@ -53,50 +53,56 @@ Issue completed: #7.
 - projection is horizontally centered and bottom-aligned;
 - resize never invokes gravity, ingress placement, or topology rewriting;
 - restore preserves stored canonical dimensions on any opening viewport;
-- shrink/expand and repeated oscillation preserve exact `SandState`;
 - the destructive edge-band resize module is removed.
 
-Accepted authority is recorded in `docs/SEDIMENT_AUTHORITY.md` and STRATA-D025.
+Accepted authority: STRATA-D025.
 
 ### SEDIMENT-001C1 — compressed recovery mass
 
 Status: implemented and certified in PR #52.
-Issue advanced: #6; not closed.
+Issue advanced: #6.
 
 - pending mass is represented as ordered category/count runs;
 - adjacent same-category additions merge while transitions preserve FIFO order;
-- bulk addition and storage are independent of the number of grains represented;
+- bulk addition and storage are independent of represented grain count;
 - ingress flush work is bounded by currently free columns;
-- `SandState` schema version 2 serializes runs and migrates version 1 pending vectors;
+- `SandState` schema version 2 serializes runs and migrates version 1 vectors;
 - overflow fails visibly;
-- periodic event counts and remainders use checked integer arithmetic without replay;
-- a billion blocked grains are certified as one run.
+- periodic event counts and remainders use checked integer arithmetic without replay.
 
-Accepted authority is recorded in `docs/SEDIMENT_AUTHORITY.md` and STRATA-D026 through STRATA-D027.
+Accepted authority: STRATA-D026 through STRATA-D027.
 
 ### SEDIMENT-001C2 — durable bounded detached recovery
 
-Status: next.
-Issue: #6.
+Status: implemented and certified in PR #53.
+Issue completed: #6.
 
-- claim and validate checkpoint evidence before applying recovery;
-- restore committed canonical topology directly;
-- calculate detached elapsed contribution once with exact periodic arithmetic;
-- add missed category mass through compressed runs rather than frame replay;
-- preserve topology instead of installing a relaxed catch-up replacement;
-- retain checkpoint evidence until recovered sediment and session state commit together;
-- certify short gaps, extreme gaps, repeated reopen, interrupted commit, stale/invalid checkpoints, and exact mass without duplication or loss.
+- runtime checkpoints cover autosave, detach, terminal closure, and crash recovery;
+- evidence is claimed and a target is persisted before publication;
+- canonical topology and engine metadata restore directly;
+- detached elapsed mass is added as compressed pending runs;
+- missed physics frames are not replayed;
+- SQLite recovery publication is atomic and committed evidence remains reclaimable;
+- legacy-file recovery uses deterministic target and committed markers;
+- normal shutdown clears only pending or committed evidence;
+- recovering and quarantined evidence remains protected;
+- queued-mutation checkpoints fail closed because stable cross-authority mutation receipts do not exist;
+- repeated reopen and interrupted publication do not duplicate or lose mass.
+
+Accepted authority: STRATA-D028 through STRATA-D029.
 
 ### SEDIMENT-001D — snapshot identity
 
+Status: next.
 Issue: #18.
 
 - distinguish cumulative checkpoints, daily contributions, and derived previews;
 - make historical viewing immutable;
 - record snapshot kind and source provenance;
 - invalidate or rebuild the correct artifacts after session mutation;
-- establish deterministic idle inclusion and reconstructed-preview marking.
+- establish deterministic idle inclusion and reconstructed-preview marking;
+- prevent report viewing from becoming a competing mutable sediment authority.
 
 ## Current edge
 
-Implement SEDIMENT-001C2. The engine can now represent and calculate arbitrarily large detached contributions without linear allocation or replay. Integrate that authority with checkpoint claiming, validation, atomic SQLite commit, legacy-file custody, and lifecycle semantics so issue #6 can close without weakening canonical topology.
+Implement SEDIMENT-001D. Mass, topology, viewport behavior, and runtime recovery are now conserved. Historical snapshot meaning is the remaining sediment authority gap: each artifact must declare whether it is a cumulative checkpoint, a daily contribution, or a derived preview, and historical viewing must remain immutable.
