@@ -1,0 +1,42 @@
+name: reconciliation001b2b-apply
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    if: github.head_ref == 'reconciliation/001b2b-legacy-finish-receipts'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: reconciliation/001b2b-legacy-finish-receipts
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Apply RECONCILIATION-001B2B
+        run: python tools/reconciliation001b2b-apply.py
+      - name: Remove temporary machinery
+        run: |
+          rm tools/reconciliation001b2b-apply.py
+          rm .github/workflows/reconciliation001b2b-apply.yml
+      - name: Format
+        run: cargo fmt --all
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Strict Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Test
+        run: cargo test --all-targets --all-features
+      - name: Commit clean implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(reconciliation-001b2b): add legacy finish receipts"
+          git push origin HEAD:reconciliation/001b2b-legacy-finish-receipts
