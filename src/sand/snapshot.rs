@@ -54,6 +54,7 @@ pub(crate) struct DailySedimentSlice {
 impl SedimentSnapshot {
     pub const VERSION: u8 = 1;
 
+    #[cfg(test)]
     pub fn cumulative_checkpoint(
         operational_day: Option<String>,
         source_revision: String,
@@ -106,6 +107,7 @@ impl SedimentSnapshot {
         }
     }
 
+    #[cfg(test)]
     pub fn legacy_daily_payload(operational_day: String, state: SandState) -> Self {
         let encoded = serde_json::to_vec(&state).unwrap_or_default();
         Self::cumulative_checkpoint(
@@ -167,7 +169,8 @@ pub(crate) fn daily_contribution_from_slices(
     grid_height: usize,
     slices: &[DailySedimentSlice],
 ) -> Option<SedimentSnapshot> {
-    let (source_revision, state) = daily_material(operational_day, grid_width, grid_height, slices)?;
+    let (source_revision, state) =
+        daily_material(operational_day, grid_width, grid_height, slices)?;
     Some(SedimentSnapshot::daily_contribution(
         operational_day.to_string(),
         source_revision,
@@ -181,7 +184,8 @@ pub(crate) fn derived_preview_from_slices(
     grid_height: usize,
     slices: &[DailySedimentSlice],
 ) -> Option<SedimentSnapshot> {
-    let (source_revision, state) = daily_material(operational_day, grid_width, grid_height, slices)?;
+    let (source_revision, state) =
+        daily_material(operational_day, grid_width, grid_height, slices)?;
     Some(SedimentSnapshot::derived_preview(
         operational_day.to_string(),
         source_revision,
@@ -223,9 +227,8 @@ fn daily_material(
         return None;
     }
 
-    let mut revision_material = format!(
-        "day={operational_day}|idle=included|grid={grid_width}x{grid_height}|quantum=1|"
-    );
+    let mut revision_material =
+        format!("day={operational_day}|idle=included|grid={grid_width}x{grid_height}|quantum=1|");
     for slice in &ordered {
         let _ = write!(
             revision_material,
@@ -316,9 +319,9 @@ pub fn stable_source_revision(source: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        DailySedimentSlice, SedimentSnapshot, SedimentSnapshotKind,
-        SedimentSnapshotProvenance, daily_contribution_from_slices,
-        derived_preview_from_slices, select_daily_artifact, stable_source_revision,
+        DailySedimentSlice, SedimentSnapshot, SedimentSnapshotKind, SedimentSnapshotProvenance,
+        daily_contribution_from_slices, derived_preview_from_slices, select_daily_artifact,
+        stable_source_revision,
     };
     use crate::sand::{PendingGrainRun, SandState, SandStateGrain};
 
@@ -406,11 +409,8 @@ mod tests {
     fn revision_matching_reuses_persisted_contribution_and_stale_falls_back() {
         let persisted = daily_contribution_from_slices("2026-08-01", 2, 2, &slices()).unwrap();
         let derived = derived_preview_from_slices("2026-08-01", 2, 2, &slices()).unwrap();
-        let selected = select_daily_artifact(
-            "2026-08-01",
-            Some(persisted.clone()),
-            Some(derived.clone()),
-        );
+        let selected =
+            select_daily_artifact("2026-08-01", Some(persisted.clone()), Some(derived.clone()));
         assert_eq!(selected, Some(persisted));
 
         let mut stale = daily_contribution_from_slices("2026-08-01", 2, 2, &slices()).unwrap();

@@ -1919,9 +1919,16 @@ impl App {
             return;
         };
         let state = self.sand_engine.snapshot_state();
-        let operational_day = operational_day_key_for_utc(self.simulation.simulation_time_utc)
-            .format("%Y-%m-%d")
-            .to_string();
+        let operational_day_date = operational_day_key_for_utc(self.simulation.simulation_time_utc);
+        let operational_day = operational_day_date.format("%Y-%m-%d").to_string();
+        let Some(daily_contribution) = self.daily_contribution_from_time_log(operational_day_date)
+        else {
+            self.record_storage_result::<()>(Err(
+                "checkpoint recovery produced no daily contribution for its active session"
+                    .to_string(),
+            ));
+            return;
+        };
 
         if let Some(database_path) = self.sqlite_database_path.clone() {
             let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
@@ -1939,6 +1946,7 @@ impl App {
                         &expected_stable_id,
                         &operational_day,
                         &state,
+                        &daily_contribution,
                     ),
                 )
                 .is_none()

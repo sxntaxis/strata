@@ -10,7 +10,7 @@ use rusqlite::{Connection, params};
 use crate::{
     constants::COLORS,
     domain::{Category, CategoryId, Session},
-    sand::SandState,
+    sand::{SandState, SedimentSnapshot},
     storage::CategoryTagsState,
 };
 
@@ -140,6 +140,14 @@ fn sand_state(frame_count: usize) -> SandState {
         pending_grains: Vec::new(),
         pending_runs: Vec::new(),
     }
+}
+
+fn daily_snapshot(frame_count: usize) -> SedimentSnapshot {
+    SedimentSnapshot::daily_contribution(
+        "2026-08-01".to_string(),
+        format!("revision-{frame_count}"),
+        sand_state(frame_count),
+    )
 }
 
 fn with_database(name: &str, action: impl FnOnce(&Path)) {
@@ -349,22 +357,23 @@ fn every_authoritative_persistence_family_rolls_back_or_remains_recoverable() {
     });
 
     with_database("daily-snapshot", |path| {
-        tui_runtime::save_daily_snapshot(path, "2026-08-01", &sand_state(1)).unwrap();
+        tui_runtime::save_daily_snapshot(path, "2026-08-01", &daily_snapshot(1)).unwrap();
         runtime_coordination::with_test_fault("daily-snapshot", "commit", "commit", || {
-            tui_runtime::save_daily_snapshot(path, "2026-08-01", &sand_state(2))
+            tui_runtime::save_daily_snapshot(path, "2026-08-01", &daily_snapshot(2))
         })
         .unwrap_err();
         assert_eq!(
             tui_runtime::load_daily_snapshot(path, "2026-08-01")
                 .unwrap()
                 .unwrap()
+                .state
                 .frame_count,
             1
         );
     });
 
     with_database("daily-snapshot-delete", |path| {
-        tui_runtime::save_daily_snapshot(path, "2026-08-01", &sand_state(1)).unwrap();
+        tui_runtime::save_daily_snapshot(path, "2026-08-01", &daily_snapshot(1)).unwrap();
         runtime_coordination::with_test_fault("daily-snapshot-delete", "commit", "commit", || {
             tui_runtime::delete_daily_snapshot(path, "2026-08-01")
         })
@@ -459,7 +468,13 @@ fn every_authoritative_persistence_family_rolls_back_or_remains_recoverable() {
             .unwrap();
         drop(repository);
         runtime_coordination::with_test_fault("checkpoint-recovery", "commit", "commit", || {
-            tui_runtime::commit_checkpoint_recovery(path, "active-a", "2026-08-01", &sand_state(2))
+            tui_runtime::commit_checkpoint_recovery(
+                path,
+                "active-a",
+                "2026-08-01",
+                &sand_state(2),
+                &daily_snapshot(2),
+            )
         })
         .unwrap_err();
         assert_eq!(
@@ -506,6 +521,7 @@ fn every_authoritative_persistence_family_rolls_back_or_remains_recoverable() {
                 payload_json: serde_json::to_string(&sand_state(1)).unwrap(),
                 updated_at_utc: "2026-08-01T13:00:00Z".to_string(),
             },
+            &serde_json::to_string(&daily_snapshot(1)).unwrap(),
             "2026-08-01T13:00:00Z",
         )
         .unwrap();
