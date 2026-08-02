@@ -35,5 +35,42 @@ if old_effective_replace not in text:
     raise SystemExit("effective key replacement block was not found")
 text = text.replace(old_effective_replace, new_effective_replace, 1)
 
+old_confirm_replace = '''if text.count(old_main) != 1:
+    raise SystemExit("main confirm fallback not found")
+text = text.replace(old_main, "            Action::Confirm => false,\\n", 1)
+'''
+new_confirm_replace = '''main_start = text.index("    fn handle_main_action")
+confirm_start = text.index("            Action::Confirm => {", main_start)
+confirm_end = text.index("            Action::SwitchToNone => {", confirm_start)
+text = text[:confirm_start] + "            Action::Confirm => false,\\n" + text[confirm_end:]
+'''
+if old_confirm_replace not in text:
+    raise SystemExit("main confirm replacement block was not found")
+text = text.replace(old_confirm_replace, new_confirm_replace, 1)
+
+old_cancel_replace = '''if text.count(old_cancel) != 1:
+    raise SystemExit("main cancel fallback not found")
+text = text.replace(old_cancel, "            Action::Cancel => false,\\n", 1)
+'''
+new_cancel_replace = '''cancel_start = text.index("            Action::Cancel => {", main_start)
+cancel_end = text.index("            Action::ReportToday => {", cancel_start)
+text = text[:cancel_start] + "            Action::Cancel => false,\\n" + text[cancel_end:]
+'''
+if old_cancel_replace not in text:
+    raise SystemExit("main cancel replacement block was not found")
+text = text.replace(old_cancel_replace, new_cancel_replace, 1)
+
+old_today_replace = '''if text.count(old_today) != 1:
+    raise SystemExit("main today fallback not found")
+text = text.replace(old_today, new_today, 1)
+'''
+new_today_replace = '''today_start = text.index("            Action::ReportToday => {", main_start)
+today_end = text.index("            _ => false,", today_start)
+text = text[:today_start] + new_today + text[today_end:]
+'''
+if old_today_replace not in text:
+    raise SystemExit("main today replacement block was not found")
+text = text.replace(old_today_replace, new_today_replace, 1)
+
 path.write_text(text)
 Path(__file__).unlink(missing_ok=True)
