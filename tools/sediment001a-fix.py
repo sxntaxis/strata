@@ -47,6 +47,11 @@ replace_exact(
     "        let cell_h = se.cell_height as usize;",
     expected=2,
 )
+replace_exact(
+    "src/sand/engine.rs",
+    "    pub fn pending_grain_count(&self) -> usize {",
+    "    #[cfg(test)]\n    fn pending_grain_count(&self) -> usize {",
+)
 
 replace_exact(
     "src/sand/engine.rs",
