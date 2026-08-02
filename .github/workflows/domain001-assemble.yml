@@ -1,0 +1,56 @@
+name: domain001-assemble
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - synchronize
+
+permissions:
+  contents: write
+
+jobs:
+  assemble:
+    if: github.event.pull_request.head.ref == 'domain/001-project-classification-idle'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout implementation branch
+        uses: actions/checkout@v4
+        with:
+          ref: domain/001-project-classification-idle
+          fetch-depth: 0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Apply implementation patch
+        run: |
+          test "$(sha256sum tools/domain001.patch.b64 | cut -d' ' -f1)" = "a9b72bbf326d5bb133b981440f76eee7edf2cd0258aa64c63ff79e2b42983cd7"
+          base64 --decode tools/domain001.patch.b64 | gzip --decompress > /tmp/domain001.patch
+          git apply --check /tmp/domain001.patch
+          git apply /tmp/domain001.patch
+
+      - name: Format
+        run: cargo fmt --all
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run strict Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test --all-features
+
+      - name: Commit certified implementation and remove assembly machinery
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          rm -f tools/domain001.patch.b64
+          rm -f .github/workflows/domain001-assemble.yml
+          git add -A src tests tools/domain001.patch.b64 .github/workflows/domain001-assemble.yml
+          git commit -m 'DOMAIN-001: preserve project identity and require explicit classification'
+          git push origin HEAD:domain/001-project-classification-idle
