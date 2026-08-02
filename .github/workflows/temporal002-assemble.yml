@@ -33,6 +33,7 @@ jobs:
           cat tools/temporal002.patch.b64.* | base64 --decode | gzip --decompress > /tmp/temporal002.patch
           git apply --check /tmp/temporal002.patch
           git apply /tmp/temporal002.patch
+          python tools/temporal002_fix.py
 
       - name: Format
         run: cargo fmt --all
