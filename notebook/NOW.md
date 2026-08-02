@@ -5,15 +5,15 @@ state: active
 created: 2026-08-01
 updated: 2026-08-02
 authority: working
-summary: SEDIMENT-001A and 001B are complete; logical mass and topology now survive ingress blockage and terminal resize.
-next: Implement SEDIMENT-001C for issue #6: bounded, retry-safe detached recovery.
+summary: SEDIMENT-001C1 is complete; arbitrarily large pending and recovered mass now has a bounded exact representation.
+next: Implement SEDIMENT-001C2 for issue #6: integrate compressed mass with durable, retry-safe checkpoint recovery.
 ---
 
 # NOW — Strata
 
 ## Current phase
 
-The SQLite migration program, AUTHORITY-001, TEMPORAL-001, TEMPORAL-002, DOMAIN-001, REPORT-001, SEDIMENT-001A, and SEDIMENT-001B are complete. Strata now has durable persistence, explicit clock and boundary semantics, preserved project/category identity, truthful deterministic report/export projections, lossless sediment ingress, and canonical sediment topology independent of terminal geometry.
+The SQLite migration program, AUTHORITY-001, TEMPORAL-001, TEMPORAL-002, DOMAIN-001, REPORT-001, SEDIMENT-001A, SEDIMENT-001B, and SEDIMENT-001C1 are complete. Strata now has durable persistence, explicit clock and boundary semantics, preserved project/category identity, truthful deterministic report/export projections, lossless ingress, viewport-independent canonical topology, and compressed pending mass suitable for bounded recovery.
 
 The project is implementing **sediment conservation**.
 
@@ -32,6 +32,7 @@ The project is implementing **sediment conservation**.
 - Every due grain exists exactly once as placed or pending logical mass.
 - Terminal-cell dimensions and Braille-dot grid dimensions are separate units.
 - The persisted logical grid owns canonical topology; terminal resize is projection only.
+- Pending logical mass may be compressed into ordered category/count runs without changing count, identity, or FIFO category order.
 
 ## Verified technical baseline
 
@@ -46,14 +47,15 @@ The project is implementing **sediment conservation**.
 - ICS uses authoritative UTC chronology, stable UIDs, RFC 5545-safe text serialization, and independent parser certification.
 - Idle is excluded from ordinary active-time totals and ICS work events while remaining part of sediment history.
 - Sediment rendering emits one Braille character per drawable terminal cell.
-- Randomized ingress scans every physical column before declaring blockage.
+- Randomized ingress scans available physical columns before declaring blockage.
 - Fully blocked grains remain category-preserving pending mass and survive persistence/restore.
 - `grain_count` accounts for placed plus pending logical mass.
-- Terminal shrink crops presentation without deleting or repacking hidden grains.
-- Terminal expansion pads presentation without stretching or relocating canonical grains.
-- Resize leaves canonical dimensions, coordinates, category neighborhoods, pending order, frame count, sweep direction, and RNG state unchanged.
-- Persisted sediment restores its canonical dimensions on any opening viewport.
-- The destructive resize module and resize-triggered gravity path are removed.
+- Terminal resize leaves canonical dimensions, coordinates, category neighborhoods, pending order, frame count, sweep direction, and RNG state unchanged.
+- `SandState` schema version 2 stores ordered pending category/count runs and migrates version 1 vectors.
+- Adjacent same-category runs merge while category transitions remain ordered.
+- A billion blocked grains require one run rather than a billion allocations.
+- Bulk ingress work is bounded by currently free columns.
+- Exact periodic event counts and accumulator remainders are calculated without iterative replay.
 - Persistence, temporal, projection, and sediment-state failures remain fail-closed and recoverable.
 
 ## Completed post-migration units
@@ -65,24 +67,26 @@ The project is implementing **sediment conservation**.
 - **REPORT-001** — issues #1, #3, #14, #17, #28: truthful ranges/help, provisional active projection, valid ICS, and deterministic ordering.
 - **SEDIMENT-001A** — issues #16, #26: dimension-unit truth, exact Braille output width, complete ingress scanning, and durable pending logical mass.
 - **SEDIMENT-001B** — issue #7: canonical logical canvas, projection-only resize, exact topology preservation, and direct canonical restore.
+- **SEDIMENT-001C1** — issue #6 prerequisite: compressed pending runs, `SandState` v2 migration, bounded bulk addition, and exact periodic arithmetic.
 
 Complete profile isolation remains open under issue #15. Project CRUD, TUI project selection, project-grouped reporting, and a TUI custom-range editor remain future work.
 
 ## Active sequence
 
-1. **SEDIMENT-001C** — issue #6: bounded, retry-safe detached recovery.
+1. **SEDIMENT-001C2** — issue #6: durable, retry-safe bounded detached recovery.
 2. **SEDIMENT-001D** — issue #18: explicit immutable historical snapshot kinds and provenance.
 3. **INTERACTION-001** — issues #19, #20, #24: explicit edit modes, terminal lifecycle guard, truthful keybinding policy.
 4. Reconcile remaining partially satisfied issues #5, #10, #13 and later domain/profile work.
 
 ## Current risks
 
-- Detached catch-up still replays simulation work rather than applying bounded logical mass.
-- Recovery evidence and sediment/session commit do not yet have one explicit retry-safe transaction contract.
+- Application startup still uses accelerated spawn/physics replay instead of compressed recovery mass.
+- Recovery evidence and sediment/session commit do not yet have one fully integrated retry-safe lifecycle contract.
+- Legacy detached checkpoint custody still differs from SQLite checkpoint custody.
 - Historical snapshots do not yet have explicit kinds and immutable provenance.
 - Interaction edit modes and terminal cleanup remain incompletely enforced.
 - Complete profile switching/isolation remains open.
 
 ## Next
 
-Implement **SEDIMENT-001C** for issue #6. Restore committed canonical topology directly, calculate detached elapsed contribution once, add the missed category mass through bounded work, and retain recovery evidence until sediment and session state commit together without duplication or loss across repeated reopen.
+Implement **SEDIMENT-001C2** for issue #6. Claim and validate checkpoint evidence, restore canonical topology directly, calculate detached contribution once, add it through compressed runs, and retain evidence until sediment and session state commit atomically without duplication or loss across repeated reopen or interruption.
