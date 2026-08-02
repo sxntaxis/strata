@@ -25,6 +25,13 @@ impl App {
         let selected_item = self.selected_atlas_item();
         let border_color = self.atlas_item_color(selected_item);
         let bottom_description = self.atlas_item_description(selected_item);
+        let close_hint =
+            self.atlas_control_hint(&[Action::Cancel, Action::ToggleKeybindingsHelp], "close");
+        let movement_hint = self.atlas_control_hint(
+            &[Action::Up, Action::Down, Action::Left, Action::Right],
+            "move",
+        );
+        let jump_hint = self.atlas_control_hint(&[Action::HelpTop, Action::HelpBottom], "jump");
 
         let modal_rect = self.modal_rect_ratio(terminal_size, 5, 6);
         let title = Line::from(Span::styled(
@@ -36,7 +43,7 @@ impl App {
         .alignment(Alignment::Center);
 
         let bottom_left = Line::from(Span::styled(
-            "Esc/F1/? close",
+            close_hint,
             Style::default().fg(Color::DarkGray),
         ))
         .alignment(Alignment::Left);
@@ -46,7 +53,7 @@ impl App {
         ))
         .alignment(Alignment::Center);
         let bottom_right = Line::from(Span::styled(
-            "↑↓ move · Home/End jump",
+            format!("{movement_hint} · {jump_hint}"),
             Style::default().fg(Color::DarkGray),
         ))
         .alignment(Alignment::Right);
@@ -114,6 +121,16 @@ impl App {
         if let Some(overlay) = self.atlas_overlay.as_ref() {
             self.render_atlas_overlay(f, terminal_size, overlay);
         }
+    }
+
+    fn atlas_control_hint(&self, actions: &[Action], label: &str) -> String {
+        format_atlas_control_hint(
+            actions
+                .iter()
+                .flat_map(|action| self.effective_keys_for_action(*action))
+                .map(|key| key.to_string()),
+            label,
+        )
     }
 
     fn command_atlas_rows(&self, selected_item: AtlasSelectable) -> Vec<AtlasRow> {
@@ -310,7 +327,7 @@ impl App {
                         Style::default().fg(Color::White),
                     )),
                     Line::from(Span::styled(
-                        "Esc: cancel · Backspace/Delete: unbind",
+                        "Esc: cancel · Backspace: disable · Delete: unbind",
                         Style::default().fg(Color::Gray),
                     )),
                 ];
@@ -404,6 +421,21 @@ impl App {
     }
 }
 
+fn format_atlas_control_hint(keys: impl IntoIterator<Item = String>, label: &str) -> String {
+    let mut unique = Vec::new();
+    for key in keys {
+        if !unique.contains(&key) {
+            unique.push(key);
+        }
+    }
+
+    if unique.is_empty() {
+        format!("(unbound) {label}")
+    } else {
+        format!("{} {label}", unique.join("/"))
+    }
+}
+
 fn week_day_label(day: FirstDayOfWeek) -> &'static str {
     match day {
         FirstDayOfWeek::Monday => "Monday",
@@ -432,4 +464,26 @@ fn pad_column(value: &str, width: usize) -> String {
     }
 
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_atlas_control_hint;
+
+    #[test]
+    fn atlas_control_hint_preserves_runtime_key_order_and_deduplicates() {
+        let hint = format_atlas_control_hint(
+            ["Esc", "F1", "?", "F1"].into_iter().map(str::to_string),
+            "close",
+        );
+        assert_eq!(hint, "Esc/F1/? close");
+    }
+
+    #[test]
+    fn atlas_control_hint_exposes_unreachable_control_groups() {
+        assert_eq!(
+            format_atlas_control_hint(std::iter::empty(), "jump"),
+            "(unbound) jump"
+        );
+    }
 }

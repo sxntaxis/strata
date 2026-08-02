@@ -47,12 +47,15 @@ impl App {
             return false;
         }
 
-        if self.keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
-            return true;
+        if self.has_persistence_recovery() {
+            if self.keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
+                return self.request_persistence_recovery_quit();
+            }
+            return self.handle_persistence_recovery_key(key);
         }
 
-        if self.has_persistence_recovery() {
-            return self.handle_persistence_recovery_key(key);
+        if self.keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
+            return true;
         }
 
         if self.report_log_edit.is_some() {

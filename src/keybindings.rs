@@ -1128,7 +1128,7 @@ pub(crate) fn load_keybindings(path: &Path) -> Result<LoadedKeybindings, String>
     let runtime_settings = parse_runtime_settings(&config, path)?;
     let time_log_path = parse_time_log_path(&config, path)?;
     let contextual_aliases = parse_contextual_aliases(&config, path)?;
-    let mut disabled_actions = parse_unbound_actions(&config, path)?;
+    let disabled_actions = parse_unbound_actions(&config, path)?;
 
     let mut parsed_overrides: Vec<(KeyBinding, Option<Action>)> = Vec::new();
     let mut overridden_actions: HashSet<Action> = HashSet::new();
@@ -1159,8 +1159,14 @@ pub(crate) fn load_keybindings(path: &Path) -> Result<LoadedKeybindings, String>
                         path.display()
                     )
                 })?;
+                if disabled_actions.contains(&action) {
+                    return Err(format!(
+                        "Action '{}' in {} is both bound and disabled",
+                        action.config_name(),
+                        path.display()
+                    ));
+                }
                 overridden_actions.insert(action);
-                disabled_actions.remove(&action);
                 Some(action)
             }
             None => None,
@@ -1587,6 +1593,22 @@ mod tests {
 
         fs::remove_file(path).ok();
         fs::remove_file(blocker).ok();
+    }
+
+    #[test]
+    fn contradictory_bound_and_disabled_action_is_rejected() {
+        let path = unique_path("strata_keymap_contradictory_state");
+        fs::write(
+            &path,
+            r#"{
+              "keymap":{"ctrl-r":"open_karma_popup"},
+              "unbind_actions":["open_karma_popup"]
+            }"#,
+        )
+        .unwrap();
+        let error = load_keymap_for_test(&path).unwrap_err();
+        assert!(error.contains("both bound and disabled"));
+        fs::remove_file(path).ok();
     }
 
     #[test]
