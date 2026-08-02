@@ -19,8 +19,8 @@ impl App {
         let inner_width = size.width.saturating_sub(2);
         let inner_height = size.height.saturating_sub(2);
 
-        if self.sand_engine.width != inner_width * SAND_ENGINE.dot_width as u16
-            || self.sand_engine.height != inner_height * SAND_ENGINE.dot_height as u16
+        if self.sand_engine.grid_width_dots != inner_width * SAND_ENGINE.dot_width as u16
+            || self.sand_engine.grid_height_dots != inner_height * SAND_ENGINE.dot_height as u16
         {
             self.sand_engine.resize(inner_width, inner_height);
         }

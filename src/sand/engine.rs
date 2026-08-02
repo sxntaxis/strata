@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use ratatui::{
     prelude::{Line, Span},
@@ -32,6 +32,8 @@ pub struct SandState {
     pub sweep_left_to_right: bool,
     #[serde(default = "default_rng_state")]
     pub rng_state: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_grains: Vec<u64>,
 }
 
 impl SandState {
@@ -48,11 +50,14 @@ fn default_rng_state() -> u64 {
 
 pub struct SandEngine {
     pub(crate) grid: Vec<Vec<Option<CategoryId>>>,
-    pub width: u16,
-    pub height: u16,
+    pub cell_width: u16,
+    pub cell_height: u16,
+    pub grid_width_dots: u16,
+    pub grid_height_dots: u16,
     frame_count: usize,
     sweep_left_to_right: bool,
     rng_state: u64,
+    pending_grains: VecDeque<CategoryId>,
     pub grain_count: usize,
 }
 
@@ -60,11 +65,14 @@ impl SandEngine {
     pub fn new(width: u16, height: u16) -> Self {
         let mut se = Self {
             grid: vec![],
-            width,
-            height,
+            cell_width: width,
+            cell_height: height,
+            grid_width_dots: 0,
+            grid_height_dots: 0,
             frame_count: 0,
             sweep_left_to_right: true,
             rng_state: rand::random::<u64>() | 1,
+            pending_grains: VecDeque::new(),
             grain_count: 0,
         };
         se.resize(width, height);
@@ -72,8 +80,10 @@ impl SandEngine {
     }
 
     pub fn resize(&mut self, width: u16, height: u16) {
-        self.width = width * SAND_ENGINE.dot_width as u16;
-        self.height = height * SAND_ENGINE.dot_height as u16;
+        self.cell_width = width;
+        self.cell_height = height;
+        self.grid_width_dots = width * SAND_ENGINE.dot_width as u16;
+        self.grid_height_dots = height * SAND_ENGINE.dot_height as u16;
 
         let old_w = if self.grid.is_empty() {
             0
@@ -82,12 +92,12 @@ impl SandEngine {
         };
         let old_h = self.grid.len();
 
-        let new_w = self.width as usize;
-        let new_h = self.height as usize;
+        let new_w = self.grid_width_dots as usize;
+        let new_h = self.grid_height_dots as usize;
 
         if old_w == 0 || old_h == 0 {
             self.grid = vec![vec![None; new_w]; new_h];
-            self.grain_count = 0;
+            self.grain_count = self.pending_grains.len();
             return;
         }
 
@@ -104,13 +114,8 @@ impl SandEngine {
         );
 
         self.apply_gravity();
-
-        self.grain_count = self
-            .grid
-            .iter()
-            .flat_map(|row| row.iter())
-            .filter(|c| c.is_some())
-            .count();
+        self.flush_pending_grains();
+        self.refresh_logical_grain_count();
     }
 
     fn capacity(&self) -> usize {
@@ -122,24 +127,46 @@ impl SandEngine {
     }
 
     pub fn spawn(&mut self, category_id: CategoryId) {
-        let capacity = self.capacity();
-        if capacity == 0 {
+        self.pending_grains.push_back(category_id);
+        self.grain_count += 1;
+        self.flush_pending_grains();
+    }
+
+    #[cfg(test)]
+    fn pending_grain_count(&self) -> usize {
+        self.pending_grains.len()
+    }
+
+    pub fn physical_grain_count(&self) -> usize {
+        self.grid
+            .iter()
+            .flat_map(|row| row.iter())
+            .filter(|cell| cell.is_some())
+            .count()
+    }
+
+    fn refresh_logical_grain_count(&mut self) {
+        self.grain_count = self.physical_grain_count() + self.pending_grains.len();
+    }
+
+    fn flush_pending_grains(&mut self) {
+        if self.capacity() == 0 {
             return;
         }
 
-        let w = self.grid[0].len();
+        let width = self.grid[0].len();
+        while let Some(category_id) = self.pending_grains.front().copied() {
+            let start = self.random_index(width);
+            let insertion = (0..width)
+                .map(|offset| (start + offset) % width)
+                .find(|&x| self.grid[0][x].is_none());
 
-        let x = self.random_index(w);
+            let Some(x) = insertion else {
+                break;
+            };
 
-        if self.grid[0][x].is_none() {
             self.grid[0][x] = Some(category_id);
-            self.grain_count += 1;
-        } else {
-            let fallback_x = self.random_index(w);
-            if self.grid[0][fallback_x].is_none() {
-                self.grid[0][fallback_x] = Some(category_id);
-                self.grain_count += 1;
-            }
+            self.pending_grains.pop_front();
         }
     }
 
@@ -212,11 +239,12 @@ impl SandEngine {
         if self.frame_count.is_multiple_of(2) {
             self.apply_gravity();
         }
+        self.flush_pending_grains();
     }
 
     pub fn render(&self, categories: &[Category]) -> Vec<Line<'static>> {
-        let cell_w = self.width as usize;
-        let cell_h = (self.height / SAND_ENGINE.dot_height as u16) as usize;
+        let cell_w = self.cell_width as usize;
+        let cell_h = self.cell_height as usize;
         let grid_h = self.grid.len();
         let grid_w = self.grid.first().map_or(0, |row| row.len());
         let mut lines: Vec<Line<'static>> = Vec::with_capacity(cell_h);
@@ -308,22 +336,22 @@ impl SandEngine {
                 *cell = None;
             }
         }
+        self.pending_grains.clear();
         self.grain_count = 0;
     }
 
     pub fn clear_category(&mut self, category_id: CategoryId) {
-        let mut removed = 0usize;
-
         for row in &mut self.grid {
             for cell in row {
                 if *cell == Some(category_id) {
                     *cell = None;
-                    removed += 1;
                 }
             }
         }
 
-        self.grain_count = self.grain_count.saturating_sub(removed);
+        self.pending_grains
+            .retain(|pending| *pending != category_id);
+        self.refresh_logical_grain_count();
     }
 
     pub fn remove_category_grains(&mut self, category_id: CategoryId, count: usize) -> usize {
@@ -349,12 +377,26 @@ impl SandEngine {
             }
         }
 
-        if removed > 0 {
-            self.grain_count = self.grain_count.saturating_sub(removed);
-            self.apply_gravity();
+        let mut pending_removed = 0usize;
+        if removed < count {
+            let mut retained = VecDeque::with_capacity(self.pending_grains.len());
+            while let Some(category) = self.pending_grains.pop_front() {
+                if category == category_id && removed + pending_removed < count {
+                    pending_removed += 1;
+                } else {
+                    retained.push_back(category);
+                }
+            }
+            self.pending_grains = retained;
         }
 
-        removed
+        if removed > 0 {
+            self.apply_gravity();
+        }
+        self.flush_pending_grains();
+        self.refresh_logical_grain_count();
+
+        removed + pending_removed
     }
 
     pub fn snapshot_state(&self) -> SandState {
@@ -382,6 +424,11 @@ impl SandEngine {
             frame_count: self.frame_count,
             sweep_left_to_right: self.sweep_left_to_right,
             rng_state: self.rng_state,
+            pending_grains: self
+                .pending_grains
+                .iter()
+                .map(|category_id| category_id.0)
+                .collect(),
         }
     }
 
@@ -413,6 +460,19 @@ impl SandEngine {
             restored[grain.y][grain.x] = Some(normalized_id);
         }
 
+        self.pending_grains = state
+            .pending_grains
+            .iter()
+            .map(|category_id| {
+                let category_id = CategoryId::new(*category_id);
+                if valid_category_ids.contains(&category_id) {
+                    category_id
+                } else {
+                    none_id
+                }
+            })
+            .collect();
+
         let target_height = self.grid.len();
         let target_width = self.grid.first().map_or(0, |row| row.len());
 
@@ -431,12 +491,7 @@ impl SandEngine {
             )
         };
 
-        self.grain_count = self
-            .grid
-            .iter()
-            .flat_map(|row| row.iter())
-            .filter(|cell| cell.is_some())
-            .count();
+        self.refresh_logical_grain_count();
 
         self.frame_count = state.frame_count;
         self.sweep_left_to_right = state.sweep_left_to_right;
@@ -554,8 +609,8 @@ mod tests {
     #[test]
     fn test_sand_resize_preserves_count_right_edge() {
         let mut se = SandEngine::new(80, 50);
-        let cell_w = se.width as usize / SAND_ENGINE.dot_width;
-        let cell_h = se.height as usize / SAND_ENGINE.dot_height;
+        let cell_w = se.cell_width as usize;
+        let cell_h = se.cell_height as usize;
 
         for cy in 0..cell_h {
             for cx in (cell_w - 10..cell_w).rev() {
@@ -582,8 +637,8 @@ mod tests {
     #[test]
     fn test_sand_resize_preserves_count_expand() {
         let mut se = SandEngine::new(50, 50);
-        let cell_w = se.width as usize / SAND_ENGINE.dot_width;
-        let cell_h = se.height as usize / SAND_ENGINE.dot_height;
+        let cell_w = se.cell_width as usize;
+        let cell_h = se.cell_height as usize;
 
         if cell_h > 2 && cell_w > 2 {
             se.grid[cell_h / 2][cell_w / 2] = Some(CategoryId::new(0));
@@ -816,5 +871,84 @@ mod tests {
 
         assert_ne!(after_first, initial);
         assert_eq!(after_second, initial);
+    }
+}
+
+#[cfg(test)]
+mod conservation_tests {
+    use std::collections::HashSet;
+
+    use crate::{domain::CategoryId, sand::SandEngine};
+
+    #[test]
+    fn spawn_scans_every_ingress_column_before_blocking() {
+        let mut engine = SandEngine::new(4, 2);
+        let ingress_width = engine.grid[0].len();
+        for x in 0..ingress_width - 1 {
+            engine.grid[0][x] = Some(CategoryId::new(1));
+        }
+        engine.grain_count = ingress_width - 1;
+
+        engine.spawn(CategoryId::new(2));
+
+        assert_eq!(engine.grid[0][ingress_width - 1], Some(CategoryId::new(2)));
+        assert_eq!(engine.pending_grain_count(), 0);
+        assert_eq!(engine.grain_count, ingress_width);
+    }
+
+    #[test]
+    fn blocked_spawn_remains_logical_until_ingress_reopens() {
+        let mut engine = SandEngine::new(3, 2);
+        let ingress_width = engine.grid[0].len();
+        for x in 0..ingress_width {
+            engine.grid[0][x] = Some(CategoryId::new(1));
+        }
+        engine.grain_count = ingress_width;
+
+        engine.spawn(CategoryId::new(2));
+        assert_eq!(engine.pending_grain_count(), 1);
+        assert_eq!(engine.grain_count, ingress_width + 1);
+
+        let displaced = engine.grid[0][0].take().expect("occupied ingress");
+        engine.grid[1][0] = Some(displaced);
+        engine.update();
+
+        assert_eq!(engine.pending_grain_count(), 0);
+        assert_eq!(engine.physical_grain_count(), ingress_width + 1);
+        assert_eq!(engine.grain_count, ingress_width + 1);
+    }
+
+    #[test]
+    fn render_uses_terminal_cell_dimensions_exactly() {
+        let engine = SandEngine::new(3, 2);
+        let lines = engine.render(&[]);
+
+        assert_eq!(lines.len(), 2);
+        assert!(lines.iter().all(|line| line.spans.len() == 3));
+        assert_eq!(engine.grid_width_dots as usize, 3 * 2);
+        assert_eq!(engine.grid_height_dots as usize, 2 * 4);
+    }
+
+    #[test]
+    fn pending_grains_round_trip_with_category_identity() {
+        let mut engine = SandEngine::new(2, 1);
+        for cell in &mut engine.grid[0] {
+            *cell = Some(CategoryId::new(1));
+        }
+        engine.grain_count = engine.grid[0].len();
+        engine.spawn(CategoryId::new(2));
+
+        let state = engine.snapshot_state();
+        assert_eq!(state.pending_grains, vec![2]);
+
+        let mut restored = SandEngine::new(2, 1);
+        restored.restore_state(
+            &state,
+            &HashSet::from([CategoryId::new(0), CategoryId::new(1), CategoryId::new(2)]),
+        );
+
+        assert_eq!(restored.pending_grain_count(), 1);
+        assert_eq!(restored.grain_count, state.grains.len() + 1);
+        assert_eq!(restored.snapshot_state().pending_grains, vec![2]);
     }
 }

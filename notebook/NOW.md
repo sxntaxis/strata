@@ -5,17 +5,17 @@ state: active
 created: 2026-08-01
 updated: 2026-08-02
 authority: working
-summary: Persistence, temporal, domain, and report/export authority are complete; sediment conservation now leads the frontier.
-next: Implement SEDIMENT-001 for issues #6, #7, #16, #18, and #26 without weakening chronological ledger truth.
+summary: SEDIMENT-001A is complete; lossless logical mass and explicit dimension units are certified.
+next: Implement SEDIMENT-001B for issue #7: viewport-independent canonical sediment and non-destructive resize.
 ---
 
 # NOW — Strata
 
 ## Current phase
 
-The SQLite migration program, AUTHORITY-001, TEMPORAL-001, TEMPORAL-002, DOMAIN-001, and REPORT-001 are complete. Strata now has durable persistence, explicit clock and boundary semantics, preserved project/category identity, and truthful deterministic report/export projections.
+The SQLite migration program, AUTHORITY-001, TEMPORAL-001, TEMPORAL-002, DOMAIN-001, REPORT-001, and SEDIMENT-001A are complete. Strata now has durable persistence, explicit clock and boundary semantics, preserved project/category identity, truthful deterministic report/export projections, and lossless sediment ingress with explicit geometry units.
 
-The project is moving from **projection correctness** to **sediment conservation**.
+The project is implementing **sediment conservation**.
 
 ## Accepted product baseline
 
@@ -29,6 +29,8 @@ The project is moving from **projection correctness** to **sediment conservation
 - Sediment is product function and artwork, not disposable decoration.
 - One grain currently represents one elapsed second.
 - Braille-cell color mixing is intentional.
+- Every due grain exists exactly once as placed or pending logical mass.
+- Terminal-cell dimensions and Braille-dot grid dimensions are separate units.
 
 ## Verified technical baseline
 
@@ -42,7 +44,11 @@ The project is moving from **projection correctness** to **sediment conservation
 - JSON schema version 2 carries stable UIDs, provisional state, and UTC endpoints.
 - ICS uses authoritative UTC chronology, stable UIDs, RFC 5545-safe text serialization, and independent parser certification.
 - Idle is excluded from ordinary active-time totals and ICS work events while remaining part of sediment history.
-- Persistence, temporal, and projection failures remain fail-closed and recoverable.
+- Sediment rendering emits one Braille character per drawable terminal cell.
+- Randomized ingress scans every physical column before declaring blockage.
+- Fully blocked grains remain category-preserving pending mass and survive persistence/restore.
+- `grain_count` accounts for placed plus pending logical mass.
+- Persistence, temporal, projection, and sediment-state failures remain fail-closed and recoverable.
 
 ## Completed post-migration units
 
@@ -51,22 +57,26 @@ The project is moving from **projection correctness** to **sediment conservation
 - **TEMPORAL-002** — issues #4, #23, #27: overlap allocation, removal of false sunrise semantics, and zero-transition policy.
 - **DOMAIN-001** — issues #2, #12: persisted project identity, explicit category requirement, and completed idle vocabulary migration.
 - **REPORT-001** — issues #1, #3, #14, #17, #28: truthful ranges/help, provisional active projection, valid ICS, and deterministic ordering.
+- **SEDIMENT-001A** — issues #16, #26: dimension-unit truth, exact Braille output width, complete ingress scanning, and durable pending logical mass.
 
 Complete profile isolation remains open under issue #15. Project CRUD, TUI project selection, project-grouped reporting, and a TUI custom-range editor remain future work.
 
 ## Active sequence
 
-1. **SEDIMENT-001** — issues #6, #7, #16, #18, #26: conserved logical sediment independent of viewport and mutable previews.
-2. **INTERACTION-001** — issues #19, #20, #24: explicit edit modes, terminal lifecycle guard, truthful keybinding policy.
-3. Reconcile remaining partially satisfied issues #5, #10, #13 and later domain/profile work.
+1. **SEDIMENT-001B** — issue #7: canonical logical sediment independent of viewport and non-destructive resize.
+2. **SEDIMENT-001C** — issue #6: bounded, retry-safe detached recovery.
+3. **SEDIMENT-001D** — issue #18: explicit immutable historical snapshot kinds and provenance.
+4. **INTERACTION-001** — issues #19, #20, #24: explicit edit modes, terminal lifecycle guard, truthful keybinding policy.
+5. Reconcile remaining partially satisfied issues #5, #10, #13 and later domain/profile work.
 
 ## Current risks
 
-- Sediment rendering, resize, catch-up, and snapshots still lack one conservation model.
-- The relationship between logical sediment mass, viewport capacity, and historical topology is not yet explicit.
+- The live viewport still owns the current physical grid dimensions and resize still repacks/mutates canonical topology.
+- Detached catch-up still replays simulation work rather than applying bounded logical mass.
+- Historical snapshots do not yet have explicit kinds and immutable provenance.
 - Interaction edit modes and terminal cleanup remain incompletely enforced.
 - Complete profile switching/isolation remains open.
 
 ## Next
 
-Implement **SEDIMENT-001**. Reconcile issues #6, #7, #16, #18, and #26 around one conserved logical sediment model. The visual projection may adapt to terminal geometry, but it must not silently create, discard, or reclassify accountable elapsed mass.
+Implement **SEDIMENT-001B** for issue #7. Separate canonical logical sediment from the current viewport, make shrink non-destructive, preserve hidden topology for later expansion, and remove resize-triggered canonical gravity/repacking without weakening the placed/pending mass authority established by SEDIMENT-001A.

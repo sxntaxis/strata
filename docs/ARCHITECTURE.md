@@ -53,7 +53,6 @@ AUTHORITY-001 adds a shared startup gate before either interface resolves or ope
 - `--ignore-config` is the only deliberate built-in-default bypass;
 - TUI hot-reload failures retain the last valid settings rather than applying a partial configuration.
 
-
 TEMPORAL-001 establishes one explicit temporal authority:
 
 - live elapsed duration is owned by the process monotonic clock;
@@ -68,7 +67,6 @@ TEMPORAL-001 establishes one explicit temporal authority:
 
 The detailed contract and failure matrix are `docs/TEMPORAL_AUTHORITY.md`.
 
-
 TEMPORAL-002 completes the remaining interval semantics:
 
 - one canonical session identity owns chronology, editing, deletion, and provenance;
@@ -81,7 +79,6 @@ TEMPORAL-002 completes the remaining interval semantics:
 
 The SQLite closure evidence is `docs/SQLITE_MIGRATION_CLOSURE_AUDIT.md`.
 
-
 DOMAIN-001 establishes session-classification authority:
 
 - project identity and category identity are independent canonical session fields;
@@ -92,7 +89,6 @@ DOMAIN-001 establishes session-classification authority:
 - legacy 8- and 12-column session CSV remains compatible while new 13-column rows preserve project.
 
 The detailed contract is `docs/DOMAIN_AUTHORITY.md`.
-
 
 REPORT-001 establishes projection authority:
 
@@ -105,6 +101,18 @@ REPORT-001 establishes projection authority:
 - idle remains excluded from ordinary reports and ICS work events.
 
 The detailed contract is `docs/REPORT_AUTHORITY.md`.
+
+SEDIMENT-001A establishes the first sediment-conservation primitives:
+
+- terminal-cell dimensions and physical Braille-dot grid dimensions are explicit independent units;
+- rendering emits exactly one Braille character per drawable terminal cell;
+- each due grain is logical mass before placement and cannot disappear because selected ingress columns are occupied;
+- randomized ingress scans every column before declaring complete physical blockage;
+- blocked grains remain category-preserving pending mass and are retried by normal simulation;
+- placed plus pending mass is persisted through `SandState`, SQLite, detached checkpoints, catch-up projections, report previews, and legacy JSON compatibility;
+- clearing and category removal apply to both placed and pending forms.
+
+Viewport-independent topology, bounded detached recovery, and immutable snapshot kinds remain SEDIMENT-001B through 001D. The evolving accepted contract is `docs/SEDIMENT_AUTHORITY.md`.
 
 ## Truth boundaries
 
@@ -126,9 +134,9 @@ TUI and CLI translate user intent and present state. Neither may maintain an ind
 
 ## Current architectural frontier
 
-Persistence, startup configuration, clock authority, interval boundaries, session classification, and report/export projection correctness are no longer the primary risks. The next programs are:
+Persistence, startup configuration, clock authority, interval boundaries, session classification, report/export projection correctness, sediment dimension units, and lossless ingress are no longer the primary risks. The next programs are:
 
-1. establish a conserved sediment model independent of viewport and mutable previews;
+1. complete viewport-independent sediment topology, bounded recovery, and snapshot identity;
 2. complete interaction-mode and terminal-lifecycle contracts.
 
 Complete profile isolation and deliberate runtime profile switching remain separate work under issue #15.
