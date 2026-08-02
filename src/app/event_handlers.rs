@@ -527,7 +527,12 @@ impl App {
                             self.selected_index,
                             self.modal_description.clone(),
                         ) {
+                            let description_is_active = self.time_tracker.active_category_index()
+                                == Some(self.selected_index);
                             self.persist_categories();
+                            if description_is_active {
+                                self.refresh_active_runtime_checkpoint();
+                            }
                             if self.has_persistence_recovery() {
                                 self.render_needed = true;
                                 return true;

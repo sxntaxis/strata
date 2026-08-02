@@ -34,7 +34,6 @@ impl App {
                 self.record_storage_result::<()>(Err(error));
             }
         }
-        self.refresh_active_runtime_checkpoint();
     }
 
     pub(super) fn persist_sessions(&mut self) {
