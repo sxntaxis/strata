@@ -5,7 +5,7 @@ Strata is a Rust time tracker with a terminal UI and a small CLI.
 ## Goals
 
 - Keep behavior stable and predictable.
-- Preserve billable history through explicit, transactional persistence.
+- Preserve classified history and session identity through explicit, transactional persistence.
 - Keep domain, repository, and UI concerns separated.
 
 ## Build and run
@@ -19,6 +19,29 @@ Run CLI commands with arguments:
 ```bash
 cargo run -- report --today
 ```
+
+### CLI session identity
+
+A CLI session has two independent identity axes:
+
+- **project** — the subject, client, effort, or context supplied as the positional argument;
+- **category/layer** — the activity classification supplied with `--category`.
+
+The category is required. Strata never interprets an omitted category as idle work:
+
+```bash
+strata start client-a --category Work --desc "Implementation"
+strata stop
+strata report --today
+```
+
+Use the baseline state deliberately when that is the intended classification:
+
+```bash
+strata start break --category idle
+```
+
+Idle remains part of continuous sediment history but is omitted from ordinary active-time totals. Historical `none` and `drift` inputs remain compatibility aliases; new UI and documentation use `idle`.
 
 ## Architecture
 
@@ -150,6 +173,8 @@ strata sqlite-import --bundle ./strata-bundle --database ./restored.sqlite3
 Import validates manifest fingerprints, file sizes, schemas, identities, references, totals, and repository-snapshot parity. Existing targets are not overwritten. Use `--json` for a machine-readable validation or import report.
 
 The general `strata export --format ...` command remains for JSON and ICS session exports; full-fidelity CSV interchange uses `sqlite-export` and `sqlite-import`.
+
+Completed sessions preserve project identity independently from category identity. JSON includes the persisted project and ICS uses it in the event summary. Under legacy authority, new `time_log.csv` rows use the project-bearing 13-column schema; the prior 8-column and 12-column schemas remain readable and importable with an empty project rather than an invented value.
 
 ## Database maintenance
 

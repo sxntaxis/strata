@@ -8,7 +8,7 @@ Detailed rationale and unresolved implications live in `notebook/decisions/DECIS
 | ID | Decision | State |
 |---|---|---|
 | STRATA-D001 | Strata combines a continuous temporal ledger with an active timer; these are complementary rather than competing models. | accepted |
-| STRATA-D002 | Rename the baseline `drift` concept to `idle`. | accepted; runtime vocabulary pending |
+| STRATA-D002 | Rename the baseline `drift` concept to `idle`; historical names remain compatibility aliases only. | implemented and certified |
 | STRATA-D003 | Idle time continues producing sediment but is omitted from ordinary active-time accounting. | accepted |
 | STRATA-D004 | Strata is general-purpose across study, habits, projects, work, leisure, and other user-defined activities. | accepted |
 | STRATA-D005 | Chronological ledger truth and sedimentary visual truth are both historically meaningful, with different precision obligations. | accepted |
@@ -24,6 +24,8 @@ Detailed rationale and unresolved implications live in `notebook/decisions/DECIS
 | STRATA-D015 | A logical session remains one canonical ledger identity; reports allocate its duration through exact operational-day overlap slices using policy captured with the session. | implemented and certified |
 | STRATA-D016 | Fixed-clock policy is the only supported operational-day mode; the former sunrise label is removed and migrated visibly because no solar calculation existed. | implemented and certified |
 | STRATA-D017 | Zero-whole-second finishes and switches are transactional transition events with receipts, not completed work rows or sediment. | implemented and certified |
+| STRATA-D018 | Project identity and category identity are independent canonical session axes; absent project remains empty rather than invented. | implemented and certified |
+| STRATA-D019 | CLI starts require explicit category classification; idle is explicitly selectable and omission never silently becomes idle. | implemented and certified |
 
 ## Explicitly unresolved
 
