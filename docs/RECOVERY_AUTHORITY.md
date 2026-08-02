@@ -1,7 +1,7 @@
 # Recovery authority
 
 Status: partially implemented and certified
-Current completed unit: RECONCILIATION-001B1
+Current completed unit: RECONCILIATION-001B2A
 Issue in progress: #10
 Last reviewed: 2026-08-02
 
@@ -50,7 +50,7 @@ The application publishes fresh runtime checkpoint evidence immediately after:
 
 The application does not refresh checkpoint evidence after unrelated category color, ordering, karma, archive, restore, or inactive-description changes. Checkpoint publication follows semantic recovery changes rather than every persistence call.
 
-If current-generation checkpoint publication fails after an active transition, Strata enters visible persistence recovery before accepting ordinary input. It does not claim the transition is fully recoverable merely because the active-session transaction succeeded.
+If current-generation checkpoint publication fails after an active transition, Strata enters visible persistence recovery before accepting ordinary input. It does not claim the transition is fully recoverable merely because one authority write succeeded.
 
 ## Startup identity validation
 
@@ -61,6 +61,41 @@ Checkpoint recovery validates evidence identity before applying sediment or acti
 - malformed checkpoint JSON is quarantined;
 - repository and database-integrity checks may reject impossible states even earlier;
 - recovery cannot install stale identity in memory and discover the mismatch only during commit.
+
+## Legacy switch transition receipts
+
+Legacy switch transitions cross separate checkpoint, session CSV, and category-catalog files. They use a prepared receipt rather than pretending those files form one atomic transaction.
+
+Publication order is:
+
+1. stage the switch in memory;
+2. publish a schema-3 resulting checkpoint carrying one deterministic switch receipt;
+3. publish completed session history;
+4. publish category-description state;
+5. replace the checkpoint without the receipt.
+
+If step 2 fails, the in-memory switch rolls back. After step 2 succeeds, the receipt remains the replay authority until every later publication succeeds.
+
+The receipt binds:
+
+- prior category and UTC active start;
+- switch UTC timestamp;
+- optional completed session identity and full temporal payload;
+- resulting category, description, and UTC start;
+- a deterministic operation ID derived from those boundaries.
+
+Startup validates the receipt and resulting checkpoint generation before publication replay. It appends a missing completed row, exact-matches an existing row, and rejects conflicting or out-of-order history. It republishes category descriptions and clears the receipt only after session and catalog authority converge.
+
+Whole-second semantics are explicit:
+
+- one or more whole elapsed seconds require exactly one completed row;
+- a zero-whole-second switch requires no completed row;
+- subsecond monotonic remainder means the completed row starts at `switch UTC - whole elapsed seconds`, which may differ subsecond-wise from the original wall start;
+- UTC endpoints, elapsed duration, civil labels, operational-day policy, and operational-day key must all agree.
+
+Legacy session parsing rejects reserved ID `0`, malformed or duplicate IDs, malformed elapsed values, unknown categories, and conflicting receipt history rather than skipping or coercing them.
+
+Kill-point tests certify convergence from receipt-only, receipt-plus-session, and receipt-plus-session-plus-catalog states. A catalog failure after session publication leaves the receipt durable for retry.
 
 ## Bounded sediment recovery
 
@@ -74,7 +109,7 @@ The bounded sediment rules in `docs/SEDIMENT_AUTHORITY.md` remain authoritative:
 - publish recovered authority atomically where the storage authority supports it;
 - retain or replace evidence according to explicit status.
 
-Active/checkpoint generation coherence constrains which evidence may enter that process.
+Active/checkpoint generation coherence and transition receipts constrain which evidence may enter that process.
 
 ## Runtime and terminal failure
 
@@ -84,24 +119,22 @@ Panic restoration returns the host terminal to normal state but does not claim a
 
 Mandatory Ctrl-C during visible persistence recovery exports current recovery evidence before requesting exit.
 
-## Legacy-file authority
+## Remaining legacy transitions
 
-Legacy authority now replaces its runtime checkpoint immediately after successful switch, reset, or active-description persistence. This eliminates the known autosave-length stale-evidence interval.
+Legacy reset and finish do not yet have the switch receipt contract. Immediate checkpoint refresh reduces stale exposure but does not certify every kill point for those operations.
 
-Legacy sessions and checkpoints remain separate atomic files, however. Immediate replacement is not equivalent to one atomic cross-file transition. A crash between publications can still leave a completed session file and a prior checkpoint that describe different transition stages.
-
-Until stable transition receipts exist:
+Until B2B completes them:
 
 - issue #10 remains open;
-- legacy multi-file transition atomicity is not claimed;
-- recovery must fail visibly rather than silently inventing a cutoff;
-- B1 cannot be used as evidence that every kill point is idempotently recoverable.
+- reset/finish multi-file atomicity is not claimed;
+- recovery must retain evidence and fail visibly rather than inventing a completed transition;
+- switch certification cannot be generalized to other transition kinds.
 
 ## Initial active start
 
 SQLite active-session start and first checkpoint publication remain separate operations. The active row is authoritative chronological state, but a process death before the first checkpoint can leave no sediment/runtime evidence for the new active generation.
 
-This window remains part of RECONCILIATION-001B2 or a later bounded unit. Full issue #10 closure requires an atomic start-plus-evidence transaction or an explicit certified recovery policy for active rows without checkpoints.
+This window remains part of a later bounded issue #10 unit. Full closure requires an atomic start-plus-evidence transaction or an explicit certified recovery policy for active rows without checkpoints.
 
 ## User-visible recovery cutoff
 
@@ -114,15 +147,15 @@ Current checkpoint recovery reconstructs from persisted checkpoint evidence towa
 - whether the interval is exact, provisional, or reconstructed;
 - the deterministic cutoff policy applied.
 
-This presentation and policy remain unresolved for B2. Recovery authority must not imply that elapsed time after the last durable evidence is exact without showing its reconstruction basis.
+This presentation and policy remain unresolved. Recovery authority must not imply that elapsed time after the last durable evidence is exact without showing its reconstruction basis.
 
 ## Certification
 
-RECONCILIATION-001B1 passes:
+RECONCILIATION-001B1 and RECONCILIATION-001B2A pass:
 
 - formatting;
 - strict Clippy with all targets/features and warnings denied;
-- 190 library tests;
+- 199 library tests;
 - 9 CLI lifecycle tests;
 - 6 configuration-authority tests;
 - 1 report-help regression test;
@@ -130,14 +163,14 @@ RECONCILIATION-001B1 passes:
 - 2 temporal-authority tests;
 - 3 terminal-lifecycle PTY process tests.
 
-Focused proofs cover transactional checkpoint retirement on switch/reset/finish, protected recovery evidence, mismatched checkpoint conflict, startup quarantine, idempotent receipts, immediate semantic-edge refresh, and absence of unrelated metadata checkpoint writes.
+Focused proofs cover transactional SQLite checkpoint retirement, protected recovery evidence, startup identity quarantine, immediate semantic-edge refresh, prepared legacy switch rollback, exact/idempotent session reconciliation, strict receipt payload validation, subsecond whole-second boundaries, all persisted switch kill points, and receipt retention after catalog-publication failure.
 
 ## Unresolved boundary
 
-Full crash-recovery authority requires:
+Full crash-recovery authority still requires:
 
-- stable legacy transition receipts and idempotent replay;
-- kill-point certification between every legacy publication;
+- stable legacy reset and finish receipts with kill-point replay certification;
 - initial active-start/checkpoint coherence;
+- exact sediment classification at transition boundaries;
 - explicit user-visible recovery cutoff and uncertainty semantics;
 - any future safe queued-mutation replay based on stable cross-authority receipts.
