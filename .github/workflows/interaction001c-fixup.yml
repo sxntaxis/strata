@@ -23,7 +23,9 @@ jobs:
         with:
           components: rustfmt, clippy
       - name: Apply semantic fixup
-        run: python tools/interaction001c-fixup.py
+        run: |
+          python tools/interaction001c-fixup.py
+          sed -i 's/let mut disabled_actions =/let disabled_actions =/' src/keybindings.rs
       - name: Format
         run: cargo fmt --all
       - name: Check formatting
