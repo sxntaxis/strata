@@ -19,66 +19,20 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Apply semantic and receipt pass
-        run: python tools/reconciliation001b2c-semantic.py
-      - name: Complete structural fixes
+      - name: Apply B2C semantic patch
         run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          app_path = Path('src/app.rs')
-          app = app_path.read_text()
-          app = app.replace(
-              'use chrono::{DateTime, Duration as ChronoDuration, SecondsFormat, Utc};',
-              'use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, SecondsFormat, Utc};',
-              1,
-          )
-          app = app.replace(
-              '        Category, CategoryId, DRIFT_CATEGORY_DISPLAY_NAME, DRIFT_CATEGORY_ID, FirstDayOfWeek,\n        ReportPeriod, RuntimeSettings, TimeTracker, civil_time_for_utc, is_drift_category_id,',
-              '        Category, CategoryId, DRIFT_CATEGORY_DISPLAY_NAME, DRIFT_CATEGORY_ID, FirstDayOfWeek,\n        OperationalDayPolicy, ReportPeriod, RuntimeSettings, TimeTracker, civil_time_for_utc,\n        is_drift_category_id,',
-              1,
-          )
-          app = app.replace(
-              '                interval.started_at_utc,\n                interval.ended_at_utc,',
-              '                self.session\n                    .active_session_started_at_utc\n                    .ok_or_else(|| "active session is missing its UTC start timestamp".to_string())?,\n                interval.ended_at_utc,',
-              1,
-          )
-          old = '''        } else if let Some(database_path) = self.sqlite_database_path.clone() {
-              checkpoint.clear_all = None;
-              sqlite::replace_tui_recovering_checkpoint(&database_path, checkpoint)?;
-          }'''
-          new = '''        } else if let Some(database_path) = self.sqlite_database_path.clone() {
-              let expected_stable_id = self
-                  .session
-                  .active_session_stable_id
-                  .as_deref()
-                  .ok_or_else(|| "SQLite clear-all recovery has no active stable identity".to_string())?;
-              checkpoint.clear_all = None;
-              sqlite::replace_tui_recovering_checkpoint(
-                  &database_path,
-                  expected_stable_id,
-                  checkpoint,
-              )?;
-          }'''
-          if old not in app:
-              raise SystemExit('SQLite clear receipt replacement anchor missing')
-          app_path.write_text(app.replace(old, new, 1))
-
-          fault_path = Path('src/sqlite/fault_certification.rs')
-          fault = fault_path.read_text()
-          marker = 'tui_runtime::delete_drift_sessions_for_day(path, "2026-08-01")'
-          index = fault.find(marker)
-          if index == -1:
-              raise SystemExit('obsolete drift fault call missing')
-          start = fault.rfind('        PersistenceFaultCase {', 0, index)
-          end = fault.find('        PersistenceFaultCase {', index)
-          if start == -1 or end == -1:
-              raise SystemExit('could not bound obsolete drift fault case')
-          fault_path.write_text(fault[:start] + fault[end:])
-          PY
+          python tools/reconciliation001b2c-semantic.py
+          python tools/reconciliation001b2c-app-fix.py
+          python tools/reconciliation001b2c-sqlite.py
+          python tools/reconciliation001b2c-tests.py
+          python tools/reconciliation001b2c-cleanup.py
       - name: Remove temporary machinery
         run: |
           rm -f tools/reconciliation001b2c-semantic.py
+          rm -f tools/reconciliation001b2c-app-fix.py
+          rm -f tools/reconciliation001b2c-sqlite.py
+          rm -f tools/reconciliation001b2c-tests.py
+          rm -f tools/reconciliation001b2c-cleanup.py
           rm -f .github/workflows/reconciliation001b2c-semantic.yml
           rm -f .github/workflows/reconciliation001b2c-semantic-retry.yml
       - name: Format
@@ -89,10 +43,10 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Test
         run: cargo test --all-targets --all-features
-      - name: Commit clean semantic pass
+      - name: Commit clean implementation
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "fix(reconciliation-001b2c): make clear-all non-destructive and receipt-governed"
+          git commit -m "fix(reconciliation-001b2c): make clear-all receipt governed"
           git push origin HEAD:reconciliation/001b2c-clear-all-custody
