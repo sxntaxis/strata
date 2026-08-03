@@ -12,7 +12,7 @@ root = root_path.read_text()
 root = replace_once(
     root,
     "    archive_category as archive_tui_category, clear_checkpoint as clear_tui_checkpoint,",
-    "    archive_category as archive_tui_category, clear_all_state as clear_tui_state,\n    clear_checkpoint as clear_tui_checkpoint,",
+    "    archive_category as archive_tui_category, clear_all_state as clear_tui_state,\n    ClearAllStateRequest as TuiClearAllStateRequest,\n    clear_checkpoint as clear_tui_checkpoint,",
     "SQLite clear-all export",
 )
 root_path.write_text(root)

@@ -10,17 +10,31 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
 tui_path = Path("src/sqlite/tui_runtime.rs")
 tui = tui_path.read_text()
 insert_anchor = "pub(crate) fn load_daily_snapshot(\n"
-clear_fn = r'''pub(crate) fn clear_all_state<T: Serialize>(
+clear_fn = r'''pub(crate) struct ClearAllStateRequest<'a, T> {
+    pub expected_active_stable_id: &'a str,
+    pub resulting_active_stable_id: &'a str,
+    pub resulting_started_at_utc: DateTime<Utc>,
+    pub state: &'a SandState,
+    pub daily_updates: &'a [(String, Option<SedimentSnapshot>)],
+    pub detached_at_utc: DateTime<Utc>,
+    pub simulation_time_utc: DateTime<Utc>,
+    pub checkpoint: &'a T,
+}
+
+pub(crate) fn clear_all_state<T: Serialize>(
     database_path: &Path,
-    expected_active_stable_id: &str,
-    resulting_active_stable_id: &str,
-    resulting_started_at_utc: DateTime<Utc>,
-    state: &SandState,
-    daily_updates: &[(String, Option<SedimentSnapshot>)],
-    detached_at_utc: DateTime<Utc>,
-    simulation_time_utc: DateTime<Utc>,
-    checkpoint: &T,
+    request: ClearAllStateRequest<'_, T>,
 ) -> Result<(), String> {
+    let ClearAllStateRequest {
+        expected_active_stable_id,
+        resulting_active_stable_id,
+        resulting_started_at_utc,
+        state,
+        daily_updates,
+        detached_at_utc,
+        simulation_time_utc,
+        checkpoint,
+    } = request;
     runtime_coordination::maybe_inject_test_fault("clear-all", "before-write")
         .map_err(|error| error.to_string())?;
     if expected_active_stable_id.trim().is_empty() || resulting_active_stable_id.trim().is_empty() {

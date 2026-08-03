@@ -101,16 +101,20 @@ mod clear_all_transaction_tests {
         let path = database_path("commit");
         seed(&path);
         let empty = state(false);
+        let checkpoint = serde_json::json!({"clear_all": {"operation_id": "clear"}});
+        let updates = [("2026-08-01".to_string(), None)];
         clear_all_state(
             &path,
-            "idle-a",
-            "idle-b",
-            Utc::now(),
-            &empty,
-            &[("2026-08-01".to_string(), None)],
-            Utc::now(),
-            Utc::now(),
-            &serde_json::json!({"clear_all": {"operation_id": "clear"}}),
+            ClearAllStateRequest {
+                expected_active_stable_id: "idle-a",
+                resulting_active_stable_id: "idle-b",
+                resulting_started_at_utc: Utc::now(),
+                state: &empty,
+                daily_updates: &updates,
+                detached_at_utc: Utc::now(),
+                simulation_time_utc: Utc::now(),
+                checkpoint: &checkpoint,
+            },
         )
         .unwrap();
         let repository = open_cli_repository(&path).unwrap();
@@ -142,16 +146,21 @@ mod clear_all_transaction_tests {
             "commit",
             "io",
             || {
+                let empty = state(false);
+                let updates = [("2026-08-01".to_string(), None)];
+                let checkpoint = serde_json::json!({"clear_all": true});
                 clear_all_state(
                     &path,
-                    "idle-a",
-                    "idle-b",
-                    Utc::now(),
-                    &state(false),
-                    &[("2026-08-01".to_string(), None)],
-                    Utc::now(),
-                    Utc::now(),
-                    &serde_json::json!({"clear_all": true}),
+                    ClearAllStateRequest {
+                        expected_active_stable_id: "idle-a",
+                        resulting_active_stable_id: "idle-b",
+                        resulting_started_at_utc: Utc::now(),
+                        state: &empty,
+                        daily_updates: &updates,
+                        detached_at_utc: Utc::now(),
+                        simulation_time_utc: Utc::now(),
+                        checkpoint: &checkpoint,
+                    },
                 )
             },
         );

@@ -88,14 +88,16 @@ new_sqlite_implementation = r'''        if let Some(database_path) = self.sqlite
                 .collect::<Vec<_>>();
             let result = sqlite::clear_tui_state(
                 &database_path,
-                &expected_stable_id,
-                &resulting_stable_id,
-                receipt.resulting_active.started_at_utc,
-                &checkpoint.sand_state,
-                &daily_updates,
-                checkpoint.detached_at_utc,
-                checkpoint.simulation_time_utc,
-                &checkpoint,
+                sqlite::TuiClearAllStateRequest {
+                    expected_active_stable_id: &expected_stable_id,
+                    resulting_active_stable_id: &resulting_stable_id,
+                    resulting_started_at_utc: receipt.resulting_active.started_at_utc,
+                    state: &checkpoint.sand_state,
+                    daily_updates: &daily_updates,
+                    detached_at_utc: checkpoint.detached_at_utc,
+                    simulation_time_utc: checkpoint.simulation_time_utc,
+                    checkpoint: &checkpoint,
+                },
             );
             if self
                 .record_storage_result_for(
@@ -158,4 +160,72 @@ new_recovery_call = r'''        } else if let Some(database_path) = self.sqlite_
         }
 '''
 app = replace_once(app, old_recovery_call, new_recovery_call, "SQLite receipt replay")
+# Remove the obsolete standalone reset helper; clear-all now owns its reset atomically.
+reset_start = app.find("    fn reset_active_session_at(")
+if reset_start != -1:
+    reset_end = app.find("    fn open_modal(", reset_start)
+    if reset_end == -1:
+        raise SystemExit("reset helper end anchor missing")
+    app = app[:reset_start] + app[reset_end:]
+
+# Keep strict Clippy clean without suppressions.
+old_idle_reset = """        if idle_reset {
+            if let Err(error) = self.begin_transition_session(applied_at_utc, clock_mode) {
+                self.sand_engine.restore_state(
+                    &previous_sand,
+                    &self
+                        .time_tracker
+                        .categories_for_storage()
+                        .into_iter()
+                        .chain(self.archived_categories.iter().cloned())
+                        .map(|category| category.id)
+                        .collect(),
+                );
+                self.record_storage_result_for::<()>(
+                    PersistenceOperation::ActiveReset,
+                    RecoveryAction::ReloadAuthority,
+                    Err(error),
+                );
+                return;
+            }
+        }
+"""
+new_idle_reset = """        if idle_reset
+            && let Err(error) = self.begin_transition_session(applied_at_utc, clock_mode)
+        {
+            self.sand_engine.restore_state(
+                &previous_sand,
+                &self
+                    .time_tracker
+                    .categories_for_storage()
+                    .into_iter()
+                    .chain(self.archived_categories.iter().cloned())
+                    .map(|category| category.id)
+                    .collect(),
+            );
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::ActiveReset,
+                RecoveryAction::ReloadAuthority,
+                Err(error),
+            );
+            return;
+        }
+"""
+app = replace_once(app, old_idle_reset, new_idle_reset, "idle reset collapse")
 app_path.write_text(app)
+
+recovery_path = Path("src/app/persistence_recovery.rs")
+recovery = recovery_path.read_text()
+recovery = replace_once(
+    recovery,
+    "    DriftSessionDelete,\n",
+    "",
+    "obsolete idle-delete operation",
+)
+recovery = replace_once(
+    recovery,
+    '            Self::DriftSessionDelete => "idle-session deletion",\n',
+    "",
+    "obsolete idle-delete label",
+)
+recovery_path.write_text(recovery)
