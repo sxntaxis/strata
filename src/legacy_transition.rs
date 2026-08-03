@@ -2,7 +2,7 @@ use chrono::{DateTime, Duration as ChronoDuration, FixedOffset, NaiveDate, Naive
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    domain::{CategoryId, OperationalDayPolicy, Session},
+    domain::{CategoryId, DRIFT_CATEGORY_ID, OperationalDayPolicy, Session},
     temporal,
 };
 
@@ -415,6 +415,94 @@ impl LegacyFinishReceipt {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct ClearAllReceipt {
+    pub version: u8,
+    pub operation_id: String,
+    pub applied_at_utc: DateTime<Utc>,
+    pub previous_active: LegacyActiveReceipt,
+    pub resulting_active: LegacyActiveReceipt,
+    pub idle_reset: bool,
+    pub affected_operational_days: Vec<String>,
+}
+
+impl ClearAllReceipt {
+    pub(crate) const VERSION: u8 = 1;
+
+    pub(crate) fn validate_boundaries(&self) -> Result<(), String> {
+        if self.version != Self::VERSION {
+            return Err(format!(
+                "unsupported clear-all receipt version {}",
+                self.version
+            ));
+        }
+        if self.previous_active.category_id != self.resulting_active.category_id
+            || self.previous_active.description != self.resulting_active.description
+        {
+            return Err(format!(
+                "clear-all receipt {} changes active classification",
+                self.operation_id
+            ));
+        }
+        if self.applied_at_utc < self.previous_active.started_at_utc {
+            return Err(format!(
+                "clear-all receipt {} predates its active generation",
+                self.operation_id
+            ));
+        }
+        if self.idle_reset {
+            if self.previous_active.category_id != DRIFT_CATEGORY_ID.0 {
+                return Err(format!(
+                    "clear-all receipt {} resets a non-idle active generation",
+                    self.operation_id
+                ));
+            }
+            if self.resulting_active.started_at_utc != self.applied_at_utc {
+                return Err(format!(
+                    "clear-all receipt {} has inconsistent idle reset time",
+                    self.operation_id
+                ));
+            }
+        } else {
+            if self.previous_active.category_id == DRIFT_CATEGORY_ID.0 {
+                return Err(format!(
+                    "clear-all receipt {} leaves an idle generation unreset",
+                    self.operation_id
+                ));
+            }
+            if self.resulting_active.started_at_utc != self.previous_active.started_at_utc {
+                return Err(format!(
+                    "clear-all receipt {} changes a non-idle active start",
+                    self.operation_id
+                ));
+            }
+        }
+        if self.affected_operational_days.is_empty() {
+            return Err(format!(
+                "clear-all receipt {} has no affected operational day",
+                self.operation_id
+            ));
+        }
+        let mut previous = None;
+        for value in &self.affected_operational_days {
+            let day = NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|error| {
+                format!(
+                    "clear-all receipt {} has invalid operational day '{}': {error}",
+                    self.operation_id, value
+                )
+            })?;
+            if previous.is_some_and(|prior| prior >= day) {
+                return Err(format!(
+                    "clear-all receipt {} operational days are not unique and sorted",
+                    self.operation_id
+                ));
+            }
+            previous = Some(day);
+        }
+        Ok(())
+    }
+}
+
 pub(crate) fn reconcile_completed_session(
     sessions: &mut Vec<Session>,
     next_session_id: &mut usize,
@@ -600,6 +688,60 @@ mod tests {
                 .validate_boundaries()
                 .unwrap_err()
                 .contains("wrong description")
+        );
+    }
+
+    fn clear_all_receipt(idle_reset: bool) -> ClearAllReceipt {
+        let previous = LegacyActiveReceipt {
+            category_id: if idle_reset { 0 } else { 4 },
+            description: if idle_reset { "" } else { "work" }.to_string(),
+            started_at_utc: Utc.with_ymd_and_hms(2026, 8, 1, 16, 0, 0).unwrap(),
+        };
+        let applied_at_utc = Utc.with_ymd_and_hms(2026, 8, 2, 17, 0, 0).unwrap();
+        ClearAllReceipt {
+            version: ClearAllReceipt::VERSION,
+            operation_id: "clear-all:test".to_string(),
+            applied_at_utc,
+            previous_active: previous.clone(),
+            resulting_active: LegacyActiveReceipt {
+                category_id: previous.category_id,
+                description: previous.description.clone(),
+                started_at_utc: if idle_reset {
+                    applied_at_utc
+                } else {
+                    previous.started_at_utc
+                },
+            },
+            idle_reset,
+            affected_operational_days: vec!["2026-08-01".to_string(), "2026-08-02".to_string()],
+        }
+    }
+
+    #[test]
+    fn clear_all_receipt_validates_idle_reset_and_non_idle_continuity() {
+        clear_all_receipt(true).validate_boundaries().unwrap();
+        clear_all_receipt(false).validate_boundaries().unwrap();
+    }
+
+    #[test]
+    fn clear_all_receipt_rejects_hidden_classification_or_day_ambiguity() {
+        let mut changed = clear_all_receipt(true);
+        changed.resulting_active.category_id = 4;
+        assert!(
+            changed
+                .validate_boundaries()
+                .unwrap_err()
+                .contains("classification")
+        );
+
+        let mut duplicate = clear_all_receipt(true);
+        duplicate.affected_operational_days =
+            vec!["2026-08-02".to_string(), "2026-08-02".to_string()];
+        assert!(
+            duplicate
+                .validate_boundaries()
+                .unwrap_err()
+                .contains("unique and sorted")
         );
     }
 

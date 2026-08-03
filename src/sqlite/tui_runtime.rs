@@ -611,28 +611,6 @@ pub(crate) fn delete_session(database_path: &Path, session_id: usize) -> Result<
     transaction.commit().map_err(|error| error.to_string())
 }
 
-pub(crate) fn delete_drift_sessions_for_day(
-    database_path: &Path,
-    operational_day: &str,
-) -> Result<(), String> {
-    runtime_coordination::maybe_inject_test_fault("drift-session-delete", "before-write")
-        .map_err(|error| error.to_string())?;
-    let mut repository = open_cli_repository(database_path)?;
-    let transaction = repository
-        .connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(|error| error.to_string())?;
-    transaction
-        .execute(
-            "DELETE FROM sessions WHERE category_id = 0 AND operational_day = ?1",
-            params![operational_day],
-        )
-        .map_err(|error| error.to_string())?;
-    runtime_coordination::maybe_inject_test_fault("drift-session-delete", "commit")
-        .map_err(|error| error.to_string())?;
-    transaction.commit().map_err(|error| error.to_string())
-}
-
 pub(crate) fn save_sand_state(database_path: &Path, state: &SandState) -> Result<(), String> {
     runtime_coordination::maybe_inject_test_fault("sand-state", "before-write")
         .map_err(|error| error.to_string())?;
@@ -738,6 +716,200 @@ pub(crate) fn save_daily_snapshot(
         )
         .map_err(|error| error.to_string())?;
     runtime_coordination::maybe_inject_test_fault("daily-snapshot", "commit")
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
+}
+
+pub(crate) struct ClearAllStateRequest<'a, T> {
+    pub expected_active_stable_id: &'a str,
+    pub resulting_active_stable_id: &'a str,
+    pub resulting_started_at_utc: DateTime<Utc>,
+    pub state: &'a SandState,
+    pub daily_updates: &'a [(String, Option<SedimentSnapshot>)],
+    pub detached_at_utc: DateTime<Utc>,
+    pub simulation_time_utc: DateTime<Utc>,
+    pub checkpoint: &'a T,
+}
+
+pub(crate) fn clear_all_state<T: Serialize>(
+    database_path: &Path,
+    request: ClearAllStateRequest<'_, T>,
+) -> Result<(), String> {
+    let ClearAllStateRequest {
+        expected_active_stable_id,
+        resulting_active_stable_id,
+        resulting_started_at_utc,
+        state,
+        daily_updates,
+        detached_at_utc,
+        simulation_time_utc,
+        checkpoint,
+    } = request;
+    runtime_coordination::maybe_inject_test_fault("clear-all", "before-write")
+        .map_err(|error| error.to_string())?;
+    if expected_active_stable_id.trim().is_empty() || resulting_active_stable_id.trim().is_empty() {
+        return Err("clear-all requires non-empty active stable identities".to_string());
+    }
+    let mut repository = open_cli_repository(database_path)?;
+    let payload_json = serde_json::to_string(state).map_err(|error| error.to_string())?;
+    let checkpoint_json = serde_json::to_string(checkpoint).map_err(|error| error.to_string())?;
+    let transaction = repository
+        .connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+
+    let active: Option<(String, String, i64, String)> = transaction
+        .query_row(
+            "SELECT stable_id, project, category_id, description
+             FROM active_session WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let Some((actual_stable_id, _, _, _)) = active else {
+        return Err("there is no active TUI session to clear".to_string());
+    };
+    if actual_stable_id != expected_active_stable_id {
+        return Err(format!(
+            "active session changed concurrently; expected {expected_active_stable_id}, found {actual_stable_id}"
+        ));
+    }
+
+    let checkpoint_state: Option<(String, Option<String>)> = transaction
+        .query_row(
+            "SELECT status, active_session_stable_id
+             FROM runtime_checkpoint WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    if let Some((status, checkpoint_active)) = checkpoint_state {
+        let replaceable = matches!(status.as_str(), "pending" | "committed")
+            && checkpoint_active.as_deref() == Some(expected_active_stable_id);
+        if !replaceable {
+            let identity = checkpoint_active.as_deref().unwrap_or("missing");
+            return Err(format!(
+                "runtime checkpoint is {status} for {identity}; expected pending/committed for {expected_active_stable_id}"
+            ));
+        }
+    }
+
+    if resulting_active_stable_id != expected_active_stable_id {
+        let changed = transaction
+            .execute(
+                "UPDATE active_session
+                 SET stable_id = ?1, started_at_utc = ?2, recovery_kind = 'live'
+                 WHERE singleton = 1 AND stable_id = ?3",
+                params![
+                    resulting_active_stable_id,
+                    timestamp(resulting_started_at_utc),
+                    expected_active_stable_id,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        if changed != 1 {
+            return Err("active session changed during clear-all".to_string());
+        }
+    }
+    runtime_coordination::maybe_inject_test_fault("clear-all", "active")
+        .map_err(|error| error.to_string())?;
+
+    let existing_sand: Option<(String, i64)> = transaction
+        .query_row(
+            "SELECT formation_id, quantum_seconds FROM sand_state WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let (formation_id, quantum_seconds) =
+        existing_sand.unwrap_or_else(|| ("default".to_string(), 1));
+    let captured_at_utc = timestamp(Utc::now());
+    transaction
+        .execute(
+            "INSERT INTO sand_state (
+                singleton, formation_id, quantum_seconds, grid_width, grid_height,
+                payload_json, updated_at_utc, legacy_import_id
+             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, NULL)
+             ON CONFLICT(singleton) DO UPDATE SET
+                formation_id = excluded.formation_id,
+                quantum_seconds = excluded.quantum_seconds,
+                grid_width = excluded.grid_width,
+                grid_height = excluded.grid_height,
+                payload_json = excluded.payload_json,
+                updated_at_utc = excluded.updated_at_utc,
+                legacy_import_id = NULL",
+            params![
+                formation_id,
+                quantum_seconds,
+                i64::try_from(state.grid_width)
+                    .map_err(|_| "sand width is too large".to_string())?,
+                i64::try_from(state.grid_height)
+                    .map_err(|_| "sand height is too large".to_string())?,
+                payload_json,
+                captured_at_utc,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    runtime_coordination::maybe_inject_test_fault("clear-all", "sand")
+        .map_err(|error| error.to_string())?;
+
+    for (operational_day, snapshot) in daily_updates {
+        transaction
+            .execute(
+                "DELETE FROM sand_snapshots
+                 WHERE snapshot_kind = 'daily-contribution' AND operational_day = ?1",
+                params![operational_day],
+            )
+            .map_err(|error| error.to_string())?;
+        if let Some(snapshot) = snapshot {
+            let daily_json = serde_json::to_string(snapshot).map_err(|error| error.to_string())?;
+            transaction
+                .execute(
+                    "INSERT INTO sand_snapshots (
+                        formation_id, snapshot_kind, operational_day, quantum_seconds,
+                        payload_json, captured_at_utc, legacy_import_id
+                     ) VALUES (?1, 'daily-contribution', ?2, ?3, ?4, ?5, NULL)",
+                    params![
+                        formation_id,
+                        operational_day,
+                        quantum_seconds,
+                        daily_json,
+                        captured_at_utc,
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    runtime_coordination::maybe_inject_test_fault("clear-all", "daily")
+        .map_err(|error| error.to_string())?;
+
+    transaction
+        .execute(
+            "INSERT INTO runtime_checkpoint (
+                singleton, status, detached_at_utc, simulation_time_utc,
+                active_session_stable_id, payload_json, legacy_import_id
+             ) VALUES (1, 'pending', ?1, ?2, ?3, ?4, NULL)
+             ON CONFLICT(singleton) DO UPDATE SET
+                status = 'pending',
+                detached_at_utc = excluded.detached_at_utc,
+                simulation_time_utc = excluded.simulation_time_utc,
+                active_session_stable_id = excluded.active_session_stable_id,
+                payload_json = excluded.payload_json,
+                legacy_import_id = NULL",
+            params![
+                timestamp(detached_at_utc),
+                timestamp(simulation_time_utc),
+                resulting_active_stable_id,
+                checkpoint_json,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    runtime_coordination::maybe_inject_test_fault("clear-all", "checkpoint")
+        .map_err(|error| error.to_string())?;
+    runtime_coordination::maybe_inject_test_fault("clear-all", "commit")
         .map_err(|error| error.to_string())?;
     transaction.commit().map_err(|error| error.to_string())
 }
@@ -1357,6 +1529,184 @@ mod checkpoint_identity_tests {
             .unwrap();
         assert_eq!(status, "quarantined");
         drop(repository);
+        remove_database(&path);
+    }
+}
+
+#[cfg(test)]
+mod clear_all_transaction_tests {
+    use std::path::{Path, PathBuf};
+
+    use serde_json::Value;
+
+    use super::*;
+    use crate::sqlite::{NewActiveSession, SqliteRepository, runtime_coordination};
+
+    fn database_path(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "strata-clear-all-{label}-{}-{}.sqlite3",
+            std::process::id(),
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ))
+    }
+
+    fn remove_database(path: &Path) {
+        std::fs::remove_file(path).ok();
+        std::fs::remove_file(format!("{}-wal", path.display())).ok();
+        std::fs::remove_file(format!("{}-shm", path.display())).ok();
+    }
+
+    fn state(grains: bool) -> SandState {
+        SandState {
+            version: SandState::VERSION,
+            grid_width: 2,
+            grid_height: 2,
+            grains: if grains {
+                vec![crate::sand::SandStateGrain {
+                    x: 0,
+                    y: 1,
+                    category_id: 0,
+                }]
+            } else {
+                Vec::new()
+            },
+            frame_count: 3,
+            sweep_left_to_right: true,
+            rng_state: 9,
+            pending_grains: Vec::new(),
+            pending_runs: Vec::new(),
+        }
+    }
+
+    fn seed(path: &Path) {
+        let mut repository = SqliteRepository::open(path).unwrap();
+        repository
+            .transition_storage_authority("sqlite-candidate", "sqlite-cli", "2026-08-01T12:00:00Z")
+            .unwrap();
+        repository
+            .connection
+            .execute(
+                "INSERT INTO sessions (
+                    stable_id, project, category_id, description, started_at_utc,
+                    ended_at_utc, operational_day, elapsed_seconds, source
+                 ) VALUES ('completed-idle', '', 0, '', '2026-08-01T10:00:00Z',
+                    '2026-08-01T11:00:00Z', '2026-08-01', 3600, 'test')",
+                [],
+            )
+            .unwrap();
+        runtime_coordination::start_active_session(
+            &mut repository,
+            &NewActiveSession {
+                stable_id: "idle-a",
+                project: "",
+                category_id: 0,
+                description: "",
+                started_at_utc: "2026-08-01T11:00:00Z",
+                recovery_kind: "live",
+            },
+        )
+        .unwrap();
+        drop(repository);
+        save_sand_state(path, &state(true)).unwrap();
+        let daily = SedimentSnapshot::daily_contribution(
+            "2026-08-01".to_string(),
+            "before".to_string(),
+            state(true),
+        );
+        save_daily_snapshot(path, "2026-08-01", &daily).unwrap();
+        save_checkpoint(
+            path,
+            "idle-a",
+            Utc::now(),
+            Utc::now(),
+            &serde_json::json!({"before": true}),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn clear_all_is_atomic_and_preserves_committed_history() {
+        let path = database_path("commit");
+        seed(&path);
+        let empty = state(false);
+        let checkpoint = serde_json::json!({"clear_all": {"operation_id": "clear"}});
+        let updates = [("2026-08-01".to_string(), None)];
+        clear_all_state(
+            &path,
+            ClearAllStateRequest {
+                expected_active_stable_id: "idle-a",
+                resulting_active_stable_id: "idle-b",
+                resulting_started_at_utc: Utc::now(),
+                state: &empty,
+                daily_updates: &updates,
+                detached_at_utc: Utc::now(),
+                simulation_time_utc: Utc::now(),
+                checkpoint: &checkpoint,
+            },
+        )
+        .unwrap();
+        let repository = open_cli_repository(&path).unwrap();
+        let session_count: i64 = repository
+            .connection
+            .query_row("SELECT count(*) FROM sessions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(session_count, 1);
+        assert_eq!(
+            repository.active_session().unwrap().unwrap().stable_id,
+            "idle-b"
+        );
+        let checkpoint = repository.checkpoint().unwrap().unwrap();
+        assert_eq!(
+            checkpoint.active_session_stable_id.as_deref(),
+            Some("idle-b")
+        );
+        let payload: Value = serde_json::from_str(&checkpoint.payload_json).unwrap();
+        assert_eq!(payload["clear_all"]["operation_id"], "clear");
+        drop(repository);
+        assert_eq!(load_sand_state(&path).unwrap(), Some(empty));
+        assert!(load_daily_snapshot(&path, "2026-08-01").unwrap().is_none());
+        remove_database(&path);
+    }
+
+    #[test]
+    fn clear_all_fault_rolls_back_every_authority() {
+        let path = database_path("rollback");
+        seed(&path);
+        let result = runtime_coordination::with_test_fault("clear-all", "commit", "io", || {
+            let empty = state(false);
+            let updates = [("2026-08-01".to_string(), None)];
+            let checkpoint = serde_json::json!({"clear_all": true});
+            clear_all_state(
+                &path,
+                ClearAllStateRequest {
+                    expected_active_stable_id: "idle-a",
+                    resulting_active_stable_id: "idle-b",
+                    resulting_started_at_utc: Utc::now(),
+                    state: &empty,
+                    daily_updates: &updates,
+                    detached_at_utc: Utc::now(),
+                    simulation_time_utc: Utc::now(),
+                    checkpoint: &checkpoint,
+                },
+            )
+        });
+        assert!(result.is_err());
+        let repository = open_cli_repository(&path).unwrap();
+        assert_eq!(
+            repository.active_session().unwrap().unwrap().stable_id,
+            "idle-a"
+        );
+        assert_eq!(
+            repository
+                .connection
+                .query_row("SELECT count(*) FROM sessions", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        drop(repository);
+        assert_eq!(load_sand_state(&path).unwrap(), Some(state(true)));
+        assert!(load_daily_snapshot(&path, "2026-08-01").unwrap().is_some());
         remove_database(&path);
     }
 }

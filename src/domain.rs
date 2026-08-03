@@ -810,13 +810,6 @@ impl TimeTracker {
         session.description = description;
         true
     }
-
-    pub fn clear_drift_sessions_for_day(&mut self, day: NaiveDate) {
-        let day_key = day.format("%Y-%m-%d").to_string();
-        self.sessions.retain(|session| {
-            !(is_drift_category_id(session.category_id) && session.date == day_key)
-        });
-    }
 }
 
 pub(crate) fn session_slices(session: &Session) -> Vec<SessionSlice> {
@@ -2133,69 +2126,6 @@ mod tests {
         assert_eq!(summary.date, today);
         assert_eq!(summary.total_seconds, 600);
         assert_eq!(summary.total_karma_seconds, 600);
-    }
-
-    #[test]
-    fn test_clear_drift_sessions_for_day_clears_only_target_day() {
-        let mut tracker = TimeTracker::new();
-        let today = operational_day_key_now().format("%Y-%m-%d").to_string();
-        let yesterday = (operational_day_key_now() - ChronoDuration::days(1))
-            .format("%Y-%m-%d")
-            .to_string();
-
-        tracker.sessions = vec![
-            Session {
-                id: 1,
-                date: today.clone(),
-                category_id: CategoryId::new(0),
-                project: String::new(),
-                description: String::new(),
-                start_time: "08:00:00".to_string(),
-                end_time: "08:10:00".to_string(),
-                elapsed_seconds: 600,
-                started_at_utc: None,
-                ended_at_utc: None,
-                operational_day_policy: None,
-            },
-            Session {
-                id: 2,
-                date: yesterday,
-                category_id: CategoryId::new(0),
-                project: String::new(),
-                description: String::new(),
-                start_time: "08:00:00".to_string(),
-                end_time: "08:10:00".to_string(),
-                elapsed_seconds: 600,
-                started_at_utc: None,
-                ended_at_utc: None,
-                operational_day_policy: None,
-            },
-            Session {
-                id: 3,
-                date: today,
-                category_id: CategoryId::new(1),
-                project: String::new(),
-                description: String::new(),
-                start_time: "09:00:00".to_string(),
-                end_time: "09:10:00".to_string(),
-                elapsed_seconds: 600,
-                started_at_utc: None,
-                ended_at_utc: None,
-                operational_day_policy: None,
-            },
-        ];
-
-        tracker.clear_drift_sessions_for_day(operational_day_key_now());
-
-        assert_eq!(
-            tracker
-                .sessions
-                .iter()
-                .filter(|session| session.category_id == CategoryId::new(0))
-                .count(),
-            1
-        );
-        assert_eq!(tracker.sessions.len(), 2);
     }
 
     #[test]

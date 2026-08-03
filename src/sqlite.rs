@@ -34,19 +34,19 @@ pub(crate) use maintenance::{
 };
 pub(crate) use migration_command::{ControlledMigrationOptions, ControlledMigrationReport};
 pub(crate) use tui_runtime::{
-    archive_category as archive_tui_category, clear_checkpoint as clear_tui_checkpoint,
+    ClearAllStateRequest as TuiClearAllStateRequest, archive_category as archive_tui_category,
+    clear_all_state as clear_tui_state, clear_checkpoint as clear_tui_checkpoint,
     commit_checkpoint_recovery as commit_tui_checkpoint_recovery,
-    delete_daily_snapshot as delete_tui_daily_snapshot,
-    delete_drift_sessions_for_day as delete_tui_drift_sessions_for_day,
-    delete_session as delete_tui_session, ensure_active_session as ensure_tui_active_session,
+    delete_daily_snapshot as delete_tui_daily_snapshot, delete_session as delete_tui_session,
+    ensure_active_session as ensure_tui_active_session,
     finish_active_session as finish_tui_active_session, load_checkpoint as load_tui_checkpoint,
     load_daily_snapshot as load_tui_daily_snapshot, load_sand_state as load_tui_sand_state,
     load_state as load_tui_state, quarantine_checkpoint as quarantine_tui_checkpoint,
     replace_recovering_checkpoint as replace_tui_recovering_checkpoint,
-    reset_active_session as reset_tui_active_session, save_checkpoint as save_tui_checkpoint,
-    save_daily_snapshot as save_tui_daily_snapshot, save_sand_state as save_tui_sand_state,
-    switch_active_session as switch_tui_active_session, sync_categories as sync_tui_categories,
-    sync_category_tags as sync_tui_category_tags, sync_sessions as sync_tui_sessions,
+    save_checkpoint as save_tui_checkpoint, save_daily_snapshot as save_tui_daily_snapshot,
+    save_sand_state as save_tui_sand_state, switch_active_session as switch_tui_active_session,
+    sync_categories as sync_tui_categories, sync_category_tags as sync_tui_category_tags,
+    sync_sessions as sync_tui_sessions,
     update_session_description as update_tui_session_description,
 };
 
