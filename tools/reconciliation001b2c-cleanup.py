@@ -24,8 +24,8 @@ fault = fault_path.read_text()
 marker = 'tui_runtime::delete_drift_sessions_for_day(path, "2026-08-01")'
 index = fault.find(marker)
 if index != -1:
-    start = fault.rfind("        PersistenceFaultCase {", 0, index)
-    end = fault.find("        PersistenceFaultCase {", index)
+    start = fault.rfind('    with_database("drift-delete", |path| {', 0, index)
+    end = fault.find('    with_database("sand-state", |path| {', index)
     if start == -1 or end == -1:
         raise SystemExit("could not bound obsolete drift fault case")
     fault = fault[:start] + fault[end:]
