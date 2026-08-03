@@ -506,9 +506,9 @@ mod clear_all_replay_tests {
         stage_clear_all_active_state(&mut tracker, &mut started_at_utc, &non_idle).unwrap();
         assert_eq!(tracker.active_category_id(), CategoryId::new(1));
         assert_eq!(started_at_utc, Some(non_idle.resulting_active.started_at_utc));
-        assert!(tracker.current_elapsed().unwrap() >= non_idle.previous_elapsed_seconds);
+        assert!(tracker.current_elapsed().unwrap().as_secs() as usize >= non_idle.previous_elapsed_seconds);
         assert!(
-            tracker.current_elapsed().unwrap()
+            tracker.current_elapsed().unwrap().as_secs() as usize
                 <= non_idle.previous_elapsed_seconds.saturating_add(1)
         );
 
@@ -516,7 +516,7 @@ mod clear_all_replay_tests {
         stage_clear_all_active_state(&mut tracker, &mut started_at_utc, &idle).unwrap();
         assert_eq!(tracker.active_category_id(), CategoryId::new(0));
         assert_eq!(started_at_utc, Some(idle.applied_at_utc));
-        assert!(tracker.current_elapsed().unwrap() <= 1);
+        assert!(tracker.current_elapsed().unwrap().as_secs() <= 1);
     }
 }
 
