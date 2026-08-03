@@ -15,6 +15,12 @@ root = replace_once(
     "    archive_category as archive_tui_category, clear_all_state as clear_tui_state,\n    ClearAllStateRequest as TuiClearAllStateRequest,\n    clear_checkpoint as clear_tui_checkpoint,",
     "SQLite clear-all export",
 )
+root = replace_once(
+    root,
+    "    reset_active_session as reset_tui_active_session, save_checkpoint as save_tui_checkpoint,\n",
+    "    save_checkpoint as save_tui_checkpoint,\n",
+    "obsolete reset export",
+)
 root_path.write_text(root)
 
 
