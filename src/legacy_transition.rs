@@ -423,6 +423,7 @@ pub(crate) struct ClearAllReceipt {
     pub previous_active: LegacyActiveReceipt,
     pub resulting_active: LegacyActiveReceipt,
     pub idle_reset: bool,
+    pub previous_elapsed_seconds: usize,
     pub affected_operational_days: Vec<String>,
 }
 
@@ -447,6 +448,27 @@ impl ClearAllReceipt {
         if self.applied_at_utc < self.previous_active.started_at_utc {
             return Err(format!(
                 "clear-all receipt {} predates its active generation",
+                self.operation_id
+            ));
+        }
+        let wall_seconds = u64::try_from(
+            (self.applied_at_utc - self.previous_active.started_at_utc).num_seconds(),
+        )
+        .map_err(|_| {
+            format!(
+                "clear-all receipt {} has an invalid wall interval",
+                self.operation_id
+            )
+        })?;
+        let elapsed_seconds = u64::try_from(self.previous_elapsed_seconds).map_err(|_| {
+            format!(
+                "clear-all receipt {} elapsed value exceeds the supported range",
+                self.operation_id
+            )
+        })?;
+        if wall_seconds.abs_diff(elapsed_seconds) > temporal::MAX_LIVE_CLOCK_SKEW.as_secs() {
+            return Err(format!(
+                "clear-all receipt {} elapsed payload diverges from its UTC interval",
                 self.operation_id
             ));
         }
@@ -713,6 +735,7 @@ mod tests {
                 },
             },
             idle_reset,
+            previous_elapsed_seconds: 90_000,
             affected_operational_days: vec!["2026-08-01".to_string(), "2026-08-02".to_string()],
         }
     }
@@ -742,6 +765,15 @@ mod tests {
                 .validate_boundaries()
                 .unwrap_err()
                 .contains("unique and sorted")
+        );
+
+        let mut divergent = clear_all_receipt(false);
+        divergent.previous_elapsed_seconds = 1;
+        assert!(
+            divergent
+                .validate_boundaries()
+                .unwrap_err()
+                .contains("diverges")
         );
     }
 
