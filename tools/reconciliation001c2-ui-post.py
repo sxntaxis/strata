@@ -147,10 +147,3 @@ for file_name in [
         "Action::DeleteCategory\n            | Action::CategoryLifecycle\n            | Action::ArchiveCategory",
     )
     path.write_text(text)
-
-# Current default keymap already had 27 physical entries before adding Shift-X.
-replace_once(
-    "src/keybindings.rs",
-    "const DEFAULT_BINDINGS: [(&str, Action); 27] = [",
-    "const DEFAULT_BINDINGS: [(&str, Action); 28] = [",
-)
