@@ -111,10 +111,14 @@ test = r'''    #[test]
         };
         let value = serde_json::to_value(bundle).unwrap();
         assert_eq!(value["schema_version"], 3);
-        assert_eq!(
-            value["recovery_statement"]["recovery_target_utc"],
-            target.to_rfc3339()
-        );
+        let exported_target = chrono::DateTime::parse_from_rfc3339(
+            value["recovery_statement"]["recovery_target_utc"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap()
+        .with_timezone(&Utc);
+        assert_eq!(exported_target, target);
         assert_eq!(
             value["recovery_statement"]["recovered_interval_class"],
             "reconstructed"
