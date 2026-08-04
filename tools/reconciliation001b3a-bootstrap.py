@@ -207,11 +207,7 @@ insert_before(
     runtime_tests,
 )
 
-replace_between(
-    "src/sqlite/tui_runtime.rs",
-    "pub(crate) fn ensure_active_session(",
-    "#[allow(clippy::too_many_arguments)]\npub(crate) fn switch_active_session(",
-    r'''pub(crate) fn start_active_session_with_checkpoint<T: Serialize>(
+runtime_adapter = r'''pub(crate) fn start_active_session_with_checkpoint<T: Serialize>(
     database_path: &Path,
     category_id: CategoryId,
     description: &str,
@@ -242,15 +238,22 @@ replace_between(
     Ok(stable_id)
 }
 
-''',
+'''
+insert_before(
+    "src/sqlite/tui_runtime.rs",
+    "#[allow(clippy::too_many_arguments)]\npub(crate) fn switch_active_session(",
+    runtime_adapter,
 )
 
 sqlite = read("src/sqlite.rs")
 old_export = "    ensure_active_session as ensure_tui_active_session,\n"
-new_export = "    start_active_session_with_checkpoint as start_tui_active_session_with_checkpoint,\n"
+new_exports = (
+    old_export
+    + "    start_active_session_with_checkpoint as start_tui_active_session_with_checkpoint,\n"
+)
 if old_export not in sqlite:
     raise SystemExit("SQLite TUI active-start export marker missing")
-write("src/sqlite.rs", sqlite.replace(old_export, new_export, 1))
+write("src/sqlite.rs", sqlite.replace(old_export, new_exports, 1))
 
 app_constructor_and_bootstrap = r'''        app.persist_category_tags();
 
@@ -393,7 +396,11 @@ fn initial_tui_bootstrap_failure_leaves_no_orphan_generation() {
 }
 
 '''
-insert_before("tests/sqlite_cli_authority.rs", "fn recovery_bundle(profile: &TestProfile) -> Value {", process_test)
+insert_before(
+    "tests/sqlite_cli_authority.rs",
+    "fn recovery_bundle(profile: &TestProfile) -> Value {",
+    process_test,
+)
 
 work = r'''---
 id: RECONCILIATION-001B3A
