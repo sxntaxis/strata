@@ -16,13 +16,14 @@ use thiserror::Error;
 use super::{
     CURRENT_SCHEMA_VERSION, SqliteRepository,
     repository::{
-        ActiveSessionRecord, CategoryRecord, CheckpointRecord, CheckpointStatus,
-        RepositorySnapshot, SandSnapshotRecord, SandStateRecord, SessionRecord, SnapshotKind,
+        ActiveSessionRecord, CategoryLifecycleReceiptRecord, CategoryRecord, CheckpointRecord,
+        CheckpointStatus, RepositorySnapshot, SandSnapshotRecord, SandStateRecord, SessionRecord,
+        SnapshotKind,
     },
 };
 
 const MAINTENANCE_REPORT_SCHEMA_VERSION: u8 = 1;
-const PORTABLE_BUNDLE_SCHEMA_VERSION: u8 = 2;
+const PORTABLE_BUNDLE_SCHEMA_VERSION: u8 = 3;
 const MANIFEST_FILENAME: &str = "manifest.json";
 const CATEGORIES_FILENAME: &str = "categories.csv";
 const CATEGORY_TAGS_FILENAME: &str = "category_tags.csv";
@@ -31,7 +32,8 @@ const ACTIVE_SESSION_FILENAME: &str = "active_session.csv";
 const CHECKPOINT_FILENAME: &str = "runtime_checkpoint.csv";
 const SAND_STATE_FILENAME: &str = "sand_state.csv";
 const SAND_SNAPSHOTS_FILENAME: &str = "sand_snapshots.csv";
-const BUNDLE_FILES: [&str; 7] = [
+const CATEGORY_LIFECYCLE_RECEIPTS_FILENAME: &str = "category_lifecycle_receipts.csv";
+const BUNDLE_FILES: [&str; 8] = [
     CATEGORIES_FILENAME,
     CATEGORY_TAGS_FILENAME,
     SESSIONS_FILENAME,
@@ -39,6 +41,7 @@ const BUNDLE_FILES: [&str; 7] = [
     CHECKPOINT_FILENAME,
     SAND_STATE_FILENAME,
     SAND_SNAPSHOTS_FILENAME,
+    CATEGORY_LIFECYCLE_RECEIPTS_FILENAME,
 ];
 
 #[derive(Debug, Clone)]
@@ -89,6 +92,7 @@ pub(crate) struct SnapshotCounts {
     pub checkpoints: usize,
     pub sand_states: usize,
     pub sand_snapshots: usize,
+    pub category_lifecycle_receipts: usize,
     pub total_elapsed_seconds: i64,
 }
 
@@ -110,6 +114,7 @@ impl SnapshotCounts {
             checkpoints: usize::from(snapshot.checkpoint.is_some()),
             sand_states: usize::from(snapshot.sand_state.is_some()),
             sand_snapshots: snapshot.sand_snapshots.len(),
+            category_lifecycle_receipts: snapshot.category_lifecycle_receipts.len(),
             total_elapsed_seconds,
         })
     }
@@ -715,6 +720,7 @@ fn doctor_at(
         "sand_snapshots",
         "legacy_imports",
         "category_tags",
+        "category_lifecycle_receipts",
     ];
     let existing_tables = sqlite_tables(&connection)?;
     let missing_tables: Vec<_> = required_tables
@@ -888,6 +894,10 @@ fn serialize_snapshot(
     files.insert(
         SAND_SNAPSHOTS_FILENAME,
         serialize_sand_snapshots(&snapshot.sand_snapshots)?,
+    );
+    files.insert(
+        CATEGORY_LIFECYCLE_RECEIPTS_FILENAME,
+        serialize_category_lifecycle_receipts(&snapshot.category_lifecycle_receipts)?,
     );
     Ok(files)
 }
@@ -1137,6 +1147,48 @@ fn serialize_sand_snapshots(snapshots: &[SandSnapshotRecord]) -> Result<Vec<u8>,
     finish_writer(writer, SAND_SNAPSHOTS_FILENAME)
 }
 
+fn serialize_category_lifecycle_receipts(
+    receipts: &[CategoryLifecycleReceiptRecord],
+) -> Result<Vec<u8>, MaintenanceError> {
+    let mut writer = csv_writer().from_writer(Vec::new());
+    write_record(
+        &mut writer,
+        CATEGORY_LIFECYCLE_RECEIPTS_FILENAME,
+        [
+            "operation_id",
+            "operation_kind",
+            "source_category_id",
+            "target_category_id",
+            "source_metadata_json",
+            "target_metadata_json",
+            "preview_revision",
+            "reference_counts_json",
+            "applied_at_utc",
+        ],
+    )?;
+    for receipt in receipts {
+        write_record(
+            &mut writer,
+            CATEGORY_LIFECYCLE_RECEIPTS_FILENAME,
+            [
+                receipt.operation_id.clone(),
+                receipt.operation_kind.clone(),
+                receipt.source_category_id.to_string(),
+                receipt
+                    .target_category_id
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                receipt.source_metadata_json.clone(),
+                receipt.target_metadata_json.clone().unwrap_or_default(),
+                receipt.preview_revision.clone(),
+                receipt.reference_counts_json.clone(),
+                receipt.applied_at_utc.clone(),
+            ],
+        )?;
+    }
+    finish_writer(writer, CATEGORY_LIFECYCLE_RECEIPTS_FILENAME)
+}
+
 fn write_record<I, T>(
     writer: &mut csv::Writer<Vec<u8>>,
     path: &str,
@@ -1261,6 +1313,10 @@ fn parse_snapshot(
         checkpoint: parse_checkpoint(required_file(files, CHECKPOINT_FILENAME)?)?,
         sand_state: parse_sand_state(required_file(files, SAND_STATE_FILENAME)?)?,
         sand_snapshots: parse_sand_snapshots(required_file(files, SAND_SNAPSHOTS_FILENAME)?)?,
+        category_lifecycle_receipts: parse_category_lifecycle_receipts(required_file(
+            files,
+            CATEGORY_LIFECYCLE_RECEIPTS_FILENAME,
+        )?)?,
     })
 }
 
@@ -1558,6 +1614,51 @@ fn parse_sand_snapshots(bytes: &[u8]) -> Result<Vec<SandSnapshotRecord>, Mainten
     Ok(snapshots)
 }
 
+fn parse_category_lifecycle_receipts(
+    bytes: &[u8],
+) -> Result<Vec<CategoryLifecycleReceiptRecord>, MaintenanceError> {
+    let records = csv_records(
+        CATEGORY_LIFECYCLE_RECEIPTS_FILENAME,
+        bytes,
+        &[
+            "operation_id",
+            "operation_kind",
+            "source_category_id",
+            "target_category_id",
+            "source_metadata_json",
+            "target_metadata_json",
+            "preview_revision",
+            "reference_counts_json",
+            "applied_at_utc",
+        ],
+    )?;
+    let mut receipts = Vec::with_capacity(records.len());
+    for (index, record) in records.iter().enumerate() {
+        receipts.push(CategoryLifecycleReceiptRecord {
+            operation_id: field(record, 0)?.to_string(),
+            operation_kind: field(record, 1)?.to_string(),
+            source_category_id: parse_i64(
+                CATEGORY_LIFECYCLE_RECEIPTS_FILENAME,
+                index,
+                field(record, 2)?,
+                "source_category_id",
+            )?,
+            target_category_id: optional_i64(
+                CATEGORY_LIFECYCLE_RECEIPTS_FILENAME,
+                index,
+                field(record, 3)?,
+                "target_category_id",
+            )?,
+            source_metadata_json: field(record, 4)?.to_string(),
+            target_metadata_json: optional_string(field(record, 5)?),
+            preview_revision: field(record, 6)?.to_string(),
+            reference_counts_json: field(record, 7)?.to_string(),
+            applied_at_utc: field(record, 8)?.to_string(),
+        });
+    }
+    Ok(receipts)
+}
+
 fn validate_snapshot_references(snapshot: &RepositorySnapshot) -> Result<(), MaintenanceError> {
     if snapshot.categories.is_empty() {
         return Err(MaintenanceError::InvalidBundle(
@@ -1566,11 +1667,85 @@ fn validate_snapshot_references(snapshot: &RepositorySnapshot) -> Result<(), Mai
     }
 
     let mut category_ids = BTreeSet::new();
+    let mut retired_category_ids = BTreeSet::new();
+    let mut lifecycle_operation_ids = BTreeSet::new();
+    for receipt in &snapshot.category_lifecycle_receipts {
+        require_text(&receipt.operation_id, "category lifecycle operation id")?;
+        require_text(
+            &receipt.preview_revision,
+            "category lifecycle preview revision",
+        )?;
+        require_text(
+            &receipt.applied_at_utc,
+            "category lifecycle application timestamp",
+        )?;
+        if !lifecycle_operation_ids.insert(receipt.operation_id.as_str()) {
+            return Err(MaintenanceError::InvalidBundle(format!(
+                "duplicate category lifecycle operation id {}",
+                receipt.operation_id
+            )));
+        }
+        if receipt.source_category_id <= 0 {
+            return Err(MaintenanceError::InvalidBundle(
+                "category lifecycle receipt source must be a positive identity".to_string(),
+            ));
+        }
+        retired_category_ids.insert(receipt.source_category_id);
+        match receipt.operation_kind.as_str() {
+            "merge" => {
+                let target = receipt.target_category_id.ok_or_else(|| {
+                    MaintenanceError::InvalidBundle(
+                        "merge receipt has no target category identity".to_string(),
+                    )
+                })?;
+                if target == receipt.source_category_id || target <= 0 {
+                    return Err(MaintenanceError::InvalidBundle(
+                        "merge receipt has an invalid target category identity".to_string(),
+                    ));
+                }
+                if receipt.target_metadata_json.is_none() {
+                    return Err(MaintenanceError::InvalidBundle(
+                        "merge receipt has no target metadata".to_string(),
+                    ));
+                }
+            }
+            "delete" => {
+                if receipt.target_category_id.is_some() || receipt.target_metadata_json.is_some() {
+                    return Err(MaintenanceError::InvalidBundle(
+                        "delete receipt unexpectedly names a target category".to_string(),
+                    ));
+                }
+            }
+            other => {
+                return Err(MaintenanceError::InvalidBundle(format!(
+                    "unknown category lifecycle operation kind {other}"
+                )));
+            }
+        }
+        validate_json(
+            &receipt.source_metadata_json,
+            "category lifecycle source metadata",
+        )?;
+        if let Some(target) = &receipt.target_metadata_json {
+            validate_json(target, "category lifecycle target metadata")?;
+        }
+        validate_json(
+            &receipt.reference_counts_json,
+            "category lifecycle reference counts",
+        )?;
+    }
+
     let mut active_names = BTreeSet::new();
     for category in &snapshot.categories {
         if !category_ids.insert(category.id) {
             return Err(MaintenanceError::InvalidBundle(format!(
                 "duplicate category id {}",
+                category.id
+            )));
+        }
+        if retired_category_ids.contains(&category.id) {
+            return Err(MaintenanceError::InvalidBundle(format!(
+                "category id {} was retired by a lifecycle receipt and cannot be active",
                 category.id
             )));
         }
@@ -1878,6 +2053,27 @@ fn import_snapshot(
                 item.quantum_seconds,
                 item.payload_json,
                 item.captured_at_utc,
+            ],
+        )?;
+    }
+
+    for receipt in &snapshot.category_lifecycle_receipts {
+        transaction.execute(
+            "INSERT INTO category_lifecycle_receipts(
+                operation_id, operation_kind, source_category_id, target_category_id,
+                source_metadata_json, target_metadata_json, preview_revision,
+                reference_counts_json, applied_at_utc
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                receipt.operation_id,
+                receipt.operation_kind,
+                receipt.source_category_id,
+                receipt.target_category_id,
+                receipt.source_metadata_json,
+                receipt.target_metadata_json,
+                receipt.preview_revision,
+                receipt.reference_counts_json,
+                receipt.applied_at_utc,
             ],
         )?;
     }
@@ -2224,6 +2420,7 @@ mod tests {
     use super::*;
     use crate::sqlite::{
         NewActiveSession,
+        category_lifecycle::{CategoryLifecycleRequest, apply, preview},
         repository::{NewCategoryRecord, NewSandSnapshotRecord, NewSessionRecord},
     };
 
@@ -2249,6 +2446,25 @@ mod tests {
                 balance_effect: 1,
             })
             .unwrap();
+        let disposable_id = repository
+            .create_category(&NewCategoryRecord {
+                name: "Disposable",
+                description: "retired before export",
+                color_index: 3,
+                balance_effect: 0,
+            })
+            .unwrap();
+        let lifecycle_preview = preview(&repository, disposable_id, None).unwrap();
+        apply(
+            &mut repository,
+            CategoryLifecycleRequest {
+                source_category_id: disposable_id,
+                target_category_id: None,
+                expected_revision: &lifecycle_preview.revision,
+                applied_at_utc: "2026-08-01T14:00:00Z",
+            },
+        )
+        .unwrap();
         repository
             .replace_category_tags(study_id, &["reading".to_string(), "focus".to_string()])
             .unwrap();
@@ -2353,6 +2569,19 @@ mod tests {
 
         assert_eq!(read_repository_snapshot(&imported).unwrap(), expected);
         assert!(doctor_at(&imported, None).unwrap().is_healthy());
+        let mut imported_repository = SqliteRepository::open(&imported).unwrap();
+        let post_import_id = imported_repository
+            .create_category(&NewCategoryRecord {
+                name: "After bundle",
+                description: "",
+                color_index: 4,
+                balance_effect: 0,
+            })
+            .unwrap();
+        assert_eq!(
+            post_import_id, 3,
+            "portable round-trip must preserve retired category identity"
+        );
 
         let _ = fs::remove_dir_all(root);
     }

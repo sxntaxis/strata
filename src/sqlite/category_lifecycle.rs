@@ -1353,6 +1353,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(receipt_count, 1);
+        let next = repository
+            .create_category(&NewCategoryRecord {
+                name: "After merge",
+                description: "",
+                color_index: 3,
+                balance_effect: 0,
+            })
+            .unwrap();
+        assert_eq!(next, 3, "merged source identity must remain retired");
     }
 
     #[test]
@@ -1441,6 +1450,15 @@ mod tests {
         .unwrap();
         assert_eq!(receipt.operation_kind, "delete");
         assert!(query_category(&empty.connection, 1).unwrap().is_none());
+        let replacement = empty
+            .create_category(&NewCategoryRecord {
+                name: "Replacement",
+                description: "",
+                color_index: 2,
+                balance_effect: 0,
+            })
+            .unwrap();
+        assert_eq!(replacement, 2, "retired stable identity must not be reused");
     }
 
     #[test]

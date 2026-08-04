@@ -49,7 +49,7 @@ One immediate SQLite transaction must, after recomputing and matching the previe
 - merge tags deterministically with deduplication;
 - remap placed, legacy-pending, and compressed-pending sediment identity while conserving mass and order;
 - remap every persisted snapshot payload and regenerate daily-contribution source revision from reassigned ledger truth;
-- remap the runtime checkpoint payload, including active identity, sediment, queued switch mutations, and legacy transition/finish/clear receipts;
+- remap receipt-free runtime checkpoint payload identity, sediment, and queued switch mutations; unresolved transition/finish/clear receipts block the operation because their deterministic operation identities bind the original categories;
 - delete the source category only after all references have moved;
 - insert an auditable receipt containing source/target metadata, preview revision, affected counts, and application time;
 - roll back every authority on injected failure.

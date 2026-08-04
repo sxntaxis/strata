@@ -200,6 +200,19 @@ pub(crate) struct NewSandSnapshotRecord<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CategoryLifecycleReceiptRecord {
+    pub operation_id: String,
+    pub operation_kind: String,
+    pub source_category_id: i64,
+    pub target_category_id: Option<i64>,
+    pub source_metadata_json: String,
+    pub target_metadata_json: Option<String>,
+    pub preview_revision: String,
+    pub reference_counts_json: String,
+    pub applied_at_utc: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RepositorySnapshot {
     pub categories: Vec<CategoryRecord>,
     pub category_tags: BTreeMap<i64, Vec<String>>,
@@ -208,6 +221,7 @@ pub(crate) struct RepositorySnapshot {
     pub checkpoint: Option<CheckpointRecord>,
     pub sand_state: Option<SandStateRecord>,
     pub sand_snapshots: Vec<SandSnapshotRecord>,
+    pub category_lifecycle_receipts: Vec<CategoryLifecycleReceiptRecord>,
 }
 
 impl SqliteRepository {
@@ -226,17 +240,33 @@ impl SqliteRepository {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let maximum_identity: i64 = transaction.query_row(
+            "SELECT COALESCE(MAX(identity), 0)
+             FROM (
+                 SELECT id AS identity FROM categories
+                 UNION ALL
+                 SELECT source_category_id AS identity FROM category_lifecycle_receipts
+                 UNION ALL
+                 SELECT target_category_id AS identity FROM category_lifecycle_receipts
+                 WHERE target_category_id IS NOT NULL
+             )",
+            [],
+            |row| row.get(0),
+        )?;
+        let id = maximum_identity.checked_add(1).ok_or_else(|| {
+            RepositoryError::InvalidInput("category identity space is exhausted".to_string())
+        })?;
         transaction.execute(
-            "INSERT INTO categories(name, description, color_index, balance_effect)
-             VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO categories(id, name, description, color_index, balance_effect)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
+                id,
                 category.name.trim(),
                 category.description,
                 category.color_index,
                 category.balance_effect,
             ],
         )?;
-        let id = transaction.last_insert_rowid();
         transaction.commit()?;
         Ok(id)
     }
@@ -708,10 +738,37 @@ impl SqliteRepository {
             checkpoint: query_checkpoint(&transaction)?,
             sand_state: query_sand_state(&transaction)?,
             sand_snapshots: query_sand_snapshots(&transaction)?,
+            category_lifecycle_receipts: query_category_lifecycle_receipts(&transaction)?,
         };
         transaction.commit()?;
         Ok(snapshot)
     }
+}
+
+fn query_category_lifecycle_receipts(
+    connection: &Connection,
+) -> Result<Vec<CategoryLifecycleReceiptRecord>, RepositoryError> {
+    let mut statement = connection.prepare(
+        "SELECT operation_id, operation_kind, source_category_id, target_category_id,
+                source_metadata_json, target_metadata_json, preview_revision,
+                reference_counts_json, applied_at_utc
+         FROM category_lifecycle_receipts
+         ORDER BY applied_at_utc, operation_id",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(CategoryLifecycleReceiptRecord {
+            operation_id: row.get(0)?,
+            operation_kind: row.get(1)?,
+            source_category_id: row.get(2)?,
+            target_category_id: row.get(3)?,
+            source_metadata_json: row.get(4)?,
+            target_metadata_json: row.get(5)?,
+            preview_revision: row.get(6)?,
+            reference_counts_json: row.get(7)?,
+            applied_at_utc: row.get(8)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
 fn validate_category(category: &NewCategoryRecord<'_>) -> Result<(), RepositoryError> {
