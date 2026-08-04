@@ -362,7 +362,11 @@ replace_once(
                 applied_at_utc: "2026-08-01T14:00:00Z".parse().unwrap(),
             }],
         };
-        storage::write_json_atomic(&fixture.paths.lifecycle_ledger_json, &lifecycle_ledger).unwrap();
+        crate::storage::write_json_atomic(
+            &fixture.paths.lifecycle_ledger_json,
+            &lifecycle_ledger,
+        )
+        .unwrap();
         let before = fixture.source_bytes();
         let plan = LegacyImportPlan::from_paths(&fixture.paths, options()).unwrap();
 ''',
