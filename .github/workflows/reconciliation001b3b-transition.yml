@@ -24,11 +24,14 @@ jobs:
           components: rustfmt, clippy
 
       - name: Apply transition settlement implementation
-        run: python tools/reconciliation001b3b-transition.py
+        run: |
+          python tools/reconciliation001b3b-transition.py
+          python tools/reconciliation001b3b-typed.py
 
       - name: Remove temporary machinery
         run: |
           rm -f tools/reconciliation001b3b-transition.py
+          rm -f tools/reconciliation001b3b-typed.py
           rm -f .github/workflows/reconciliation001b3b-transition.yml
 
       - name: Format
