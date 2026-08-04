@@ -46,7 +46,6 @@ The emergency recovery export includes the same structured statement when presen
 
 This is the final bounded unit for issue #10. The issue closes only after the implementation, process-level restart proof, durable authority promotion, and exact-head CI all pass.
 
-
 ## Implemented result
 
 - successful checkpoint recovery builds one structured evidence statement from the claimed checkpoint and persisted target;
@@ -71,6 +70,7 @@ This is the final bounded unit for issue #10. The issue closes only after the im
 - 3 terminal-lifecycle PTY process tests: pass;
 - repeated failed-commit/delayed-retry process proof: pass;
 - emergency export schema/value parity proof: pass;
+- permanent 12-file source, test, authority, and Notebook diff audit: pass;
 - temporary transformation, audit, and workflow machinery: absent from the permanent tree.
 
 RECONCILIATION-001B3C completes issue #10. Crash recovery now has evidence-backed identity, atomicity, replay, bounded reconstruction, exact transition edges, deterministic cutoff reuse, visible uncertainty, acknowledgment custody, and export parity.
