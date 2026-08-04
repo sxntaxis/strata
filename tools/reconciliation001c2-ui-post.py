@@ -54,6 +54,9 @@ replace_once(
                 &database_path,
 ''',
 )
+path = Path("src/app/category_lifecycle_view.rs")
+content = path.read_text().replace("        self.category_action_error = None;\n", "")
+path.write_text(content)
 replace_once(
     "src/app.rs",
     "    fn try_write_runtime_checkpoint(&self) -> Result<(), String> {",
@@ -144,3 +147,10 @@ for file_name in [
         "Action::DeleteCategory\n            | Action::CategoryLifecycle\n            | Action::ArchiveCategory",
     )
     path.write_text(text)
+
+# Current default keymap already had 27 physical entries before adding Shift-X.
+replace_once(
+    "src/keybindings.rs",
+    "const DEFAULT_BINDINGS: [(&str, Action); 27] = [",
+    "const DEFAULT_BINDINGS: [(&str, Action); 28] = [",
+)
