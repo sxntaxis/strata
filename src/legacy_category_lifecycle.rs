@@ -246,7 +246,7 @@ impl LegacyCategoryLifecycleLedger {
         })
     }
 
-    fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(&self) -> Result<(), String> {
         if self.version != LEDGER_VERSION {
             return Err(format!(
                 "unsupported legacy lifecycle ledger version {}",
