@@ -30,11 +30,6 @@ replace_once(
     "const CURRENT_SCHEMA_VERSION: i64 = 6;",
     "const CURRENT_SCHEMA_VERSION: i64 = 7;",
 )
-replace_once(
-    "src/sqlite.rs",
-    '''const MIGRATION_6: &str = r#"\nCREATE TABLE sand_snapshots_v6 (\n''',
-    '''const MIGRATION_6: &str = r#"\nCREATE TABLE sand_snapshots_v6 (\n''',
-)
 marker = '''PRAGMA user_version = 6;\n"#;\n\n#[derive(Debug, Error)]\n'''
 migration = '''PRAGMA user_version = 6;\n"#;\n\nconst MIGRATION_7: &str = r#"\nCREATE TABLE category_lifecycle_receipts (\n    operation_id TEXT PRIMARY KEY,\n    operation_kind TEXT NOT NULL CHECK (operation_kind IN ('merge', 'delete')),\n    source_category_id INTEGER NOT NULL,\n    target_category_id INTEGER,\n    source_metadata_json TEXT NOT NULL,\n    target_metadata_json TEXT,\n    preview_revision TEXT NOT NULL,\n    reference_counts_json TEXT NOT NULL,\n    applied_at_utc TEXT NOT NULL,\n    CHECK (\n        (operation_kind = 'merge' AND target_category_id IS NOT NULL)\n        OR (operation_kind = 'delete' AND target_category_id IS NULL)\n    ),\n    CHECK (target_category_id IS NULL OR target_category_id != source_category_id)\n) STRICT;\n\nCREATE UNIQUE INDEX category_lifecycle_receipts_preview_unique\n    ON category_lifecycle_receipts(\n        source_category_id,\n        COALESCE(target_category_id, -1),\n        preview_revision\n    );\n\nINSERT INTO schema_migrations(version, applied_at_utc)\nVALUES (7, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));\n\nPRAGMA user_version = 7;\n"#;\n\n#[derive(Debug, Error)]\n'''
 replace_once("src/sqlite.rs", marker, migration)
@@ -48,4 +43,24 @@ replace_once(
     "src/sqlite/category_lifecycle.rs",
     "            let mut current: SedimentSnapshot = serde_json::from_str(&payload_json).map_err(|error| {",
     "            let current: SedimentSnapshot = serde_json::from_str(&payload_json).map_err(|error| {",
+)
+replace_once(
+    "src/category_lifecycle.rs",
+    "    let mut compacted = Vec::with_capacity(state.pending_runs.len());",
+    "    let mut compacted: Vec<crate::sand::PendingGrainRun> =\n        Vec::with_capacity(state.pending_runs.len());",
+)
+replace_once(
+    "src/sqlite/category_lifecycle.rs",
+    '''                    start_time: slice.start_time,\n                    end_time: slice.end_time,\n''',
+    '''                    start_time: temporal::civil_from_policy(\n                        slice.started_at_utc,\n                        session.policy,\n                    )?\n                    .format("%H:%M:%S")\n                    .to_string(),\n                    end_time: temporal::civil_from_policy(\n                        slice.ended_at_utc,\n                        session.policy,\n                    )?\n                    .format("%H:%M:%S")\n                    .to_string(),\n''',
+)
+replace_once(
+    "src/sqlite/category_lifecycle.rs",
+    '''        let preview = preview(&referenced, 1, None).unwrap();\n        assert!(preview.references.total().unwrap() > 0);\n''',
+    '''        let referenced_preview = preview(&referenced, 1, None).unwrap();\n        assert!(referenced_preview.references.total().unwrap() > 0);\n''',
+)
+replace_once(
+    "src/sqlite/category_lifecycle.rs",
+    "                    expected_revision: &preview.revision,\n                    applied_at_utc: \"2026-08-03T19:00:00Z\",\n",
+    "                    expected_revision: &referenced_preview.revision,\n                    applied_at_utc: \"2026-08-03T19:00:00Z\",\n",
 )
