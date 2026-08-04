@@ -79,7 +79,6 @@ Startup validates the receipt and resulting checkpoint generation before ordinar
 
 This unit does not yet close issue #10. Initial active-start/checkpoint coherence, final transition-edge sediment timing, and user-visible recovery cutoff/reconstruction semantics remain subsequent bounded work.
 
-
 ## Implemented result
 
 - committed idle and non-idle session history is never deleted by clear-all;
@@ -107,3 +106,7 @@ This unit does not yet close issue #10. Initial active-start/checkpoint coherenc
 - temporary transformation and audit machinery: absent from the permanent tree.
 
 The unit is accepted as a partial completion of issue #10. It does not claim initial active-start/checkpoint atomicity, complete transition-edge sediment attribution, or final user-visible recovery cutoff/reconstruction semantics.
+
+## Merge gate
+
+The documentation-complete branch must pass ordinary GitHub Actions on this exact permanent head before the pull request is marked ready for review.
