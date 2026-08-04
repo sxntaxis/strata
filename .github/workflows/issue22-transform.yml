@@ -37,7 +37,9 @@ jobs:
           text = path.read_text()
           start = text.index('# Emergency serialization.\n')
           end = text.index('# Direct calls in this file', start)
-          path.write_text(text[:start] + text[end:])
+          text = text[:start] + text[end:]
+          text = text.replace('"palette fresh draft")', '"palette fresh draft", count=2)')
+          path.write_text(text)
           PY
       - name: Apply issue 22 correction
         run: python3 .github/scripts/apply_issue_22.py
