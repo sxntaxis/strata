@@ -62,9 +62,7 @@ jobs:
               raise SystemExit('event handler crate import marker missing')
           text = text.replace(old, new, 1)
           old = 'use super::{App, PaletteCommand, QueuedMutation, ui_helpers};'
-          new = '''use super::{
-    App, PaletteCommand, PersistenceOperation, QueuedMutation, RecoveryAction, ui_helpers,
-};'''
+          new = 'use super::{\n    App, PaletteCommand, PersistenceOperation, QueuedMutation, RecoveryAction, ui_helpers,\n};'
           if text.count(old) != 1:
               raise SystemExit('event handler app import marker missing')
           path.write_text(text.replace(old, new, 1))
@@ -81,6 +79,7 @@ jobs:
 
       - name: Publish clean product commit
         run: |
+          rm .github/issue22-trigger.txt
           rm .github/scripts/apply_issue_22.py
           rm .github/workflows/issue22-transform.yml
           rm .github/workflows/issue22-transform-v2.yml
