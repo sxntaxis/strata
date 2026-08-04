@@ -41,7 +41,6 @@ Queued mutations already replay simulation to their recorded timestamp before ap
 
 This unit does not close issue #10. Visible checkpoint capture, recovery target, reconstructed duration, deterministic cutoff, and uncertainty semantics remain the final bounded recovery unit.
 
-
 ## Implemented result
 
 - immediate switch, clear, provisional-idle reset, and normal finish settle simulation through one selected UTC boundary before changing chronological authority;
@@ -65,6 +64,7 @@ This unit does not close issue #10. Visible checkpoint capture, recovery target,
 - 13 SQLite/TUI process tests: pass;
 - 2 temporal-authority tests: pass;
 - 3 terminal-lifecycle PTY process tests: pass;
+- permanent nine-file source, authority, and Notebook diff audit: pass;
 - temporary transformation, diagnostic, and workflow machinery: absent from the permanent tree.
 
 The unit is accepted as a partial completion of issue #10. User-visible deterministic recovery cutoff, reconstruction, and uncertainty semantics remain the final unresolved boundary.
