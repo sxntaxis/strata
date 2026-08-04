@@ -28,7 +28,9 @@ jobs:
           components: rustfmt, clippy
 
       - name: Promote lifecycle authority
-        run: python tools/reconciliation001c1-authority.py
+        run: |
+          printf '\n' >> docs/CATEGORY_AUTHORITY.md
+          python tools/reconciliation001c1-authority.py
 
       - name: Remove temporary authority machinery
         run: |
