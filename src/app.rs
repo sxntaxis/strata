@@ -67,7 +67,6 @@ enum SessionClockMode {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AtlasSelectable {
-    TimeLogPath,
     WeekStartDay,
     Action(keybindings::Action),
 }
@@ -75,7 +74,6 @@ enum AtlasSelectable {
 #[derive(Clone, Debug)]
 enum AtlasOverlay {
     CaptureKey { action: keybindings::Action },
-    EditTimeLogPath { input: String },
     SelectWeekStartDay { selected: usize },
 }
 
@@ -174,6 +172,8 @@ struct QueuedMutationEventRecord {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct DetachedRuntimeCheckpoint {
     schema_version: u8,
+    #[serde(default)]
+    profile_id: Option<String>,
     detached_at_utc: DateTime<Utc>,
     simulation_time_utc: DateTime<Utc>,
     spawn_accumulator_nanos: u64,
@@ -231,6 +231,7 @@ impl PostTargetClass {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 struct RecoveryStatement {
+    profile_id: String,
     checkpoint_captured_at_utc: DateTime<Utc>,
     checkpoint_simulation_at_utc: DateTime<Utc>,
     recovery_target_utc: DateTime<Utc>,
@@ -280,6 +281,10 @@ fn build_recovery_statement(
         RecoveredIntervalClass::Reconstructed
     };
     Ok(RecoveryStatement {
+        profile_id: checkpoint
+            .profile_id
+            .clone()
+            .unwrap_or_else(crate::profile::profile_id),
         checkpoint_captured_at_utc: checkpoint.detached_at_utc,
         checkpoint_simulation_at_utc: checkpoint.simulation_time_utc,
         recovery_target_utc: target_utc,
@@ -681,7 +686,6 @@ impl App {
         let keybindings::LoadedKeybindings {
             keymap,
             runtime_settings,
-            time_log_path: _,
         } = loaded;
         let keymap_error = None;
 
@@ -1006,7 +1010,7 @@ impl App {
     }
 
     fn atlas_items(&self) -> Vec<AtlasSelectable> {
-        let mut items = vec![AtlasSelectable::TimeLogPath, AtlasSelectable::WeekStartDay];
+        let mut items = vec![AtlasSelectable::WeekStartDay];
         items.extend(
             keybindings::Action::all()
                 .iter()
@@ -1049,9 +1053,6 @@ impl App {
     }
     fn atlas_item_description(&self, item: AtlasSelectable) -> String {
         match item {
-            AtlasSelectable::TimeLogPath => {
-                "Path where session rows are written (time_log.csv).".to_string()
-            }
             AtlasSelectable::WeekStartDay => {
                 "First weekday used by Week range in Karma pop-up.".to_string()
             }
@@ -1063,7 +1064,6 @@ impl App {
         use ratatui::style::Color;
 
         match item {
-            AtlasSelectable::TimeLogPath => Color::Cyan,
             AtlasSelectable::WeekStartDay => Color::Green,
             AtlasSelectable::Action(action) => match action.category() {
                 keybindings::ActionCategory::Global => Color::Cyan,
@@ -1179,11 +1179,6 @@ impl App {
             AtlasSelectable::Action(action) => {
                 self.atlas_overlay = Some(AtlasOverlay::CaptureKey { action });
             }
-            AtlasSelectable::TimeLogPath => {
-                self.atlas_overlay = Some(AtlasOverlay::EditTimeLogPath {
-                    input: storage::get_time_log_path().display().to_string(),
-                });
-            }
             AtlasSelectable::WeekStartDay => {
                 let selected = Self::week_start_options()
                     .iter()
@@ -1205,9 +1200,6 @@ impl App {
         self.keymap = loaded.keymap;
         self.runtime_settings = loaded.runtime_settings;
         set_runtime_settings(self.runtime_settings);
-        storage::set_runtime_storage_settings(storage::RuntimeStorageSettings {
-            time_log_path: loaded.time_log_path,
-        });
         self.keymap_error = None;
         self.render_needed = true;
     }
@@ -2569,6 +2561,7 @@ impl App {
 
         Ok(DetachedRuntimeCheckpoint {
             schema_version: DetachedRuntimeCheckpoint::VERSION,
+            profile_id: Some(crate::profile::profile_id()),
             detached_at_utc: Utc::now(),
             simulation_time_utc: self.simulation.simulation_time_utc,
             spawn_accumulator_nanos,
@@ -2739,6 +2732,18 @@ impl App {
                 }
             }
         };
+
+        if let Err(error) = crate::profile::validate_artifact_profile(
+            checkpoint.profile_id.as_deref(),
+            "detached runtime checkpoint",
+        ) {
+            if let Some(database_path) = self.sqlite_database_path.clone() {
+                let _ = sqlite::quarantine_tui_checkpoint(&database_path);
+            }
+            self.record_storage_result::<()>(Err(error));
+            return false;
+        }
+        checkpoint.profile_id = Some(crate::profile::profile_id());
 
         if checkpoint.clear_all.is_some()
             && let Err(error) = self.reconcile_clear_all_receipt(&mut checkpoint)
@@ -3178,6 +3183,7 @@ mod recovery_statement_tests {
     fn checkpoint(simulation_second: u32, capture_second: u32) -> DetachedRuntimeCheckpoint {
         DetachedRuntimeCheckpoint {
             schema_version: DetachedRuntimeCheckpoint::VERSION,
+            profile_id: Some(crate::profile::profile_id()),
             detached_at_utc: timestamp(capture_second),
             simulation_time_utc: timestamp(simulation_second),
             spawn_accumulator_nanos: 0,
@@ -3480,6 +3486,7 @@ mod clear_all_replay_tests {
     fn checkpoint(receipt: ClearAllReceipt) -> DetachedRuntimeCheckpoint {
         DetachedRuntimeCheckpoint {
             schema_version: DetachedRuntimeCheckpoint::VERSION,
+            profile_id: Some(crate::profile::profile_id()),
             detached_at_utc: receipt.applied_at_utc,
             simulation_time_utc: receipt.applied_at_utc,
             spawn_accumulator_nanos: 0,
@@ -3633,6 +3640,7 @@ mod bounded_checkpoint_tests {
     fn checkpoint() -> DetachedRuntimeCheckpoint {
         DetachedRuntimeCheckpoint {
             schema_version: DetachedRuntimeCheckpoint::VERSION,
+            profile_id: Some(crate::profile::profile_id()),
             detached_at_utc: Utc.with_ymd_and_hms(2026, 8, 2, 12, 0, 0).unwrap(),
             simulation_time_utc: Utc.with_ymd_and_hms(2026, 8, 2, 12, 0, 0).unwrap(),
             spawn_accumulator_nanos: 0,
@@ -3827,6 +3835,7 @@ mod legacy_switch_replay_tests {
         let transition = receipt.transition_at_utc;
         DetachedRuntimeCheckpoint {
             schema_version: DetachedRuntimeCheckpoint::VERSION,
+            profile_id: Some(crate::profile::profile_id()),
             detached_at_utc: transition,
             simulation_time_utc: transition,
             spawn_accumulator_nanos: 0,
@@ -4094,6 +4103,7 @@ mod legacy_finish_replay_tests {
         let finished = receipt.finished_at_utc;
         DetachedRuntimeCheckpoint {
             schema_version: DetachedRuntimeCheckpoint::VERSION,
+            profile_id: Some(crate::profile::profile_id()),
             detached_at_utc: finished,
             simulation_time_utc: finished,
             spawn_accumulator_nanos: 0,

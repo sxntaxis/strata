@@ -275,9 +275,6 @@ impl App {
             super::AtlasOverlay::CaptureKey { action } => {
                 self.handle_atlas_capture_key_input(action, key);
             }
-            super::AtlasOverlay::EditTimeLogPath { .. } => {
-                self.handle_atlas_time_log_input(key);
-            }
             super::AtlasOverlay::SelectWeekStartDay { .. } => {
                 self.handle_atlas_week_start_dropdown(key);
             }
@@ -337,51 +334,6 @@ impl App {
                 }
             }
         }
-    }
-
-    fn handle_atlas_time_log_input(&mut self, key: KeyEvent) {
-        let Some(super::AtlasOverlay::EditTimeLogPath { mut input }) = self.atlas_overlay.take()
-        else {
-            return;
-        };
-
-        match key.code {
-            KeyCode::Esc => {
-                self.close_atlas_overlay();
-                return;
-            }
-            KeyCode::Enter => {
-                let value = crate::storage::normalize_time_log_path_input(input.as_str())
-                    .map(|path| path.display().to_string());
-
-                let keymap_path = crate::storage::get_keymap_path();
-                match crate::keybindings::set_time_log_path(&keymap_path, value) {
-                    Ok(loaded) => {
-                        self.apply_loaded_keybindings(loaded);
-                        self.close_atlas_overlay();
-                    }
-                    Err(err) => {
-                        self.keymap_error = Some(err);
-                        self.close_atlas_overlay();
-                    }
-                }
-                return;
-            }
-            KeyCode::Backspace => {
-                input.pop();
-            }
-            KeyCode::Char(c)
-                if !key
-                    .modifiers
-                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
-            {
-                input.push(c);
-            }
-            _ => {}
-        }
-
-        self.atlas_overlay = Some(super::AtlasOverlay::EditTimeLogPath { input });
-        self.render_needed = true;
     }
 
     fn handle_atlas_week_start_dropdown(&mut self, key: KeyEvent) {

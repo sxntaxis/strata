@@ -11,7 +11,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::storage;
+use crate::{profile, storage};
 
 use super::{
     SqliteRepository, SqliteStoreError,
@@ -217,6 +217,8 @@ impl MigrationLayout {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct StorageAuthorityMarker {
     schema_version: u8,
+    #[serde(default)]
+    profile_id: Option<String>,
     active_authority: String,
     sqlite_candidate: SqliteCandidateMarker,
 }
@@ -808,6 +810,7 @@ fn validate_or_create_artifacts(
 
     let marker = StorageAuthorityMarker {
         schema_version: AUTHORITY_MARKER_SCHEMA_VERSION,
+        profile_id: Some(profile::profile_id()),
         active_authority: "legacy-files".to_string(),
         sqlite_candidate: SqliteCandidateMarker {
             status: "verified".to_string(),

@@ -997,6 +997,7 @@ mod tests {
         let captured = chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 8, 3, 18, 0, 2).unwrap();
         let target = chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 8, 3, 18, 0, 7).unwrap();
         let statement = RecoveryStatement {
+            profile_id: crate::profile::profile_id(),
             checkpoint_captured_at_utc: captured,
             checkpoint_simulation_at_utc: captured,
             recovery_target_utc: target,

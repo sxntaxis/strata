@@ -14,7 +14,7 @@ use crate::{
         build_period_report, build_report_for_date_range, civil_time_for_utc, day_boundary_config,
         operational_day_key_for_utc, runtime_settings,
     },
-    sqlite, storage, temporal,
+    profile, sqlite, storage, temporal,
 };
 
 #[derive(Parser, Debug)]
@@ -28,12 +28,26 @@ pub struct Invocation {
     )]
     pub ignore_config: bool,
 
+    #[arg(
+        long,
+        global = true,
+        value_name = "DIRECTORY",
+        help = "Select one complete process-lifetime profile root"
+    )]
+    pub profile: Option<PathBuf>,
+
     #[command(subcommand)]
     pub command: Option<Cli>,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum Cli {
+    #[command(about = "Show the selected profile identity and complete authority paths")]
+    Profile {
+        #[arg(long, help = "Print the profile description as JSON")]
+        json: bool,
+    },
+
     #[command(about = "Start a new tracking session")]
     Start {
         #[arg(help = "Project name")]
@@ -309,6 +323,8 @@ pub enum ExportFormat {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActiveSession {
+    #[serde(default)]
+    pub profile_id: Option<String>,
     pub project: String,
     pub description: String,
     pub category_id: u64,
@@ -407,6 +423,7 @@ fn start_session_legacy(
     }
 
     let session = ActiveSession {
+        profile_id: Some(profile::profile_id()),
         project: project.clone(),
         description: description.unwrap_or_default(),
         category_id: category.id.0,
@@ -449,6 +466,7 @@ fn stop_session_legacy(accept_clock_jump: bool) -> Result<usize, String> {
     }
 
     let active_session: ActiveSession = storage::read_json(&session_path)?;
+    profile::validate_artifact_profile(active_session.profile_id.as_deref(), "active session")?;
 
     let now_utc = Utc::now();
     let interval =
@@ -556,6 +574,7 @@ fn report_legacy(selection: ReportSelection, completed_only: bool) -> Result<(),
         let active_path = storage::get_active_session_path();
         if storage::file_exists(&active_path) {
             let active: ActiveSession = storage::read_json(&active_path)?;
+            profile::validate_artifact_profile(active.profile_id.as_deref(), "active session")?;
             if let Some(provisional) = provisional_session(
                 &active.project,
                 active.category_id,
@@ -1205,6 +1224,39 @@ pub fn sqlite_legacy_remove(
     print_legacy_evidence_report(report, json)
 }
 
+pub fn show_profile(json: bool) -> Result<(), String> {
+    let description = profile::describe();
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&description).map_err(|error| error.to_string())?
+        );
+    } else {
+        println!(
+            "Profile ID: {}",
+            description["profile_id"].as_str().unwrap_or("unknown")
+        );
+        println!(
+            "Root: {}",
+            description["root"].as_str().unwrap_or("XDG default")
+        );
+        println!(
+            "Data: {}",
+            description["data_dir"].as_str().unwrap_or("unknown")
+        );
+        println!(
+            "State: {}",
+            description["state_dir"].as_str().unwrap_or("unknown")
+        );
+        println!(
+            "Config: {}",
+            description["config_dir"].as_str().unwrap_or("unknown")
+        );
+        println!("Switching: exit Strata and invoke again with --profile <directory>");
+    }
+    Ok(())
+}
+
 pub fn parse_invocation() -> Invocation {
     Invocation::parse()
 }
@@ -1248,6 +1300,12 @@ pub fn print_completions(shell: &str) -> Result<(), String> {
 
 pub fn run_command(cli: Cli) {
     match cli {
+        Cli::Profile { json } => {
+            if let Err(error) = show_profile(json) {
+                eprintln!("Error: {error}");
+                std::process::exit(1);
+            }
+        }
         Cli::Start {
             project,
             desc,

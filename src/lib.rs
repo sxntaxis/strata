@@ -13,6 +13,7 @@ mod keybindings;
 #[allow(dead_code)]
 mod legacy_category_lifecycle;
 mod legacy_transition;
+mod profile;
 #[allow(clippy::manual_checked_ops)]
 mod sand;
 #[allow(dead_code)]
@@ -41,13 +42,16 @@ fn load_startup_configuration(
 
 fn apply_startup_configuration(loaded: &keybindings::LoadedKeybindings) {
     domain::set_runtime_settings(loaded.runtime_settings);
-    storage::set_runtime_storage_settings(storage::RuntimeStorageSettings {
-        time_log_path: loaded.time_log_path.clone(),
-    });
 }
 
 pub fn run() -> Result<(), io::Error> {
     let invocation = cli::parse_invocation();
+    profile::initialize(invocation.profile.clone()).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("Profile error: {error}"),
+        )
+    })?;
     let loaded = load_startup_configuration(invocation.ignore_config)?;
     apply_startup_configuration(&loaded);
 
