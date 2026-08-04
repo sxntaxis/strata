@@ -1,11 +1,11 @@
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{BTreeSet, HashSet, VecDeque},
     io,
     path::{Path, PathBuf},
     time::{Duration, Instant, SystemTime},
 };
 
-use chrono::{DateTime, Duration as ChronoDuration, SecondsFormat, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, SecondsFormat, Utc};
 use crossterm::event::{self, Event};
 use ratatui::layout::Rect;
 use serde::{Deserialize, Serialize};
@@ -17,13 +17,13 @@ use crate::{
     },
     domain::{
         Category, CategoryId, DRIFT_CATEGORY_DISPLAY_NAME, DRIFT_CATEGORY_ID, FirstDayOfWeek,
-        ReportPeriod, RuntimeSettings, TimeTracker, civil_time_for_utc, is_drift_category_id,
-        operational_day_key_for_utc, set_runtime_settings,
+        OperationalDayPolicy, ReportPeriod, RuntimeSettings, TimeTracker, civil_time_for_utc,
+        is_drift_category_id, operational_day_key_for_utc, set_runtime_settings,
     },
     keybindings::{self, Action, ActionBindingState, KeyBinding},
     legacy_transition::{
-        LegacyActiveReceipt, LegacyFinishReceipt, LegacySessionReceipt, LegacyTransitionKind,
-        LegacyTransitionReceipt, reconcile_completed_session,
+        ClearAllReceipt, LegacyActiveReceipt, LegacyFinishReceipt, LegacySessionReceipt,
+        LegacyTransitionKind, LegacyTransitionReceipt, reconcile_completed_session,
     },
     sand::{
         RecoveryTiming, SandEngine, SandState, SandStateGrain, SedimentSnapshot,
@@ -155,6 +155,8 @@ struct DetachedRuntimeCheckpoint {
     legacy_transition: Option<LegacyTransitionReceipt>,
     #[serde(default)]
     legacy_finish: Option<LegacyFinishReceipt>,
+    #[serde(default)]
+    clear_all: Option<ClearAllReceipt>,
 }
 
 impl DetachedRuntimeCheckpoint {
@@ -176,6 +178,92 @@ fn transition_operation_id(
         at_utc.to_rfc3339_opts(SecondsFormat::Nanos, true),
         discriminator
     )
+}
+
+fn clear_all_operation_id(
+    previous_active: &LegacyActiveReceipt,
+    applied_at_utc: DateTime<Utc>,
+    idle_reset: bool,
+    previous_elapsed_seconds: usize,
+    affected_operational_days: &[String],
+) -> String {
+    let description = &previous_active.description;
+    let identity = format!(
+        "{}:{}:{}:{}:{}:{}",
+        previous_active.category_id,
+        description.len(),
+        description,
+        previous_active
+            .started_at_utc
+            .to_rfc3339_opts(SecondsFormat::Nanos, true),
+        previous_elapsed_seconds,
+        affected_operational_days.join(",")
+    );
+    transition_operation_id(
+        "clear-all",
+        &identity,
+        applied_at_utc,
+        if idle_reset {
+            "idle-reset"
+        } else {
+            "active-preserved"
+        },
+    )
+}
+
+fn clear_all_affected_days_for_interval(
+    operation_day: NaiveDate,
+    idle_reset: bool,
+    previous_started_at_utc: DateTime<Utc>,
+    applied_at_utc: DateTime<Utc>,
+    previous_elapsed_seconds: usize,
+    policy: OperationalDayPolicy,
+) -> Result<BTreeSet<NaiveDate>, String> {
+    let mut days = BTreeSet::from([operation_day]);
+    if idle_reset {
+        days.extend(
+            temporal::allocate_operational_day_slices(
+                previous_started_at_utc,
+                applied_at_utc,
+                previous_elapsed_seconds,
+                policy,
+            )?
+            .into_iter()
+            .map(|slice| slice.operational_day),
+        );
+    }
+    Ok(days)
+}
+
+fn stage_clear_all_active_state(
+    tracker: &mut TimeTracker,
+    active_session_started_at_utc: &mut Option<DateTime<Utc>>,
+    receipt: &ClearAllReceipt,
+) -> Result<(), String> {
+    let resulting_category_id = CategoryId::new(receipt.resulting_active.category_id);
+    if !tracker.set_active_category_by_id(resulting_category_id) {
+        return Err(format!(
+            "clear-all receipt {} references unavailable resulting category {}",
+            receipt.operation_id, receipt.resulting_active.category_id
+        ));
+    }
+    if !tracker.set_category_description_by_id(
+        resulting_category_id,
+        receipt.resulting_active.description.clone(),
+    ) {
+        return Err(format!(
+            "clear-all receipt {} cannot restore its resulting description",
+            receipt.operation_id
+        ));
+    }
+    let resulting_elapsed_seconds = if receipt.idle_reset {
+        0
+    } else {
+        receipt.previous_elapsed_seconds
+    };
+    tracker.start_session_with_elapsed(resulting_elapsed_seconds)?;
+    *active_session_started_at_utc = Some(receipt.resulting_active.started_at_utc);
+    Ok(())
 }
 
 fn validate_legacy_switch_checkpoint(
@@ -350,6 +438,58 @@ fn publish_legacy_finish_replay(
     )?;
     storage::save_sand_state(sand_path, &checkpoint.sand_state)?;
     Ok(staged_tracker)
+}
+
+fn sand_state_is_empty(state: &SandState) -> bool {
+    state.grains.is_empty() && state.pending_grains.is_empty() && state.pending_runs.is_empty()
+}
+
+fn validate_clear_all_checkpoint(
+    checkpoint: &DetachedRuntimeCheckpoint,
+    receipt: &ClearAllReceipt,
+) -> Result<(), String> {
+    if checkpoint.schema_version != DetachedRuntimeCheckpoint::VERSION {
+        return Err(format!(
+            "clear-all receipt requires checkpoint schema {}, found {}; evidence retained",
+            DetachedRuntimeCheckpoint::VERSION,
+            checkpoint.schema_version
+        ));
+    }
+    if checkpoint.legacy_transition.is_some() || checkpoint.legacy_finish.is_some() {
+        return Err(
+            "checkpoint contains overlapping transition receipts; evidence retained".to_string(),
+        );
+    }
+    receipt.validate_boundaries()?;
+    let expected_operation_id = clear_all_operation_id(
+        &receipt.previous_active,
+        receipt.applied_at_utc,
+        receipt.idle_reset,
+        receipt.previous_elapsed_seconds,
+        &receipt.affected_operational_days,
+    );
+    if receipt.operation_id != expected_operation_id {
+        return Err(format!(
+            "clear-all receipt operation ID {} is inconsistent; evidence retained",
+            receipt.operation_id
+        ));
+    }
+    if checkpoint.active_category_id != receipt.resulting_active.category_id
+        || checkpoint.active_description != receipt.resulting_active.description
+        || checkpoint.active_session_started_at_utc != Some(receipt.resulting_active.started_at_utc)
+    {
+        return Err(format!(
+            "clear-all receipt {} does not match its resulting checkpoint generation",
+            receipt.operation_id
+        ));
+    }
+    if !sand_state_is_empty(&checkpoint.sand_state) {
+        return Err(format!(
+            "clear-all receipt {} carries non-empty sediment",
+            receipt.operation_id
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -637,62 +777,6 @@ impl App {
         self.time_tracker.session_id_counter = state.loaded_sessions.next_session_id;
         self.archived_categories = state.archived_categories;
         true
-    }
-
-    fn reset_active_session_at(
-        &mut self,
-        started_at_utc: DateTime<Utc>,
-        accept_large_wall_interval: bool,
-    ) {
-        if let Err(error) =
-            temporal::checked_wall_interval(started_at_utc, Utc::now(), accept_large_wall_interval)
-        {
-            self.record_storage_result_for::<()>(
-                PersistenceOperation::ActiveStart,
-                RecoveryAction::ReloadAuthority,
-                Err(error),
-            );
-            return;
-        }
-
-        if let Some(database_path) = self.sqlite_database_path.clone() {
-            let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
-                self.record_storage_result_for::<()>(
-                    PersistenceOperation::ActiveReset,
-                    RecoveryAction::ReloadAuthority,
-                    Err("SQLite runtime has no active stable identity to reset".to_string()),
-                );
-                return;
-            };
-            let operation_id =
-                transition_operation_id("reset", &expected_stable_id, started_at_utc, "active");
-            let next_stable_id = format!("tui-active:{operation_id}");
-            let result = sqlite::reset_tui_active_session(
-                &database_path,
-                &expected_stable_id,
-                &operation_id,
-                &next_stable_id,
-                started_at_utc,
-            );
-            let Some(receipt) = self.record_storage_result_for(
-                PersistenceOperation::ActiveReset,
-                RecoveryAction::ReloadAuthority,
-                result,
-            ) else {
-                return;
-            };
-            self.session.active_session_stable_id = receipt.resulting_active_stable_id;
-        }
-        if let Err(error) = self.begin_active_session_at(started_at_utc, accept_large_wall_interval)
-        {
-            self.record_storage_result_for::<()>(
-                PersistenceOperation::ActiveStart,
-                RecoveryAction::ReloadAuthority,
-                Err(error),
-            );
-            return;
-        }
-        self.refresh_active_runtime_checkpoint();
     }
 
     fn open_modal(&mut self) {
@@ -1567,6 +1651,302 @@ impl App {
             || !self.simulation.pending_mutations.is_empty()
     }
 
+    fn clear_all_effect(
+        &self,
+        applied_at_utc: DateTime<Utc>,
+        clock_mode: SessionClockMode,
+    ) -> Result<(BTreeSet<NaiveDate>, usize), String> {
+        let interval = self.reconciled_active_interval(applied_at_utc, clock_mode)?;
+        let previous_started_at_utc = self
+            .session
+            .active_session_started_at_utc
+            .ok_or_else(|| "active session is missing its UTC start timestamp".to_string())?;
+        let days = clear_all_affected_days_for_interval(
+            operational_day_key_for_utc(applied_at_utc),
+            is_drift_category_id(self.time_tracker.active_category_id()),
+            previous_started_at_utc,
+            interval.ended_at_utc,
+            interval.elapsed_seconds,
+            OperationalDayPolicy::from_config(self.runtime_settings.day_boundary),
+        )?;
+        Ok((days, interval.elapsed_seconds))
+    }
+
+    fn reconcile_clear_all_receipt(
+        &mut self,
+        checkpoint: &mut DetachedRuntimeCheckpoint,
+    ) -> Result<(), String> {
+        let Some(receipt) = checkpoint.clear_all.clone() else {
+            return Ok(());
+        };
+        validate_clear_all_checkpoint(checkpoint, &receipt)?;
+        if self.sqlite_database_path.is_none() {
+            let valid_category_ids = self
+                .time_tracker
+                .categories_for_storage()
+                .into_iter()
+                .chain(self.archived_categories.iter().cloned())
+                .map(|category| category.id)
+                .collect::<HashSet<_>>();
+            self.sand_engine
+                .restore_state(&checkpoint.sand_state, &valid_category_ids);
+            stage_clear_all_active_state(
+                &mut self.time_tracker,
+                &mut self.session.active_session_started_at_utc,
+                &receipt,
+            )?;
+            storage::save_sand_state(&storage::get_sand_state_path(), &checkpoint.sand_state)?;
+            for value in &receipt.affected_operational_days {
+                let day = NaiveDate::parse_from_str(value, "%Y-%m-%d")
+                    .map_err(|error| error.to_string())?;
+                self.reconcile_daily_contribution(day);
+                if let Some(recovery) = self.persistence_recovery.as_ref() {
+                    return Err(recovery.failure.summary());
+                }
+            }
+            checkpoint.clear_all = None;
+            storage::write_json_atomic(&storage::get_detached_runtime_path(), checkpoint)?;
+        } else if let Some(database_path) = self.sqlite_database_path.clone() {
+            let expected_stable_id = self
+                .session
+                .active_session_stable_id
+                .as_deref()
+                .ok_or_else(|| {
+                    "SQLite clear-all recovery has no active stable identity".to_string()
+                })?;
+            checkpoint.clear_all = None;
+            sqlite::replace_tui_recovering_checkpoint(
+                &database_path,
+                expected_stable_id,
+                checkpoint,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn apply_clear_all_at(&mut self, applied_at_utc: DateTime<Utc>, clock_mode: SessionClockMode) {
+        let (affected_days, previous_elapsed_seconds) =
+            match self.clear_all_effect(applied_at_utc, clock_mode) {
+                Ok(effect) => effect,
+                Err(error) => {
+                    self.record_storage_result_for::<()>(
+                        PersistenceOperation::SandStateSave,
+                        RecoveryAction::ReloadAuthority,
+                        Err(error),
+                    );
+                    return;
+                }
+            };
+        let previous_tracker = self.time_tracker.clone();
+        let previous_session = self.session.clone();
+        let previous_sand = self.sand_engine.snapshot_state();
+        let previous_active = LegacyActiveReceipt {
+            category_id: self.time_tracker.active_category_id().0,
+            description: self
+                .time_tracker
+                .category_description_by_id(self.time_tracker.active_category_id())
+                .unwrap_or_default()
+                .to_string(),
+            started_at_utc: match self.session.active_session_started_at_utc {
+                Some(value) => value,
+                None => {
+                    self.record_storage_result_for::<()>(
+                        PersistenceOperation::ActiveReset,
+                        RecoveryAction::ReloadAuthority,
+                        Err("runtime has no active UTC start timestamp to clear".to_string()),
+                    );
+                    return;
+                }
+            },
+        };
+        let idle_reset = is_drift_category_id(self.time_tracker.active_category_id());
+
+        self.sand_engine.clear();
+        if idle_reset && let Err(error) = self.begin_transition_session(applied_at_utc, clock_mode)
+        {
+            self.sand_engine.restore_state(
+                &previous_sand,
+                &self
+                    .time_tracker
+                    .categories_for_storage()
+                    .into_iter()
+                    .chain(self.archived_categories.iter().cloned())
+                    .map(|category| category.id)
+                    .collect(),
+            );
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::ActiveReset,
+                RecoveryAction::ReloadAuthority,
+                Err(error),
+            );
+            return;
+        }
+        let resulting_active = LegacyActiveReceipt {
+            category_id: previous_active.category_id,
+            description: previous_active.description.clone(),
+            started_at_utc: if idle_reset {
+                applied_at_utc
+            } else {
+                previous_active.started_at_utc
+            },
+        };
+        let affected_operational_days = affected_days
+            .iter()
+            .map(|day| day.format("%Y-%m-%d").to_string())
+            .collect::<Vec<_>>();
+        let operation_id = clear_all_operation_id(
+            &previous_active,
+            applied_at_utc,
+            idle_reset,
+            previous_elapsed_seconds,
+            &affected_operational_days,
+        );
+        let receipt = ClearAllReceipt {
+            version: ClearAllReceipt::VERSION,
+            operation_id,
+            applied_at_utc,
+            previous_active,
+            resulting_active,
+            idle_reset,
+            previous_elapsed_seconds,
+            affected_operational_days,
+        };
+        let mut checkpoint = match self.build_runtime_checkpoint() {
+            Ok(value) => value,
+            Err(error) => {
+                self.time_tracker = previous_tracker;
+                self.session = previous_session;
+                self.sand_engine.restore_state(
+                    &previous_sand,
+                    &self
+                        .time_tracker
+                        .categories_for_storage()
+                        .into_iter()
+                        .chain(self.archived_categories.iter().cloned())
+                        .map(|category| category.id)
+                        .collect(),
+                );
+                self.record_storage_result_for::<()>(
+                    PersistenceOperation::CheckpointSave,
+                    RecoveryAction::ReloadAuthority,
+                    Err(error),
+                );
+                return;
+            }
+        };
+        checkpoint.clear_all = Some(receipt.clone());
+
+        if let Some(database_path) = self.sqlite_database_path.clone() {
+            let Some(expected_stable_id) = previous_session.active_session_stable_id.clone() else {
+                self.time_tracker = previous_tracker;
+                self.session = previous_session;
+                self.sand_engine.restore_state(
+                    &previous_sand,
+                    &self
+                        .time_tracker
+                        .categories_for_storage()
+                        .into_iter()
+                        .chain(self.archived_categories.iter().cloned())
+                        .map(|category| category.id)
+                        .collect(),
+                );
+                self.record_storage_result_for::<()>(
+                    PersistenceOperation::ActiveReset,
+                    RecoveryAction::ReloadAuthority,
+                    Err("SQLite clear-all has no active stable identity".to_string()),
+                );
+                return;
+            };
+            let resulting_stable_id = if idle_reset {
+                format!("tui-active:{}", receipt.operation_id)
+            } else {
+                expected_stable_id.clone()
+            };
+            let daily_updates = affected_days
+                .iter()
+                .map(|day| {
+                    (
+                        day.format("%Y-%m-%d").to_string(),
+                        self.daily_contribution_from_time_log(*day),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let result = sqlite::clear_tui_state(
+                &database_path,
+                sqlite::TuiClearAllStateRequest {
+                    expected_active_stable_id: &expected_stable_id,
+                    resulting_active_stable_id: &resulting_stable_id,
+                    resulting_started_at_utc: receipt.resulting_active.started_at_utc,
+                    state: &checkpoint.sand_state,
+                    daily_updates: &daily_updates,
+                    detached_at_utc: checkpoint.detached_at_utc,
+                    simulation_time_utc: checkpoint.simulation_time_utc,
+                    checkpoint: &checkpoint,
+                },
+            );
+            if self
+                .record_storage_result_for(
+                    PersistenceOperation::SandStateSave,
+                    RecoveryAction::ReloadAuthority,
+                    result,
+                )
+                .is_none()
+            {
+                self.time_tracker = previous_tracker;
+                self.session = previous_session;
+                self.sand_engine.restore_state(
+                    &previous_sand,
+                    &self
+                        .time_tracker
+                        .categories_for_storage()
+                        .into_iter()
+                        .chain(self.archived_categories.iter().cloned())
+                        .map(|category| category.id)
+                        .collect(),
+                );
+                return;
+            }
+            self.session.active_session_stable_id = Some(resulting_stable_id);
+            self.sync_drift_idle_state();
+            return;
+        }
+
+        if let Err(error) =
+            storage::write_json_atomic(&storage::get_detached_runtime_path(), &checkpoint)
+        {
+            self.time_tracker = previous_tracker;
+            self.session = previous_session;
+            self.sand_engine.restore_state(
+                &previous_sand,
+                &self
+                    .time_tracker
+                    .categories_for_storage()
+                    .into_iter()
+                    .chain(self.archived_categories.iter().cloned())
+                    .map(|category| category.id)
+                    .collect(),
+            );
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::CheckpointSave,
+                RecoveryAction::ReloadAuthority,
+                Err(error),
+            );
+            return;
+        }
+        self.persist_sand_state();
+        if self.has_persistence_recovery() {
+            return;
+        }
+        for day in affected_days {
+            self.reconcile_daily_contribution(day);
+            if self.has_persistence_recovery() {
+                return;
+            }
+        }
+        self.refresh_active_runtime_checkpoint();
+        self.sync_drift_idle_state();
+    }
+
     fn queue_or_apply_mutation(&mut self, mutation: QueuedMutation) {
         if self.is_catching_up() || !self.simulation.pending_mutations.is_empty() {
             self.simulation
@@ -1592,37 +1972,7 @@ impl App {
                 self.apply_switch_layer_at(category_id, scheduled_at_utc, clock_mode);
             }
             QueuedMutation::ClearAllSand => {
-                self.sand_engine.clear();
-
-                let scheduled_day = operational_day_key_for_utc(scheduled_at_utc);
-                if let Some(database_path) = self.sqlite_database_path.clone() {
-                    let day = scheduled_day.format("%Y-%m-%d").to_string();
-                    let result = sqlite::delete_tui_drift_sessions_for_day(&database_path, &day);
-                    if self
-                        .record_storage_result_for(
-                            PersistenceOperation::DriftSessionDelete,
-                            RecoveryAction::ReloadAuthority,
-                            result,
-                        )
-                        .is_none()
-                    {
-                        return;
-                    }
-                }
-                self.time_tracker
-                    .clear_drift_sessions_for_day(scheduled_day);
-
-                if is_drift_category_id(self.time_tracker.active_category_id()) {
-                    self.reset_active_session_at(
-                        scheduled_at_utc,
-                        clock_mode == SessionClockMode::HistoricalWall,
-                    );
-                    self.sync_drift_idle_state();
-                }
-
-                self.persist_sessions();
-                self.persist_sand_state();
-                self.persist_daily_sand_snapshot();
+                self.apply_clear_all_at(scheduled_at_utc, clock_mode);
             }
             QueuedMutation::ClearDriftSand => {
                 self.sand_engine.clear_category(DRIFT_CATEGORY_ID);
@@ -2028,6 +2378,7 @@ impl App {
             legacy_recovery_committed: false,
             legacy_transition: None,
             legacy_finish: None,
+            clear_all: None,
         })
     }
 
@@ -2187,6 +2538,17 @@ impl App {
                     }
                 }
             };
+
+        if checkpoint.clear_all.is_some()
+            && let Err(error) = self.reconcile_clear_all_receipt(&mut checkpoint)
+        {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::CheckpointRecovery,
+                RecoveryAction::ReloadAuthority,
+                Err(error),
+            );
+            return false;
+        }
 
         if self.sqlite_database_path.is_none() {
             match self.reconcile_legacy_transition_receipt(&mut checkpoint) {
@@ -2592,6 +2954,227 @@ pub fn run_ui(loaded: keybindings::LoadedKeybindings) -> Result<(), io::Error> {
 }
 
 #[cfg(test)]
+mod clear_all_replay_tests {
+    use chrono::{TimeZone, Utc};
+    use ratatui::style::Color;
+
+    use super::{
+        ClearAllReceipt, DetachedRuntimeCheckpoint, LegacyActiveReceipt,
+        clear_all_affected_days_for_interval, clear_all_operation_id, stage_clear_all_active_state,
+        validate_clear_all_checkpoint,
+    };
+    use crate::{
+        domain::{Category, CategoryId, OperationalDayPolicy, TimeTracker},
+        sand::{SandState, SandStateGrain},
+    };
+
+    fn categories() -> Vec<Category> {
+        vec![
+            Category {
+                id: CategoryId::new(0),
+                name: "idle".to_string(),
+                color: Color::White,
+                description: String::new(),
+                karma_effect: 0,
+            },
+            Category {
+                id: CategoryId::new(1),
+                name: "Work".to_string(),
+                color: Color::Blue,
+                description: "focus".to_string(),
+                karma_effect: 1,
+            },
+        ]
+    }
+
+    fn receipt(idle_reset: bool) -> ClearAllReceipt {
+        let previous_started_at_utc = Utc.with_ymd_and_hms(2026, 8, 1, 23, 0, 0).unwrap();
+        let applied_at_utc = Utc.with_ymd_and_hms(2026, 8, 2, 1, 0, 0).unwrap();
+        let previous_active = LegacyActiveReceipt {
+            category_id: if idle_reset { 0 } else { 1 },
+            description: if idle_reset { "" } else { "focus" }.to_string(),
+            started_at_utc: previous_started_at_utc,
+        };
+        let affected_operational_days = if idle_reset {
+            vec!["2026-08-01".to_string(), "2026-08-02".to_string()]
+        } else {
+            vec!["2026-08-02".to_string()]
+        };
+        let previous_elapsed_seconds = 7_200;
+        ClearAllReceipt {
+            version: ClearAllReceipt::VERSION,
+            operation_id: clear_all_operation_id(
+                &previous_active,
+                applied_at_utc,
+                idle_reset,
+                previous_elapsed_seconds,
+                &affected_operational_days,
+            ),
+            applied_at_utc,
+            resulting_active: LegacyActiveReceipt {
+                category_id: previous_active.category_id,
+                description: previous_active.description.clone(),
+                started_at_utc: if idle_reset {
+                    applied_at_utc
+                } else {
+                    previous_started_at_utc
+                },
+            },
+            previous_active,
+            idle_reset,
+            previous_elapsed_seconds,
+            affected_operational_days,
+        }
+    }
+
+    fn checkpoint(receipt: ClearAllReceipt) -> DetachedRuntimeCheckpoint {
+        DetachedRuntimeCheckpoint {
+            schema_version: DetachedRuntimeCheckpoint::VERSION,
+            detached_at_utc: receipt.applied_at_utc,
+            simulation_time_utc: receipt.applied_at_utc,
+            spawn_accumulator_nanos: 0,
+            physics_accumulator_nanos: 0,
+            active_category_id: receipt.resulting_active.category_id,
+            active_description: receipt.resulting_active.description.clone(),
+            active_session_started_at_utc: Some(receipt.resulting_active.started_at_utc),
+            sand_state: SandState {
+                version: SandState::VERSION,
+                grid_width: 3,
+                grid_height: 5,
+                grains: Vec::new(),
+                frame_count: 9,
+                sweep_left_to_right: true,
+                rng_state: 7,
+                pending_grains: Vec::new(),
+                pending_runs: Vec::new(),
+            },
+            pending_mutations: Vec::new(),
+            recovery_target_utc: None,
+            legacy_recovery_committed: false,
+            legacy_transition: None,
+            legacy_finish: None,
+            clear_all: Some(receipt),
+        }
+    }
+
+    #[test]
+    fn idle_cross_day_effect_names_every_touched_day() {
+        let days = clear_all_affected_days_for_interval(
+            Utc.with_ymd_and_hms(2026, 8, 3, 1, 0, 0)
+                .unwrap()
+                .date_naive(),
+            true,
+            Utc.with_ymd_and_hms(2026, 8, 1, 23, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 8, 3, 1, 0, 0).unwrap(),
+            93_600,
+            OperationalDayPolicy {
+                utc_offset_seconds: 0,
+                start_minutes: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            days.into_iter().collect::<Vec<_>>(),
+            vec![
+                Utc.with_ymd_and_hms(2026, 8, 1, 0, 0, 0)
+                    .unwrap()
+                    .date_naive(),
+                Utc.with_ymd_and_hms(2026, 8, 2, 0, 0, 0)
+                    .unwrap()
+                    .date_naive(),
+                Utc.with_ymd_and_hms(2026, 8, 3, 0, 0, 0)
+                    .unwrap()
+                    .date_naive(),
+            ]
+        );
+    }
+
+    #[test]
+    fn non_idle_effect_names_only_operation_day() {
+        let operation_day = Utc
+            .with_ymd_and_hms(2026, 8, 3, 0, 0, 0)
+            .unwrap()
+            .date_naive();
+        let days = clear_all_affected_days_for_interval(
+            operation_day,
+            false,
+            Utc.with_ymd_and_hms(2026, 8, 1, 23, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 8, 3, 1, 0, 0).unwrap(),
+            93_600,
+            OperationalDayPolicy {
+                utc_offset_seconds: 0,
+                start_minutes: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(days.into_iter().collect::<Vec<_>>(), vec![operation_day]);
+    }
+
+    #[test]
+    fn receipt_identity_binds_elapsed_days_and_empty_sediment() {
+        let receipt = receipt(false);
+        let checkpoint = checkpoint(receipt.clone());
+        validate_clear_all_checkpoint(&checkpoint, &receipt).unwrap();
+
+        let mut changed_days = receipt.clone();
+        changed_days.affected_operational_days = vec!["2026-08-01".to_string()];
+        assert!(
+            validate_clear_all_checkpoint(&checkpoint, &changed_days)
+                .unwrap_err()
+                .contains("operation ID")
+        );
+
+        let mut changed_elapsed = receipt.clone();
+        changed_elapsed.previous_elapsed_seconds += 1;
+        assert!(
+            validate_clear_all_checkpoint(&checkpoint, &changed_elapsed)
+                .unwrap_err()
+                .contains("operation ID")
+        );
+
+        let mut non_empty = checkpoint;
+        non_empty.sand_state.grains.push(SandStateGrain {
+            x: 0,
+            y: 0,
+            category_id: 1,
+        });
+        assert!(
+            validate_clear_all_checkpoint(&non_empty, &receipt)
+                .unwrap_err()
+                .contains("non-empty")
+        );
+    }
+
+    #[test]
+    fn replay_stages_exact_resulting_active_interval() {
+        let mut tracker = TimeTracker::new();
+        tracker.apply_loaded_state(categories(), 2, Vec::new(), 1);
+        let mut started_at_utc = None;
+        let non_idle = receipt(false);
+        stage_clear_all_active_state(&mut tracker, &mut started_at_utc, &non_idle).unwrap();
+        assert_eq!(tracker.active_category_id(), CategoryId::new(1));
+        assert_eq!(
+            started_at_utc,
+            Some(non_idle.resulting_active.started_at_utc)
+        );
+        assert!(
+            tracker.current_elapsed().unwrap().as_secs() as usize
+                >= non_idle.previous_elapsed_seconds
+        );
+        assert!(
+            tracker.current_elapsed().unwrap().as_secs() as usize
+                <= non_idle.previous_elapsed_seconds.saturating_add(1)
+        );
+
+        let idle = receipt(true);
+        stage_clear_all_active_state(&mut tracker, &mut started_at_utc, &idle).unwrap();
+        assert_eq!(tracker.active_category_id(), CategoryId::new(0));
+        assert_eq!(started_at_utc, Some(idle.applied_at_utc));
+        assert!(tracker.current_elapsed().unwrap().as_secs() <= 1);
+    }
+}
+
+#[cfg(test)]
 mod bounded_checkpoint_tests {
     use super::DetachedRuntimeCheckpoint;
     use crate::sand::SandState;
@@ -2625,6 +3208,7 @@ mod bounded_checkpoint_tests {
             legacy_recovery_committed: false,
             legacy_transition: None,
             legacy_finish: None,
+            clear_all: None,
         }
     }
 
@@ -2816,6 +3400,7 @@ mod legacy_switch_replay_tests {
             legacy_recovery_committed: false,
             legacy_transition: Some(receipt),
             legacy_finish: None,
+            clear_all: None,
         }
     }
 
@@ -3072,6 +3657,7 @@ mod legacy_finish_replay_tests {
             legacy_recovery_committed: false,
             legacy_transition: None,
             legacy_finish: Some(receipt),
+            clear_all: None,
         }
     }
 

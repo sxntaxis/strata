@@ -1,7 +1,7 @@
 # Strata accepted decision index
 
 Status: accepted authority
-Last reviewed: 2026-08-02
+Last reviewed: 2026-08-03
 
 Detailed rationale and unresolved implications live in `notebook/decisions/DECISION-REGISTER.md`. This file contains only decisions accepted strongly enough to constrain implementation.
 
@@ -54,6 +54,7 @@ Detailed rationale and unresolved implications live in `notebook/decisions/DECIS
 | STRATA-D045 | A legacy switch is a receipt-governed multi-file transition: publish the resulting checkpoint and deterministic receipt first, replay session/catalog effects idempotently, and clear the receipt only after every authority converges. Whole-second ledger semantics—not exact subsecond wall-start equality—own the completed row. | implemented and certified |
 | STRATA-D046 | A normal legacy finish is a receipt-governed terminal transition: publish prior-generation evidence before active mutation, never resume a receipt-marked finished generation, and retire the receipt only after session, catalog, sediment, and every affected daily contribution converge. | implemented and certified |
 | STRATA-D047 | Persistence recovery must preserve active and archived category meaning in reload, flush, sediment validation, and emergency export; recovery artifacts identify archival state explicitly. | implemented and certified |
+| STRATA-D048 | Clear-all is a receipt-governed sediment operation plus provisional-idle reset, never committed-ledger deletion. SQLite publishes active, empty sediment, affected daily contributions, and checkpoint atomically; legacy replay restores exact active/grid state and clears evidence only after convergence. | implemented and certified |
 
 ## Explicitly unresolved
 
@@ -65,7 +66,6 @@ The following are not accepted decisions:
 - clearing and formation lifecycle beyond placed/pending mass conservation;
 - future zoom, compression, panning, or explicit canonical-canvas migration;
 - safe cross-authority replay of queued checkpoint mutations, if it is ever required;
-- a stable legacy clear-all/reset receipt across separate file publications;
 - initial active-start/checkpoint atomicity or its explicit recovery policy;
 - exact sediment classification at active transition boundaries;
 - user-visible recovery cutoff, reconstruction, and uncertainty semantics under issue #10;

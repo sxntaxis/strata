@@ -332,15 +332,6 @@ fn every_authoritative_persistence_family_rolls_back_or_remains_recoverable() {
         assert_eq!(count(path, "sessions"), 1);
     });
 
-    with_database("drift-delete", |path| {
-        insert_session(path, 7, 0, "drift");
-        runtime_coordination::with_test_fault("drift-session-delete", "commit", "commit", || {
-            tui_runtime::delete_drift_sessions_for_day(path, "2026-08-01")
-        })
-        .unwrap_err();
-        assert_eq!(count(path, "sessions"), 1);
-    });
-
     with_database("sand-state", |path| {
         tui_runtime::save_sand_state(path, &sand_state(1)).unwrap();
         runtime_coordination::with_test_fault("sand-state", "commit", "commit", || {

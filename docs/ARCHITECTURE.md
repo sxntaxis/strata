@@ -1,7 +1,7 @@
 # Strata architecture authority
 
 Status: current implementation map
-Last reviewed: 2026-08-02
+Last reviewed: 2026-08-03
 
 ## Current system
 
@@ -28,7 +28,7 @@ Current responsibility map:
 - `src/legacy_transition.rs` — schema-versioned legacy transition receipts, completed-session payload validation, and exact/idempotent session reconciliation.
 - `src/sqlite.rs` and `src/sqlite/**` — schema migrations, category archival, repositories, active/checkpoint transition transactions, checkpoint custody, deterministic interchange, backup/restore, and fault certification.
 - `src/storage.rs` — XDG paths, strict legacy active/archived category catalog, strict session identity/reference validation, atomic file helpers, legacy runtime checkpoint files, and custody-separated contribution files.
-- `src/app.rs` and `src/app/**` — TUI orchestration, active/archived category projections, semantic-edge checkpoint refresh, legacy switch/finish receipt publication and replay, explicit modal/edit state, persistence reconciliation, bounded recovery, historical artifact selection, context selection, resolver execution, palette/atlas projection, and rendering.
+- `src/app.rs` and `src/app/**` — TUI orchestration, active/archived category projections, semantic-edge checkpoint refresh, legacy switch/finish/clear-all receipt publication and replay, explicit modal/edit state, persistence reconciliation, bounded recovery, historical artifact selection, context selection, resolver execution, palette/atlas projection, and rendering.
 - `src/app/terminal_lifecycle.rs` — raw-mode/alternate-screen RAII, process-wide panic restoration, exactly-once cleanup, runtime failure composition, and debug fault certification.
 - `src/sand/engine.rs` — canonical logical grains, compressed pending mass, physics, viewport projection, and Braille rendering.
 - `src/sand/recovery.rs` — bounded recovery arithmetic and topology-preserving detached contribution.
@@ -96,7 +96,7 @@ Normal legacy finish uses a second certified receipt protocol. It publishes prio
 
 Legacy recovery flush/reload validate both active and archived catalogs, retain archived sediment identity, and emergency recovery schema 2 exports explicit archival state.
 
-Legacy clear-all/reset remains outside the certified receipt boundary.
+Clear-all/provisional-idle reset uses a third certified receipt boundary. It preserves all committed history, binds canonical prior elapsed and every affected day, restores exact active and grid state before legacy replay derives daily contributions, and applies active/sand/daily/checkpoint effects atomically in SQLite. Six transaction kill points and deterministic legacy replay are certified.
 
 The recovery contract and remaining issue #10 boundary are recorded in `docs/RECOVERY_AUTHORITY.md`.
 
@@ -210,9 +210,9 @@ TUI and CLI translate user intent and present state. Neither may own an independ
 
 ## Current architectural frontier
 
-Persistence, temporal, domain, report, sediment, interaction, cross-authority category integrity, active/checkpoint generation coherence, and legacy switch/finish replay are complete. The next priorities are:
+Persistence, temporal, domain, report, sediment, interaction, cross-authority category integrity, active/checkpoint generation coherence, and legacy switch/finish/clear-all replay are complete. The next priorities are:
 
-1. implement RECONCILIATION-001B2C: legacy clear-all/reset receipt custody, then initial active-start evidence, exact transition-edge sediment reconciliation, and visible recovery cutoff semantics for issue #10;
+1. complete issue #10 through initial active-start/checkpoint coherence, exact remaining transition-edge sediment attribution, and visible deterministic recovery cutoff/reconstruction semantics;
 2. design the explicit merge/reassignment and permanent-deletion remainder of issue #13;
 3. later domain/UI distinction work under issue #22;
 4. later profile authority, including complete isolation and deliberate switching under issue #15.
@@ -230,6 +230,6 @@ Persistence, temporal, domain, report, sediment, interaction, cross-authority ca
 - An unbound action is not a disabled action.
 - An archived category is not deleted history.
 - An unresolved category reference is not idle.
-- A switch or finish receipt is not authority for clear-all/reset.
+- A receipt for one transition kind is not authority for another transition kind.
 - A checkpoint without visible cutoff semantics is not proof of exact post-capture elapsed time.
 - CSV, JSON, and ICS are external adapters, not canonical domain models.
