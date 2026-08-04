@@ -24,9 +24,10 @@ Current responsibility map:
 - `src/cli.rs` — command lifecycle, reports, exports, migration, and maintenance.
 - `src/keybindings.rs` — validated runtime/time settings plus configured Bound/Unbound/Disabled action state, mandatory key policy, contextual aliases, and the shared input resolver.
 - `src/domain.rs` — canonical sessions, project/category identity, operational-day allocation, reports, and cloneable staged legacy transition state.
+- `src/category_lifecycle.rs` — storage-neutral category identity counting and remapping for sediment, snapshots, and receipt-free runtime checkpoint payloads.
 - `src/temporal.rs` — monotonic/wall reconciliation, fixed-offset civil policy, and exact overlap slicing.
 - `src/legacy_transition.rs` — schema-versioned legacy transition receipts, completed-session payload validation, and exact/idempotent session reconciliation.
-- `src/sqlite.rs` and `src/sqlite/**` — schema migrations, category archival, repositories, active/checkpoint transition transactions, checkpoint custody, deterministic interchange, backup/restore, and fault certification.
+- `src/sqlite.rs` and `src/sqlite/**` — schema migrations, category archival and lifecycle transactions, repositories, active/checkpoint transition transactions, checkpoint custody, deterministic interchange, backup/restore, and fault certification.
 - `src/storage.rs` — XDG paths, strict legacy active/archived category catalog, strict session identity/reference validation, atomic file helpers, legacy runtime checkpoint files, and custody-separated contribution files.
 - `src/app.rs` and `src/app/**` — TUI orchestration, active/archived category projections, semantic-edge checkpoint refresh, legacy switch/finish/clear-all receipt publication and replay, explicit modal/edit state, persistence reconciliation, bounded recovery, historical artifact selection, context selection, resolver execution, palette/atlas projection, and rendering.
 - `src/app/recovery_statement.rs` — blocking recovery-evidence acknowledgment, deterministic cutoff presentation, exact/reconstructed/provisional classification, and shared projection of the structured recovery statement.
@@ -66,6 +67,12 @@ Category retirement changes availability, not identity or historical meaning.
 - Explicit ID 0 remains intentional idle; unresolved references are never converted to idle.
 - Archive and restore preserve stable ID, name, description, color, karma effect, and tags.
 - Legacy-to-SQLite migration retains archived state and original session foreign keys.
+- SQLite schema version 7 owns reviewed category lifecycle receipts.
+- Merge/reassignment requires an explicit source and target plus a deterministic complete-reference preview; the preview is recomputed inside one immediate transaction and stale confirmation fails closed.
+- The transaction reassigns category identity across completed and active sessions, tags, canonical sediment, snapshots, regenerated daily contributions, and receipt-free checkpoint payloads while preserving non-category identity, chronology, target metadata, mass, and FIFO order.
+- Permanent deletion without reassignment requires zero references across the same complete inventory.
+- Lifecycle receipts retire source IDs permanently; creation, backup/restore, portable bundle schema 3, import validation, and doctor integrity preserve that custody.
+- Protected, malformed, or transition-receipt-bearing checkpoint evidence blocks lifecycle mutation.
 
 The detailed category contract is `docs/CATEGORY_AUTHORITY.md`.
 
@@ -126,7 +133,7 @@ The complete recovery contract and issue #10 closure are recorded in `docs/RECOV
 - Historical artifacts have explicit cumulative, daily, or derived identity.
 - Historical viewing is immutable.
 - Daily contributions derive from exact canonical session slices and are trusted only on revision match.
-- SQLite schema version 6 and distinct legacy-file paths preserve old cumulative daily evidence without reinterpretation.
+- SQLite schema version 6 introduced typed daily-contribution storage; current schema version 7 retains it while adding category lifecycle receipts, and distinct legacy-file paths preserve old cumulative daily evidence without reinterpretation.
 
 The detailed sediment contract is `docs/SEDIMENT_AUTHORITY.md`.
 
@@ -180,9 +187,9 @@ The complete interaction contract is `docs/INTERACTION_AUTHORITY.md`.
 
 Owns exact elapsed intervals, timestamps, categories, projects, descriptions, operational-day policy, and reportable totals.
 
-### Category catalog
+### Category catalog and lifecycle
 
-Owns stable category identity, active/archived state, historical display metadata, and reference validation. Retirement may hide an identity from new selection but may not erase, relabel, or redirect existing sessions, sediment, snapshots, or tags.
+Owns stable category identity, active/archived state, historical display metadata, reference validation, and retired-ID custody. Retirement may hide an identity from new selection but may not erase, relabel, or redirect existing sessions, sediment, snapshots, or tags. A reviewed SQLite lifecycle receipt may redirect all source-owned references atomically or certify zero-reference deletion; no partial or stale transformation is authority.
 
 ### Active generation
 
@@ -218,9 +225,9 @@ TUI and CLI translate user intent and present state. Neither may own an independ
 
 ## Current architectural frontier
 
-Persistence, temporal, domain, report, sediment, interaction, cross-authority category integrity, and crash-recovery authority are complete. The next priorities are:
+Persistence, temporal, domain, report, sediment, interaction, cross-authority category integrity, crash-recovery authority, and the SQLite category-lifecycle transaction are complete. The next priorities are:
 
-1. design the explicit merge/reassignment and permanent-deletion remainder of issue #13;
+1. complete issue #13 through a prepared legacy lifecycle receipt, idempotent crash replay, and explicit TUI review/confirmation under RECONCILIATION-001C2;
 2. later domain/UI distinction work under issue #22;
 3. later profile authority, including complete isolation and deliberate switching under issue #15.
 
@@ -236,6 +243,8 @@ Persistence, temporal, domain, report, sediment, interaction, cross-authority ca
 - A contextual alias is not a direct physical binding.
 - An unbound action is not a disabled action.
 - An archived category is not deleted history.
+- A source category removed by a certified lifecycle transaction is not an identity available for reuse.
+- A lifecycle preview is not mutation authority after its revision becomes stale.
 - An unresolved category reference is not idle.
 - A receipt for one transition kind is not authority for another transition kind.
 - CSV, JSON, and ICS are external adapters, not canonical domain models.

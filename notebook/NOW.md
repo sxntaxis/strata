@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-08-03
 authority: working
-summary: Crash-recovery authority is complete: identity, receipts, clear-all, initial bootstrap, exact transition edges, persisted cutoff reuse, visible uncertainty, and export parity are certified.
-next: Define the category merge/reassignment and permanent-deletion transaction required to complete issue #13.
+summary: SQLite category lifecycle authority is certified: complete preview, stale guard, atomic merge or zero-reference deletion, receipts, retired-ID custody, bundle parity, and doctor integrity.
+next: Complete issue #13 through the legacy-file lifecycle receipt/replay protocol and explicit TUI review/confirmation surface.
 ---
 
 # NOW — Strata
@@ -48,13 +48,17 @@ Strata now has:
 - bounded FIFO transition settlement, post-clear non-reappearance, and uninitialized-canvas mass preservation;
 - blocking recovery evidence acknowledgment with durable simulation, capture, target, reconstructed duration, and active identity;
 - exact/reconstructed/provisional classification with persisted cutoff reuse across failed commit and delayed retry;
-- emergency recovery schema 3 parity with the visible structured statement.
+- emergency recovery schema 3 parity with the visible structured statement;
+- SQLite schema 7 category lifecycle receipts and complete reference previews;
+- revision-bound atomic category merge/reassignment across ledger, active state, tags, sediment, snapshots, daily contributions, and receipt-free checkpoints;
+- zero-reference-only permanent deletion, idempotent retry, and permanent retired-ID custody;
+- portable bundle schema 3 lifecycle receipt parity and doctor detection of tamper or retired-ID reuse.
 
 The project remains in **post-program issue reconciliation**.
 
 ## Verified technical baseline
 
-- SQLite schema version 6 is authoritative after explicit activation.
+- SQLite schema version 7 is authoritative after explicit activation.
 - CLI and TUI share configuration, repository, temporal, session, recovery, snapshot, interaction, and category boundaries.
 - Historical sediment viewing is immutable and daily contributions are revision-matched to ledger truth.
 - Report-log editing commits only after successful persistence and retains failed drafts in visible recovery.
@@ -91,20 +95,21 @@ The project remains in **post-program issue reconciliation**.
 - **RECONCILIATION-001B3A** — partial issue #10: atomic initial SQLite active generation and first checkpoint, with rollback and process retry certification.
 - **RECONCILIATION-001B3B** — partial issue #10: exact bounded sediment settlement at immediate, queued, clear, and finish boundaries.
 - **RECONCILIATION-001B3C** — completed issue #10: persisted deterministic cutoff, visible exact/reconstructed/provisional evidence, acknowledgment custody, repeated-retry proof, and schema-3 export parity.
+- **RECONCILIATION-001C1** — partial issue #13: complete SQLite lifecycle preview, stale guard, atomic merge or zero-reference deletion, auditable receipts, retired-ID nonreuse, portable bundle schema 3, and doctor integrity.
 
 ## Active sequence
 
-1. Define the merge/reassignment and permanent-deletion transaction needed to complete issue #13.
+1. Complete RECONCILIATION-001C2: legacy-file prepared lifecycle receipt, idempotent replay, and explicit TUI review/confirmation for issue #13.
 2. Later domain/UI distinction work under issue #22.
 3. Later profile authority, including complete isolation and deliberate switching under issue #15.
 
 ## Current risks
 
-- Issue #13 still lacks explicit category merge/reassignment and permanent-deletion transactions.
+- Issue #13 still lacks legacy-file crash-safe lifecycle replay and the final explicit user review/confirmation surface.
 - Queued checkpoint mutations have no stable cross-authority receipt identity and fail closed.
 - Complete profile switching/isolation remains open.
 - Active draft versus category metadata remains an unresolved domain/UI distinction.
 
 ## Next
 
-Define the category merge/reassignment and permanent-deletion transaction required to complete issue #13. Preserve historical meaning, refuse ambiguous destructive operations, and certify both SQLite and legacy authority before closure.
+Implement RECONCILIATION-001C2. Preserve the C1 complete-reference and stale-preview contract while adding a prepared legacy receipt across every file authority, idempotent startup replay, retired-ID custody, and one explicit review/confirmation interaction before issue #13 closure.

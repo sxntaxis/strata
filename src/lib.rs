@@ -4,6 +4,7 @@ use std::io;
 
 #[allow(clippy::unnecessary_sort_by, clippy::while_let_loop)]
 mod app;
+mod category_lifecycle;
 mod cli;
 mod constants;
 #[allow(clippy::unnecessary_sort_by)]
