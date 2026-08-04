@@ -71,7 +71,10 @@ fn malformed_category_tags_block_startup_without_rewrite() {
 
     let output = run_tui(&profile);
     let evidence = combined(&output);
-    assert!(!output.status.success(), "startup unexpectedly succeeded: {evidence}");
+    assert!(
+        !output.status.success(),
+        "startup unexpectedly succeeded: {evidence}"
+    );
     assert!(
         evidence.to_ascii_lowercase().contains("category tags"),
         "missing actionable category-tags failure: {evidence}"
@@ -91,7 +94,10 @@ fn malformed_sand_state_blocks_startup_without_rewrite() {
 
     let output = run_tui(&profile);
     let evidence = combined(&output);
-    assert!(!output.status.success(), "startup unexpectedly succeeded: {evidence}");
+    assert!(
+        !output.status.success(),
+        "startup unexpectedly succeeded: {evidence}"
+    );
     assert!(
         evidence.to_ascii_lowercase().contains("sand state")
             || evidence.to_ascii_lowercase().contains("sediment"),
@@ -122,7 +128,10 @@ fn unknown_sediment_identity_blocks_startup_without_rewrite() {
 
     let output = run_tui(&profile);
     let evidence = combined(&output);
-    assert!(!output.status.success(), "startup unexpectedly succeeded: {evidence}");
+    assert!(
+        !output.status.success(),
+        "startup unexpectedly succeeded: {evidence}"
+    );
     assert!(
         evidence.contains("999") && evidence.to_ascii_lowercase().contains("category"),
         "missing unknown-category failure: {evidence}"
