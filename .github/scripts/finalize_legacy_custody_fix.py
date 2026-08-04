@@ -43,8 +43,8 @@ rollback_replacement = '''self.sand_engine
                     )
                     .expect("captured rollback sediment must remain valid");'''
 count = text.count(rollback)
-if count != 4:
-    raise SystemExit(f"rollback sediment restores: expected 4, found {count}")
+if count != 3:
+    raise SystemExit(f"rollback sediment restores: expected 3, found {count}")
 text = text.replace(rollback, rollback_replacement)
 rollback_less_indent = '''self.sand_engine.restore_state(
                 &previous_sand,
