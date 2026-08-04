@@ -2,10 +2,13 @@ use crate::{
     constants::COLORS,
     domain::{CategoryId, DRIFT_CATEGORY_ID, ReportPeriod},
     keybindings::{Action, InputContext},
+    sqlite,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
-use super::{App, PaletteCommand, QueuedMutation, ui_helpers};
+use super::{
+    App, PaletteCommand, PersistenceOperation, QueuedMutation, RecoveryAction, ui_helpers,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ReportEditKeyIntent {
@@ -242,7 +245,10 @@ impl App {
     }
 
     fn switch_to_layer_from_palette(&mut self, category_id: CategoryId) {
-        self.queue_or_apply_mutation(QueuedMutation::SwitchLayer(category_id));
+        self.queue_or_apply_mutation(QueuedMutation::SwitchLayer {
+            category_id,
+            description: String::new(),
+        });
     }
 
     fn handle_keybindings_modal_action(&mut self, action: Action) -> bool {
@@ -268,9 +274,6 @@ impl App {
         match overlay {
             super::AtlasOverlay::CaptureKey { action } => {
                 self.handle_atlas_capture_key_input(action, key);
-            }
-            super::AtlasOverlay::EditTimeLogPath { .. } => {
-                self.handle_atlas_time_log_input(key);
             }
             super::AtlasOverlay::SelectWeekStartDay { .. } => {
                 self.handle_atlas_week_start_dropdown(key);
@@ -331,51 +334,6 @@ impl App {
                 }
             }
         }
-    }
-
-    fn handle_atlas_time_log_input(&mut self, key: KeyEvent) {
-        let Some(super::AtlasOverlay::EditTimeLogPath { mut input }) = self.atlas_overlay.take()
-        else {
-            return;
-        };
-
-        match key.code {
-            KeyCode::Esc => {
-                self.close_atlas_overlay();
-                return;
-            }
-            KeyCode::Enter => {
-                let value = crate::storage::normalize_time_log_path_input(input.as_str())
-                    .map(|path| path.display().to_string());
-
-                let keymap_path = crate::storage::get_keymap_path();
-                match crate::keybindings::set_time_log_path(&keymap_path, value) {
-                    Ok(loaded) => {
-                        self.apply_loaded_keybindings(loaded);
-                        self.close_atlas_overlay();
-                    }
-                    Err(err) => {
-                        self.keymap_error = Some(err);
-                        self.close_atlas_overlay();
-                    }
-                }
-                return;
-            }
-            KeyCode::Backspace => {
-                input.pop();
-            }
-            KeyCode::Char(c)
-                if !key
-                    .modifiers
-                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
-            {
-                input.push(c);
-            }
-            _ => {}
-        }
-
-        self.atlas_overlay = Some(super::AtlasOverlay::EditTimeLogPath { input });
-        self.render_needed = true;
     }
 
     fn handle_atlas_week_start_dropdown(&mut self, key: KeyEvent) {
@@ -532,39 +490,66 @@ impl App {
                         self.add_category();
                         self.close_modal();
                     }
-                } else {
-                    if self.selected_index < self.time_tracker.category_count() {
-                        if self.time_tracker.set_category_description_by_index(
-                            self.selected_index,
-                            self.modal_description.clone(),
-                        ) {
-                            let description_is_active = self.time_tracker.active_category_index()
-                                == Some(self.selected_index);
-                            self.persist_categories();
-                            if description_is_active {
-                                self.refresh_active_runtime_checkpoint();
-                            }
-                            if self.has_persistence_recovery() {
-                                self.render_needed = true;
-                                return true;
-                            }
-                        }
-                        self.remember_selected_tag();
-                        if self.has_persistence_recovery() {
-                            self.render_needed = true;
-                            return true;
-                        }
+                } else if self.modal_editing_category_metadata {
+                    if self.time_tracker.set_category_description_by_index(
+                        self.selected_index,
+                        self.modal_description.clone(),
+                    ) {
+                        self.persist_categories();
                     }
-                    if self.time_tracker.active_category_index() != Some(self.selected_index)
-                        && let Some(category_id) = self
-                            .time_tracker
-                            .category_by_index(self.selected_index)
-                            .map(|category| category.id)
-                    {
-                        self.queue_or_apply_mutation(QueuedMutation::SwitchLayer(category_id));
+                    if !self.has_persistence_recovery() {
+                        self.close_modal();
+                    }
+                } else {
+                    self.remember_selected_tag();
+                    if self.has_persistence_recovery() {
+                        self.render_needed = true;
+                        return true;
+                    }
+                    let selected = self
+                        .time_tracker
+                        .category_by_index(self.selected_index)
+                        .map(|category| category.id);
+                    if let Some(category_id) = selected {
+                        if self.time_tracker.active_category_id() == category_id {
+                            self.time_tracker
+                                .set_active_description(self.modal_description.clone());
+                            if let Some(database_path) = self.sqlite_database_path.clone() {
+                                let Some(stable_id) = self.session.active_session_stable_id.clone()
+                                else {
+                                    self.render_needed = true;
+                                    return true;
+                                };
+                                let result = sqlite::update_tui_active_description(
+                                    &database_path,
+                                    &stable_id,
+                                    &self.modal_description,
+                                );
+                                if self
+                                    .record_storage_result_for(
+                                        PersistenceOperation::ActiveDescription,
+                                        RecoveryAction::ReloadAuthority,
+                                        result,
+                                    )
+                                    .is_none()
+                                {
+                                    self.render_needed = true;
+                                    return true;
+                                }
+                            }
+                            self.refresh_active_runtime_checkpoint();
+                        } else {
+                            self.queue_or_apply_mutation(QueuedMutation::SwitchLayer {
+                                category_id,
+                                description: self.modal_description.clone(),
+                            });
+                        }
                     }
                     self.close_modal();
                 }
+            }
+            Action::EditCategoryDescription => {
+                self.toggle_category_metadata_edit();
             }
             Action::DeleteCategory => {
                 if !self.is_on_insert_space() && self.selected_index > 0 {
@@ -751,7 +736,10 @@ impl App {
             }
             Action::Confirm => false,
             Action::SwitchToNone => {
-                self.queue_or_apply_mutation(QueuedMutation::SwitchLayer(DRIFT_CATEGORY_ID));
+                self.queue_or_apply_mutation(QueuedMutation::SwitchLayer {
+                    category_id: DRIFT_CATEGORY_ID,
+                    description: String::new(),
+                });
                 false
             }
             Action::Detach => {

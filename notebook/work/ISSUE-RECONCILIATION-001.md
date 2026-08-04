@@ -1,41 +1,39 @@
 ---
 id: ISSUE-RECONCILIATION-001
 kind: work
-state: active
-authority: working
+state: accepted
+authority: accepted
 created: 2026-08-01
-updated: 2026-08-03
+updated: 2026-08-04
 ---
 
-# ISSUE-RECONCILIATION-001 — post-SQLite queue
+# ISSUE-RECONCILIATION-001 — completed post-SQLite queue
 
-The original issue descriptions predate the completed SQLite migration. Their acceptance criteria remain useful, but code-path premises must be reverified against every still-supported authority.
+The original issue descriptions predated the completed SQLite migration. Each issue was re-evaluated against every supported authority and closed only after its current acceptance boundary received implementation and evidence.
 
-## Current disposition
+## Final disposition
 
-| Issues | Disposition | Next owner |
-|---|---|---|
-| #8, #9, #11 | Completed and closed by the SQLite program. | none |
-| #21 | Completed by AUTHORITY-001: shared fail-closed startup configuration. | none |
-| #25 | Completed by TEMPORAL-001: explicit clock and civil-time authority. | none |
-| #15 | Complete profile identity, isolation, and deliberate runtime switching remain open. | AUTHORITY-002 or later profile unit |
-| #4, #23, #27 | Completed by TEMPORAL-002: overlap allocation, fixed-clock truth, and zero-transition policy. | none |
-| #2, #12 | Completed by DOMAIN-001: project/category identity, explicit classification, and idle vocabulary. | none |
-| #1, #3, #14, #17, #28 | Completed by REPORT-001: truthful ranges/help, provisional active projection, valid ICS, and deterministic ordering. | none |
-| #5 | Completed by RECONCILIATION-001A: malformed or unknown legacy session category IDs fail closed, retain the original value for repair, and are never reinterpreted as idle. | none |
-| #10 | Completed by RECONCILIATION-001B1, B2A, B2B, B2C, B3A, B3B, and B3C: active/checkpoint generations, prepared legacy replay, non-destructive clear-all, atomic initial bootstrap, exact transition-edge sediment, persisted cutoff reuse, visible recovery classification, repeated restart proof, and schema-3 export parity are certified. | none |
-| #13 | Completed by RECONCILIATION-001A, RECONCILIATION-001C1, and RECONCILIATION-001C2: archive/restore preserves historical meaning; SQLite provides the complete transaction and receipt; legacy files provide exact-result prepared replay and permanent retired-ID custody; the TUI requires explicit target/deletion review and exact revision-bound confirmation. | none |
-| #6, #7, #16, #18, #26 | Completed by SEDIMENT-001: conserved mass/topology/recovery and truthful immutable historical artifacts. | none |
-| #19 | Completed by INTERACTION-001A: explicit report-log edit mode, stable-ID draft, atomic commit, full cancel, and command/text separation. | none |
-| #20 | Completed by INTERACTION-001B: exactly-once terminal restoration, runtime emergency checkpoint custody, primary-error preservation, and PTY certification. | none |
-| #24 | Completed by INTERACTION-001C: explicit Bound/Unbound/Disabled state, declared contextual aliases, mandatory recovery-safe Ctrl-C, configurable F1, hidden-fallback removal, and atlas/palette/runtime parity. | none |
-| #22 | Active draft versus category metadata remains a domain/UI distinction. | DOMAIN-002 |
+| Issues | Completed by |
+|---|---|
+| #8, #9, #11 | SQLite migration program |
+| #21 | AUTHORITY-001 |
+| #15, #22 | AUTHORITY-002 |
+| #25 | TEMPORAL-001 |
+| #4, #23, #27 | TEMPORAL-002 |
+| #2, #12 | DOMAIN-001 |
+| #1, #3, #14, #17, #28 | REPORT-001 |
+| #5 | RECONCILIATION-001A |
+| #10 | RECONCILIATION-001B1 through B3C |
+| #13 | RECONCILIATION-001A, C1, and C2 |
+| #6, #7, #16, #18, #26 | SEDIMENT-001 |
+| #19 | INTERACTION-001A |
+| #20 | INTERACTION-001B |
+| #24 | INTERACTION-001C |
 
-## Immediate action
+## Closure
 
-Issues #10 and #13 are evidence-backed and complete. Next:
-
-1. resolve issue #22: the active draft versus durable category metadata distinction;
-2. later define complete profile identity, isolation, and deliberate switching under issue #15.
-
-Do not weaken the completed archive/lifecycle distinction, retired-ID custody, or fail-closed handling of unresolved references while pursuing later domain work.
+- issue #22 is closed by explicit active-draft ownership, separate durable metadata editing, and recovery/replay proofs;
+- issue #15 is closed by stable complete-profile identity, all-path isolation, copied-artifact refusal, and process-bound switching;
+- every issue in the queue is implemented or was already superseded by certified authority;
+- no open GitHub issue remains at closure time;
+- future questions must enter through a new explicit unit and may not silently reopen superseded premises.

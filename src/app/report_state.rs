@@ -91,11 +91,7 @@ impl App {
         }
 
         let category_id = self.time_tracker.active_category_id();
-        let description = self
-            .time_tracker
-            .category_description_by_id(category_id)
-            .map(ToString::to_string)
-            .unwrap_or_default();
+        let description = self.time_tracker.active_description().to_string();
 
         let started_at_utc = self.session.active_session_started_at_utc?;
         let ended_at_utc = started_at_utc + ChronoDuration::seconds(elapsed_seconds as i64);

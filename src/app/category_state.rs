@@ -213,14 +213,31 @@ impl App {
     }
 
     pub(super) fn sync_modal_description_from_selection(&mut self) {
+        self.modal_editing_category_metadata = false;
         if self.is_on_insert_space() {
             self.modal_description.clear();
+        } else if self.time_tracker.active_category_index() == Some(self.selected_index) {
+            self.modal_description = self.time_tracker.active_description().to_string();
         } else {
-            self.modal_description = self
-                .time_tracker
-                .category_description_by_index(self.selected_index)
-                .unwrap_or_default();
+            self.modal_description.clear();
         }
+        self.modal_tag_index = None;
+    }
+
+    pub(super) fn toggle_category_metadata_edit(&mut self) {
+        if self.is_on_insert_space() {
+            return;
+        }
+        self.modal_editing_category_metadata = !self.modal_editing_category_metadata;
+        self.modal_description = if self.modal_editing_category_metadata {
+            self.time_tracker
+                .category_description_by_index(self.selected_index)
+                .unwrap_or_default()
+        } else if self.time_tracker.active_category_index() == Some(self.selected_index) {
+            self.time_tracker.active_description().to_string()
+        } else {
+            String::new()
+        };
         self.modal_tag_index = None;
     }
 
@@ -338,6 +355,7 @@ impl App {
             self.persist_categories();
             self.switch_active_category_at(
                 added_id,
+                String::new(),
                 chrono::Utc::now(),
                 super::SessionClockMode::LiveMonotonic,
             );
@@ -363,6 +381,7 @@ impl App {
             if was_active {
                 self.switch_active_category_at(
                     DRIFT_CATEGORY_ID,
+                    String::new(),
                     chrono::Utc::now(),
                     super::SessionClockMode::LiveMonotonic,
                 );

@@ -3,12 +3,10 @@ use std::{
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
-    sync::{OnceLock, RwLock},
 };
 
 use chrono::{DateTime, Local, NaiveDate, Utc};
 use csv::{ReaderBuilder, StringRecord, WriterBuilder};
-use directories::ProjectDirs;
 use ratatui::style::Color;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
@@ -122,29 +120,6 @@ impl Default for CategoryTagsState {
             version: Self::VERSION,
             tags_by_category: HashMap::new(),
         }
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct RuntimeStorageSettings {
-    pub time_log_path: Option<PathBuf>,
-}
-
-fn runtime_storage_settings_cell() -> &'static RwLock<RuntimeStorageSettings> {
-    static CELL: OnceLock<RwLock<RuntimeStorageSettings>> = OnceLock::new();
-    CELL.get_or_init(|| RwLock::new(RuntimeStorageSettings::default()))
-}
-
-pub fn runtime_storage_settings() -> RuntimeStorageSettings {
-    runtime_storage_settings_cell()
-        .read()
-        .map(|guard| guard.clone())
-        .unwrap_or_default()
-}
-
-pub fn set_runtime_storage_settings(settings: RuntimeStorageSettings) {
-    if let Ok(mut guard) = runtime_storage_settings_cell().write() {
-        *guard = settings;
     }
 }
 
@@ -637,43 +612,15 @@ pub fn save_sessions_to_csv(
 }
 
 pub fn get_data_dir() -> PathBuf {
-    if let Ok(raw_override) = std::env::var("STRATA_DATA_DIR") {
-        let trimmed = raw_override.trim();
-        if !trimmed.is_empty() {
-            let override_dir = PathBuf::from(trimmed);
-            fs::create_dir_all(&override_dir).ok();
-            return override_dir;
-        }
-    }
-
-    if let Some(proj_dirs) = ProjectDirs::from("com", "strata", "strata") {
-        let data_dir = proj_dirs.data_dir().to_path_buf();
-        fs::create_dir_all(&data_dir).ok();
-        data_dir
-    } else {
-        PathBuf::from(".")
-    }
+    crate::profile::data_dir()
 }
 
 pub fn get_config_dir() -> PathBuf {
-    if let Some(proj_dirs) = ProjectDirs::from("com", "strata", "strata") {
-        let config_dir = proj_dirs.config_dir().to_path_buf();
-        fs::create_dir_all(&config_dir).ok();
-        config_dir
-    } else {
-        PathBuf::from(".")
-    }
+    crate::profile::config_dir()
 }
 
 pub fn get_state_dir() -> PathBuf {
-    if let Some(proj_dirs) = ProjectDirs::from("com", "strata", "strata")
-        && let Some(state_dir) = proj_dirs.state_dir()
-    {
-        let dir = state_dir.to_path_buf();
-        fs::create_dir_all(&dir).ok();
-        return dir;
-    }
-    PathBuf::from(".")
+    crate::profile::state_dir()
 }
 
 pub fn get_active_session_path() -> PathBuf {
@@ -726,34 +673,7 @@ pub fn get_categories_path() -> PathBuf {
 }
 
 pub fn get_time_log_path() -> PathBuf {
-    if let Some(override_path) = runtime_storage_settings().time_log_path {
-        if let Some(parent) = override_path.parent() {
-            fs::create_dir_all(parent).ok();
-        }
-        return override_path;
-    }
-
     get_data_dir().join("time_log.csv")
-}
-
-pub fn normalize_time_log_path_input(raw: &str) -> Option<PathBuf> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let candidate = PathBuf::from(trimmed);
-    let normalized = if candidate
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("csv"))
-    {
-        candidate
-    } else {
-        candidate.join("time_log.csv")
-    };
-
-    Some(normalized)
 }
 
 pub fn load_sand_state(path: &Path) -> Option<SandState> {

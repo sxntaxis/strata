@@ -10,7 +10,7 @@ use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::storage;
+use crate::{profile, storage};
 
 use super::{ControlledMigrationReport, SqliteRepository, migration_command};
 
@@ -82,6 +82,8 @@ impl SqliteCliActivationReport {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct StorageAuthorityMarker {
     schema_version: u8,
+    #[serde(default)]
+    profile_id: Option<String>,
     active_authority: String,
     sqlite_candidate: SqliteCandidateMarker,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -412,6 +414,8 @@ fn build_report(
 }
 
 fn validate_marker(marker: &StorageAuthorityMarker) -> Result<(), AuthorityError> {
+    profile::validate_artifact_profile(marker.profile_id.as_deref(), "SQLite authority marker")
+        .map_err(AuthorityError::InvalidMarker)?;
     if marker.schema_version != MARKER_SCHEMA_VERSION {
         return Err(AuthorityError::InvalidMarker(format!(
             "unsupported schema version {}",

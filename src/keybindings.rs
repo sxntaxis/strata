@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fmt, fs,
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 use chrono::FixedOffset;
@@ -66,6 +66,7 @@ pub(crate) enum Action {
 
     DeleteCategory,
     CategoryLifecycle,
+    EditCategoryDescription,
     IncreaseKarma,
     DecreaseKarma,
     Backspace,
@@ -79,7 +80,7 @@ pub(crate) enum Action {
 }
 
 impl Action {
-    const ALL: [Action; 29] = [
+    const ALL: [Action; 30] = [
         Action::Quit,
         Action::ToggleCommandPalette,
         Action::OpenCategoryModal,
@@ -101,6 +102,7 @@ impl Action {
         Action::Cancel,
         Action::DeleteCategory,
         Action::CategoryLifecycle,
+        Action::EditCategoryDescription,
         Action::IncreaseKarma,
         Action::DecreaseKarma,
         Action::Backspace,
@@ -140,6 +142,7 @@ impl Action {
 
             Action::DeleteCategory => "delete_layer",
             Action::CategoryLifecycle => "category_lifecycle",
+            Action::EditCategoryDescription => "edit_layer_metadata",
             Action::IncreaseKarma => "boost_layer_karma",
             Action::DecreaseKarma => "drain_layer_karma",
             Action::Backspace => "backspace",
@@ -182,6 +185,9 @@ impl Action {
             "category_lifecycle" | "merge_or_delete_layer" | "permanent_layer_lifecycle" => {
                 Some(Self::CategoryLifecycle)
             }
+            "edit_layer_metadata" | "edit_category_description" => {
+                Some(Self::EditCategoryDescription)
+            }
             "boost_layer_karma" | "increase_karma" => Some(Self::IncreaseKarma),
             "drain_layer_karma" | "decrease_karma" => Some(Self::DecreaseKarma),
             "backspace" => Some(Self::Backspace),
@@ -222,6 +228,7 @@ impl Action {
 
             Action::DeleteCategory => "Archive selected layer",
             Action::CategoryLifecycle => "Merge or permanently delete selected layer",
+            Action::EditCategoryDescription => "Toggle durable layer-metadata editing",
             Action::IncreaseKarma => "Set selected layer karma to +1",
             Action::DecreaseKarma => "Set selected layer karma to -1",
             Action::Backspace => "Delete one typed character in layer pop-up",
@@ -260,6 +267,7 @@ impl Action {
 
             Action::DeleteCategory
             | Action::CategoryLifecycle
+            | Action::EditCategoryDescription
             | Action::IncreaseKarma
             | Action::DecreaseKarma
             | Action::Backspace => ActionCategory::CategoryModal,
@@ -788,14 +796,13 @@ impl Default for KeymapConfig {
 pub(crate) struct LoadedKeybindings {
     pub keymap: Keymap,
     pub runtime_settings: RuntimeSettings,
-    pub time_log_path: Option<PathBuf>,
 }
 
 fn default_true() -> bool {
     true
 }
 
-const DEFAULT_BINDINGS: [(&str, Action); 31] = [
+const DEFAULT_BINDINGS: [(&str, Action); 32] = [
     ("q", Action::Quit),
     ("ctrl-p", Action::ToggleCommandPalette),
     ("enter", Action::Confirm),
@@ -816,6 +823,7 @@ const DEFAULT_BINDINGS: [(&str, Action); 31] = [
     ("shift-right", Action::ShiftRight),
     ("x", Action::DeleteCategory),
     ("shift-x", Action::CategoryLifecycle),
+    ("shift-e", Action::EditCategoryDescription),
     ("+", Action::IncreaseKarma),
     ("=", Action::IncreaseKarma),
     ("-", Action::DecreaseKarma),
@@ -955,7 +963,6 @@ pub(crate) fn default_loaded_keybindings() -> LoadedKeybindings {
     LoadedKeybindings {
         keymap: default_keymap(),
         runtime_settings: default_runtime_settings(),
-        time_log_path: None,
     }
 }
 
@@ -1046,53 +1053,6 @@ fn parse_unbound_actions(config: &KeymapConfig, path: &Path) -> Result<HashSet<A
     Ok(actions)
 }
 
-fn parse_time_log_path(
-    config: &KeymapConfig,
-    config_path: &Path,
-) -> Result<Option<PathBuf>, String> {
-    let Some(raw) = config.time_log_path.as_deref() else {
-        return Ok(None);
-    };
-    if raw.contains('\0') {
-        return Err(format!(
-            "Invalid time_log_path in {}: paths cannot contain NUL bytes",
-            config_path.display()
-        ));
-    }
-
-    let Some(path) = crate::storage::normalize_time_log_path_input(raw) else {
-        return Ok(None);
-    };
-    if path.file_name().is_none() {
-        return Err(format!(
-            "Invalid time_log_path '{}' in {}: expected a file or directory path",
-            raw,
-            config_path.display()
-        ));
-    }
-    if path.exists() && !path.is_file() {
-        return Err(format!(
-            "Invalid time_log_path '{}' in {}: resolved path {} is not a regular file",
-            raw,
-            config_path.display(),
-            path.display()
-        ));
-    }
-    if let Some(parent) = path.parent()
-        && parent.exists()
-        && !parent.is_dir()
-    {
-        return Err(format!(
-            "Invalid time_log_path '{}' in {}: parent {} is not a directory",
-            raw,
-            config_path.display(),
-            parent.display()
-        ));
-    }
-
-    Ok(Some(path))
-}
-
 fn load_config_or_default(path: &Path) -> Result<KeymapConfig, String> {
     if !path.exists() {
         return Ok(KeymapConfig::default());
@@ -1135,7 +1095,12 @@ pub(crate) fn load_keybindings(path: &Path) -> Result<LoadedKeybindings, String>
     }
 
     let runtime_settings = parse_runtime_settings(&config, path)?;
-    let time_log_path = parse_time_log_path(&config, path)?;
+    if config.time_log_path.is_some() {
+        return Err(format!(
+            "time_log_path in {} is no longer supported because it hot-redirected one file without switching complete profile authority; exit Strata and use --profile <directory>",
+            path.display()
+        ));
+    }
     let contextual_aliases = parse_contextual_aliases(&config, path)?;
     let disabled_actions = parse_unbound_actions(&config, path)?;
 
@@ -1211,7 +1176,6 @@ pub(crate) fn load_keybindings(path: &Path) -> Result<LoadedKeybindings, String>
     Ok(LoadedKeybindings {
         keymap,
         runtime_settings,
-        time_log_path,
     })
 }
 
@@ -1268,16 +1232,6 @@ pub(crate) fn set_action_unbound(path: &Path, action: Action) -> Result<LoadedKe
         }
     }
 
-    save_config(path, &config)?;
-    load_keybindings(path)
-}
-
-pub(crate) fn set_time_log_path(
-    path: &Path,
-    time_log_path: Option<String>,
-) -> Result<LoadedKeybindings, String> {
-    let mut config = load_config_or_default(path)?;
-    config.time_log_path = time_log_path;
     save_config(path, &config)?;
     load_keybindings(path)
 }
@@ -1601,24 +1555,18 @@ mod tests {
     }
 
     #[test]
-    fn test_load_keybindings_invalid_time_log_parent_returns_error() {
-        let path = unique_path("strata_keymap_invalid_profile");
-        let blocker = unique_path("strata_keymap_profile_blocker");
-        fs::write(&blocker, "not a directory").expect("write blocker");
-        let configured = blocker.join("history.csv");
-        fs::write(
-            &path,
-            serde_json::json!({"time_log_path": configured}).to_string(),
-        )
-        .expect("write config");
+    fn test_load_keybindings_rejects_time_log_path_hot_redirect() {
+        let path = unique_path("strata_keymap_obsolete_time_log_path");
+        let raw = r#"{
+  "time_log_path": "/tmp/strata-other-profile/time_log.csv"
+}"#;
+        fs::write(&path, raw).expect("write config");
 
         let err = load_keybindings(&path).expect_err("config should fail");
-        assert!(err.contains("Invalid time_log_path"));
-        assert!(err.contains("parent"));
-        assert!(err.contains(&path.display().to_string()));
+        assert!(err.contains("time_log_path"));
+        assert!(err.contains("--profile"));
 
         fs::remove_file(path).ok();
-        fs::remove_file(blocker).ok();
     }
 
     #[test]

@@ -165,20 +165,6 @@ impl App {
                 )),
             },
             self.selectable_row(
-                AtlasSelectable::TimeLogPath,
-                selected_item,
-                self.atlas_item_color(AtlasSelectable::TimeLogPath),
-                pad_column(
-                    &self.truncate_label(
-                        &crate::storage::get_time_log_path().display().to_string(),
-                        value_col,
-                    ),
-                    value_col,
-                ),
-                "time_log_path".to_string(),
-                action_col,
-            ),
-            self.selectable_row(
                 AtlasSelectable::WeekStartDay,
                 selected_item,
                 self.atlas_item_color(AtlasSelectable::WeekStartDay),
@@ -329,46 +315,6 @@ impl App {
                     Line::from(Span::styled(
                         "Esc: cancel · Backspace: disable · Delete: unbind",
                         Style::default().fg(Color::Gray),
-                    )),
-                ];
-
-                f.render_widget(ratatui::widgets::Clear, rect);
-                f.render_widget(Paragraph::new(body).block(block), rect);
-            }
-            AtlasOverlay::EditTimeLogPath { input } => {
-                let rect = self.modal_rect_ratio(terminal_size, 2, 3);
-                let block = Block::default()
-                    .title(Line::from(Span::styled(
-                        "time log path",
-                        Style::default()
-                            .fg(Color::White)
-                            .add_modifier(Modifier::BOLD),
-                    )))
-                    .title_alignment(Alignment::Center)
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .border_style(
-                        Style::default().fg(self.atlas_item_color(AtlasSelectable::TimeLogPath)),
-                    );
-
-                let body = vec![
-                    Line::from(Span::styled(
-                        "Type a file path (.csv) or a directory.",
-                        Style::default().fg(Color::White),
-                    )),
-                    Line::from(Span::styled(
-                        "If directory is given, time_log.csv is appended.",
-                        Style::default().fg(Color::Gray),
-                    )),
-                    Line::from(""),
-                    Line::from(Span::styled(
-                        input.to_string(),
-                        Style::default().fg(Color::Cyan),
-                    )),
-                    Line::from(""),
-                    Line::from(Span::styled(
-                        "Enter: save · Esc: cancel",
-                        Style::default().fg(Color::DarkGray),
                     )),
                 ];
 

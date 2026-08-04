@@ -134,19 +134,17 @@ fn invalid_timezone_blocks_mutation_before_default_database_creation() {
 }
 
 #[test]
-fn invalid_profile_path_blocks_mutation() {
+fn time_log_path_hot_redirect_is_rejected() {
     let profile = TestProfile::new("profile-path");
-    let blocker = profile.root.join("not-a-directory");
-    fs::write(&blocker, "blocker").expect("write blocker");
-    let configured = blocker.join("time_log.csv");
     fs::write(
         profile.config_path(),
-        serde_json::json!({"time_log_path": configured}).to_string(),
+        serde_json::json!({"time_log_path": profile.root.join("elsewhere")}).to_string(),
     )
-    .expect("write invalid profile config");
+    .expect("write obsolete partial-path config");
 
     let output = profile.run(&["start", "unsafe", "--category", "Work"]);
-    assert_config_failure(&profile, &output, "Invalid time_log_path");
+    assert_config_failure(&profile, &output, "time_log_path");
+    assert!(stderr(&output).contains("--profile"));
 }
 
 #[test]
