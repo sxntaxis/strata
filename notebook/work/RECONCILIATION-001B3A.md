@@ -35,7 +35,6 @@ Under SQLite authority, first TUI startup with no existing active generation cur
 
 This unit closes only the initial active-start/checkpoint window. Exact remaining transition-edge sediment attribution and visible recovery cutoff/reconstruction semantics remain later issue #10 units.
 
-
 ## Implemented result
 
 - SQLite restores and validates sediment before publishing a new TUI active generation;
@@ -57,6 +56,7 @@ This unit closes only the initial active-start/checkpoint window. Exact remainin
 - 13 SQLite/TUI process tests: pass;
 - 2 temporal-authority tests: pass;
 - 3 terminal-lifecycle PTY process tests: pass;
+- permanent 11-file source, test, authority, and Notebook diff audit: pass;
 - temporary transformation and workflow machinery: absent from the permanent tree.
 
 The unit is accepted as a partial completion of issue #10. Exact transition-edge sediment attribution and user-visible deterministic recovery cutoff/reconstruction semantics remain unresolved.
