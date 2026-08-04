@@ -398,6 +398,7 @@ fn start_session_legacy(
     description: Option<String>,
     category_name: String,
 ) -> Result<(), String> {
+    let _lifecycle_lock = storage::try_acquire_legacy_lifecycle_lock()?;
     let categories_path = storage::get_categories_path();
     let categories = storage::try_load_categories_from_csv(&categories_path)
         .map_err(|error| error.to_string())?
@@ -460,6 +461,7 @@ pub fn stop_session(accept_clock_jump: bool) -> Result<usize, String> {
 }
 
 fn stop_session_legacy(accept_clock_jump: bool) -> Result<usize, String> {
+    let _lifecycle_lock = storage::try_acquire_legacy_lifecycle_lock()?;
     let session_path = storage::get_active_session_path();
     if !storage::file_exists(&session_path) {
         return Err("No active session to stop".to_string());

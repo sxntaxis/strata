@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    fs::{self, File, OpenOptions},
+    fs::{self, File, OpenOptions, TryLockError},
     io::Write,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
@@ -628,6 +628,49 @@ pub fn get_state_dir() -> PathBuf {
 
 pub fn get_active_session_path() -> PathBuf {
     get_state_dir().join("active_session.json")
+}
+
+pub fn get_legacy_lifecycle_lock_path() -> PathBuf {
+    get_state_dir().join("legacy_lifecycle.lock")
+}
+
+pub struct LegacyLifecycleLock {
+    _file: File,
+}
+
+pub fn try_acquire_legacy_lifecycle_lock() -> Result<LegacyLifecycleLock, String> {
+    let path = get_legacy_lifecycle_lock_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "cannot create legacy lifecycle lock directory {}: {error}",
+                parent.display()
+            )
+        })?;
+    }
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path)
+        .map_err(|error| {
+            format!(
+                "cannot open legacy lifecycle lock {}: {error}",
+                path.display()
+            )
+        })?;
+    match file.try_lock() {
+        Ok(()) => Ok(LegacyLifecycleLock { _file: file }),
+        Err(TryLockError::WouldBlock) => Err(
+            "another Strata process is already performing a legacy lifecycle transition"
+                .to_string(),
+        ),
+        Err(TryLockError::Error(error)) => Err(format!(
+            "cannot acquire legacy lifecycle lock {}: {error}",
+            path.display()
+        )),
+    }
 }
 
 pub fn get_detached_runtime_path() -> PathBuf {
