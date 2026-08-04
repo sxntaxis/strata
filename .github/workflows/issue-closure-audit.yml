@@ -1,0 +1,23 @@
+name: issue-closure-audit
+
+on:
+  push:
+    branches:
+      - reconciliation/002-close-all-issues
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Active description ownership
+        run: |
+          echo '=== category description call sites ==='
+          grep -RInE 'category_description|set_category_description|active_description|modal_description' src tests || true
+      - name: Profile and path ownership
+        run: |
+          echo '=== profile/path call sites ==='
+          grep -RInE 'time_log_path|STRATA_DATA_DIR|get_(data|state|config)_dir|database_path|storage_authority' src tests docs notebook || true
