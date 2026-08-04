@@ -4,6 +4,7 @@ Status: implemented and certified
 Completed unit: AUTHORITY-002
 Issue completed: #15
 Last reviewed: 2026-08-04
+Certification: complete Rust suite plus two Linux profile-process proofs
 
 ## Purpose
 
