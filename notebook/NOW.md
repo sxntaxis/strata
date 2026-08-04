@@ -35,7 +35,7 @@ Strata now has:
 - idempotent switch replay from every durable publication point;
 - prepared legacy finish receipts published before active mutation;
 - idempotent finish replay across session, catalog, sediment, and daily-contribution effects;
-- archived-safe recovery reload/flush and schema-2 emergency exports;
+- archived-safe recovery reload/flush and schema-3 emergency exports;
 - whole-second/subsecond transition validation consistent with canonical ledger semantics;
 - strict legacy session identity and temporal payload validation;
 - receipt-governed clear-all that preserves committed history and resets only provisional idle;
