@@ -29,6 +29,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - name: Normalize transform staging
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/apply_issue_22.py')
+          text = path.read_text()
+          start = text.index('# Emergency serialization.\n')
+          end = text.index('# Direct calls in this file', start)
+          path.write_text(text[:start] + text[end:])
+          PY
       - name: Apply issue 22 correction
         run: python3 .github/scripts/apply_issue_22.py
       - name: Format
