@@ -50,3 +50,5 @@ jobs:
           git add -A
           git commit -m "fix(reconciliation-001b3a): publish initial active generation atomically"
           git push origin HEAD:reconciliation/001b3a-atomic-initial-active
+
+# retriggered after PR creation
