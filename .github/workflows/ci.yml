@@ -33,6 +33,9 @@ jobs:
       - name: Integrate strict custody callers
         run: python3 .github/scripts/integrate_legacy_custody_fix.py
 
+      - name: Handle every restore result
+        run: python3 .github/scripts/finalize_legacy_custody_fix.py
+
       - name: Format
         run: cargo fmt --all
 
@@ -47,6 +50,7 @@ jobs:
         run: |
           rm .github/scripts/apply_legacy_custody_fix.py
           rm .github/scripts/integrate_legacy_custody_fix.py
+          rm .github/scripts/finalize_legacy_custody_fix.py
           cat > .github/workflows/ci.yml <<'YAML'
           name: ci
 
