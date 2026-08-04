@@ -63,6 +63,164 @@ content = content.replace(
 ''',
 )
 
+# Translate the lifecycle action transform from the superseded keymap model to
+# the current Action enum, registry, descriptions, category, and defaults.
+keymap_replacements = [
+    (
+        '''    NewCategory,
+    DeleteCategory,
+    CategoryLifecycle,
+    ArchiveCategory,
+''',
+        '''    DeleteCategory,
+    CategoryLifecycle,
+    IncreaseKarma,
+''',
+    ),
+    (
+        '''    NewCategory,
+    DeleteCategory,
+    ArchiveCategory,
+''',
+        '''    DeleteCategory,
+    IncreaseKarma,
+''',
+    ),
+    ("    pub const ALL: [Self; 29] = [", "    const ALL: [Action; 29] = ["),
+    ("    pub const ALL: [Self; 28] = [", "    const ALL: [Action; 28] = ["),
+    (
+        '''        Self::NewCategory,
+        Self::DeleteCategory,
+        Self::CategoryLifecycle,
+        Self::ArchiveCategory,
+''',
+        '''        Action::DeleteCategory,
+        Action::CategoryLifecycle,
+        Action::IncreaseKarma,
+''',
+    ),
+    (
+        '''        Self::NewCategory,
+        Self::DeleteCategory,
+        Self::ArchiveCategory,
+''',
+        '''        Action::DeleteCategory,
+        Action::IncreaseKarma,
+''',
+    ),
+    (
+        '''            Self::NewCategory => "new_layer",
+            Self::DeleteCategory => "delete_layer",
+            Self::CategoryLifecycle => "category_lifecycle",
+            Self::ArchiveCategory => "archive_layer",
+''',
+        '''            Action::DeleteCategory => "delete_layer",
+            Action::CategoryLifecycle => "category_lifecycle",
+            Action::IncreaseKarma => "boost_layer_karma",
+''',
+    ),
+    (
+        '''            Self::NewCategory => "new_layer",
+            Self::DeleteCategory => "delete_layer",
+            Self::ArchiveCategory => "archive_layer",
+''',
+        '''            Action::DeleteCategory => "delete_layer",
+            Action::IncreaseKarma => "boost_layer_karma",
+''',
+    ),
+    (
+        '''            "delete_layer" | "delete_category" => Some(Self::DeleteCategory),
+            "category_lifecycle" | "merge_or_delete_layer" | "permanent_layer_lifecycle" => {
+                Some(Self::CategoryLifecycle)
+            }
+            "archive_layer" | "archive_category" => Some(Self::ArchiveCategory),
+''',
+        '''            "delete_layer" | "delete_category" => Some(Self::DeleteCategory),
+            "category_lifecycle" | "merge_or_delete_layer" | "permanent_layer_lifecycle" => {
+                Some(Self::CategoryLifecycle)
+            }
+            "boost_layer_karma" | "increase_karma" => Some(Self::IncreaseKarma),
+''',
+    ),
+    (
+        '''            "delete_layer" | "delete_category" => Some(Self::DeleteCategory),
+            "archive_layer" | "archive_category" => Some(Self::ArchiveCategory),
+''',
+        '''            "delete_layer" | "delete_category" => Some(Self::DeleteCategory),
+            "boost_layer_karma" | "increase_karma" => Some(Self::IncreaseKarma),
+''',
+    ),
+    (
+        '''            Self::NewCategory => "Create layer",
+            Self::DeleteCategory => "Archive selected layer",
+            Self::CategoryLifecycle => "Merge or permanently delete selected layer",
+            Self::ArchiveCategory => "Archive selected layer",
+''',
+        '''            Action::DeleteCategory => "Archive selected layer",
+            Action::CategoryLifecycle => "Merge or permanently delete selected layer",
+            Action::IncreaseKarma => "Set selected layer karma to +1",
+''',
+    ),
+    (
+        '''            Self::NewCategory => "Create layer",
+            Self::DeleteCategory => "Delete layer",
+            Self::ArchiveCategory => "Archive selected layer",
+''',
+        '''            Action::DeleteCategory => "Delete selected layer",
+            Action::IncreaseKarma => "Set selected layer karma to +1",
+''',
+    ),
+    (
+        '''            Self::NewCategory
+            | Self::DeleteCategory
+            | Self::CategoryLifecycle
+            | Self::ArchiveCategory
+''',
+        '''            Action::DeleteCategory
+            | Action::CategoryLifecycle
+            | Action::IncreaseKarma
+''',
+    ),
+    (
+        '''            Self::NewCategory
+            | Self::DeleteCategory
+            | Self::ArchiveCategory
+''',
+        '''            Action::DeleteCategory
+            | Action::IncreaseKarma
+''',
+    ),
+    ("const DEFAULT_BINDINGS: [(&str, Action); 27] = [", "const DEFAULT_BINDINGS: [(&str, Action); 31] = ["),
+    ("const DEFAULT_BINDINGS: [(&str, Action); 26] = [", "const DEFAULT_BINDINGS: [(&str, Action); 30] = ["),
+    (
+        '''    ("n", Action::NewCategory),
+    ("x", Action::DeleteCategory),
+    ("X", Action::CategoryLifecycle),
+    ("r", Action::RestoreCategory),
+''',
+        '''    ("x", Action::DeleteCategory),
+    ("shift-x", Action::CategoryLifecycle),
+    ("+", Action::IncreaseKarma),
+''',
+    ),
+    (
+        '''    ("n", Action::NewCategory),
+    ("x", Action::DeleteCategory),
+    ("r", Action::RestoreCategory),
+''',
+        '''    ("x", Action::DeleteCategory),
+    ("+", Action::IncreaseKarma),
+''',
+    ),
+]
+for old, new in keymap_replacements:
+    content = content.replace(old, new)
+content = content.replace("keymap.action_for(", "keymap.action_for_key_event(")
+content = content.replace(
+    "KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT)",
+    "KeyEvent::new(KeyCode::Char('x'), KeyModifiers::SHIFT)",
+)
+
 # The retired-ID high-watermark is now added by the post-transform adapter
 # against the current load-state structure, so remove the obsolete earlier block.
 start = content.find('replace_once(\n    "src/sqlite/tui_runtime.rs",')
