@@ -718,7 +718,7 @@ impl App {
                 let loaded_sessions =
                     storage::try_load_sessions_from_csv(&sessions_path, &session_categories)
                         .map_err(|error| error.to_string())?;
-                let tags = storage::load_category_tags(&storage::get_category_tags_path());
+                let tags = storage::try_load_category_tags(&storage::get_category_tags_path())?;
                 let archived_categories = loaded_categories.archived_categories.clone();
                 (
                     None,
@@ -1822,7 +1822,7 @@ impl App {
                 .map(|category| category.id)
                 .collect::<HashSet<_>>();
             self.sand_engine
-                .restore_state(&checkpoint.sand_state, &valid_category_ids);
+                .restore_state(&checkpoint.sand_state, &valid_category_ids)?;
             stage_clear_all_active_state(
                 &mut self.time_tracker,
                 &mut self.session.active_session_started_at_utc,
@@ -1893,16 +1893,18 @@ impl App {
         self.sand_engine.clear();
         if idle_reset && let Err(error) = self.begin_transition_session(applied_at_utc, clock_mode)
         {
-            self.sand_engine.restore_state(
-                &previous_sand,
-                &self
-                    .time_tracker
-                    .categories_for_storage()
-                    .into_iter()
-                    .chain(self.archived_categories.iter().cloned())
-                    .map(|category| category.id)
-                    .collect(),
-            );
+            self.sand_engine
+                .restore_state(
+                    &previous_sand,
+                    &self
+                        .time_tracker
+                        .categories_for_storage()
+                        .into_iter()
+                        .chain(self.archived_categories.iter().cloned())
+                        .map(|category| category.id)
+                        .collect(),
+                )
+                .expect("captured rollback sediment must remain valid");
             self.record_storage_result_for::<()>(
                 PersistenceOperation::ActiveReset,
                 RecoveryAction::ReloadAuthority,
@@ -1945,16 +1947,18 @@ impl App {
             Err(error) => {
                 self.time_tracker = previous_tracker;
                 self.session = previous_session;
-                self.sand_engine.restore_state(
-                    &previous_sand,
-                    &self
-                        .time_tracker
-                        .categories_for_storage()
-                        .into_iter()
-                        .chain(self.archived_categories.iter().cloned())
-                        .map(|category| category.id)
-                        .collect(),
-                );
+                self.sand_engine
+                    .restore_state(
+                        &previous_sand,
+                        &self
+                            .time_tracker
+                            .categories_for_storage()
+                            .into_iter()
+                            .chain(self.archived_categories.iter().cloned())
+                            .map(|category| category.id)
+                            .collect(),
+                    )
+                    .expect("captured rollback sediment must remain valid");
                 self.record_storage_result_for::<()>(
                     PersistenceOperation::CheckpointSave,
                     RecoveryAction::ReloadAuthority,
@@ -1969,16 +1973,18 @@ impl App {
             let Some(expected_stable_id) = previous_session.active_session_stable_id.clone() else {
                 self.time_tracker = previous_tracker;
                 self.session = previous_session;
-                self.sand_engine.restore_state(
-                    &previous_sand,
-                    &self
-                        .time_tracker
-                        .categories_for_storage()
-                        .into_iter()
-                        .chain(self.archived_categories.iter().cloned())
-                        .map(|category| category.id)
-                        .collect(),
-                );
+                self.sand_engine
+                    .restore_state(
+                        &previous_sand,
+                        &self
+                            .time_tracker
+                            .categories_for_storage()
+                            .into_iter()
+                            .chain(self.archived_categories.iter().cloned())
+                            .map(|category| category.id)
+                            .collect(),
+                    )
+                    .expect("captured rollback sediment must remain valid");
                 self.record_storage_result_for::<()>(
                     PersistenceOperation::ActiveReset,
                     RecoveryAction::ReloadAuthority,
@@ -2023,16 +2029,18 @@ impl App {
             {
                 self.time_tracker = previous_tracker;
                 self.session = previous_session;
-                self.sand_engine.restore_state(
-                    &previous_sand,
-                    &self
-                        .time_tracker
-                        .categories_for_storage()
-                        .into_iter()
-                        .chain(self.archived_categories.iter().cloned())
-                        .map(|category| category.id)
-                        .collect(),
-                );
+                self.sand_engine
+                    .restore_state(
+                        &previous_sand,
+                        &self
+                            .time_tracker
+                            .categories_for_storage()
+                            .into_iter()
+                            .chain(self.archived_categories.iter().cloned())
+                            .map(|category| category.id)
+                            .collect(),
+                    )
+                    .expect("captured rollback sediment must remain valid");
                 return;
             }
             self.session.active_session_stable_id = Some(resulting_stable_id);
@@ -2045,16 +2053,18 @@ impl App {
         {
             self.time_tracker = previous_tracker;
             self.session = previous_session;
-            self.sand_engine.restore_state(
-                &previous_sand,
-                &self
-                    .time_tracker
-                    .categories_for_storage()
-                    .into_iter()
-                    .chain(self.archived_categories.iter().cloned())
-                    .map(|category| category.id)
-                    .collect(),
-            );
+            self.sand_engine
+                .restore_state(
+                    &previous_sand,
+                    &self
+                        .time_tracker
+                        .categories_for_storage()
+                        .into_iter()
+                        .chain(self.archived_categories.iter().cloned())
+                        .map(|category| category.id)
+                        .collect(),
+                )
+                .expect("captured rollback sediment must remain valid");
             self.record_storage_result_for::<()>(
                 PersistenceOperation::CheckpointSave,
                 RecoveryAction::ReloadAuthority,
@@ -2104,7 +2114,7 @@ impl App {
             },
         )?;
         self.sand_engine
-            .restore_state(&settlement.state, &valid_category_ids);
+            .restore_state(&settlement.state, &valid_category_ids)?;
         self.simulation.spawn_accumulator = settlement.spawn_remainder;
         self.simulation.physics_accumulator = settlement.physics_remainder;
         self.simulation.simulation_time_utc = target_utc;
@@ -2291,7 +2301,9 @@ impl App {
                 .collect::<HashSet<_>>();
 
             if let Some(engine) = self.simulation.catchup_visual_engine.as_mut() {
-                engine.restore_state(&projected_state, &valid_category_ids);
+                engine
+                    .restore_state(&projected_state, &valid_category_ids)
+                    .ok()?;
             }
             self.simulation.catchup_visual_last_refresh = Instant::now();
         }
@@ -2672,7 +2684,7 @@ impl App {
                 .map(|category| category.id)
                 .collect::<HashSet<_>>();
             self.sand_engine
-                .restore_state(&checkpoint.sand_state, &valid_category_ids);
+                .restore_state(&checkpoint.sand_state, &valid_category_ids)?;
             self.reconcile_all_daily_contributions();
             if let Some(recovery) = self.persistence_recovery.as_ref() {
                 return Err(recovery.failure.summary());
@@ -2917,8 +2929,13 @@ impl App {
             }
         };
 
-        self.sand_engine
-            .restore_state(&recovered.state, &valid_category_ids);
+        if let Err(error) = self
+            .sand_engine
+            .restore_state(&recovered.state, &valid_category_ids)
+        {
+            self.record_storage_result::<()>(Err(error));
+            return false;
+        }
         if !self
             .time_tracker
             .set_active_category_by_id(active_category_id)
@@ -4157,7 +4174,7 @@ mod legacy_finish_replay_tests {
         assert_eq!(loaded_sessions.sessions.len(), 1);
         assert_eq!(loaded_sessions.sessions[0].id, 1);
         assert_eq!(loaded_sessions.sessions[0].elapsed_seconds, 3600);
-        let persisted_sand = storage::load_sand_state(sand_path).unwrap();
+        let persisted_sand = storage::try_load_sand_state(sand_path).unwrap().unwrap();
         assert_eq!(persisted_sand.frame_count, 17);
         assert_eq!(persisted_sand.rng_state, 19);
     }

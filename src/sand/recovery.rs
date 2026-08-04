@@ -125,7 +125,7 @@ fn recover_sediment(
         migrate_uninitialized_state(base_state)?
     } else {
         let mut engine = SandEngine::new(1, 1);
-        engine.restore_state(base_state, valid_category_ids);
+        engine.restore_state(base_state, valid_category_ids)?;
         engine.snapshot_state()
     };
     let pending_mass = state

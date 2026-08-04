@@ -465,7 +465,8 @@ impl App {
                     .chain(self.archived_categories.iter().cloned())
                     .map(|category| category.id)
                     .collect();
-                self.sand_engine.restore_state(&state, &valid_category_ids);
+                self.sand_engine
+                    .restore_state(&state, &valid_category_ids)?;
             }
         } else {
             let lifecycle_paths =
@@ -488,8 +489,9 @@ impl App {
                 sessions.next_session_id,
             );
             self.archived_categories = archived_categories;
-            self.category_tags = storage::load_category_tags(&storage::get_category_tags_path());
-            if let Some(state) = storage::load_sand_state(&storage::get_sand_state_path()) {
+            self.category_tags =
+                storage::try_load_category_tags(&storage::get_category_tags_path())?;
+            if let Some(state) = storage::try_load_sand_state(&storage::get_sand_state_path())? {
                 let valid_category_ids = self
                     .time_tracker
                     .categories_for_storage()
@@ -497,7 +499,8 @@ impl App {
                     .chain(self.archived_categories.iter().cloned())
                     .map(|category| category.id)
                     .collect();
-                self.sand_engine.restore_state(&state, &valid_category_ids);
+                self.sand_engine
+                    .restore_state(&state, &valid_category_ids)?;
             }
         }
         self.sync_drift_idle_state();

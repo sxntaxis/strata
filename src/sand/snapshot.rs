@@ -3,7 +3,7 @@ use std::{collections::HashSet, fmt::Write as _};
 use ratatui::prelude::Line;
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{Category, CategoryId};
+use crate::domain::{Category, CategoryId, DRIFT_CATEGORY_ID};
 
 use super::engine::{PendingGrainRun, SandEngine, SandState, SandStateGrain};
 
@@ -135,12 +135,15 @@ impl SedimentSnapshot {
         height: u16,
         categories: &[Category],
     ) -> Vec<Line<'static>> {
-        let valid_category_ids = categories
+        let mut valid_category_ids = categories
             .iter()
             .map(|category| category.id)
             .collect::<HashSet<CategoryId>>();
+        valid_category_ids.insert(DRIFT_CATEGORY_ID);
         let mut engine = SandEngine::new(width, height);
-        engine.restore_state(&self.state, &valid_category_ids);
+        engine
+            .restore_state(&self.state, &valid_category_ids)
+            .expect("validated sediment snapshot must restore");
         engine.resize(width, height);
         engine.render(categories)
     }

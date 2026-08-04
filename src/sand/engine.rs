@@ -495,72 +495,94 @@ impl SandEngine {
         }
     }
 
-    pub fn restore_state(&mut self, state: &SandState, valid_category_ids: &HashSet<CategoryId>) {
+    pub fn restore_state(
+        &mut self,
+        state: &SandState,
+        valid_category_ids: &HashSet<CategoryId>,
+    ) -> Result<(), String> {
         if state.version != SandState::VERSION && state.version != SandState::LEGACY_VERSION {
-            return;
+            return Err(format!("unsupported sand state version {}", state.version));
         }
-
-        if state.grid_width == 0 || state.grid_height == 0 {
-            self.clear();
-            return;
+        if (state.grid_width == 0 || state.grid_height == 0) && !state.grains.is_empty() {
+            return Err("zero-sized sand state cannot contain placed grains".to_string());
         }
 
         let mut restored = vec![vec![None; state.grid_width]; state.grid_height];
-        let none_id = DRIFT_CATEGORY_ID;
-
+        let mut occupied = HashSet::with_capacity(state.grains.len());
         for grain in &state.grains {
             if grain.x >= state.grid_width || grain.y >= state.grid_height {
-                continue;
+                return Err(format!(
+                    "sand grain ({}, {}) is outside the {}x{} canonical grid",
+                    grain.x, grain.y, state.grid_width, state.grid_height
+                ));
             }
-
             let category_id = CategoryId::new(grain.category_id);
-            let normalized_id = if valid_category_ids.contains(&category_id) {
-                category_id
-            } else {
-                none_id
-            };
-
-            restored[grain.y][grain.x] = Some(normalized_id);
+            if !valid_category_ids.contains(&category_id) {
+                return Err(format!(
+                    "sand state references unknown category ID {}",
+                    grain.category_id
+                ));
+            }
+            if !occupied.insert((grain.x, grain.y)) {
+                return Err(format!(
+                    "sand state contains duplicate grain coordinate ({}, {})",
+                    grain.x, grain.y
+                ));
+            }
+            restored[grain.y][grain.x] = Some(category_id);
         }
 
         let mut pending_runs = VecDeque::new();
-        let append_serialized_run =
-            |runs: &mut VecDeque<PendingRun>, category_id: u64, count: usize| {
-                let category_id = CategoryId::new(category_id);
-                let normalized_id = if valid_category_ids.contains(&category_id) {
-                    category_id
-                } else {
-                    none_id
-                };
-                Self::append_pending_run(runs, normalized_id, count)
-            };
-
-        let pending_result = if state.version == SandState::LEGACY_VERSION {
-            state.pending_grains.iter().try_for_each(|category_id| {
-                append_serialized_run(&mut pending_runs, *category_id, 1)
-            })
-        } else {
-            state.pending_runs.iter().try_for_each(|run| {
-                append_serialized_run(&mut pending_runs, run.category_id, run.count)
-            })
+        let mut append_serialized_run = |category_id: u64, count: usize| -> Result<(), String> {
+            if count == 0 {
+                return Err(format!(
+                    "sand state contains a zero-count pending run for category {category_id}"
+                ));
+            }
+            let category_id = CategoryId::new(category_id);
+            if !valid_category_ids.contains(&category_id) {
+                return Err(format!(
+                    "sand state references unknown pending category ID {}",
+                    category_id.0
+                ));
+            }
+            Self::append_pending_run(&mut pending_runs, category_id, count)
         };
-        if pending_result.is_err() {
-            return;
+
+        if state.version == SandState::LEGACY_VERSION {
+            if !state.pending_runs.is_empty() {
+                return Err("legacy sand state cannot contain version-two pending runs".to_string());
+            }
+            for category_id in &state.pending_grains {
+                append_serialized_run(*category_id, 1)?;
+            }
+        } else {
+            if !state.pending_runs.is_empty() && !state.pending_grains.is_empty() {
+                return Err(
+                    "sand state contains both legacy pending grains and compressed pending runs"
+                        .to_string(),
+                );
+            }
+            if state.pending_runs.is_empty() {
+                for category_id in &state.pending_grains {
+                    append_serialized_run(*category_id, 1)?;
+                }
+            } else {
+                for run in &state.pending_runs {
+                    append_serialized_run(run.category_id, run.count)?;
+                }
+            }
         }
 
-        let physical_count = restored
-            .iter()
-            .flat_map(|row| row.iter())
-            .filter(|cell| cell.is_some())
-            .count();
-        let pending_count = pending_runs
-            .iter()
-            .try_fold(0usize, |total, run| total.checked_add(run.count));
-        let Some(logical_count) =
-            pending_count.and_then(|pending| physical_count.checked_add(pending))
-        else {
-            return;
-        };
+        let physical_count = state.grains.len();
+        let pending_count = pending_runs.iter().try_fold(0usize, |total, run| {
+            total
+                .checked_add(run.count)
+                .ok_or_else(|| "pending sediment count exceeds the supported range".to_string())
+        })?;
+        let logical_count = physical_count
+            .checked_add(pending_count)
+            .ok_or_else(|| "logical sediment count exceeds the supported range".to_string())?;
 
         self.grid = restored;
         self.grid_width_dots = state.grid_width;
@@ -574,6 +596,7 @@ impl SandEngine {
         } else {
             state.rng_state
         };
+        Ok(())
     }
 
     fn next_random_u64(&mut self) -> u64 {
@@ -699,7 +722,7 @@ mod tests {
 
         let mut restored = SandEngine::new(20, 20);
         let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1), CategoryId::new(2)]);
-        restored.restore_state(&state, &valid);
+        restored.restore_state(&state, &valid).unwrap();
 
         assert_eq!(restored.grid[3][2], Some(CategoryId::new(1)));
         assert_eq!(restored.grid[10][7], Some(CategoryId::new(2)));
@@ -707,20 +730,30 @@ mod tests {
     }
 
     #[test]
-    fn test_sand_state_restore_maps_unknown_category_to_none() {
-        let mut se = SandEngine::new(20, 20);
-        se.clear();
-        se.grid[2][2] = Some(CategoryId::new(99));
-        se.grain_count = 1;
-
-        let state = se.snapshot_state();
+    fn test_sand_state_restore_rejects_unknown_category_without_mutation() {
+        let state = super::SandState {
+            version: super::SandState::VERSION,
+            grid_width: 2,
+            grid_height: 2,
+            grains: vec![super::SandStateGrain {
+                x: 1,
+                y: 1,
+                category_id: 99,
+            }],
+            frame_count: 0,
+            sweep_left_to_right: true,
+            rng_state: 1,
+            pending_grains: Vec::new(),
+            pending_runs: Vec::new(),
+        };
 
         let mut restored = SandEngine::new(20, 20);
+        let before = restored.snapshot_state();
         let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
-        restored.restore_state(&state, &valid);
+        let error = restored.restore_state(&state, &valid).unwrap_err();
 
-        assert_eq!(restored.grid[2][2], Some(CategoryId::new(0)));
-        assert_eq!(restored.grain_count, 1);
+        assert!(error.contains("unknown category ID 99"));
+        assert_eq!(restored.snapshot_state(), before);
     }
 
     #[test]
@@ -734,7 +767,7 @@ mod tests {
 
         let mut restored = SandEngine::new(40, 40);
         let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1), CategoryId::new(2)]);
-        restored.restore_state(&state, &valid);
+        restored.restore_state(&state, &valid).unwrap();
 
         assert_eq!(restored.snapshot_state(), state);
         assert_eq!(restored.cell_width, 40);
@@ -809,7 +842,7 @@ mod tests {
 
         let mut restored = SandEngine::new(10, 10);
         let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
-        restored.restore_state(&state, &valid);
+        restored.restore_state(&state, &valid).unwrap();
 
         assert_eq!(restored.frame_count, 9);
         assert!(!restored.sweep_left_to_right);
@@ -907,10 +940,12 @@ mod conservation_tests {
         );
 
         let mut restored = SandEngine::new(2, 1);
-        restored.restore_state(
-            &state,
-            &HashSet::from([CategoryId::new(0), CategoryId::new(1), CategoryId::new(2)]),
-        );
+        restored
+            .restore_state(
+                &state,
+                &HashSet::from([CategoryId::new(0), CategoryId::new(1), CategoryId::new(2)]),
+            )
+            .unwrap();
 
         assert_eq!(restored.pending_grain_count(), 1);
         assert_eq!(restored.grain_count, state.grains.len() + 1);
@@ -993,7 +1028,7 @@ mod conservation_tests {
             };
             let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1), CategoryId::new(2)]);
             let mut engine = SandEngine::new(1, 1);
-            engine.restore_state(&legacy, &valid);
+            engine.restore_state(&legacy, &valid).unwrap();
             let migrated = engine.snapshot_state();
 
             assert_eq!(migrated.version, SandState::VERSION);

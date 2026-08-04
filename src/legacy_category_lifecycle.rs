@@ -507,7 +507,7 @@ fn load_authority(paths: &LegacyCategoryLifecyclePaths) -> Result<LoadedAuthorit
         .iter()
         .map(LegacySessionSnapshot::from_session)
         .collect::<Vec<_>>();
-    let tags = storage::load_category_tags(&paths.category_tags_json);
+    let tags = storage::try_load_category_tags(&paths.category_tags_json)?;
     let sand_state = if paths.sand_state_json.exists() {
         Some(storage::read_json::<SandState>(&paths.sand_state_json)?)
     } else {
@@ -1564,7 +1564,7 @@ mod tests {
                 .contains("differ")
         );
         let review = build_review(&paths, 1, Some(2)).unwrap();
-        let mut tags = storage::load_category_tags(&paths.category_tags_json);
+        let mut tags = storage::try_load_category_tags(&paths.category_tags_json).unwrap();
         tags.tags_by_category
             .entry(2)
             .or_default()
