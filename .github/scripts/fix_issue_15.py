@@ -121,10 +121,34 @@ if count != 1:
     raise SystemExit("runtime storage functions marker missing")
 path.write_text(text)
 
-# PathBuf is no longer part of keymap authority.
+# PathBuf is no longer part of keymap authority, and the old path test becomes
+# an explicit migration-guidance proof.
 path = Path("src/keybindings.rs")
 text = path.read_text()
 text = replace_once(text, "path::{Path, PathBuf}", "path::Path", "keymap path import")
+text, count = re.subn(
+    r"    #\[test\]\n    fn test_load_keybindings_invalid_time_log_parent_returns_error\(\) \{.*?\n    \}\n",
+    '''    #[test]
+    fn test_load_keybindings_rejects_time_log_path_hot_redirect() {
+        let path = unique_path("strata_keymap_obsolete_time_log_path");
+        let raw = r#"{
+  "time_log_path": "/tmp/strata-other-profile/time_log.csv"
+}"#;
+        fs::write(&path, raw).expect("write config");
+
+        let err = load_keybindings(&path).expect_err("config should fail");
+        assert!(err.contains("time_log_path"));
+        assert!(err.contains("--profile"));
+
+        fs::remove_file(path).ok();
+    }
+''',
+    text,
+    count=1,
+    flags=re.S,
+)
+if count != 1:
+    raise SystemExit("obsolete time-log path test marker missing")
 path.write_text(text)
 
 # Bind the recovery-export fixture to the selected profile.
