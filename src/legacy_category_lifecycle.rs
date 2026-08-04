@@ -1488,6 +1488,33 @@ mod tests {
     }
 
     #[test]
+    fn startup_order_replays_prepared_before_loading_catalog_and_identity() {
+        let root = unique_root("legacy-lifecycle-startup");
+        let paths = paths(&root);
+        seed(&paths);
+        let review = build_review(&paths, 1, Some(2)).unwrap();
+        prepare(
+            &paths,
+            1,
+            Some(2),
+            &review.revision,
+            "2026-08-03T19:00:00Z".parse().unwrap(),
+        )
+        .unwrap();
+        assert!(has_prepared(&paths));
+
+        replay_prepared(&paths).unwrap();
+        let loaded = storage::try_load_categories_from_csv(&paths.categories_csv).unwrap();
+        let ledger = load_ledger(&paths).unwrap();
+        let next = next_category_id(loaded.next_category_id, &ledger).unwrap();
+        assert!(!has_prepared(&paths));
+        assert!(loaded.categories.iter().all(|category| category.id.0 != 1));
+        assert_eq!(next, 3);
+
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
     fn targetless_delete_requires_complete_zero_reference_preview() {
         let root = unique_root("legacy-lifecycle-delete");
         let paths = paths(&root);

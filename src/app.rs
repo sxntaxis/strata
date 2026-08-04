@@ -708,10 +708,19 @@ impl App {
             sqlite_active_session,
         ) = match authority {
             sqlite::RuntimeAuthority::LegacyFiles => {
+                let lifecycle_paths =
+                    crate::legacy_category_lifecycle::LegacyCategoryLifecyclePaths::runtime();
+                crate::legacy_category_lifecycle::replay_prepared(&lifecycle_paths)?;
+                let ledger = crate::legacy_category_lifecycle::load_ledger(&lifecycle_paths)?;
                 let categories_path = storage::get_categories_path();
                 let sessions_path = storage::get_time_log_path();
-                let loaded_categories = storage::try_load_categories_from_csv(&categories_path)
+                let mut loaded_categories = storage::try_load_categories_from_csv(&categories_path)
                     .map_err(|error| error.to_string())?;
+                loaded_categories.next_category_id =
+                    crate::legacy_category_lifecycle::next_category_id(
+                        loaded_categories.next_category_id,
+                        &ledger,
+                    )?;
                 let mut session_categories = loaded_categories.categories.clone();
                 session_categories.extend(loaded_categories.archived_categories.iter().cloned());
                 let loaded_sessions =
