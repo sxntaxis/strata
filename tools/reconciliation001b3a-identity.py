@@ -31,16 +31,29 @@ adapter = r'''pub(crate) fn initial_active_stable_id(started_at_utc: DateTime<Ut
     stable_id("tui", started_at_utc)
 }
 
+pub(crate) struct InitialActiveGenerationRequest<'a, T> {
+    pub active_stable_id: &'a str,
+    pub category_id: CategoryId,
+    pub description: &'a str,
+    pub started_at_utc: DateTime<Utc>,
+    pub detached_at_utc: DateTime<Utc>,
+    pub simulation_time_utc: DateTime<Utc>,
+    pub checkpoint: &'a T,
+}
+
 pub(crate) fn start_active_session_with_checkpoint<T: Serialize>(
     database_path: &Path,
-    active_stable_id: &str,
-    category_id: CategoryId,
-    description: &str,
-    started_at_utc: DateTime<Utc>,
-    detached_at_utc: DateTime<Utc>,
-    simulation_time_utc: DateTime<Utc>,
-    checkpoint: &T,
+    request: InitialActiveGenerationRequest<'_, T>,
 ) -> Result<(), String> {
+    let InitialActiveGenerationRequest {
+        active_stable_id,
+        category_id,
+        description,
+        started_at_utc,
+        detached_at_utc,
+        simulation_time_utc,
+        checkpoint,
+    } = request;
     let mut repository = open_cli_repository(database_path)?;
     let started = timestamp(started_at_utc);
     let payload_json = serde_json::to_string(checkpoint).map_err(|error| error.to_string())?;
@@ -114,13 +127,15 @@ app_method = r'''    fn persist_initial_active_generation(&mut self) -> bool {
         };
         let result = sqlite::start_tui_active_session_with_checkpoint(
             &database_path,
-            &stable_id,
-            category_id,
-            &description,
-            started_at_utc,
-            checkpoint.detached_at_utc,
-            checkpoint.simulation_time_utc,
-            &checkpoint,
+            sqlite::TuiInitialActiveGenerationRequest {
+                active_stable_id: &stable_id,
+                category_id,
+                description: &description,
+                started_at_utc,
+                detached_at_utc: checkpoint.detached_at_utc,
+                simulation_time_utc: checkpoint.simulation_time_utc,
+                checkpoint: &checkpoint,
+            },
         );
         if self
             .record_storage_result_for(
@@ -144,6 +159,11 @@ replace_between(
     app_method,
 )
 
+replace_once(
+    "src/sqlite.rs",
+    "pub(crate) use tui_runtime::{\n    ClearAllStateRequest as TuiClearAllStateRequest,",
+    "pub(crate) use tui_runtime::{\n    ClearAllStateRequest as TuiClearAllStateRequest,\n    InitialActiveGenerationRequest as TuiInitialActiveGenerationRequest,",
+)
 replace_once(
     "src/sqlite.rs",
     "    finish_active_session as finish_tui_active_session, load_checkpoint as load_tui_checkpoint,\n",
@@ -184,13 +204,15 @@ tests = r'''    #[derive(serde::Serialize)]
 
         start_active_session_with_checkpoint(
             &path,
-            &stable_id,
-            CategoryId::new(1),
-            "Focused",
-            started_at_utc,
-            started_at_utc,
-            started_at_utc,
-            &checkpoint,
+            InitialActiveGenerationRequest {
+                active_stable_id: &stable_id,
+                category_id: CategoryId::new(1),
+                description: "Focused",
+                started_at_utc,
+                detached_at_utc: started_at_utc,
+                simulation_time_utc: started_at_utc,
+                checkpoint: &checkpoint,
+            },
         )
         .unwrap();
 
@@ -234,13 +256,15 @@ tests = r'''    #[derive(serde::Serialize)]
 
         let error = start_active_session_with_checkpoint(
             &path,
-            &stable_id,
-            CategoryId::new(1),
-            "Focused",
-            started_at_utc,
-            started_at_utc,
-            started_at_utc,
-            &checkpoint,
+            InitialActiveGenerationRequest {
+                active_stable_id: &stable_id,
+                category_id: CategoryId::new(1),
+                description: "Focused",
+                started_at_utc,
+                detached_at_utc: started_at_utc,
+                simulation_time_utc: started_at_utc,
+                checkpoint: &checkpoint,
+            },
         )
         .unwrap_err();
         assert!(error.contains("does not match bootstrap identity"));
