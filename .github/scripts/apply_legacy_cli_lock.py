@@ -48,6 +48,7 @@ pub fn try_acquire_legacy_lifecycle_lock() -> Result<LegacyLifecycleLock, String
         .read(true)
         .write(true)
         .create(true)
+        .truncate(false)
         .open(&path)
         .map_err(|error| {
             format!(
