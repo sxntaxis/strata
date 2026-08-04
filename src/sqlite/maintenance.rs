@@ -2664,6 +2664,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(collect_files(&bundle_a), collect_files(&bundle_b));
+        assert!(bundle_a.join(CATEGORY_LIFECYCLE_RECEIPTS_FILENAME).exists());
 
         import_bundle(BundleImportOptions {
             bundle_directory: bundle_a.clone(),
@@ -2718,6 +2719,48 @@ mod tests {
         assert!(
             error.to_string().contains("byte count") || error.to_string().contains("fingerprint")
         );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn doctor_rejects_tampered_lifecycle_receipts_and_retired_identity_reuse() {
+        let root = unique_root("lifecycle_doctor");
+        fs::create_dir_all(&root).unwrap();
+        let database = root.join("lifecycle.sqlite3");
+        fixture_database(&database);
+        assert!(doctor_at(&database, None).unwrap().is_healthy());
+
+        let connection = Connection::open(&database).unwrap();
+        connection
+            .execute(
+                "UPDATE category_lifecycle_receipts
+                 SET source_metadata_json = '{}'
+                 WHERE source_category_id = 2",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO categories(
+                    id, name, description, color_index, balance_effect, archived_at_utc,
+                    sort_order
+                 ) VALUES (2, 'Reused', '', 1, 0, NULL, 99)",
+                [],
+            )
+            .unwrap();
+        drop(connection);
+
+        let report = doctor_at(&database, None).unwrap();
+        assert!(!report.is_healthy());
+        let lifecycle = report
+            .checks
+            .iter()
+            .find(|check| check.name == "category-lifecycle-integrity")
+            .unwrap();
+        assert!(!lifecycle.passed);
+        assert!(lifecycle.detail.contains("source metadata"));
+        assert!(lifecycle.detail.contains("retired category identity 2"));
 
         let _ = fs::remove_dir_all(root);
     }
