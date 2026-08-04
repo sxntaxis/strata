@@ -28,11 +28,16 @@ jobs:
           components: rustfmt, clippy
 
       - name: Wire lifecycle interaction
-        run: python tools/reconciliation001c2-ui.py
+        run: |
+          python tools/reconciliation001c2-ui-prep.py
+          python tools/reconciliation001c2-ui.py
+          python tools/reconciliation001c2-ui-post.py
 
       - name: Remove temporary interaction machinery
         run: |
+          rm -f tools/reconciliation001c2-ui-prep.py
           rm -f tools/reconciliation001c2-ui.py
+          rm -f tools/reconciliation001c2-ui-post.py
           rm -f .github/workflows/reconciliation001c2-ui.yml
 
       - name: Format
