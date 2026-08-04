@@ -87,7 +87,8 @@ pub(crate) fn reassign_sand_state_category(
 }
 
 fn coalesce_pending_runs(state: &mut SandState) -> Result<(), String> {
-    let mut compacted = Vec::with_capacity(state.pending_runs.len());
+    let mut compacted: Vec<crate::sand::PendingGrainRun> =
+        Vec::with_capacity(state.pending_runs.len());
     for run in state.pending_runs.drain(..) {
         if run.count == 0 {
             continue;
@@ -119,11 +120,8 @@ pub(crate) fn reassign_snapshot_category(
     source_category_id: u64,
     target_category_id: u64,
 ) -> Result<SedimentCategoryReferences, String> {
-    let references = reassign_sand_state_category(
-        &mut snapshot.state,
-        source_category_id,
-        target_category_id,
-    )?;
+    let references =
+        reassign_sand_state_category(&mut snapshot.state, source_category_id, target_category_id)?;
     if references.total()? > 0 {
         snapshot.source_revision.clear();
         let material = serde_json::to_vec(snapshot)
@@ -350,13 +348,21 @@ mod tests {
         let mut state = state();
         let before = state.grains.len()
             + state.pending_grains.len()
-            + state.pending_runs.iter().map(|run| run.count).sum::<usize>();
+            + state
+                .pending_runs
+                .iter()
+                .map(|run| run.count)
+                .sum::<usize>();
         let references = reassign_sand_state_category(&mut state, 1, 2).unwrap();
         assert_eq!(references.placed, 1);
         assert_eq!(references.pending, 5);
         let after = state.grains.len()
             + state.pending_grains.len()
-            + state.pending_runs.iter().map(|run| run.count).sum::<usize>();
+            + state
+                .pending_runs
+                .iter()
+                .map(|run| run.count)
+                .sum::<usize>();
         assert_eq!(before, after);
         assert!(state.grains.iter().all(|grain| grain.category_id == 2));
         assert!(state.pending_grains.iter().all(|category| *category == 2));
@@ -387,11 +393,20 @@ mod tests {
             "clear_all": null
         })
         .to_string();
-        assert_eq!(count_checkpoint_category_references(&payload, 1).unwrap(), 5);
+        assert_eq!(
+            count_checkpoint_category_references(&payload, 1).unwrap(),
+            5
+        );
         let (updated, changed) = reassign_checkpoint_category(&payload, 1, 2).unwrap();
         assert_eq!(changed, 5);
-        assert_eq!(count_checkpoint_category_references(&updated, 1).unwrap(), 0);
-        assert_eq!(count_checkpoint_category_references(&updated, 2).unwrap(), 5);
+        assert_eq!(
+            count_checkpoint_category_references(&updated, 1).unwrap(),
+            0
+        );
+        assert_eq!(
+            count_checkpoint_category_references(&updated, 2).unwrap(),
+            5
+        );
     }
 
     #[test]

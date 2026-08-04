@@ -4,6 +4,7 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use thiserror::Error;
 
 mod authority;
+mod category_lifecycle;
 mod cli_runtime;
 #[cfg(test)]
 mod closure_tests;
@@ -19,6 +20,12 @@ mod tui_runtime;
 
 pub(crate) use authority::{
     RuntimeAuthority, SqliteCliActivationOptions, activate_sqlite_cli, resolve_runtime_authority,
+};
+#[allow(unused_imports)]
+pub(crate) use category_lifecycle::{
+    CategoryLifecyclePreview, CategoryLifecycleReceipt, CategoryLifecycleRequest,
+    CategoryReferenceCounts, apply as apply_category_lifecycle,
+    preview as preview_category_lifecycle,
 };
 pub(crate) use cli_runtime::{
     acknowledge_stop as acknowledge_cli_stop, read_snapshot as read_cli_snapshot,
@@ -108,7 +115,7 @@ pub(crate) fn run_restore(options: RestoreOptions) -> Result<SqliteMaintenanceRe
     maintenance::restore(options).map_err(|error| error.to_string())
 }
 
-const CURRENT_SCHEMA_VERSION: i64 = 6;
+const CURRENT_SCHEMA_VERSION: i64 = 7;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 const MIGRATION_1: &str = r#"
@@ -411,6 +418,37 @@ VALUES (6, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
 PRAGMA user_version = 6;
 "#;
 
+const MIGRATION_7: &str = r#"
+CREATE TABLE category_lifecycle_receipts (
+    operation_id TEXT PRIMARY KEY,
+    operation_kind TEXT NOT NULL CHECK (operation_kind IN ('merge', 'delete')),
+    source_category_id INTEGER NOT NULL,
+    target_category_id INTEGER,
+    source_metadata_json TEXT NOT NULL,
+    target_metadata_json TEXT,
+    preview_revision TEXT NOT NULL,
+    reference_counts_json TEXT NOT NULL,
+    applied_at_utc TEXT NOT NULL,
+    CHECK (
+        (operation_kind = 'merge' AND target_category_id IS NOT NULL)
+        OR (operation_kind = 'delete' AND target_category_id IS NULL)
+    ),
+    CHECK (target_category_id IS NULL OR target_category_id != source_category_id)
+) STRICT;
+
+CREATE UNIQUE INDEX category_lifecycle_receipts_preview_unique
+    ON category_lifecycle_receipts(
+        source_category_id,
+        COALESCE(target_category_id, -1),
+        preview_revision
+    );
+
+INSERT INTO schema_migrations(version, applied_at_utc)
+VALUES (7, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+
+PRAGMA user_version = 7;
+"#;
+
 #[derive(Debug, Error)]
 pub(crate) enum SqliteStoreError {
     #[error("SQLite error: {0}")]
@@ -520,6 +558,14 @@ impl SqliteRepository {
             let transaction =
                 connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
             transaction.execute_batch(MIGRATION_6)?;
+            transaction.commit()?;
+            version = 6;
+        }
+
+        if version < 7 {
+            let transaction =
+                connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(MIGRATION_7)?;
             transaction.commit()?;
         }
 
@@ -723,7 +769,7 @@ mod tests {
     fn new_database_applies_schema_and_idle_category() {
         let repository = SqliteRepository::open_in_memory().expect("database should open");
 
-        assert_eq!(repository.schema_version().unwrap(), 6);
+        assert_eq!(repository.schema_version().unwrap(), 7);
         assert_eq!(repository.integrity_check().unwrap(), "ok");
         let idle: (String, i64) = repository
             .connection
@@ -790,7 +836,7 @@ mod tests {
         let repository =
             SqliteRepository::from_connection(connection).expect("migration should succeed");
 
-        assert_eq!(repository.schema_version().unwrap(), 6);
+        assert_eq!(repository.schema_version().unwrap(), 7);
         assert_eq!(repository.completed_session_count().unwrap(), 1);
         let legacy_import_id: Option<i64> = repository
             .connection
@@ -825,7 +871,7 @@ mod tests {
         let repository =
             SqliteRepository::from_connection(connection).expect("migration should succeed");
 
-        assert_eq!(repository.schema_version().unwrap(), 6);
+        assert_eq!(repository.schema_version().unwrap(), 7);
         let legacy_count: i64 = repository
             .connection
             .query_row(
@@ -845,7 +891,7 @@ mod tests {
                            '2026-08-01T13:00:00Z', NULL)",
                 [],
             )
-            .expect("schema 6 must accept typed daily contributions");
+            .expect("schema 7 must retain typed daily contributions");
     }
 
     #[test]

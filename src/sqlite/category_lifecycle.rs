@@ -324,9 +324,8 @@ fn preview_on(
     if target_category_id == Some(source_category_id) {
         return Err("category merge source and target must differ".to_string());
     }
-    let source = query_category(connection, source_category_id)?.ok_or_else(|| {
-        format!("source category {source_category_id} does not exist")
-    })?;
+    let source = query_category(connection, source_category_id)?
+        .ok_or_else(|| format!("source category {source_category_id} does not exist"))?;
     let target = target_category_id
         .map(|category_id| {
             query_category(connection, category_id)?
@@ -421,7 +420,9 @@ fn reference_counts_on(
         .prepare("SELECT id, payload_json FROM sand_snapshots ORDER BY id")
         .map_err(|error| error.to_string())?;
     let rows = statement
-        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
         .map_err(|error| error.to_string())?;
     for row in rows {
         let (id, payload) = row.map_err(|error| error.to_string())?;
@@ -461,11 +462,7 @@ fn reference_counts_on(
     })
 }
 
-fn count_query(
-    connection: &Connection,
-    sql: &str,
-    category_id: i64,
-) -> Result<u64, String> {
+fn count_query(connection: &Connection, sql: &str, category_id: i64) -> Result<u64, String> {
     let count: i64 = connection
         .query_row(sql, params![category_id], |row| row.get(0))
         .map_err(|error| error.to_string())?;
@@ -592,9 +589,7 @@ fn append_rows(
     while let Some(row) = rows.next().map_err(|error| error.to_string())? {
         let mut values = Vec::with_capacity(column_count);
         for index in 0..column_count {
-            let value = row
-                .get_ref(index)
-                .map_err(|error| error.to_string())?;
+            let value = row.get_ref(index).map_err(|error| error.to_string())?;
             let encoded = match value {
                 rusqlite::types::ValueRef::Null => serde_json::Value::Null,
                 rusqlite::types::ValueRef::Integer(value) => serde_json::Value::from(value),
@@ -679,7 +674,9 @@ fn stage_merge(
             reassign_sand_state_category(&mut state, source_u64, target_u64)?;
             let after = sediment_mass(&state)?;
             if before != after {
-                return Err("canonical sediment mass changed during category reassignment".to_string());
+                return Err(
+                    "canonical sediment mass changed during category reassignment".to_string(),
+                );
             }
             serde_json::to_string(&state)
                 .map_err(|error| format!("cannot serialize reassigned sand state: {error}"))
@@ -895,9 +892,10 @@ fn stage_snapshots(
         let (id, snapshot_kind, operational_day, payload_json) =
             row.map_err(|error| error.to_string())?;
         let payload_json = if snapshot_kind == "daily-contribution" {
-            let mut current: SedimentSnapshot = serde_json::from_str(&payload_json).map_err(|error| {
-                format!("daily contribution snapshot {id} is malformed: {error}")
-            })?;
+            let current: SedimentSnapshot =
+                serde_json::from_str(&payload_json).map_err(|error| {
+                    format!("daily contribution snapshot {id} is malformed: {error}")
+                })?;
             if current.kind != SedimentSnapshotKind::DailyContribution {
                 return Err(format!(
                     "snapshot {id} row kind is daily-contribution but payload kind differs"
@@ -918,11 +916,7 @@ fn stage_snapshots(
             .map_err(|error| format!("cannot serialize daily snapshot {id}: {error}"))?
         } else if let Ok(mut snapshot) = serde_json::from_str::<SedimentSnapshot>(&payload_json) {
             let before = sediment_mass(&snapshot.state)?;
-            reassign_snapshot_category(
-                &mut snapshot,
-                source_category_id,
-                target_category_id,
-            )?;
+            reassign_snapshot_category(&mut snapshot, source_category_id, target_category_id)?;
             if sediment_mass(&snapshot.state)? != before {
                 return Err(format!("snapshot {id} changed mass during reassignment"));
             }
@@ -931,9 +925,8 @@ fn stage_snapshots(
                     .map_err(|error| format!("cannot serialize snapshot {id}: {error}"))?,
             )
         } else {
-            let mut state: SandState = serde_json::from_str(&payload_json).map_err(|error| {
-                format!("snapshot {id} has unsupported payload: {error}")
-            })?;
+            let mut state: SandState = serde_json::from_str(&payload_json)
+                .map_err(|error| format!("snapshot {id} has unsupported payload: {error}"))?;
             let before = sediment_mass(&state)?;
             reassign_sand_state_category(&mut state, source_category_id, target_category_id)?;
             if sediment_mass(&state)? != before {
@@ -967,8 +960,12 @@ fn daily_slices(
                 slices.push(DailySedimentSlice {
                     category_id: session.category_id,
                     elapsed_seconds: slice.elapsed_seconds,
-                    start_time: slice.start_time,
-                    end_time: slice.end_time,
+                    start_time: temporal::civil_from_policy(slice.started_at_utc, session.policy)?
+                        .format("%H:%M:%S")
+                        .to_string(),
+                    end_time: temporal::civil_from_policy(slice.ended_at_utc, session.policy)?
+                        .format("%H:%M:%S")
+                        .to_string(),
                     session_id: session.id,
                 });
             }
@@ -1059,12 +1056,15 @@ fn query_receipt(
                 Ok(CategoryLifecycleReceipt {
                     operation_id,
                     operation_kind,
-                    source: serde_json::from_str(&source_json)
-                        .map_err(|error| format!("invalid category receipt source metadata: {error}"))?,
+                    source: serde_json::from_str(&source_json).map_err(|error| {
+                        format!("invalid category receipt source metadata: {error}")
+                    })?,
                     target: target_json
                         .map(|json| serde_json::from_str(&json))
                         .transpose()
-                        .map_err(|error| format!("invalid category receipt target metadata: {error}"))?,
+                        .map_err(|error| {
+                            format!("invalid category receipt target metadata: {error}")
+                        })?,
                     preview_revision,
                     references: serde_json::from_str(&references_json)
                         .map_err(|error| format!("invalid category receipt counts: {error}"))?,
@@ -1080,12 +1080,12 @@ fn query_receipt(
 mod tests {
     use super::*;
     use crate::{
-        sand::{
-            PendingGrainRun, SandStateGrain, SedimentSnapshotProvenance,
-        },
+        sand::{PendingGrainRun, SandStateGrain, SedimentSnapshotProvenance},
         sqlite::{
             NewActiveSession, SqliteRepository,
-            repository::{NewCategoryRecord, NewSessionRecord, NewSandSnapshotRecord, SnapshotKind},
+            repository::{
+                NewCategoryRecord, NewSandSnapshotRecord, NewSessionRecord, SnapshotKind,
+            },
             runtime_coordination,
         },
     };
@@ -1293,7 +1293,9 @@ mod tests {
         assert!(query_category(&repository.connection, 2).unwrap().is_some());
         let completed_category: i64 = repository
             .connection
-            .query_row("SELECT category_id FROM sessions WHERE id = 1", [], |row| row.get(0))
+            .query_row("SELECT category_id FROM sessions WHERE id = 1", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         let active_category: i64 = repository
             .connection
@@ -1315,15 +1317,15 @@ mod tests {
         );
         assert!(!tags.contains_key(&1));
 
-        let state: SandState = serde_json::from_str(
-            &repository
-                .sand_state()
+        let state: SandState =
+            serde_json::from_str(&repository.sand_state().unwrap().unwrap().payload_json).unwrap();
+        assert_eq!(
+            count_sand_state_category(&state, 1)
                 .unwrap()
-                .unwrap()
-                .payload_json,
-        )
-        .unwrap();
-        assert_eq!(count_sand_state_category(&state, 1).unwrap().total().unwrap(), 0);
+                .total()
+                .unwrap(),
+            0
+        );
         assert_eq!(sediment_mass(&state).unwrap(), 8);
 
         let checkpoint: String = repository
@@ -1334,7 +1336,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(count_checkpoint_category_references(&checkpoint, 1).unwrap(), 0);
+        assert_eq!(
+            count_checkpoint_category_references(&checkpoint, 1).unwrap(),
+            0
+        );
         assert!(count_checkpoint_category_references(&checkpoint, 2).unwrap() > 0);
 
         let residual = reference_counts_on(&repository.connection, 1).unwrap();
@@ -1386,22 +1391,26 @@ mod tests {
                 params![checkpoint_json(true)],
             )
             .unwrap();
-        assert!(merge(&mut receipt).unwrap_err().contains("transition custody"));
+        assert!(
+            merge(&mut receipt)
+                .unwrap_err()
+                .contains("transition custody")
+        );
         assert!(query_category(&receipt.connection, 1).unwrap().is_some());
     }
 
     #[test]
     fn permanent_delete_requires_complete_zero_reference_preview() {
         let mut referenced = seeded_repository("pending");
-        let preview = preview(&referenced, 1, None).unwrap();
-        assert!(preview.references.total().unwrap() > 0);
+        let referenced_preview = preview(&referenced, 1, None).unwrap();
+        assert!(referenced_preview.references.total().unwrap() > 0);
         assert!(
             apply(
                 &mut referenced,
                 CategoryLifecycleRequest {
                     source_category_id: 1,
                     target_category_id: None,
-                    expected_revision: &preview.revision,
+                    expected_revision: &referenced_preview.revision,
                     applied_at_utc: "2026-08-03T19:00:00Z",
                 },
             )
@@ -1437,10 +1446,26 @@ mod tests {
     #[test]
     fn source_idle_self_merge_and_missing_identity_are_rejected() {
         let repository = seeded_repository("pending");
-        assert!(preview(&repository, 0, Some(2)).unwrap_err().contains("idle"));
-        assert!(preview(&repository, 1, Some(1)).unwrap_err().contains("differ"));
-        assert!(preview(&repository, 99, Some(2)).unwrap_err().contains("does not exist"));
-        assert!(preview(&repository, 1, Some(99)).unwrap_err().contains("does not exist"));
+        assert!(
+            preview(&repository, 0, Some(2))
+                .unwrap_err()
+                .contains("idle")
+        );
+        assert!(
+            preview(&repository, 1, Some(1))
+                .unwrap_err()
+                .contains("differ")
+        );
+        assert!(
+            preview(&repository, 99, Some(2))
+                .unwrap_err()
+                .contains("does not exist")
+        );
+        assert!(
+            preview(&repository, 1, Some(99))
+                .unwrap_err()
+                .contains("does not exist")
+        );
     }
 
     #[test]
@@ -1457,7 +1482,13 @@ mod tests {
         assert!(preview.target.as_ref().unwrap().archived_at_utc.is_some());
         merge(&mut repository).unwrap();
         assert!(query_category(&repository.connection, 1).unwrap().is_none());
-        assert!(query_category(&repository.connection, 2).unwrap().unwrap().archived_at_utc.is_some());
+        assert!(
+            query_category(&repository.connection, 2)
+                .unwrap()
+                .unwrap()
+                .archived_at_utc
+                .is_some()
+        );
     }
 
     #[test]
