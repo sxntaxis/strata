@@ -1,8 +1,8 @@
 ---
 id: RECONCILIATION-001C2
 kind: work
-state: active
-authority: working
+state: accepted
+authority: accepted
 created: 2026-08-03
 updated: 2026-08-03
 ---
@@ -97,3 +97,43 @@ Startup detects a prepared receipt before ordinary detached recovery, validates 
 - permanent ledger prevents retired-ID reuse and survives restart and SQLite migration;
 - SQLite TUI lifecycle uses the same review/confirmation surface and delegates mutation to C1;
 - issue #13 closes only after both authorities and the complete interaction/process suite pass.
+
+
+## Implemented result
+
+- `legacy_category_lifecycle` inventories catalog/session/active/tag/canonical-sediment/daily-artifact/checkpoint references and binds them with a deterministic revision;
+- preparation rejects idle, self-merge, missing target, stale preview, nonzero-reference deletion, malformed checkpoint, and unresolved transition receipts before publication;
+- one private prepared receipt stores every exact resulting authority artifact plus the permanent lifecycle ledger before any result file changes;
+- replay publishes sessions, tags, sediment, affected daily artifacts, checkpoint, catalog, and permanent ledger deterministically, accepts exact matches, rejects conflicts, and clears evidence only after convergence;
+- eight injected post-receipt publication boundaries retain evidence and converge on clean retry without duplicate mutation;
+- startup replays prepared lifecycle evidence before ordinary legacy state load;
+- permanent ledger custody prevents retired-ID reuse across restart and participates in new category allocation;
+- migration fingerprints and imports legacy lifecycle receipts into SQLite schema 7 and preserves the identity high-water mark;
+- `x` remains ordinary archive and configurable `Shift-X` is the distinct merge/permanent-delete action;
+- atlas, palette, key resolver, category modal, active-layer route, and recovery ownership expose the same action truth;
+- the blocking overlay requires explicit target or deletion selection, displays all affected counts and revision, and accepts only the exact phrase derived from source, target, and revision;
+- legacy review writes a fresh runtime checkpoint first so the active generation cannot be omitted; successful application reloads through the authoritative replay path;
+- SQLite review delegates mutation to the certified C1 transaction and reloads the resulting authority;
+- SQLite TUI allocation advances beyond lifecycle receipt identities after reload.
+
+## Certification
+
+- formatting: pass;
+- strict Clippy, all targets/features, warnings denied: pass;
+- 246 library tests: pass;
+- 9 CLI lifecycle process tests: pass;
+- 6 configuration-authority tests: pass;
+- 1 report-help regression test: pass;
+- 15 SQLite/TUI process tests: pass;
+- 2 temporal-authority tests: pass;
+- 3 terminal-lifecycle PTY process tests: pass;
+- eight legacy lifecycle replay fault boundaries: retained prepared evidence and idempotent convergence;
+- source-idle, self-merge, missing-target, stale-preview, nonzero-delete, malformed/protected checkpoint, and transition-receipt refusal proofs: pass;
+- session identity/chronology, target metadata, tag order, sediment mass/FIFO, daily contribution, checkpoint, catalog, and permanent-ledger preservation proofs: pass;
+- restart retired-ID nonreuse and legacy-ledger-to-SQLite migration custody: pass;
+- archive/lifecycle keymap distinction and exact phrase unit proofs: pass;
+- live PTY proof captured the rendered phrase, typed it back, committed one merge receipt, retired the source, preserved target metadata, and completed normal shutdown: pass;
+- permanent diff audit: intended source, test, authority, and Notebook files only;
+- temporary transformation, interaction, process-proof, and workflow machinery: absent from the permanent tree.
+
+RECONCILIATION-001C2 completes the legacy, migration, and interaction half of issue #13. Together with RECONCILIATION-001A and RECONCILIATION-001C1, category archive, merge/reassignment, zero-reference permanent deletion, crash recovery, and retired-identity custody are fully implemented and certified across every supported authority.

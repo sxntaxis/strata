@@ -27,9 +27,10 @@ Current responsibility map:
 - `src/category_lifecycle.rs` — storage-neutral category identity counting and remapping for sediment, snapshots, and receipt-free runtime checkpoint payloads.
 - `src/temporal.rs` — monotonic/wall reconciliation, fixed-offset civil policy, and exact overlap slicing.
 - `src/legacy_transition.rs` — schema-versioned legacy transition receipts, completed-session payload validation, and exact/idempotent session reconciliation.
+- `src/legacy_category_lifecycle.rs` — complete legacy category-reference inventory, exact-result prepared receipts, permanent lifecycle ledger, deterministic replay, and retired-ID allocation.
 - `src/sqlite.rs` and `src/sqlite/**` — schema migrations, category archival and lifecycle transactions, repositories, active/checkpoint transition transactions, checkpoint custody, deterministic interchange, backup/restore, and fault certification.
 - `src/storage.rs` — XDG paths, strict legacy active/archived category catalog, strict session identity/reference validation, atomic file helpers, legacy runtime checkpoint files, and custody-separated contribution files.
-- `src/app.rs` and `src/app/**` — TUI orchestration, active/archived category projections, semantic-edge checkpoint refresh, legacy switch/finish/clear-all receipt publication and replay, explicit modal/edit state, persistence reconciliation, bounded recovery, historical artifact selection, context selection, resolver execution, palette/atlas projection, and rendering.
+- `src/app.rs` and `src/app/**` — TUI orchestration, active/archived category projections, semantic-edge checkpoint refresh, legacy switch/finish/clear-all and category-lifecycle receipt publication/replay, blocking revision-bound lifecycle review, explicit modal/edit state, persistence reconciliation, bounded recovery, historical artifact selection, context selection, resolver execution, palette/atlas projection, and rendering.
 - `src/app/recovery_statement.rs` — blocking recovery-evidence acknowledgment, deterministic cutoff presentation, exact/reconstructed/provisional classification, and shared projection of the structured recovery statement.
 - `src/app/terminal_lifecycle.rs` — raw-mode/alternate-screen RAII, process-wide panic restoration, exactly-once cleanup, runtime failure composition, and debug fault certification.
 - `src/sand/engine.rs` — canonical logical grains, compressed pending mass, physics, viewport projection, and Braille rendering.
@@ -73,6 +74,10 @@ Category retirement changes availability, not identity or historical meaning.
 - Permanent deletion without reassignment requires zero references across the same complete inventory.
 - Lifecycle receipts retire source IDs permanently; creation, backup/restore, portable bundle schema 3, import validation, and doctor integrity preserve that custody.
 - Protected, malformed, or transition-receipt-bearing checkpoint evidence blocks lifecycle mutation.
+- Legacy lifecycle preparation stages exact resulting catalog, sessions, tags, canonical sediment, affected daily contributions, receipt-free checkpoint payload, and permanent ledger before publishing one prepared receipt.
+- Startup replays that prepared receipt before ordinary authority load, accepts exact already-published artifacts, rejects conflict, and removes evidence only after every result and the permanent ledger converge.
+- The TUI keeps ordinary archive on `x`; a distinct configurable `Shift-X` action requires explicit target/deletion selection, displays the complete revision-bound preview, and applies only after the exact phrase is typed.
+- The permanent legacy ledger migrates into SQLite receipts and preserves the shared identity high-water mark.
 
 The detailed category contract is `docs/CATEGORY_AUTHORITY.md`.
 
@@ -189,11 +194,15 @@ Owns exact elapsed intervals, timestamps, categories, projects, descriptions, op
 
 ### Category catalog and lifecycle
 
-Owns stable category identity, active/archived state, historical display metadata, reference validation, and retired-ID custody. Retirement may hide an identity from new selection but may not erase, relabel, or redirect existing sessions, sediment, snapshots, or tags. A reviewed SQLite lifecycle receipt may redirect all source-owned references atomically or certify zero-reference deletion; no partial or stale transformation is authority.
+Owns stable category identity, active/archived state, historical display metadata, reference validation, and retired-ID custody. Retirement may hide an identity from new selection but may not erase, relabel, or redirect existing sessions, sediment, snapshots, or tags. A reviewed lifecycle receipt may redirect all source-owned references atomically in SQLite or publish one exact-result replay package under legacy authority, or may certify zero-reference deletion; no partial, stale, or unconfirmed transformation is authority.
 
 ### Active generation
 
 Owns the current stable active-session identity and its transition receipts. Checkpoint evidence may describe that generation but cannot replace authoritative active identity or survive a completed transition under a stale stable ID.
+
+### Legacy category lifecycle receipt
+
+Owns replay of one reviewed exact-result category merge or zero-reference deletion. It may republish only the receipt-bound catalog, sessions, tags, sediment, daily artifacts, checkpoint payload, and permanent ledger; exact matches are accepted, conflicts fail closed, and source identity remains retired after convergence.
 
 ### Legacy transition receipt
 
@@ -225,11 +234,10 @@ TUI and CLI translate user intent and present state. Neither may own an independ
 
 ## Current architectural frontier
 
-Persistence, temporal, domain, report, sediment, interaction, cross-authority category integrity, crash-recovery authority, and the SQLite category-lifecycle transaction are complete. The next priorities are:
+Persistence, temporal, domain, report, sediment, interaction, cross-authority category integrity, crash-recovery authority, and category lifecycle across SQLite, legacy files, migration, and TUI confirmation are complete. The next priorities are:
 
-1. complete issue #13 through a prepared legacy lifecycle receipt, idempotent crash replay, and explicit TUI review/confirmation under RECONCILIATION-001C2;
-2. later domain/UI distinction work under issue #22;
-3. later profile authority, including complete isolation and deliberate switching under issue #15.
+1. resolve the active draft versus category metadata distinction under issue #22;
+2. later profile authority, including complete isolation and deliberate switching under issue #15.
 
 ## Non-authority
 
@@ -245,6 +253,8 @@ Persistence, temporal, domain, report, sediment, interaction, cross-authority ca
 - An archived category is not deleted history.
 - A source category removed by a certified lifecycle transaction is not an identity available for reuse.
 - A lifecycle preview is not mutation authority after its revision becomes stale.
+- Target selection or an approximate confirmation phrase is not authority for destructive lifecycle mutation.
+- A prepared legacy lifecycle receipt is not disposable until every exact resulting artifact and the permanent ledger converge.
 - An unresolved category reference is not idle.
 - A receipt for one transition kind is not authority for another transition kind.
 - CSV, JSON, and ICS are external adapters, not canonical domain models.

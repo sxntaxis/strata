@@ -5,15 +5,15 @@ state: active
 created: 2026-08-01
 updated: 2026-08-03
 authority: working
-summary: SQLite category lifecycle authority is certified: complete preview, stale guard, atomic merge or zero-reference deletion, receipts, retired-ID custody, bundle parity, and doctor integrity.
-next: Complete issue #13 through the legacy-file lifecycle receipt/replay protocol and explicit TUI review/confirmation surface.
+summary: Category lifecycle is complete across SQLite, legacy-file replay, migration, and explicit TUI confirmation; issue #13 is evidence-backed for closure.
+next: Resolve the active draft versus category metadata distinction under issue #22.
 ---
 
 # NOW — Strata
 
 ## Current phase
 
-The SQLite migration, startup authority, temporal, domain, reporting, sediment, interaction, category-integrity, active/checkpoint generation-coherence, and legacy switch/finish/clear-all-replay units are complete.
+The SQLite migration, startup authority, temporal, domain, reporting, sediment, interaction, category-integrity, active/checkpoint generation-coherence, legacy transition replay, and complete category-lifecycle units are complete.
 
 Strata now has:
 
@@ -52,7 +52,12 @@ Strata now has:
 - SQLite schema 7 category lifecycle receipts and complete reference previews;
 - revision-bound atomic category merge/reassignment across ledger, active state, tags, sediment, snapshots, daily contributions, and receipt-free checkpoints;
 - zero-reference-only permanent deletion, idempotent retry, and permanent retired-ID custody;
-- portable bundle schema 3 lifecycle receipt parity and doctor detection of tamper or retired-ID reuse.
+- portable bundle schema 3 lifecycle receipt parity and doctor detection of tamper or retired-ID reuse;
+- exact-result legacy lifecycle preparation and startup replay across every file authority;
+- permanent legacy lifecycle ledger, restart-safe retired-ID allocation, and schema-7 migration import;
+- distinct archive and lifecycle action truth across keymap, atlas, palette, and runtime;
+- blocking target/deletion review with exact revision-bound typed confirmation;
+- live PTY proof of rendered-phrase capture, confirmation, one receipt, reassignment, and normal active-interval finish.
 
 The project remains in **post-program issue reconciliation**.
 
@@ -96,20 +101,19 @@ The project remains in **post-program issue reconciliation**.
 - **RECONCILIATION-001B3B** — partial issue #10: exact bounded sediment settlement at immediate, queued, clear, and finish boundaries.
 - **RECONCILIATION-001B3C** — completed issue #10: persisted deterministic cutoff, visible exact/reconstructed/provisional evidence, acknowledgment custody, repeated-retry proof, and schema-3 export parity.
 - **RECONCILIATION-001C1** — partial issue #13: complete SQLite lifecycle preview, stale guard, atomic merge or zero-reference deletion, auditable receipts, retired-ID nonreuse, portable bundle schema 3, and doctor integrity.
+- **RECONCILIATION-001C2** — completed issue #13: exact-result legacy prepared receipt/replay, permanent lifecycle ledger and migration custody, distinct archive/lifecycle actions, revision-bound typed confirmation, and live PTY proof.
 
 ## Active sequence
 
-1. Complete RECONCILIATION-001C2: legacy-file prepared lifecycle receipt, idempotent replay, and explicit TUI review/confirmation for issue #13.
-2. Later domain/UI distinction work under issue #22.
-3. Later profile authority, including complete isolation and deliberate switching under issue #15.
+1. Resolve the active draft versus category metadata distinction under issue #22.
+2. Later profile authority, including complete isolation and deliberate switching under issue #15.
 
 ## Current risks
 
-- Issue #13 still lacks legacy-file crash-safe lifecycle replay and the final explicit user review/confirmation surface.
 - Queued checkpoint mutations have no stable cross-authority receipt identity and fail closed.
 - Complete profile switching/isolation remains open.
 - Active draft versus category metadata remains an unresolved domain/UI distinction.
 
 ## Next
 
-Implement RECONCILIATION-001C2. Preserve the C1 complete-reference and stale-preview contract while adding a prepared legacy receipt across every file authority, idempotent startup replay, retired-ID custody, and one explicit review/confirmation interaction before issue #13 closure.
+Start the issue #22 domain/UI distinction unit. Preserve the completed category lifecycle and historical-meaning contracts while deciding whether active draft text and durable category metadata remain coupled or become explicit separate concepts.
