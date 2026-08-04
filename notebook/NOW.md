@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-08-03
 authority: working
-summary: Legacy switch, finish, and clear-all now use deterministic prepared receipts with idempotent replay; committed history survives clear-all and SQLite publishes the operation atomically. Issue #10 remains open for initial start, remaining sediment-edge, and cutoff semantics.
-next: Complete issue #10 through initial active-start/checkpoint coherence, exact remaining transition-edge sediment attribution, and visible recovery cutoff/reconstruction semantics.
+summary: Legacy transitions are receipt-governed and initial SQLite TUI startup now publishes active generation plus first checkpoint atomically. Issue #10 remains open only for transition-edge sediment and visible cutoff semantics.
+next: Complete issue #10 through exact remaining transition-edge sediment attribution and visible recovery cutoff/reconstruction semantics.
 ---
 
 # NOW — Strata
@@ -41,7 +41,9 @@ Strata now has:
 - receipt-governed clear-all that preserves committed history and resets only provisional idle;
 - one SQLite clear-all transaction for active, empty sediment, explicit affected days, and resulting checkpoint;
 - deterministic legacy clear-all replay that restores exact canonical elapsed and grid state before daily reconstruction;
-- six-point SQLite rollback certification and cross-day stale-artifact deletion proofs.
+- six-point SQLite rollback certification and cross-day stale-artifact deletion proofs;
+- atomic SQLite initial active/checkpoint bootstrap after sediment restoration;
+- four-point bootstrap rollback, pre-existing evidence refusal, and real TUI failure/retry certification.
 
 The project remains in **post-program issue reconciliation**.
 
@@ -81,17 +83,17 @@ The project remains in **post-program issue reconciliation**.
 - **RECONCILIATION-001B2A** — partial issue #10: prepared legacy switch receipts and idempotent kill-point replay.
 - **RECONCILIATION-001B2B** — partial issue #10: prepared legacy finish receipts, multi-authority replay, and archived recovery custody.
 - **RECONCILIATION-001B2C** — partial issue #10: non-destructive receipt-governed clear-all/provisional-idle reset with atomic SQLite publication and deterministic legacy replay.
+- **RECONCILIATION-001B3A** — partial issue #10: atomic initial SQLite active generation and first checkpoint, with rollback and process retry certification.
 
 ## Active sequence
 
-1. Complete issue #10 through initial active-start/checkpoint coherence, exact remaining transition-edge sediment reconciliation, and user-visible recovery cutoff semantics.
+1. Complete issue #10 through exact remaining transition-edge sediment reconciliation and user-visible recovery cutoff semantics.
 2. Define the merge/reassignment and permanent-deletion transaction needed to complete issue #13.
 3. Later domain/UI distinction work under issue #22.
 4. Later profile authority, including complete isolation and deliberate switching under issue #15.
 
 ## Current risks
 
-- SQLite initial active start and first checkpoint publication remain separate operations.
 - Exact sediment classification at active transition boundaries has not been certified against receipt replay.
 - The recovery interface does not yet expose a complete deterministic cutoff and uncertainty statement for reconstructed elapsed time.
 - Issue #13 still lacks explicit category merge/reassignment and permanent-deletion transactions.
@@ -101,4 +103,4 @@ The project remains in **post-program issue reconciliation**.
 
 ## Next
 
-Complete the remaining issue #10 units. First reconcile initial active-session creation with first checkpoint evidence. Then certify exact remaining sediment attribution at transition edges and expose checkpoint capture, recovery target, reconstructed duration, deterministic cutoff, and uncertainty in the recovery interface. After issue #10 closes, return to the category merge/reassignment and permanent-deletion transaction required by issue #13.
+Complete the remaining issue #10 units. Certify exact remaining sediment attribution at transition edges, then expose checkpoint capture, recovery target, reconstructed duration, deterministic cutoff, and uncertainty in the recovery interface. After issue #10 closes, return to the category merge/reassignment and permanent-deletion transaction required by issue #13.

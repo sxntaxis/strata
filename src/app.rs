@@ -696,6 +696,8 @@ impl App {
 
         app.persist_category_tags();
 
+        let had_sqlite_active_session = sqlite_active_session.is_some();
+        let mut initial_checkpoint_published = false;
         if !app.restore_from_detached_checkpoint() && !app.has_persistence_recovery() {
             if let Some(active) = sqlite_active_session {
                 if !app
@@ -714,14 +716,20 @@ impl App {
                 app.begin_active_session_at(active.started_at_utc, false)?;
             } else {
                 app.begin_active_session_now();
-                app.persist_active_session_start();
             }
             app.restore_sand_state();
+            if !had_sqlite_active_session
+                && app.sqlite_database_path.is_some()
+                && !app.has_persistence_recovery()
+            {
+                app.sync_drift_idle_state();
+                initial_checkpoint_published = app.persist_initial_active_generation();
+            }
         }
 
         app.sync_drift_idle_state();
         app.commit_checkpoint_recovery_if_ready();
-        if !app.has_persistence_recovery() {
+        if !app.has_persistence_recovery() && !initial_checkpoint_published {
             app.persist_runtime_checkpoint();
         }
         if let Some(recovery) = app.persistence_recovery.take() {
@@ -731,9 +739,9 @@ impl App {
         Ok(app)
     }
 
-    fn persist_active_session_start(&mut self) {
+    fn persist_initial_active_generation(&mut self) -> bool {
         let Some(database_path) = self.sqlite_database_path.clone() else {
-            return;
+            return true;
         };
         let category_id = self.time_tracker.active_category_id();
         let description = self
@@ -741,23 +749,52 @@ impl App {
             .category_description_by_id(category_id)
             .unwrap_or_default()
             .to_string();
-        let started_at = self
-            .session
-            .active_session_started_at_utc
-            .unwrap_or_else(Utc::now);
-        let result = sqlite::ensure_tui_active_session(
+        let Some(started_at_utc) = self.session.active_session_started_at_utc else {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::ActiveStart,
+                RecoveryAction::ReloadAuthority,
+                Err("initial active generation has no UTC start timestamp".to_string()),
+            );
+            return false;
+        };
+        let stable_id = sqlite::initial_tui_active_stable_id(started_at_utc);
+        self.session.active_session_stable_id = Some(stable_id.clone());
+        let checkpoint = match self.build_runtime_checkpoint() {
+            Ok(checkpoint) => checkpoint,
+            Err(error) => {
+                self.session.active_session_stable_id = None;
+                self.record_storage_result_for::<()>(
+                    PersistenceOperation::CheckpointSave,
+                    RecoveryAction::ReloadAuthority,
+                    Err(error),
+                );
+                return false;
+            }
+        };
+        let result = sqlite::start_tui_active_session_with_checkpoint(
             &database_path,
-            category_id,
-            &description,
-            started_at,
+            sqlite::TuiInitialActiveGenerationRequest {
+                active_stable_id: &stable_id,
+                category_id,
+                description: &description,
+                started_at_utc,
+                detached_at_utc: checkpoint.detached_at_utc,
+                simulation_time_utc: checkpoint.simulation_time_utc,
+                checkpoint: &checkpoint,
+            },
         );
-        if let Some(stable_id) = self.record_storage_result_for(
-            PersistenceOperation::ActiveStart,
-            RecoveryAction::ReloadAuthority,
-            result,
-        ) {
-            self.session.active_session_stable_id = Some(stable_id);
+        if self
+            .record_storage_result_for(
+                PersistenceOperation::ActiveStart,
+                RecoveryAction::ReloadAuthority,
+                result,
+            )
+            .is_none()
+        {
+            self.session.active_session_stable_id = None;
+            return false;
         }
+        true
     }
 
     fn reload_sqlite_sessions(&mut self) -> bool {
