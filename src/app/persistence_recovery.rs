@@ -21,7 +21,9 @@ use crate::{
     sqlite, storage,
 };
 
-use super::{App, QueuedMutation, QueuedMutationEventRecord, QueuedMutationRecord};
+use super::{
+    App, QueuedMutation, QueuedMutationEventRecord, QueuedMutationRecord, RecoveryStatement,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PersistenceOperation {
@@ -632,7 +634,7 @@ impl App {
             })
             .collect();
         let bundle = EmergencyRecoveryBundle {
-            schema_version: 2,
+            schema_version: 3,
             created_at_utc: now.to_rfc3339_opts(SecondsFormat::Millis, true),
             failure: EmergencyFailure {
                 operation: recovery.failure.operation.to_string(),
@@ -656,6 +658,7 @@ impl App {
                 .to_rfc3339_opts(SecondsFormat::Millis, true),
             pending_mutations,
             checkpoint_recovery_active: self.checkpoint_recovery_active,
+            recovery_statement: self.recovery_statement.clone(),
         };
         write_private_json_atomic(&path, &bundle)?;
         Ok(path)
@@ -843,6 +846,7 @@ struct EmergencyRecoveryBundle {
     simulation_time_utc: String,
     pending_mutations: Vec<QueuedMutationEventRecord>,
     checkpoint_recovery_active: bool,
+    recovery_statement: Option<RecoveryStatement>,
 }
 
 #[derive(Serialize)]

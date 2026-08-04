@@ -73,14 +73,12 @@ impl TestProfile {
 
     fn run_tui_with_input(&self, input: &[u8], fault: Option<&str>) -> Output {
         let mut command = Command::new("timeout");
+        let tui_command = format!(
+            "stty cols 120 rows 40; exec {}",
+            env!("CARGO_BIN_EXE_strata")
+        );
         command
-            .args([
-                "10s",
-                "script",
-                "-qefc",
-                env!("CARGO_BIN_EXE_strata"),
-                "/dev/null",
-            ])
+            .args(["10s", "script", "-qefc", &tui_command, "/dev/null"])
             .env("XDG_DATA_HOME", &self.data_home)
             .env("XDG_STATE_HOME", &self.state_home)
             .env("XDG_CONFIG_HOME", &self.config_home)
@@ -563,6 +561,83 @@ fn initial_tui_bootstrap_failure_leaves_no_orphan_generation() {
             stderr(&retry)
         );
     }
+}
+
+#[test]
+fn failed_recovery_commit_reuses_and_displays_persisted_cutoff() {
+    let profile = TestProfile::new("visible-recovery-cutoff");
+    profile.migrate();
+    assert!(profile.activate().status.success());
+
+    let detached = profile.run_tui_with_input(b"d", None);
+    assert!(
+        detached.status.success(),
+        "detach failed: stdout={} stderr={}",
+        stdout(&detached),
+        stderr(&detached)
+    );
+
+    let connection = Connection::open(profile.database_path()).expect("database should open");
+    let payload_json: String = connection
+        .query_row(
+            "SELECT payload_json FROM runtime_checkpoint WHERE singleton = 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("detached checkpoint should exist");
+    let payload: Value = serde_json::from_str(&payload_json).expect("payload should be JSON");
+    assert!(
+        payload["sand_state"]["grid_width"].as_u64().unwrap_or(0) > 0,
+        "fixed-size PTY should produce an initialized checkpoint canvas"
+    );
+    assert!(
+        payload["sand_state"]["grid_height"].as_u64().unwrap_or(0) > 0,
+        "fixed-size PTY should produce an initialized checkpoint canvas"
+    );
+    drop(connection);
+
+    let failed = profile.run_tui_with_input(b"", Some("checkpoint-recovery:commit:cutoff"));
+    assert!(
+        !failed.status.success(),
+        "injected recovery commit unexpectedly succeeded"
+    );
+
+    let connection = Connection::open(profile.database_path()).expect("database should open");
+    let (status, payload_json): (String, String) = connection
+        .query_row(
+            "SELECT status, payload_json FROM runtime_checkpoint WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("recovering checkpoint should remain");
+    assert_eq!(status, "recovering");
+    let payload: Value = serde_json::from_str(&payload_json).expect("payload should be JSON");
+    let persisted_target = payload["recovery_target_utc"]
+        .as_str()
+        .expect("recovery target should be persisted")
+        .to_string();
+    drop(connection);
+
+    thread::sleep(Duration::from_millis(1_200));
+    let recovered = profile.run_tui_with_input(b"\rq", None);
+    assert!(
+        recovered.status.success(),
+        "recovery retry failed: stdout={} stderr={}",
+        stdout(&recovered),
+        stderr(&recovered)
+    );
+    let visible_target = chrono::DateTime::parse_from_rfc3339(&persisted_target)
+        .unwrap()
+        .with_timezone(&Utc)
+        .to_rfc3339_opts(SecondsFormat::Millis, true);
+    let output = stdout(&recovered);
+    assert!(
+        output.contains("RECOVERY EVIDENCE"),
+        "recovery statement was not rendered: {output:?}"
+    );
+    assert!(output.contains("Recovery target"));
+    assert!(output.contains(&visible_target));
+    assert!(output.contains("PROVISIONAL LIVE TIME"));
 }
 
 fn recovery_bundle(profile: &TestProfile) -> Value {

@@ -176,6 +176,10 @@ impl App {
             self.render_command_palette(f, size);
         }
 
+        if self.recovery_statement.is_some() {
+            self.render_recovery_statement(f, size);
+        }
+
         if self.has_persistence_recovery() {
             self.render_persistence_recovery(f, size);
         }

@@ -38,6 +38,7 @@ mod command_palette_view;
 mod event_handlers;
 mod keybindings_modal_view;
 mod persistence_recovery;
+mod recovery_statement;
 mod render_views;
 mod report_modal_view;
 mod report_state;
@@ -189,6 +190,97 @@ impl DetachedRuntimeCheckpoint {
     const VERSION: u8 = 3;
     const PREVIOUS_VERSION: u8 = 2;
     const LEGACY_VERSION: u8 = 1;
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum RecoveredIntervalClass {
+    Exact,
+    Reconstructed,
+}
+
+impl RecoveredIntervalClass {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Exact => "EXACT",
+            Self::Reconstructed => "RECONSTRUCTED",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum PostTargetClass {
+    ProvisionalLiveTime,
+}
+
+impl PostTargetClass {
+    fn label(self) -> &'static str {
+        "PROVISIONAL LIVE TIME"
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct RecoveryStatement {
+    checkpoint_captured_at_utc: DateTime<Utc>,
+    checkpoint_simulation_at_utc: DateTime<Utc>,
+    recovery_target_utc: DateTime<Utc>,
+    reconstructed_duration_nanos: u64,
+    recovered_interval_class: RecoveredIntervalClass,
+    post_target_class: PostTargetClass,
+    active_stable_id: Option<String>,
+    active_category_id: u64,
+    active_description: String,
+    active_session_started_at_utc: DateTime<Utc>,
+    cutoff_policy: String,
+}
+
+fn recovery_target_for_claim(
+    persisted_target_utc: Option<DateTime<Utc>>,
+    claim_time_utc: DateTime<Utc>,
+) -> DateTime<Utc> {
+    persisted_target_utc.unwrap_or(claim_time_utc)
+}
+
+fn build_recovery_statement(
+    checkpoint: &DetachedRuntimeCheckpoint,
+    active_stable_id: Option<String>,
+    target_utc: DateTime<Utc>,
+) -> Result<RecoveryStatement, String> {
+    if checkpoint.simulation_time_utc > checkpoint.detached_at_utc
+        || checkpoint.detached_at_utc > target_utc
+    {
+        return Err("recovery statement timestamps are not monotonic".to_string());
+    }
+    let started_at_utc = checkpoint
+        .active_session_started_at_utc
+        .ok_or_else(|| "recovery statement has no active-session start".to_string())?;
+    if started_at_utc > target_utc {
+        return Err("recovery statement active session starts after its target".to_string());
+    }
+    let reconstructed = (target_utc - checkpoint.simulation_time_utc)
+        .to_std()
+        .map_err(|error| format!("invalid recovery statement interval: {error}"))?;
+    let reconstructed_duration_nanos = u64::try_from(reconstructed.as_nanos())
+        .map_err(|_| "recovery statement interval exceeds the supported range".to_string())?;
+    let recovered_interval_class = if reconstructed_duration_nanos == 0 {
+        RecoveredIntervalClass::Exact
+    } else {
+        RecoveredIntervalClass::Reconstructed
+    };
+    Ok(RecoveryStatement {
+        checkpoint_captured_at_utc: checkpoint.detached_at_utc,
+        checkpoint_simulation_at_utc: checkpoint.simulation_time_utc,
+        recovery_target_utc: target_utc,
+        reconstructed_duration_nanos,
+        recovered_interval_class,
+        post_target_class: PostTargetClass::ProvisionalLiveTime,
+        active_stable_id,
+        active_category_id: checkpoint.active_category_id,
+        active_description: checkpoint.active_description.clone(),
+        active_session_started_at_utc: started_at_utc,
+        cutoff_policy: "persisted target; no post-target time is counted as recovered".to_string(),
+    })
 }
 
 fn transition_operation_id(
@@ -580,6 +672,7 @@ struct App {
     archived_categories: Vec<Category>,
     checkpoint_recovery_active: bool,
     checkpoint_recovery_payload: Option<DetachedRuntimeCheckpoint>,
+    recovery_statement: Option<RecoveryStatement>,
     persistence_recovery: Option<PersistenceRecoveryState>,
     recovery_exit_requested: bool,
     recovery_exit_error: Option<String>,
@@ -715,6 +808,7 @@ impl App {
             archived_categories,
             checkpoint_recovery_active: false,
             checkpoint_recovery_payload: None,
+            recovery_statement: None,
             persistence_recovery: None,
             recovery_exit_requested: false,
             recovery_exit_error: None,
@@ -2637,43 +2731,40 @@ impl App {
     }
 
     fn restore_from_detached_checkpoint(&mut self) -> bool {
-        let (mut checkpoint, was_committed): (DetachedRuntimeCheckpoint, bool) =
-            if let Some(database_path) = self.sqlite_database_path.clone() {
-                match sqlite::load_tui_checkpoint(&database_path) {
-                    Ok(Some(claimed)) => {
-                        let Some(active_stable_id) = claimed.active_session_stable_id else {
-                            let _ = sqlite::quarantine_tui_checkpoint(&database_path);
-                            self.record_storage_result::<()>(Err(
-                                "SQLite recovery checkpoint has no active stable identity"
-                                    .to_string(),
-                            ));
-                            return false;
-                        };
-                        self.session.active_session_stable_id = Some(active_stable_id);
-                        (claimed.payload, claimed.was_committed)
-                    }
-                    Ok(None) => return false,
-                    Err(error) => {
-                        self.record_storage_result::<()>(Err(error));
+        let mut checkpoint: DetachedRuntimeCheckpoint = if let Some(database_path) =
+            self.sqlite_database_path.clone()
+        {
+            match sqlite::load_tui_checkpoint(&database_path) {
+                Ok(Some(claimed)) => {
+                    let Some(active_stable_id) = claimed.active_session_stable_id else {
+                        let _ = sqlite::quarantine_tui_checkpoint(&database_path);
+                        self.record_storage_result::<()>(Err(
+                            "SQLite recovery checkpoint has no active stable identity".to_string(),
+                        ));
                         return false;
-                    }
+                    };
+                    self.session.active_session_stable_id = Some(active_stable_id);
+                    claimed.payload
                 }
-            } else {
-                let path = storage::get_detached_runtime_path();
-                if !storage::file_exists(&path) {
+                Ok(None) => return false,
+                Err(error) => {
+                    self.record_storage_result::<()>(Err(error));
                     return false;
                 }
-                match storage::read_json::<DetachedRuntimeCheckpoint>(&path) {
-                    Ok(value) => {
-                        let committed = value.legacy_recovery_committed;
-                        (value, committed)
-                    }
-                    Err(error) => {
-                        self.record_storage_result::<()>(Err(error));
-                        return false;
-                    }
+            }
+        } else {
+            let path = storage::get_detached_runtime_path();
+            if !storage::file_exists(&path) {
+                return false;
+            }
+            match storage::read_json::<DetachedRuntimeCheckpoint>(&path) {
+                Ok(value) => value,
+                Err(error) => {
+                    self.record_storage_result::<()>(Err(error));
+                    return false;
                 }
-            };
+            }
+        };
 
         if checkpoint.clear_all.is_some()
             && let Err(error) = self.reconcile_clear_all_receipt(&mut checkpoint)
@@ -2725,11 +2816,7 @@ impl App {
         }
 
         let now_utc = Utc::now();
-        let target_utc = if was_committed || checkpoint.legacy_recovery_committed {
-            now_utc
-        } else {
-            checkpoint.recovery_target_utc.unwrap_or(now_utc)
-        };
+        let target_utc = recovery_target_for_claim(checkpoint.recovery_target_utc, now_utc);
         if target_utc > now_utc {
             self.record_storage_result::<()>(Err(format!(
                 "detached recovery target {target_utc} is in the future"
@@ -2804,6 +2891,18 @@ impl App {
             return false;
         }
 
+        let recovery_statement = match build_recovery_statement(
+            &checkpoint,
+            self.session.active_session_stable_id.clone(),
+            target_utc,
+        ) {
+            Ok(statement) => statement,
+            Err(error) => {
+                self.record_storage_result::<()>(Err(error));
+                return false;
+            }
+        };
+
         let valid_category_ids = self
             .time_tracker
             .categories_for_storage()
@@ -2868,6 +2967,7 @@ impl App {
         self.simulation.catchup_progress_anchor = None;
         self.simulation.catchup_was_active = false;
         self.checkpoint_recovery_payload = Some(checkpoint);
+        self.recovery_statement = Some(recovery_statement);
         true
     }
 
@@ -3086,6 +3186,104 @@ pub fn run_ui(loaded: keybindings::LoadedKeybindings) -> Result<(), io::Error> {
                 cleanup_result,
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod recovery_statement_tests {
+    use chrono::{TimeZone, Utc};
+
+    use super::{
+        DetachedRuntimeCheckpoint, PostTargetClass, RecoveredIntervalClass,
+        build_recovery_statement, recovery_target_for_claim,
+    };
+    use crate::sand::SandState;
+
+    fn timestamp(second: u32) -> chrono::DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 8, 3, 18, 0, second).unwrap()
+    }
+
+    fn checkpoint(simulation_second: u32, capture_second: u32) -> DetachedRuntimeCheckpoint {
+        DetachedRuntimeCheckpoint {
+            schema_version: DetachedRuntimeCheckpoint::VERSION,
+            detached_at_utc: timestamp(capture_second),
+            simulation_time_utc: timestamp(simulation_second),
+            spawn_accumulator_nanos: 0,
+            physics_accumulator_nanos: 0,
+            active_category_id: 1,
+            active_description: "Focused".to_string(),
+            active_session_started_at_utc: Some(timestamp(0)),
+            sand_state: SandState {
+                version: SandState::VERSION,
+                grid_width: 2,
+                grid_height: 2,
+                grains: Vec::new(),
+                frame_count: 0,
+                sweep_left_to_right: true,
+                rng_state: 1,
+                pending_grains: Vec::new(),
+                pending_runs: Vec::new(),
+            },
+            pending_mutations: Vec::new(),
+            recovery_target_utc: None,
+            legacy_recovery_committed: false,
+            legacy_transition: None,
+            legacy_finish: None,
+            clear_all: None,
+        }
+    }
+
+    #[test]
+    fn exact_and_reconstructed_statements_are_distinct() {
+        let exact_checkpoint = checkpoint(2, 2);
+        let exact =
+            build_recovery_statement(&exact_checkpoint, Some("stable".to_string()), timestamp(2))
+                .unwrap();
+        assert_eq!(exact.reconstructed_duration_nanos, 0);
+        assert_eq!(
+            exact.recovered_interval_class,
+            RecoveredIntervalClass::Exact
+        );
+        assert_eq!(
+            exact.post_target_class,
+            PostTargetClass::ProvisionalLiveTime
+        );
+
+        let reconstructed_checkpoint = checkpoint(2, 3);
+        let reconstructed = build_recovery_statement(
+            &reconstructed_checkpoint,
+            Some("stable".to_string()),
+            timestamp(7),
+        )
+        .unwrap();
+        assert_eq!(reconstructed.reconstructed_duration_nanos, 5_000_000_000);
+        assert_eq!(
+            reconstructed.recovered_interval_class,
+            RecoveredIntervalClass::Reconstructed
+        );
+    }
+
+    #[test]
+    fn persisted_target_is_reused_after_wall_time_advances() {
+        let persisted = timestamp(5);
+        assert_eq!(
+            recovery_target_for_claim(Some(persisted), timestamp(30)),
+            persisted
+        );
+        assert_eq!(
+            recovery_target_for_claim(None, timestamp(30)),
+            timestamp(30)
+        );
+    }
+
+    #[test]
+    fn non_monotonic_statement_fails_closed() {
+        let invalid = checkpoint(4, 3);
+        assert!(
+            build_recovery_statement(&invalid, None, timestamp(5))
+                .unwrap_err()
+                .contains("not monotonic")
+        );
     }
 }
 
