@@ -1,7 +1,7 @@
 # Strata architecture authority
 
 Status: current implementation map
-Last reviewed: 2026-08-03
+Last reviewed: 2026-08-04
 
 ## Current system
 
@@ -20,16 +20,17 @@ SQLite repository/runtime coordination + legacy catalog/checkpoint/receipt custo
 Current responsibility map:
 
 - `src/main.rs` — process entry.
-- `src/lib.rs` — shared CLI/TUI invocation and startup authority.
+- `src/lib.rs` — shared CLI/TUI invocation, process-bound profile selection, and startup authority.
+- `src/profile.rs` — stable profile UUID, rooted/XDG data-state-config ownership, manifest validation, and cross-profile artifact refusal.
 - `src/cli.rs` — command lifecycle, reports, exports, migration, and maintenance.
 - `src/keybindings.rs` — validated runtime/time settings plus configured Bound/Unbound/Disabled action state, mandatory key policy, contextual aliases, and the shared input resolver.
-- `src/domain.rs` — canonical sessions, project/category identity, operational-day allocation, reports, and cloneable staged legacy transition state.
+- `src/domain.rs` — canonical sessions, project/category identity, session-owned active draft text, operational-day allocation, reports, and cloneable staged legacy transition state.
 - `src/category_lifecycle.rs` — storage-neutral category identity counting and remapping for sediment, snapshots, and receipt-free runtime checkpoint payloads.
 - `src/temporal.rs` — monotonic/wall reconciliation, fixed-offset civil policy, and exact overlap slicing.
 - `src/legacy_transition.rs` — schema-versioned legacy transition receipts, completed-session payload validation, and exact/idempotent session reconciliation.
 - `src/legacy_category_lifecycle.rs` — complete legacy category-reference inventory, exact-result prepared receipts, permanent lifecycle ledger, deterministic replay, and retired-ID allocation.
 - `src/sqlite.rs` and `src/sqlite/**` — schema migrations, category archival and lifecycle transactions, repositories, active/checkpoint transition transactions, checkpoint custody, deterministic interchange, backup/restore, and fault certification.
-- `src/storage.rs` — XDG paths, strict legacy active/archived category catalog, strict session identity/reference validation, atomic file helpers, legacy runtime checkpoint files, and custody-separated contribution files.
+- `src/storage.rs` — selected-profile paths, strict legacy active/archived category catalog, strict session identity/reference validation, atomic file helpers, legacy runtime checkpoint files, and custody-separated contribution files.
 - `src/app.rs` and `src/app/**` — TUI orchestration, active/archived category projections, semantic-edge checkpoint refresh, legacy switch/finish/clear-all and category-lifecycle receipt publication/replay, blocking revision-bound lifecycle review, explicit modal/edit state, persistence reconciliation, bounded recovery, historical artifact selection, context selection, resolver execution, palette/atlas projection, and rendering.
 - `src/app/recovery_statement.rs` — blocking recovery-evidence acknowledgment, deterministic cutoff presentation, exact/reconstructed/provisional classification, and shared projection of the structured recovery statement.
 - `src/app/terminal_lifecycle.rs` — raw-mode/alternate-screen RAII, process-wide panic restoration, exactly-once cleanup, runtime failure composition, and debug fault certification.
@@ -54,6 +55,19 @@ Current responsibility map:
 - Canonical sessions remain singular while exact overlap slices allocate report and daily-contribution mass across operational days.
 - Project and category are independent canonical axes.
 - Idle is explicit, continues producing sediment, and remains excluded from ordinary active-time totals.
+
+### Active draft and category metadata
+
+The active session description and durable category description are separate authorities.
+
+- `TimeTracker` owns one active-session draft independently from the category catalog.
+- Starting or switching to a category begins with an explicit draft supplied by the interaction; category metadata is never inherited implicitly.
+- Finishing commits the active draft into the completed session and clears only the draft.
+- Switch, finish, clear, detach, recovery, lifecycle reassignment, and legacy replay preserve durable category metadata.
+- SQLite persists active-description edits against the expected active stable ID before memory changes are accepted.
+- Legacy checkpoints and transition receipts carry the active draft independently from the unchanged category catalog.
+- The TUI defaults to draft editing; configurable `Shift-E` enters the separate durable metadata-editing mode.
+- Reusable category tags remain selectable aids and are not auto-applied as session text.
 
 ### Category identity and archival
 
@@ -99,14 +113,14 @@ Legacy switch transitions use a certified multi-file receipt protocol:
 1. stage the resulting state;
 2. publish schema-3 checkpoint evidence with a deterministic switch receipt;
 3. publish completed session history;
-4. publish category-description authority;
+4. publish the unchanged category catalog while the resulting active draft remains receipt/checkpoint-owned;
 5. clear the receipt only after convergence.
 
 Prepared-checkpoint failure rolls back staged memory. Once the receipt is durable, startup replays missing effects idempotently, exact-matches already published sessions, rejects conflicts, and retains the receipt after later publication failures. The real publication helper is certified from receipt-only, receipt-plus-session, and receipt-plus-session-plus-catalog crash states.
 
 Whole-second ledger semantics own the completed row. Subsecond monotonic remainder is compatible with a canonical completed start of `switch UTC - whole elapsed seconds`; it is not required to equal the original wall start exactly.
 
-Normal legacy finish uses a second certified receipt protocol. It publishes prior-generation evidence before active mutation, then converges completed history, cleared category metadata, canonical sediment, and every affected daily contribution before deleting the checkpoint. Startup consumes the finish receipt without resuming the finished generation. Four persisted kill points and later-publication failure custody are certified.
+Normal legacy finish uses a second certified receipt protocol. It publishes prior-generation evidence before active mutation, then converges completed history, a cleared active draft, unchanged category metadata, canonical sediment, and every affected daily contribution before deleting the checkpoint. Startup consumes the finish receipt without resuming the finished generation. Four persisted kill points and later-publication failure custody are certified.
 
 Legacy recovery flush/reload validate both active and archived catalogs, retain archived sediment identity, and emergency recovery schema 3 exports explicit archival state plus the structured recovery statement when present.
 
@@ -119,6 +133,23 @@ Immediate and queued switches, clear operations, and normal finish settle sedime
 Successful checkpoint recovery produces one structured evidence statement. It exposes durable simulation time, capture time, persisted target, reconstructed duration, active identity, and exact/reconstructed/provisional classification; blocks ordinary input until acknowledgment; and is serialized unchanged in emergency export schema 3. Retry reuses the persisted cutoff.
 
 The complete recovery contract and issue #10 closure are recorded in `docs/RECOVERY_AUTHORITY.md`.
+
+### Profile authority
+
+One selected profile owns the complete process authority.
+
+- `--profile <directory>` is the explicit CLI/TUI selector; `STRATA_PROFILE` is the environment equivalent.
+- A rooted profile owns `data/`, `state/`, and `config/` beneath one canonical root and persists a schema-1 UUID manifest at `profile.json`.
+- Without an explicit root, one XDG profile owns the corresponding platform data, state, and configuration directories.
+- Historical `STRATA_DATA_DIR` is accepted only as a legacy whole-profile-root alias; it no longer redirects data independently from runtime state.
+- The selected profile is initialized before configuration or storage authority resolution and cannot change during the process.
+- `time_log_path` configuration and its live atlas editor are removed; obsolete configuration fails with explicit `--profile` migration guidance.
+- Legacy active-session files, detached checkpoints, recovery statements, and SQLite authority markers carry or validate the selected profile UUID.
+- Rooted profiles reject missing or mismatched artifact identity; copied active/checkpoint evidence from another profile fails closed.
+- Profile switching is deliberate close/open behavior: exit Strata and invoke it again with the target profile. There is no hot write redirection or in-memory dataset transfer.
+- `strata --profile <directory> profile [--json]` exposes the selected UUID and all owned paths.
+
+The complete contract is `docs/PROFILE_AUTHORITY.md`.
 
 ### Reports and exports
 
@@ -190,15 +221,19 @@ The complete interaction contract is `docs/INTERACTION_AUTHORITY.md`.
 
 ### Chronological ledger
 
-Owns exact elapsed intervals, timestamps, categories, projects, descriptions, operational-day policy, and reportable totals.
+Owns exact elapsed intervals, timestamps, categories, projects, committed session descriptions, operational-day policy, and reportable totals.
+
+### Profile
+
+Owns the stable profile UUID and the complete data/state/config path set for one process. A path override, copied artifact, or live configuration edit cannot change profile authority. Missing or mismatched identity under an explicit rooted profile fails closed before state is applied.
 
 ### Category catalog and lifecycle
 
 Owns stable category identity, active/archived state, historical display metadata, reference validation, and retired-ID custody. Retirement may hide an identity from new selection but may not erase, relabel, or redirect existing sessions, sediment, snapshots, or tags. A reviewed lifecycle receipt may redirect all source-owned references atomically in SQLite or publish one exact-result replay package under legacy authority, or may certify zero-reference deletion; no partial, stale, or unconfirmed transformation is authority.
 
-### Active generation
+### Active generation and draft
 
-Owns the current stable active-session identity and its transition receipts. Checkpoint evidence may describe that generation but cannot replace authoritative active identity or survive a completed transition under a stale stable ID.
+Owns the current stable active-session identity, one session-owned description draft, and its transition receipts. Category metadata may describe the category but cannot supply, clear, or replace the active draft implicitly. Checkpoint evidence may describe that generation and draft but cannot replace authoritative active identity or survive a completed transition under a stale stable ID.
 
 ### Legacy category lifecycle receipt
 
@@ -234,10 +269,9 @@ TUI and CLI translate user intent and present state. Neither may own an independ
 
 ## Current architectural frontier
 
-Persistence, temporal, domain, report, sediment, interaction, cross-authority category integrity, crash-recovery authority, and category lifecycle across SQLite, legacy files, migration, and TUI confirmation are complete. The next priorities are:
+Persistence, temporal, domain, report, sediment, interaction, cross-authority category integrity, crash-recovery authority, category lifecycle, active-draft ownership, and complete profile isolation are implemented and certified. The post-SQLite GitHub issue reconciliation queue is empty.
 
-1. resolve the active draft versus category metadata distinction under issue #22;
-2. later profile authority, including complete isolation and deliberate switching under issue #15.
+Future work must begin as a new explicitly justified unit rather than being inferred from superseded issue premises. Known non-blocking design questions remain listed in `docs/DECISIONS.md`.
 
 ## Non-authority
 
@@ -255,6 +289,9 @@ Persistence, temporal, domain, report, sediment, interaction, cross-authority ca
 - A lifecycle preview is not mutation authority after its revision becomes stale.
 - Target selection or an approximate confirmation phrase is not authority for destructive lifecycle mutation.
 - A prepared legacy lifecycle receipt is not disposable until every exact resulting artifact and the permanent ledger converge.
+- Durable category metadata is not an active-session draft or reusable phrase template.
+- A data-file path override is not a profile and cannot redirect live authority.
+- An artifact from another profile is not recovery evidence for the selected profile.
 - An unresolved category reference is not idle.
 - A receipt for one transition kind is not authority for another transition kind.
 - CSV, JSON, and ICS are external adapters, not canonical domain models.

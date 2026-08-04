@@ -3,87 +3,35 @@ id: NOW-001
 kind: status
 state: active
 created: 2026-08-01
-updated: 2026-08-03
+updated: 2026-08-04
 authority: working
-summary: Category lifecycle is complete across SQLite, legacy-file replay, migration, and explicit TUI confirmation; issue #13 is evidence-backed for closure.
-next: Resolve the active draft versus category metadata distinction under issue #22.
+summary: Every known GitHub issue is implemented and evidence-backed; active-draft ownership and complete profile isolation close the post-SQLite reconciliation program.
+next: Maintain the certified baseline and open future work only through a new explicit issue or architecture unit.
 ---
 
 # NOW — Strata
 
 ## Current phase
 
-The SQLite migration, startup authority, temporal, domain, reporting, sediment, interaction, category-integrity, active/checkpoint generation-coherence, legacy transition replay, and complete category-lifecycle units are complete.
+The post-SQLite issue reconciliation program is complete. No open GitHub issues remain at certification time.
 
-Strata now has:
+The certified system includes:
 
-- durable fail-closed persistence;
-- explicit monotonic/UTC/fixed-offset time authority;
-- canonical project/category/session identity;
-- truthful deterministic reports and exports;
-- conserved sediment mass, topology, recovery, snapshots, and daily contributions;
-- explicit report-log view/edit ownership and atomic draft persistence;
-- exactly-once terminal restoration and runtime emergency checkpoint custody;
-- explicit Bound, Unbound, and Disabled action state with one truthful resolver;
-- mandatory recovery-safe Ctrl-C and configurable F1;
-- cross-authority active/archived category catalogs and strict reference integrity;
-- SQLite active switch/reset/finish transactions that retire prior checkpoint generations coherently;
-- protected recovering/quarantined evidence that blocks unsafe active transitions;
-- startup checkpoint identity validation before payload application;
-- immediate current-generation checkpoint refresh after switch, reset, and active-description mutation;
-- prepared legacy switch receipts published before session/category effects;
-- idempotent switch replay from every durable publication point;
-- prepared legacy finish receipts published before active mutation;
-- idempotent finish replay across session, catalog, sediment, and daily-contribution effects;
-- archived-safe recovery reload/flush and schema-3 emergency exports;
-- whole-second/subsecond transition validation consistent with canonical ledger semantics;
-- strict legacy session identity and temporal payload validation;
-- receipt-governed clear-all that preserves committed history and resets only provisional idle;
-- one SQLite clear-all transaction for active, empty sediment, explicit affected days, and resulting checkpoint;
-- deterministic legacy clear-all replay that restores exact canonical elapsed and grid state before daily reconstruction;
-- six-point SQLite rollback certification and cross-day stale-artifact deletion proofs;
-- atomic SQLite initial active/checkpoint bootstrap after sediment restoration;
-- four-point bootstrap rollback, pre-existing evidence refusal, and real TUI failure/retry certification;
-- exact outgoing-category sediment ownership at switch, clear, and finish boundaries;
-- bounded FIFO transition settlement, post-clear non-reappearance, and uninitialized-canvas mass preservation;
-- blocking recovery evidence acknowledgment with durable simulation, capture, target, reconstructed duration, and active identity;
-- exact/reconstructed/provisional classification with persisted cutoff reuse across failed commit and delayed retry;
-- emergency recovery schema 3 parity with the visible structured statement;
-- SQLite schema 7 category lifecycle receipts and complete reference previews;
-- revision-bound atomic category merge/reassignment across ledger, active state, tags, sediment, snapshots, daily contributions, and receipt-free checkpoints;
-- zero-reference-only permanent deletion, idempotent retry, and permanent retired-ID custody;
-- portable bundle schema 3 lifecycle receipt parity and doctor detection of tamper or retired-ID reuse;
-- exact-result legacy lifecycle preparation and startup replay across every file authority;
-- permanent legacy lifecycle ledger, restart-safe retired-ID allocation, and schema-7 migration import;
-- distinct archive and lifecycle action truth across keymap, atlas, palette, and runtime;
-- blocking target/deletion review with exact revision-bound typed confirmation;
-- live PTY proof of rendered-phrase capture, confirmation, one receipt, reassignment, and normal active-interval finish.
-
-The project remains in **post-program issue reconciliation**.
-
-## Verified technical baseline
-
-- SQLite schema version 7 is authoritative after explicit activation.
-- CLI and TUI share configuration, repository, temporal, session, recovery, snapshot, interaction, and category boundaries.
-- Historical sediment viewing is immutable and daily contributions are revision-matched to ledger truth.
-- Report-log editing commits only after successful persistence and retains failed drafts in visible recovery.
-- `TerminalSession` owns raw mode, alternate screen, cursor restoration, output flushing, and ratatui terminal state.
-- Draw, poll, and read errors attempt direct emergency checkpoint publication while preserving the primary error.
-- Linux PTY tests certify unchanged termios state and exactly one restoration on quit, detach, draw/poll/read failure, and panic.
-- Contextual aliases are named and disabled actions are unreachable through keys, aliases, and the palette.
-- Legacy session loading rejects malformed, duplicate, reserved, and unknown identities with actionable errors.
-- Category archive/restore preserves original identity, metadata, tags, reports, sand, and migration state.
-- SQLite active transitions validate expected active identity and checkpoint custody in one transaction.
-- Ordinary transitions may retire only pending/committed evidence for the expected prior stable ID.
-- Transition receipts remain idempotent and do not retire later checkpoint generations.
-- Missing or mismatched checkpoint identity fails closed before recovery payload application.
-- Legacy switch publication uses checkpoint receipt → session CSV → category catalog → receipt clear.
-- Receipt replay exact-matches already published rows, rejects conflict, and retains evidence until all authorities converge.
-- All three persisted switch crash states converge to one completed interval and the resulting category metadata.
+- fail-closed SQLite/legacy authority and explicit activation;
+- monotonic/UTC/fixed-offset time and exact operational-day allocation;
+- canonical project, category, session, active-generation, and report identity;
+- conserved sediment, bounded recovery, immutable historical artifacts, and revision-matched daily contributions;
+- receipt-governed switch, finish, clear-all, and category lifecycle replay;
+- active/archived category integrity, reviewed merge/deletion, and permanent retired-ID custody;
+- explicit report editing, truthful keymap/palette/atlas routing, and exactly-once terminal restoration;
+- session-owned active description drafts separated from durable category metadata and reusable tags;
+- one process-bound profile UUID owning complete data, state, configuration, recovery, and SQLite authority paths;
+- real process proofs for lifecycle confirmation, profile isolation, copied-artifact refusal, persistence failure, and PTY restoration.
 
 ## Completed post-migration units
 
 - **AUTHORITY-001** — issue #21.
+- **AUTHORITY-002** — issues #22 and #15.
 - **TEMPORAL-001** — issue #25.
 - **TEMPORAL-002** — issues #4, #23, #27.
 - **DOMAIN-001** — issues #2, #12.
@@ -92,28 +40,28 @@ The project remains in **post-program issue reconciliation**.
 - **INTERACTION-001A** — issue #19.
 - **INTERACTION-001B** — issue #20.
 - **INTERACTION-001C** — issue #24.
-- **RECONCILIATION-001A** — issue #5 and the historical data-loss portion of #13.
-- **RECONCILIATION-001B1** — partial issue #10: active/checkpoint generation coherence and semantic-edge refresh.
-- **RECONCILIATION-001B2A** — partial issue #10: prepared legacy switch receipts and idempotent kill-point replay.
-- **RECONCILIATION-001B2B** — partial issue #10: prepared legacy finish receipts, multi-authority replay, and archived recovery custody.
-- **RECONCILIATION-001B2C** — partial issue #10: non-destructive receipt-governed clear-all/provisional-idle reset with atomic SQLite publication and deterministic legacy replay.
-- **RECONCILIATION-001B3A** — partial issue #10: atomic initial SQLite active generation and first checkpoint, with rollback and process retry certification.
-- **RECONCILIATION-001B3B** — partial issue #10: exact bounded sediment settlement at immediate, queued, clear, and finish boundaries.
-- **RECONCILIATION-001B3C** — completed issue #10: persisted deterministic cutoff, visible exact/reconstructed/provisional evidence, acknowledgment custody, repeated-retry proof, and schema-3 export parity.
-- **RECONCILIATION-001C1** — partial issue #13: complete SQLite lifecycle preview, stale guard, atomic merge or zero-reference deletion, auditable receipts, retired-ID nonreuse, portable bundle schema 3, and doctor integrity.
-- **RECONCILIATION-001C2** — completed issue #13: exact-result legacy prepared receipt/replay, permanent lifecycle ledger and migration custody, distinct archive/lifecycle actions, revision-bound typed confirmation, and live PTY proof.
+- **RECONCILIATION-001A** — issue #5 and historical-meaning portion of #13.
+- **RECONCILIATION-001B1/B2A/B2B/B2C/B3A/B3B/B3C** — issue #10.
+- **RECONCILIATION-001C1/C2** — issue #13.
 
-## Active sequence
+## Verified final baseline
 
-1. Resolve the active draft versus category metadata distinction under issue #22.
-2. Later profile authority, including complete isolation and deliberate switching under issue #15.
+- formatting and strict Clippy pass;
+- 248 library tests;
+- 9 CLI lifecycle tests;
+- 6 configuration-authority tests;
+- 2 profile-authority process tests;
+- 1 report-help test;
+- 15 SQLite/TUI process tests;
+- 2 temporal-authority tests;
+- 3 terminal-lifecycle PTY tests.
 
-## Current risks
+## Known non-blocking questions
 
-- Queued checkpoint mutations have no stable cross-authority receipt identity and fail closed.
-- Complete profile switching/isolation remains open.
-- Active draft versus category metadata remains an unresolved domain/UI distinction.
+The accepted implementation does not settle every possible future product direction. Remaining design questions include vertical chronology, optional category relationships, final Karma terminology, future sediment clearing/formation semantics, zoom/compression/panning, configurable quantum migration, possible IANA timezone support, and any future stable identity for queued cross-authority mutation replay.
+
+These are not open implementation defects. They require new evidence and an explicit future unit before constraining the current system.
 
 ## Next
 
-Start the issue #22 domain/UI distinction unit. Preserve the completed category lifecycle and historical-meaning contracts while deciding whether active draft text and durable category metadata remain coupled or become explicit separate concepts.
+Preserve the certified baseline. New work begins only from a newly justified issue, decision, or architecture unit; superseded issue premises remain in Git history rather than current authority.
