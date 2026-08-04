@@ -7,6 +7,12 @@ on:
     paths:
       - .github/scripts/apply_issue_22.py
       - .github/workflows/issue22-transform.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/scripts/apply_issue_22.py
+      - .github/workflows/issue22-transform.yml
 
 permissions:
   contents: write
@@ -39,5 +45,3 @@ jobs:
           git add -A
           git commit -m "fix(domain): separate active draft from layer metadata"
           git push origin HEAD:reconciliation/002-close-all-issues
-
-# Triggered after workflow registration.
