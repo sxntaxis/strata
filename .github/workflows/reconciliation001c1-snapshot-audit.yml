@@ -28,10 +28,13 @@ jobs:
           components: rustfmt, clippy
 
       - name: Apply snapshot integrity audit
-        run: python tools/reconciliation001c1-snapshot-audit.py
+        run: |
+          python tools/reconciliation001c1-snapshot-prep.py
+          python tools/reconciliation001c1-snapshot-audit.py
 
       - name: Remove temporary audit machinery
         run: |
+          rm -f tools/reconciliation001c1-snapshot-prep.py
           rm -f tools/reconciliation001c1-snapshot-audit.py
           rm -f .github/workflows/reconciliation001c1-snapshot-audit.yml
 
