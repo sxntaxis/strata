@@ -4,7 +4,7 @@ use chrono::{Duration as ChronoDuration, Utc};
 use std::{
     collections::HashSet,
     fs,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::{Command, Output},
     sync::{Arc, Barrier},
     thread,
@@ -68,13 +68,11 @@ impl Profile {
 
     fn backdate_active(&self, seconds: i64) {
         let path = self.active_path();
-        let mut value: serde_json::Value = serde_json::from_slice(
-            &fs::read(&path).expect("active session should be readable"),
-        )
-        .expect("active session should be valid JSON");
-        value["start_time"] = serde_json::Value::String(
-            (Utc::now() - ChronoDuration::seconds(seconds)).to_rfc3339(),
-        );
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).expect("active session should be readable"))
+                .expect("active session should be valid JSON");
+        value["start_time"] =
+            serde_json::Value::String((Utc::now() - ChronoDuration::seconds(seconds)).to_rfc3339());
         fs::write(path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
     }
 }
@@ -202,9 +200,4 @@ fn concurrent_stops_commit_exactly_one_terminal_transition() {
         let rows = log.lines().skip(1).filter(|line| !line.is_empty()).count();
         assert_eq!(rows, 1, "one stop must commit one completed row: {log}");
     }
-}
-
-#[allow(dead_code)]
-fn assert_path_exists(path: &Path) {
-    assert!(path.exists(), "expected {} to exist", path.display());
 }
