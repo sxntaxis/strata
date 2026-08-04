@@ -30,6 +30,9 @@ jobs:
       - name: Apply race-safe publication
         run: python3 .github/scripts/apply_publication_race_fix.py
 
+      - name: Integrate strict race proof
+        run: python3 .github/scripts/fix_publication_race_test.py
+
       - name: Format
         run: cargo fmt --all
 
@@ -43,6 +46,7 @@ jobs:
         if: success()
         run: |
           rm .github/scripts/apply_publication_race_fix.py
+          rm .github/scripts/fix_publication_race_test.py
           cat > .github/workflows/ci.yml <<'YAML'
           name: ci
 
