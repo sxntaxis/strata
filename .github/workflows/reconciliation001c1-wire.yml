@@ -1,8 +1,6 @@
 name: reconciliation001c1-wire
 
 on:
-  push:
-    branches: [reconciliation/001c1-sqlite-category-lifecycle]
   pull_request:
     branches: [main]
 
@@ -11,7 +9,7 @@ permissions:
 
 concurrency:
   group: reconciliation001c1-wire
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   wire:
