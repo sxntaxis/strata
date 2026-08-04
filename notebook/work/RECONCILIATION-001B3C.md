@@ -1,8 +1,8 @@
 ---
 id: RECONCILIATION-001B3C
 kind: work
-state: active
-authority: working
+state: accepted
+authority: accepted
 created: 2026-08-03
 updated: 2026-08-03
 ---
@@ -45,3 +45,32 @@ The emergency recovery export includes the same structured statement when presen
 ## Closure condition
 
 This is the final bounded unit for issue #10. The issue closes only after the implementation, process-level restart proof, durable authority promotion, and exact-head CI all pass.
+
+
+## Implemented result
+
+- successful checkpoint recovery builds one structured evidence statement from the claimed checkpoint and persisted target;
+- chronology fails closed unless active start, durable simulation, capture, and target are monotonic;
+- the statement exposes active identity, category, description, start, capture, durable simulation, target, reconstructed duration, recovered classification, post-target classification, and cutoff policy;
+- exact zero-duration recovery is distinguished from reconstructed recovery;
+- post-target time is always labeled `provisional live time` and is not folded into recovered history;
+- ordinary controls remain blocked until Enter or Esc acknowledgment, while mandatory emergency quit and higher-priority persistence recovery remain available;
+- a failed recovery commit retains the target in recovering evidence; delayed retry reuses and displays that original cutoff;
+- emergency recovery export schema 3 carries the same structured statement and classifications.
+
+## Certification
+
+- formatting: pass;
+- strict Clippy, all targets/features, warnings denied: pass;
+- 228 library tests: pass;
+- 9 CLI lifecycle process tests: pass;
+- 6 configuration-authority tests: pass;
+- 1 report-help regression test: pass;
+- 14 SQLite/TUI process tests: pass;
+- 2 temporal-authority tests: pass;
+- 3 terminal-lifecycle PTY process tests: pass;
+- repeated failed-commit/delayed-retry process proof: pass;
+- emergency export schema/value parity proof: pass;
+- temporary transformation, audit, and workflow machinery: absent from the permanent tree.
+
+RECONCILIATION-001B3C completes issue #10. Crash recovery now has evidence-backed identity, atomicity, replay, bounded reconstruction, exact transition edges, deterministic cutoff reuse, visible uncertainty, acknowledgment custody, and export parity.

@@ -57,6 +57,7 @@ Detailed rationale and unresolved implications live in `notebook/decisions/DECIS
 | STRATA-D048 | Clear-all is a receipt-governed sediment operation plus provisional-idle reset, never committed-ledger deletion. SQLite publishes active, empty sediment, affected daily contributions, and checkpoint atomically; legacy replay restores exact active/grid state and clears evidence only after convergence. | implemented and certified |
 | STRATA-D049 | A new SQLite TUI active generation and its first pending checkpoint are one bootstrap transaction after sediment restoration. Existing active or checkpoint evidence blocks bootstrap, and every failed write boundary leaves neither new row durable. | implemented and certified |
 | STRATA-D050 | Sediment settles through the exact chronological transition timestamp under the outgoing category before switch, clear, or finish. Exact-boundary mass is outgoing; later mass is resulting; bounded FIFO settlement preserves mass without iterative replay. | implemented and certified |
+| STRATA-D051 | Checkpoint recovery owns one persisted target reused across retry. Successful recovery must visibly distinguish durable evidence, reconstructed time through that cutoff, and post-target provisional live time; emergency export projects the same structured statement. | implemented and certified |
 
 ## Explicitly unresolved
 
@@ -68,7 +69,6 @@ The following are not accepted decisions:
 - clearing and formation lifecycle beyond placed/pending mass conservation;
 - future zoom, compression, panning, or explicit canonical-canvas migration;
 - safe cross-authority replay of queued checkpoint mutations, if it is ever required;
-- user-visible recovery cutoff, reconstruction, and uncertainty semantics under issue #10;
 - configurable quantum migration rules;
 - complete profile switching and isolation semantics under issue #15;
 - category merge/reassignment and permanent destructive deletion under issue #13;

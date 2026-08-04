@@ -29,6 +29,7 @@ Current responsibility map:
 - `src/sqlite.rs` and `src/sqlite/**` — schema migrations, category archival, repositories, active/checkpoint transition transactions, checkpoint custody, deterministic interchange, backup/restore, and fault certification.
 - `src/storage.rs` — XDG paths, strict legacy active/archived category catalog, strict session identity/reference validation, atomic file helpers, legacy runtime checkpoint files, and custody-separated contribution files.
 - `src/app.rs` and `src/app/**` — TUI orchestration, active/archived category projections, semantic-edge checkpoint refresh, legacy switch/finish/clear-all receipt publication and replay, explicit modal/edit state, persistence reconciliation, bounded recovery, historical artifact selection, context selection, resolver execution, palette/atlas projection, and rendering.
+- `src/app/recovery_statement.rs` — blocking recovery-evidence acknowledgment, deterministic cutoff presentation, exact/reconstructed/provisional classification, and shared projection of the structured recovery statement.
 - `src/app/terminal_lifecycle.rs` — raw-mode/alternate-screen RAII, process-wide panic restoration, exactly-once cleanup, runtime failure composition, and debug fault certification.
 - `src/sand/engine.rs` — canonical logical grains, compressed pending mass, physics, viewport projection, and Braille rendering.
 - `src/sand/recovery.rs` — bounded recovery arithmetic, topology-preserving detached contribution, and exact transition-boundary settlement with separate initialized/uninitialized canvas policy.
@@ -95,7 +96,7 @@ Whole-second ledger semantics own the completed row. Subsecond monotonic remaind
 
 Normal legacy finish uses a second certified receipt protocol. It publishes prior-generation evidence before active mutation, then converges completed history, cleared category metadata, canonical sediment, and every affected daily contribution before deleting the checkpoint. Startup consumes the finish receipt without resuming the finished generation. Four persisted kill points and later-publication failure custody are certified.
 
-Legacy recovery flush/reload validate both active and archived catalogs, retain archived sediment identity, and emergency recovery schema 2 exports explicit archival state.
+Legacy recovery flush/reload validate both active and archived catalogs, retain archived sediment identity, and emergency recovery schema 3 exports explicit archival state plus the structured recovery statement when present.
 
 Clear-all/provisional-idle reset uses a third certified receipt boundary. It preserves all committed history, binds canonical prior elapsed and every affected day, restores exact active and grid state before legacy replay derives daily contributions, and applies active/sand/daily/checkpoint effects atomically in SQLite. Six transaction kill points and deterministic legacy replay are certified.
 
@@ -103,7 +104,9 @@ Initial SQLite TUI startup uses a typed atomic bootstrap request. The active row
 
 Immediate and queued switches, clear operations, and normal finish settle sediment to the same UTC boundary used by chronological reconciliation before changing active state. Exact-boundary mass belongs to the outgoing category; bounded compressed settlement preserves category order and topology, and fresh `0×0` live canvases retain due mass without weakening persisted-checkpoint validation.
 
-The recovery contract and remaining issue #10 boundary are recorded in `docs/RECOVERY_AUTHORITY.md`.
+Successful checkpoint recovery produces one structured evidence statement. It exposes durable simulation time, capture time, persisted target, reconstructed duration, active identity, and exact/reconstructed/provisional classification; blocks ordinary input until acknowledgment; and is serialized unchanged in emergency export schema 3. Retry reuses the persisted cutoff.
+
+The complete recovery contract and issue #10 closure are recorded in `docs/RECOVERY_AUTHORITY.md`.
 
 ### Reports and exports
 
@@ -191,7 +194,7 @@ Owns replay of one prepared multi-file transition. It may exact-match or publish
 
 ### Runtime recovery
 
-Owns checkpoint evidence and exact elapsed contribution since the checkpoint. It may add mass and advance accumulator remainders, but may not replay unbounded physics, relax topology, discard protected evidence, or apply payload state to a different active generation.
+Owns checkpoint evidence, bounded elapsed contribution since durable simulation time, one persisted target, and the resulting recovery statement. It may add mass and advance accumulator remainders, but may not replay unbounded physics, relax topology, discard protected evidence, apply payload state to a different active generation, move a persisted cutoff forward on retry, or label post-target live time as recovered history.
 
 ### Sediment formation
 
@@ -215,12 +218,11 @@ TUI and CLI translate user intent and present state. Neither may own an independ
 
 ## Current architectural frontier
 
-Persistence, temporal, domain, report, sediment, interaction, cross-authority category integrity, active/checkpoint generation coherence, and legacy switch/finish/clear-all replay are complete. The next priorities are:
+Persistence, temporal, domain, report, sediment, interaction, cross-authority category integrity, and crash-recovery authority are complete. The next priorities are:
 
-1. complete issue #10 through visible deterministic recovery cutoff/reconstruction semantics;
-2. design the explicit merge/reassignment and permanent-deletion remainder of issue #13;
-3. later domain/UI distinction work under issue #22;
-4. later profile authority, including complete isolation and deliberate switching under issue #15.
+1. design the explicit merge/reassignment and permanent-deletion remainder of issue #13;
+2. later domain/UI distinction work under issue #22;
+3. later profile authority, including complete isolation and deliberate switching under issue #15.
 
 ## Non-authority
 
@@ -236,5 +238,4 @@ Persistence, temporal, domain, report, sediment, interaction, cross-authority ca
 - An archived category is not deleted history.
 - An unresolved category reference is not idle.
 - A receipt for one transition kind is not authority for another transition kind.
-- A checkpoint without visible cutoff semantics is not proof of exact post-capture elapsed time.
 - CSV, JSON, and ICS are external adapters, not canonical domain models.

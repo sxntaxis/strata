@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-08-03
 authority: working
-summary: Recovery transitions, initial bootstrap, and exact transition-edge sediment are certified. Issue #10 remains open only for visible deterministic recovery cutoff and uncertainty semantics.
-next: Complete issue #10 by exposing checkpoint capture, recovery target, reconstructed duration, cutoff policy, and uncertainty.
+summary: Crash-recovery authority is complete: identity, receipts, clear-all, initial bootstrap, exact transition edges, persisted cutoff reuse, visible uncertainty, and export parity are certified.
+next: Define the category merge/reassignment and permanent-deletion transaction required to complete issue #13.
 ---
 
 # NOW — Strata
@@ -45,7 +45,10 @@ Strata now has:
 - atomic SQLite initial active/checkpoint bootstrap after sediment restoration;
 - four-point bootstrap rollback, pre-existing evidence refusal, and real TUI failure/retry certification;
 - exact outgoing-category sediment ownership at switch, clear, and finish boundaries;
-- bounded FIFO transition settlement, post-clear non-reappearance, and uninitialized-canvas mass preservation.
+- bounded FIFO transition settlement, post-clear non-reappearance, and uninitialized-canvas mass preservation;
+- blocking recovery evidence acknowledgment with durable simulation, capture, target, reconstructed duration, and active identity;
+- exact/reconstructed/provisional classification with persisted cutoff reuse across failed commit and delayed retry;
+- emergency recovery schema 3 parity with the visible structured statement.
 
 The project remains in **post-program issue reconciliation**.
 
@@ -87,17 +90,16 @@ The project remains in **post-program issue reconciliation**.
 - **RECONCILIATION-001B2C** — partial issue #10: non-destructive receipt-governed clear-all/provisional-idle reset with atomic SQLite publication and deterministic legacy replay.
 - **RECONCILIATION-001B3A** — partial issue #10: atomic initial SQLite active generation and first checkpoint, with rollback and process retry certification.
 - **RECONCILIATION-001B3B** — partial issue #10: exact bounded sediment settlement at immediate, queued, clear, and finish boundaries.
+- **RECONCILIATION-001B3C** — completed issue #10: persisted deterministic cutoff, visible exact/reconstructed/provisional evidence, acknowledgment custody, repeated-retry proof, and schema-3 export parity.
 
 ## Active sequence
 
-1. Complete issue #10 through user-visible deterministic recovery cutoff and uncertainty semantics.
-2. Define the merge/reassignment and permanent-deletion transaction needed to complete issue #13.
-3. Later domain/UI distinction work under issue #22.
-4. Later profile authority, including complete isolation and deliberate switching under issue #15.
+1. Define the merge/reassignment and permanent-deletion transaction needed to complete issue #13.
+2. Later domain/UI distinction work under issue #22.
+3. Later profile authority, including complete isolation and deliberate switching under issue #15.
 
 ## Current risks
 
-- The recovery interface does not yet expose a complete deterministic cutoff and uncertainty statement for reconstructed elapsed time.
 - Issue #13 still lacks explicit category merge/reassignment and permanent-deletion transactions.
 - Queued checkpoint mutations have no stable cross-authority receipt identity and fail closed.
 - Complete profile switching/isolation remains open.
@@ -105,4 +107,4 @@ The project remains in **post-program issue reconciliation**.
 
 ## Next
 
-Complete the final issue #10 unit by exposing checkpoint capture, recovery target, reconstructed duration, deterministic cutoff, and uncertainty in the recovery interface. After issue #10 closes, return to the category merge/reassignment and permanent-deletion transaction required by issue #13.
+Define the category merge/reassignment and permanent-deletion transaction required to complete issue #13. Preserve historical meaning, refuse ambiguous destructive operations, and certify both SQLite and legacy authority before closure.
