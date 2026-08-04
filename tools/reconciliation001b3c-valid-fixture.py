@@ -28,15 +28,15 @@ new = '''    let detached = profile.run_tui_with_input(b"d", None);
             |row| row.get(0),
         )
         .expect("detached checkpoint should exist");
-    let mut payload: Value = serde_json::from_str(&payload_json).expect("payload should be JSON");
-    payload["sand_state"]["grid_width"] = Value::from(2);
-    payload["sand_state"]["grid_height"] = Value::from(2);
-    connection
-        .execute(
-            "UPDATE runtime_checkpoint SET payload_json = ?1 WHERE singleton = 1",
-            [serde_json::to_string(&payload).unwrap()],
-        )
-        .unwrap();
+    let payload: Value = serde_json::from_str(&payload_json).expect("payload should be JSON");
+    assert!(
+        payload["sand_state"]["grid_width"].as_u64().unwrap_or(0) > 0,
+        "fixed-size PTY should produce an initialized checkpoint canvas"
+    );
+    assert!(
+        payload["sand_state"]["grid_height"].as_u64().unwrap_or(0) > 0,
+        "fixed-size PTY should produce an initialized checkpoint canvas"
+    );
     drop(connection);
 
     let failed = profile.run_tui_with_input(b"", Some("checkpoint-recovery:commit:cutoff"));
