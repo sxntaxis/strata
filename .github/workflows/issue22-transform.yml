@@ -1,0 +1,41 @@
+name: issue22-transform
+
+on:
+  push:
+    branches:
+      - reconciliation/002-close-all-issues
+    paths:
+      - .github/scripts/apply_issue_22.py
+      - .github/workflows/issue22-transform.yml
+
+permissions:
+  contents: write
+
+jobs:
+  transform:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: reconciliation/002-close-all-issues
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Apply issue 22 correction
+        run: python3 .github/scripts/apply_issue_22.py
+      - name: Format
+        run: cargo fmt --all
+      - name: Strict Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Full suite
+        run: cargo test --all-features
+      - name: Publish clean product commit
+        run: |
+          rm .github/scripts/apply_issue_22.py .github/workflows/issue22-transform.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix(domain): separate active draft from layer metadata"
+          git push origin HEAD:reconciliation/002-close-all-issues
