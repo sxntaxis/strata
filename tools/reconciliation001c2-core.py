@@ -48,4 +48,73 @@ content = content.replace(
     "    daily_contribution_from_slices(operational_day, width, height, &slices)\n",
     "    Ok(daily_contribution_from_slices(operational_day, width, height, &slices))\n",
 )
+old_faults = '''#[cfg(test)]
+fn test_fault_cell() -> &'static std::sync::RwLock<Option<String>> {
+    static CELL: std::sync::OnceLock<std::sync::RwLock<Option<String>>> =
+        std::sync::OnceLock::new();
+    CELL.get_or_init(|| std::sync::RwLock::new(None))
+}
+
+fn maybe_inject_test_fault(phase: &str) -> Result<(), String> {
+    #[cfg(test)]
+    if test_fault_cell()
+        .read()
+        .ok()
+        .and_then(|guard| guard.clone())
+        .as_deref()
+        == Some(phase)
+    {
+        return Err(format!("injected legacy lifecycle failure at {phase}"));
+    }
+    let _ = phase;
+    Ok(())
+}
+
+#[cfg(test)]
+fn with_test_fault<T>(phase: &str, operation: impl FnOnce() -> T) -> T {
+    if let Ok(mut guard) = test_fault_cell().write() {
+        *guard = Some(phase.to_string());
+    }
+    let result = operation();
+    if let Ok(mut guard) = test_fault_cell().write() {
+        *guard = None;
+    }
+    result
+}
+'''
+new_faults = '''#[cfg(test)]
+thread_local! {
+    static TEST_FAULT: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn maybe_inject_test_fault(phase: &str) -> Result<(), String> {
+    #[cfg(test)]
+    if TEST_FAULT.with(|fault| fault.borrow().as_deref() == Some(phase)) {
+        return Err(format!("injected legacy lifecycle failure at {phase}"));
+    }
+    let _ = phase;
+    Ok(())
+}
+
+#[cfg(test)]
+struct TestFaultReset;
+
+#[cfg(test)]
+impl Drop for TestFaultReset {
+    fn drop(&mut self) {
+        TEST_FAULT.with(|fault| *fault.borrow_mut() = None);
+    }
+}
+
+#[cfg(test)]
+fn with_test_fault<T>(phase: &str, operation: impl FnOnce() -> T) -> T {
+    TEST_FAULT.with(|fault| *fault.borrow_mut() = Some(phase.to_string()));
+    let _reset = TestFaultReset;
+    operation()
+}
+'''
+if old_faults not in content:
+    raise SystemExit("legacy lifecycle fault injection marker missing")
+content = content.replace(old_faults, new_faults, 1)
 path.write_text(content)
