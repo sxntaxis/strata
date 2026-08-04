@@ -28,6 +28,9 @@ jobs:
       - name: Apply complete profile authority
         run: python3 .github/scripts/apply_issue_15.py
 
+      - name: Integrate complete profile authority
+        run: python3 .github/scripts/fix_issue_15.py
+
       - name: Format
         run: cargo fmt --all
 
@@ -39,7 +42,8 @@ jobs:
 
       - name: Publish clean product commit
         run: |
-          rm .github/issue15-trigger.txt .github/scripts/apply_issue_15.py
+          rm .github/issue15-trigger.txt
+          rm .github/scripts/apply_issue_15.py .github/scripts/fix_issue_15.py
           cat > .github/workflows/ci.yml <<'YAML'
           name: ci
 
