@@ -39,3 +39,5 @@ jobs:
           git add -A
           git commit -m "fix(domain): separate active draft from layer metadata"
           git push origin HEAD:reconciliation/002-close-all-issues
+
+# Triggered after workflow registration.
