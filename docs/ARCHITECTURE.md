@@ -72,6 +72,7 @@ The detailed category contract is `docs/CATEGORY_AUTHORITY.md`.
 
 A runtime checkpoint belongs to one active-session generation.
 
+- SQLite initial startup publishes the first active row and first pending checkpoint in one transaction after sediment restoration; existing active or checkpoint evidence blocks bootstrap.
 - SQLite switch, reset, and finish validate the expected active stable ID and prior checkpoint custody inside the same transaction.
 - Only `pending` or `committed` evidence for the expected prior identity may be retired by an ordinary transition.
 - `recovering`, `quarantined`, missing-identity, or mismatched evidence blocks the transition before completed history or replacement active state changes.
@@ -97,6 +98,8 @@ Normal legacy finish uses a second certified receipt protocol. It publishes prio
 Legacy recovery flush/reload validate both active and archived catalogs, retain archived sediment identity, and emergency recovery schema 2 exports explicit archival state.
 
 Clear-all/provisional-idle reset uses a third certified receipt boundary. It preserves all committed history, binds canonical prior elapsed and every affected day, restores exact active and grid state before legacy replay derives daily contributions, and applies active/sand/daily/checkpoint effects atomically in SQLite. Six transaction kill points and deterministic legacy replay are certified.
+
+Initial SQLite TUI startup uses a typed atomic bootstrap request. The active row and first pending checkpoint share one stable identity column and commit together only after runtime state is staged. Four transaction fault boundaries, pre-existing checkpoint refusal, and real process failure/retry are certified.
 
 The recovery contract and remaining issue #10 boundary are recorded in `docs/RECOVERY_AUTHORITY.md`.
 
@@ -212,7 +215,7 @@ TUI and CLI translate user intent and present state. Neither may own an independ
 
 Persistence, temporal, domain, report, sediment, interaction, cross-authority category integrity, active/checkpoint generation coherence, and legacy switch/finish/clear-all replay are complete. The next priorities are:
 
-1. complete issue #10 through initial active-start/checkpoint coherence, exact remaining transition-edge sediment attribution, and visible deterministic recovery cutoff/reconstruction semantics;
+1. complete issue #10 through exact remaining transition-edge sediment attribution and visible deterministic recovery cutoff/reconstruction semantics;
 2. design the explicit merge/reassignment and permanent-deletion remainder of issue #13;
 3. later domain/UI distinction work under issue #22;
 4. later profile authority, including complete isolation and deliberate switching under issue #15.

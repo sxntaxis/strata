@@ -1,7 +1,7 @@
 # Recovery authority
 
 Status: partially implemented and certified
-Current completed unit: RECONCILIATION-001B2C
+Current completed unit: RECONCILIATION-001B3A
 Issue in progress: #10
 Last reviewed: 2026-08-03
 
@@ -61,6 +61,22 @@ Checkpoint recovery validates evidence identity before applying sediment or acti
 - malformed checkpoint JSON is quarantined;
 - repository and database-integrity checks may reject impossible states even earlier;
 - recovery cannot install stale identity in memory and discover the mismatch only during commit.
+
+## Atomic initial active generation
+
+Under SQLite authority, first TUI startup no longer publishes an active row before its first checkpoint.
+
+- sediment authority is restored and validated before bootstrap publication;
+- one typed bootstrap request carries the stable active identity, category, description, UTC start, checkpoint capture time, simulation time, and serialized runtime state;
+- one immediate transaction verifies that neither active state nor checkpoint evidence already exists;
+- the transaction inserts exactly one active row and one pending checkpoint whose dedicated identity column names the same stable generation;
+- pre-existing checkpoint evidence of any status blocks bootstrap and remains unchanged;
+- failures at `before-write`, `active`, `checkpoint`, or `commit` leave neither new row durable;
+- a failed real TUI startup exits visibly and a later retry may create one clean generation.
+
+The checkpoint identity column owns generation identity; the serialized payload owns runtime state. These are complementary parts of one checkpoint row, not duplicate identity fields. Existing recovery-only active reconstruction remains a separate internal primitive and is not used for ordinary initial startup.
+
+Legacy-file startup remains one atomic checkpoint-file publication and does not gain a second competing active-session authority.
 
 ## Legacy switch transition receipts
 
@@ -157,13 +173,7 @@ Mandatory Ctrl-C during visible persistence recovery exports current recovery ev
 
 ## Remaining issue #10 recovery work
 
-Legacy switch, normal finish, and clear-all/provisional-idle reset now have certified receipt protocols. Issue #10 remains open for the initial active-start/checkpoint window, exact transition-edge sediment attribution beyond the clear-all contract, and user-visible recovery cutoff/reconstruction semantics.
-
-## Initial active start
-
-SQLite active-session start and first checkpoint publication remain separate operations. The active row is authoritative chronological state, but a process death before the first checkpoint can leave no sediment/runtime evidence for the new active generation.
-
-This window remains part of a later bounded issue #10 unit. Full closure requires an atomic start-plus-evidence transaction or an explicit certified recovery policy for active rows without checkpoints.
+Legacy switch, normal finish, clear-all/provisional-idle reset, and initial SQLite active generation now have certified coherence boundaries. Issue #10 remains open only for exact transition-edge sediment attribution beyond the clear-all contract and user-visible recovery cutoff/reconstruction semantics.
 
 ## User-visible recovery cutoff
 
@@ -180,25 +190,24 @@ This presentation and policy remain unresolved. Recovery authority must not impl
 
 ## Certification
 
-RECONCILIATION-001B1, RECONCILIATION-001B2A, RECONCILIATION-001B2B, and RECONCILIATION-001B2C pass:
+RECONCILIATION-001B1, RECONCILIATION-001B2A, RECONCILIATION-001B2B, RECONCILIATION-001B2C, and RECONCILIATION-001B3A pass:
 
 - formatting;
 - strict Clippy with all targets/features and warnings denied;
-- 215 library tests;
+- 219 library tests;
 - 9 CLI lifecycle tests;
 - 6 configuration-authority tests;
 - 1 report-help regression test;
-- 12 SQLite/TUI process tests;
+- 13 SQLite/TUI process tests;
 - 2 temporal-authority tests;
 - 3 terminal-lifecycle PTY process tests.
 
-Focused proofs cover transactional SQLite checkpoint retirement, protected recovery evidence, startup identity quarantine, immediate semantic-edge refresh, prepared legacy switch and finish rollback, exact/idempotent session reconciliation, strict receipt payload validation, subsecond whole-second boundaries, all persisted switch and finish kill points, clear-all receipt identity over canonical elapsed and affected days, exact active-state staging before legacy daily reconstruction, cross-day idle authority, non-idle identity preservation, stale now-empty daily deletion, all six SQLite clear-all transaction kill points, archived-authority reload, and schema-2 emergency export custody.
+Focused proofs cover transactional SQLite checkpoint retirement, protected recovery evidence, startup identity quarantine, immediate semantic-edge refresh, prepared legacy switch and finish rollback, exact/idempotent session reconciliation, strict receipt payload validation, subsecond whole-second boundaries, all persisted switch and finish kill points, clear-all receipt identity over canonical elapsed and affected days, exact active-state staging before legacy daily reconstruction, cross-day idle authority, non-idle identity preservation, stale now-empty daily deletion, all six SQLite clear-all transaction kill points, atomic initial active/checkpoint publication, four bootstrap rollback boundaries, pre-existing checkpoint preservation, real TUI failure/retry, archived-authority reload, and schema-2 emergency export custody.
 
 ## Unresolved boundary
 
 Full crash-recovery authority still requires:
 
-- initial active-start/checkpoint coherence;
 - exact sediment classification at transition boundaries;
 - explicit user-visible recovery cutoff and uncertainty semantics;
 - any future safe queued-mutation replay based on stable cross-authority receipts.
