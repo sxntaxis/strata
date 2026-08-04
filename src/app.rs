@@ -757,9 +757,12 @@ impl App {
             );
             return false;
         };
+        let stable_id = sqlite::initial_tui_active_stable_id(started_at_utc);
+        self.session.active_session_stable_id = Some(stable_id.clone());
         let checkpoint = match self.build_runtime_checkpoint() {
             Ok(checkpoint) => checkpoint,
             Err(error) => {
+                self.session.active_session_stable_id = None;
                 self.record_storage_result_for::<()>(
                     PersistenceOperation::CheckpointSave,
                     RecoveryAction::ReloadAuthority,
@@ -770,21 +773,27 @@ impl App {
         };
         let result = sqlite::start_tui_active_session_with_checkpoint(
             &database_path,
-            category_id,
-            &description,
-            started_at_utc,
-            checkpoint.detached_at_utc,
-            checkpoint.simulation_time_utc,
-            &checkpoint,
+            sqlite::TuiInitialActiveGenerationRequest {
+                active_stable_id: &stable_id,
+                category_id,
+                description: &description,
+                started_at_utc,
+                detached_at_utc: checkpoint.detached_at_utc,
+                simulation_time_utc: checkpoint.simulation_time_utc,
+                checkpoint: &checkpoint,
+            },
         );
-        let Some(stable_id) = self.record_storage_result_for(
-            PersistenceOperation::ActiveStart,
-            RecoveryAction::ReloadAuthority,
-            result,
-        ) else {
+        if self
+            .record_storage_result_for(
+                PersistenceOperation::ActiveStart,
+                RecoveryAction::ReloadAuthority,
+                result,
+            )
+            .is_none()
+        {
+            self.session.active_session_stable_id = None;
             return false;
-        };
-        self.session.active_session_stable_id = Some(stable_id);
+        }
         true
     }
 

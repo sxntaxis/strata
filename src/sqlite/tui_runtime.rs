@@ -200,23 +200,40 @@ pub(crate) fn ensure_active_session(
     Ok(stable_id)
 }
 
+pub(crate) fn initial_active_stable_id(started_at_utc: DateTime<Utc>) -> String {
+    stable_id("tui", started_at_utc)
+}
+
+pub(crate) struct InitialActiveGenerationRequest<'a, T> {
+    pub active_stable_id: &'a str,
+    pub category_id: CategoryId,
+    pub description: &'a str,
+    pub started_at_utc: DateTime<Utc>,
+    pub detached_at_utc: DateTime<Utc>,
+    pub simulation_time_utc: DateTime<Utc>,
+    pub checkpoint: &'a T,
+}
+
 pub(crate) fn start_active_session_with_checkpoint<T: Serialize>(
     database_path: &Path,
-    category_id: CategoryId,
-    description: &str,
-    started_at_utc: DateTime<Utc>,
-    detached_at_utc: DateTime<Utc>,
-    simulation_time_utc: DateTime<Utc>,
-    checkpoint: &T,
-) -> Result<String, String> {
+    request: InitialActiveGenerationRequest<'_, T>,
+) -> Result<(), String> {
+    let InitialActiveGenerationRequest {
+        active_stable_id,
+        category_id,
+        description,
+        started_at_utc,
+        detached_at_utc,
+        simulation_time_utc,
+        checkpoint,
+    } = request;
     let mut repository = open_cli_repository(database_path)?;
-    let stable_id = stable_id("tui", started_at_utc);
     let started = timestamp(started_at_utc);
     let payload_json = serde_json::to_string(checkpoint).map_err(|error| error.to_string())?;
     runtime_coordination::start_active_session_with_checkpoint(
         &mut repository,
         &NewActiveSession {
-            stable_id: &stable_id,
+            stable_id: active_stable_id,
             project: "",
             category_id: as_i64(category_id.0, "category ID")?,
             description,
@@ -227,8 +244,7 @@ pub(crate) fn start_active_session_with_checkpoint<T: Serialize>(
         &timestamp(simulation_time_utc),
         &payload_json,
     )
-    .map_err(|error| error.to_string())?;
-    Ok(stable_id)
+    .map_err(|error| error.to_string())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1226,6 +1242,134 @@ mod tests {
             process::id(),
             Utc::now().timestamp_nanos_opt().unwrap_or_default()
         ))
+    }
+
+    #[derive(serde::Serialize)]
+    struct BootstrapCheckpointFixture {
+        schema_version: u8,
+    }
+
+    fn prepare_bootstrap_repository(path: &Path) {
+        let mut repository = SqliteRepository::open(path).unwrap();
+        repository
+            .transition_storage_authority("sqlite-candidate", "sqlite-cli", "2026-08-03T18:00:00Z")
+            .unwrap();
+        repository
+            .create_category(&NewCategoryRecord {
+                name: "Work",
+                description: "",
+                color_index: 0,
+                balance_effect: 1,
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn initial_bootstrap_binds_active_and_checkpoint_row_identity() {
+        let path = repository_file("initial-bootstrap-identity");
+        prepare_bootstrap_repository(&path);
+        let started_at_utc = DateTime::parse_from_rfc3339("2026-08-03T18:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let stable_id = initial_active_stable_id(started_at_utc);
+        let checkpoint = BootstrapCheckpointFixture { schema_version: 3 };
+
+        start_active_session_with_checkpoint(
+            &path,
+            InitialActiveGenerationRequest {
+                active_stable_id: &stable_id,
+                category_id: CategoryId::new(1),
+                description: "Focused",
+                started_at_utc,
+                detached_at_utc: started_at_utc,
+                simulation_time_utc: started_at_utc,
+                checkpoint: &checkpoint,
+            },
+        )
+        .unwrap();
+
+        let repository = open_cli_repository(&path).unwrap();
+        let row: (String, String, String) = repository
+            .connection
+            .query_row(
+                "SELECT active_session.stable_id,
+                        runtime_checkpoint.active_session_stable_id,
+                        runtime_checkpoint.payload_json
+                 FROM active_session CROSS JOIN runtime_checkpoint
+                 WHERE active_session.singleton = 1 AND runtime_checkpoint.singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&row.2).unwrap();
+        assert_eq!(row.0, stable_id);
+        assert_eq!(row.1, stable_id);
+        assert_eq!(
+            payload
+                .get("schema_version")
+                .and_then(serde_json::Value::as_u64),
+            Some(3)
+        );
+        drop(repository);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn initial_bootstrap_refuses_preexisting_checkpoint_without_overwrite() {
+        let path = repository_file("initial-bootstrap-existing-checkpoint");
+        prepare_bootstrap_repository(&path);
+        let repository = open_cli_repository(&path).unwrap();
+        repository
+            .connection
+            .execute(
+                "INSERT INTO runtime_checkpoint (
+                    singleton, status, detached_at_utc, simulation_time_utc,
+                    active_session_stable_id, payload_json, legacy_import_id
+                 ) VALUES (1, 'quarantined', '2026-08-03T17:00:00Z',
+                    '2026-08-03T17:00:00Z', NULL, '{}', NULL)",
+                [],
+            )
+            .unwrap();
+        drop(repository);
+
+        let started_at_utc = DateTime::parse_from_rfc3339("2026-08-03T18:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let stable_id = initial_active_stable_id(started_at_utc);
+        let checkpoint = BootstrapCheckpointFixture { schema_version: 3 };
+        let error = start_active_session_with_checkpoint(
+            &path,
+            InitialActiveGenerationRequest {
+                active_stable_id: &stable_id,
+                category_id: CategoryId::new(1),
+                description: "Focused",
+                started_at_utc,
+                detached_at_utc: started_at_utc,
+                simulation_time_utc: started_at_utc,
+                checkpoint: &checkpoint,
+            },
+        )
+        .unwrap_err();
+        assert!(error.contains("no checkpoint before initial active generation"));
+
+        let repository = open_cli_repository(&path).unwrap();
+        let active_count: i64 = repository
+            .connection
+            .query_row("SELECT count(*) FROM active_session", [], |row| row.get(0))
+            .unwrap();
+        let checkpoint: (String, String) = repository
+            .connection
+            .query_row(
+                "SELECT status, payload_json FROM runtime_checkpoint WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(active_count, 0);
+        assert_eq!(checkpoint.0, "quarantined");
+        assert_eq!(checkpoint.1, "{}");
+        drop(repository);
+        std::fs::remove_file(path).ok();
     }
 
     #[test]
