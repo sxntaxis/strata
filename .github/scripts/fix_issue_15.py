@@ -161,3 +161,33 @@ text = replace_once(
     "recovery statement fixture",
 )
 path.write_text(text)
+
+# Process proofs must allow one whole ledger second and must launch the TUI
+# under a pseudo-terminal so terminal acquisition is not the failure source.
+path = Path("tests/profile_authority.rs")
+text = path.read_text()
+text = replace_once(
+    text,
+    "    let stopped = run(&a, &[\"stop\"]);",
+    "    thread::sleep(Duration::from_millis(1_100));\n    let stopped = run(&a, &[\"stop\"]);",
+    "profile whole-second stop",
+)
+text = replace_once(
+    text,
+    '''    let target = Command::new("timeout")
+        .args(["8s", env!("CARGO_BIN_EXE_strata"), "--profile"])
+        .arg(&b)
+        .output()
+        .expect("target TUI should run");''',
+    '''    let command_line = format!(
+        "exec {} --profile {}",
+        env!("CARGO_BIN_EXE_strata"),
+        b.display()
+    );
+    let target = Command::new("timeout")
+        .args(["8s", "script", "-qefc", &command_line, "/dev/null"])
+        .output()
+        .expect("target TUI should run under a PTY");''',
+    "profile checkpoint PTY",
+)
+path.write_text(text)
