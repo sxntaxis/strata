@@ -1,9 +1,8 @@
 # Category authority
 
-Status: partially implemented and certified
-Current completed unit: RECONCILIATION-001C1
-Issue completed: #5
-Issue narrowed: #13
+Status: implemented and certified
+Completed units: RECONCILIATION-001A, RECONCILIATION-001C1, RECONCILIATION-001C2
+Issues completed: #5, #13
 Last reviewed: 2026-08-03
 
 ## Purpose
@@ -119,6 +118,18 @@ Loading fails closed for:
 
 Malformed catalog rows are not skipped and default values are not invented.
 
+## Legacy lifecycle transformation
+
+Legacy merge/reassignment and permanent deletion use the same explicit source/target semantics and complete reference model as SQLite, but publication is governed by an exact-result prepared receipt. Before any authority file changes, preparation validates source idle, self-merge, target existence, zero-reference deletion, stale revision, checkpoint shape, and absence of unresolved switch/finish/clear receipts.
+
+The prepared receipt contains the reviewed metadata, counts, revision, operation identity, and exact resulting catalog, session ledger, tags, canonical sediment, affected daily contributions or explicit deletions, receipt-free detached checkpoint payload, and permanent lifecycle ledger. It is published atomically before any result. Startup replays it before ordinary legacy state load in deterministic order and accepts only exact already-published artifacts. Conflicting or malformed state fails closed and retains evidence. The prepared receipt is removed only after every named authority and the permanent ledger converge.
+
+The permanent ledger records committed merge/deletion receipts and retired source identities. Legacy allocation advances beyond both catalog and ledger identities. Migration fingerprints and imports this ledger into SQLite schema-7 lifecycle receipts, preserving the identity high-water mark after activation.
+
+## Explicit lifecycle interaction
+
+Ordinary `x` remains archive. A distinct configurable `Shift-X` action opens a blocking lifecycle overlay, chooses an explicit target or targetless deletion, displays source/target identity, all affected reference counts, checkpoint custody, and revision, and requires the exact displayed revision-bound phrase. Esc cancels without mutation. Approximate, case-folded, whitespace-normalized, stale, or missing confirmation never applies. SQLite delegates to the C1 transaction; legacy authority publishes the prepared receipt and reloads through the same replay path.
+
 ## Session reference integrity
 
 Every persisted session category ID must resolve to active or archived category metadata.
@@ -149,11 +160,13 @@ Legacy-to-SQLite migration accepts both five- and six-column category catalogs.
 - six-column archived rows import with `archived_at_utc` populated;
 - sessions retain their original category foreign key;
 - migration does not reactivate archived categories or rewrite references;
+- committed legacy lifecycle receipts import into schema-7 receipt authority;
+- retired source IDs and the identity high-water mark survive activation;
 - validation and database publication remain transactional and fail closed.
 
 ## Persistence failure
 
-Category catalog writes use atomic file publication. A failed legacy write enters the existing visible persistence-recovery contract; it cannot produce a partially written catalog.
+Category catalog writes use atomic file publication. A failed ordinary legacy write enters the existing visible persistence-recovery contract; it cannot produce a partially written catalog. Once a lifecycle prepared receipt is durable, failure retains that evidence and retry/restart republishes its exact results rather than reconstructing intent from partial files.
 
 SQLite archival remains transactional. Neither authority may claim successful retirement when its authoritative persistence operation failed.
 
@@ -170,6 +183,13 @@ SQLite archival remains transactional. Neither authority may claim successful re
 - idempotent lifecycle retry;
 - retired-ID nonreuse before and after portable bundle round trip;
 - lifecycle receipt validation and doctor detection of tamper or retired-ID collision;
+- complete legacy reference inventory and deterministic revision;
+- exact-result prepared receipt across catalog, sessions, tags, sediment, daily artifacts, checkpoint, and permanent ledger;
+- eight persisted replay kill points with retained evidence and clean retry convergence;
+- legacy zero-reference-only deletion, idle/self-merge/stale/protected-evidence refusal, and target metadata preservation;
+- permanent ledger restart custody, retired-ID nonreuse, migration fingerprinting, and schema-7 import;
+- distinct archive and configurable lifecycle actions across resolver, atlas, palette, and runtime;
+- exact confirmation phrase unit proofs and a live PTY round trip that reads the rendered phrase, types it back, commits one receipt, and verifies reassignment;
 - legacy catalog backward compatibility;
 - active/archived catalog round trip;
 - malformed and unknown session-reference rejection;
@@ -181,8 +201,6 @@ SQLite archival remains transactional. Neither authority may claim successful re
 - archived legacy migration into SQLite;
 - existing report, sediment, migration, TUI, CLI, interaction, failure-recovery, and PTY suites remain green.
 
-## Remaining issue #13 boundary
+## Issue #13 closure
 
-SQLite lifecycle authority is implemented and certified. Issue #13 remains open because legacy-file authority still needs a prepared receipt and idempotent crash replay across catalog, sessions, tags, canonical sediment, daily artifacts, detached checkpoint evidence, and retired-ID custody.
-
-The product also needs one explicit review and confirmation surface that presents the complete preview and refuses stale confirmation under both supported authorities. Until C2 is complete, archive remains the only ordinary TUI retirement operation and no legacy merge or permanent deletion may claim success.
+RECONCILIATION-001A preserves historical meaning through archive/restore and strict reference resolution. RECONCILIATION-001C1 provides the complete SQLite preview, transaction, receipt, and retired-ID custody. RECONCILIATION-001C2 provides legacy exact-result receipt/replay, permanent ledger migration, and the shared explicit TUI confirmation surface. Archive remains the ordinary retirement operation; reviewed merge/reassignment and zero-reference permanent deletion are now implemented and certified under every supported authority.

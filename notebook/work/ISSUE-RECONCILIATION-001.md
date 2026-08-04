@@ -24,7 +24,7 @@ The original issue descriptions predate the completed SQLite migration. Their ac
 | #1, #3, #14, #17, #28 | Completed by REPORT-001: truthful ranges/help, provisional active projection, valid ICS, and deterministic ordering. | none |
 | #5 | Completed by RECONCILIATION-001A: malformed or unknown legacy session category IDs fail closed, retain the original value for repair, and are never reinterpreted as idle. | none |
 | #10 | Completed by RECONCILIATION-001B1, B2A, B2B, B2C, B3A, B3B, and B3C: active/checkpoint generations, prepared legacy replay, non-destructive clear-all, atomic initial bootstrap, exact transition-edge sediment, persisted cutoff reuse, visible recovery classification, repeated restart proof, and schema-3 export parity are certified. | none |
-| #13 | Partially completed by RECONCILIATION-001A and RECONCILIATION-001C1. Historical meaning survives archive/restore, and SQLite now has a complete revision-bound preview, atomic merge or zero-reference deletion, auditable receipts, retired-ID custody, portable bundle parity, and doctor integrity. Remaining scope is the legacy-file prepared receipt/replay protocol and explicit TUI review/confirmation. | RECONCILIATION-001C2 |
+| #13 | Completed by RECONCILIATION-001A, RECONCILIATION-001C1, and RECONCILIATION-001C2: archive/restore preserves historical meaning; SQLite provides the complete transaction and receipt; legacy files provide exact-result prepared replay and permanent retired-ID custody; the TUI requires explicit target/deletion review and exact revision-bound confirmation. | none |
 | #6, #7, #16, #18, #26 | Completed by SEDIMENT-001: conserved mass/topology/recovery and truthful immutable historical artifacts. | none |
 | #19 | Completed by INTERACTION-001A: explicit report-log edit mode, stable-ID draft, atomic commit, full cancel, and command/text separation. | none |
 | #20 | Completed by INTERACTION-001B: exactly-once terminal restoration, runtime emergency checkpoint custody, primary-error preservation, and PTY certification. | none |
@@ -33,11 +33,9 @@ The original issue descriptions predate the completed SQLite migration. Their ac
 
 ## Immediate action
 
-Issue #10 is evidence-backed and complete. RECONCILIATION-001C1 has certified the SQLite lifecycle half of issue #13. Next:
+Issues #10 and #13 are evidence-backed and complete. Next:
 
-1. design a prepared legacy-file lifecycle receipt that binds the C1 source/target metadata, complete counts, deterministic revision, transformed payloads, affected days, and retired-ID result;
-2. publish and replay catalog, session, tag, canonical-sand, daily-artifact, detached-checkpoint, and lifecycle-custody effects idempotently from every durable kill point;
-3. expose one explicit TUI preview and confirmation flow that recomputes the revision before mutation and keeps archive as the ordinary retirement path;
-4. close issue #13 only after both authorities and the visible interaction are evidence-backed.
+1. resolve issue #22: the active draft versus durable category metadata distinction;
+2. later define complete profile identity, isolation, and deliberate switching under issue #15.
 
-Do not treat archive as deletion, reuse a retired identity, or invent reassignment for unresolved references.
+Do not weaken the completed archive/lifecycle distinction, retired-ID custody, or fail-closed handling of unresolved references while pursuing later domain work.

@@ -32,6 +32,7 @@ use crate::{
     sqlite, storage, temporal,
 };
 
+mod category_lifecycle_view;
 mod category_modal_view;
 mod category_state;
 mod command_palette_view;
@@ -47,6 +48,7 @@ mod time_format;
 mod ui_helpers;
 mod view_style;
 
+use category_lifecycle_view::CategoryLifecycleOverlay;
 use persistence_recovery::{PersistenceOperation, PersistenceRecoveryState, RecoveryAction};
 use terminal_lifecycle::{ManagedTerminal, TerminalSession};
 
@@ -672,6 +674,7 @@ struct App {
     render_needed: bool,
     sqlite_database_path: Option<PathBuf>,
     archived_categories: Vec<Category>,
+    category_lifecycle_overlay: Option<CategoryLifecycleOverlay>,
     checkpoint_recovery_active: bool,
     checkpoint_recovery_payload: Option<DetachedRuntimeCheckpoint>,
     recovery_statement: Option<RecoveryStatement>,
@@ -708,10 +711,19 @@ impl App {
             sqlite_active_session,
         ) = match authority {
             sqlite::RuntimeAuthority::LegacyFiles => {
+                let lifecycle_paths =
+                    crate::legacy_category_lifecycle::LegacyCategoryLifecyclePaths::runtime();
+                crate::legacy_category_lifecycle::replay_prepared(&lifecycle_paths)?;
+                let ledger = crate::legacy_category_lifecycle::load_ledger(&lifecycle_paths)?;
                 let categories_path = storage::get_categories_path();
                 let sessions_path = storage::get_time_log_path();
-                let loaded_categories = storage::try_load_categories_from_csv(&categories_path)
+                let mut loaded_categories = storage::try_load_categories_from_csv(&categories_path)
                     .map_err(|error| error.to_string())?;
+                loaded_categories.next_category_id =
+                    crate::legacy_category_lifecycle::next_category_id(
+                        loaded_categories.next_category_id,
+                        &ledger,
+                    )?;
                 let mut session_categories = loaded_categories.categories.clone();
                 session_categories.extend(loaded_categories.archived_categories.iter().cloned());
                 let loaded_sessions =
@@ -808,6 +820,7 @@ impl App {
             render_needed: true,
             sqlite_database_path,
             archived_categories,
+            category_lifecycle_overlay: None,
             checkpoint_recovery_active: false,
             checkpoint_recovery_payload: None,
             recovery_statement: None,
@@ -2614,7 +2627,7 @@ impl App {
         })
     }
 
-    fn try_write_runtime_checkpoint(&self) -> Result<(), String> {
+    pub(super) fn try_write_runtime_checkpoint(&self) -> Result<(), String> {
         let checkpoint = self.build_runtime_checkpoint()?;
         if let Some(database_path) = self.sqlite_database_path.clone() {
             let expected_stable_id = self

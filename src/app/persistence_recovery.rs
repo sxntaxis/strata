@@ -35,6 +35,7 @@ pub(super) enum PersistenceOperation {
     ActiveReset,
     CategorySync,
     CategoryArchive,
+    CategoryLifecycle,
     CategoryTagsSync,
     SessionSync,
     SessionEdit,
@@ -58,6 +59,7 @@ impl fmt::Display for PersistenceOperation {
             Self::ActiveReset => "active-session reset",
             Self::CategorySync => "category synchronization",
             Self::CategoryArchive => "category archive",
+            Self::CategoryLifecycle => "category lifecycle",
             Self::CategoryTagsSync => "category-tag synchronization",
             Self::SessionSync => "session synchronization",
             Self::SessionEdit => "session edit",
@@ -408,7 +410,7 @@ impl App {
         Ok(())
     }
 
-    fn try_reload_authority(&mut self) -> Result<(), String> {
+    pub(super) fn try_reload_authority(&mut self) -> Result<(), String> {
         if let Some(database_path) = self.sqlite_database_path.clone() {
             let state = sqlite::load_tui_state(&database_path)?;
             self.time_tracker.apply_loaded_state(
@@ -470,9 +472,17 @@ impl App {
                 self.sand_engine.restore_state(&state, &valid_category_ids);
             }
         } else {
-            let (categories, sessions) = load_legacy_recovery_authority(
+            let lifecycle_paths =
+                crate::legacy_category_lifecycle::LegacyCategoryLifecyclePaths::runtime();
+            crate::legacy_category_lifecycle::replay_prepared(&lifecycle_paths)?;
+            let ledger = crate::legacy_category_lifecycle::load_ledger(&lifecycle_paths)?;
+            let (mut categories, sessions) = load_legacy_recovery_authority(
                 &storage::get_categories_path(),
                 &storage::get_time_log_path(),
+            )?;
+            categories.next_category_id = crate::legacy_category_lifecycle::next_category_id(
+                categories.next_category_id,
+                &ledger,
             )?;
             let archived_categories = categories.archived_categories;
             self.time_tracker.apply_loaded_state(
@@ -495,6 +505,11 @@ impl App {
             }
         }
         self.sync_drift_idle_state();
+        if self.category_lifecycle_overlay.is_some() {
+            self.category_lifecycle_overlay = None;
+            self.ui_mode = super::UiMode::Main;
+            self.selected_index = 0;
+        }
         Ok(())
     }
 

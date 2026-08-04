@@ -65,6 +65,10 @@ impl App {
             return true;
         }
 
+        if self.category_lifecycle_overlay.is_some() {
+            return self.handle_category_lifecycle_key(key);
+        }
+
         if self.report_log_edit.is_some() {
             return self.handle_report_log_edit_key(key);
         }
@@ -567,6 +571,11 @@ impl App {
                     self.delete_category();
                 }
             }
+            Action::CategoryLifecycle => {
+                if !self.is_on_insert_space() && self.selected_index > 0 {
+                    self.open_category_lifecycle_for_selected();
+                }
+            }
             Action::IncreaseKarma => {
                 if !self.is_on_insert_space()
                     && self.selected_index > 0
@@ -734,6 +743,10 @@ impl App {
             }
             Action::OpenCategoryModal => {
                 self.open_modal();
+                false
+            }
+            Action::CategoryLifecycle => {
+                self.open_category_lifecycle_for_active();
                 false
             }
             Action::Confirm => false,

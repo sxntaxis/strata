@@ -709,6 +709,14 @@ pub fn get_category_tags_path() -> PathBuf {
     get_state_dir().join("category_tags.json")
 }
 
+pub fn get_category_lifecycle_prepared_path() -> PathBuf {
+    get_state_dir().join("category_lifecycle_prepared.json")
+}
+
+pub fn get_category_lifecycle_ledger_path() -> PathBuf {
+    get_state_dir().join("category_lifecycle_ledger.json")
+}
+
 pub fn get_keymap_path() -> PathBuf {
     get_config_dir().join("keymap.json")
 }

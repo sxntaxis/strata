@@ -59,6 +59,7 @@ Detailed rationale and unresolved implications live in `notebook/decisions/DECIS
 | STRATA-D050 | Sediment settles through the exact chronological transition timestamp under the outgoing category before switch, clear, or finish. Exact-boundary mass is outgoing; later mass is resulting; bounded FIFO settlement preserves mass without iterative replay. | implemented and certified |
 | STRATA-D051 | Checkpoint recovery owns one persisted target reused across retry. Successful recovery must visibly distinguish durable evidence, reconstructed time through that cutoff, and post-target provisional live time; emergency export projects the same structured statement. | implemented and certified |
 | STRATA-D052 | A SQLite category merge or permanent deletion requires one complete revision-bound preview and one immediate transaction. Merge reassigns every supported category-owned authority while preserving non-category identity, chronology, target metadata, sediment mass, and FIFO order; targetless deletion requires zero references. Every committed source identity is retired permanently through an auditable receipt preserved by backup, interchange, import validation, and doctor integrity. | implemented and certified |
+| STRATA-D053 | Legacy category lifecycle publishes one exact-result prepared receipt before any multi-file mutation, replays it idempotently before ordinary startup load, and retires it only after catalog, sessions, tags, sediment, daily artifacts, checkpoint, and permanent ledger converge. Ordinary archive remains `x`; merge or permanent deletion is a distinct configurable action requiring explicit target/deletion selection and the exact displayed revision-bound phrase. | implemented and certified |
 
 ## Explicitly unresolved
 
@@ -72,5 +73,4 @@ The following are not accepted decisions:
 - safe cross-authority replay of queued checkpoint mutations, if it is ever required;
 - configurable quantum migration rules;
 - complete profile switching and isolation semantics under issue #15;
-- the legacy-file receipt/replay and explicit TUI confirmation half of category merge/reassignment and permanent deletion under issue #13;
 - future adoption of IANA timezone/DST semantics, if any; the implemented authority is fixed-offset.
