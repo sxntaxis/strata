@@ -137,8 +137,25 @@ path = Path("src/sand/snapshot.rs")
 text = path.read_text()
 text = replace_once(
     text,
-    '        engine.restore_state(&self.state, &valid_category_ids);',
-    '''        engine
+    'use crate::domain::{Category, CategoryId};',
+    'use crate::domain::{Category, CategoryId, DRIFT_CATEGORY_ID};',
+    "snapshot idle import",
+)
+text = replace_once(
+    text,
+    '''        let valid_category_ids = categories
+            .iter()
+            .map(|category| category.id)
+            .collect::<HashSet<CategoryId>>();
+        let mut engine = SandEngine::new(width, height);
+        engine.restore_state(&self.state, &valid_category_ids);''',
+    '''        let mut valid_category_ids = categories
+            .iter()
+            .map(|category| category.id)
+            .collect::<HashSet<CategoryId>>();
+        valid_category_ids.insert(DRIFT_CATEGORY_ID);
+        let mut engine = SandEngine::new(width, height);
+        engine
             .restore_state(&self.state, &valid_category_ids)
             .expect("validated sediment snapshot must restore");''',
     "immutable snapshot restore",
