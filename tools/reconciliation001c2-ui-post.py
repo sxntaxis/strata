@@ -17,15 +17,6 @@ replace_once(
 )
 replace_once(
     "src/app/category_lifecycle_view.rs",
-    '''                .map(|target| u64::try_from(target.id).map(CategoryId::new))
-''',
-    '''                .map(|target| {
-                    u64::try_from(target.id).map(|value| CategoryId::new(value))
-                })
-''',
-)
-replace_once(
-    "src/app/category_lifecycle_view.rs",
     '''    fn build_category_lifecycle_review(
         &self,
 ''',
@@ -61,6 +52,44 @@ replace_once(
     "src/app.rs",
     "    fn try_write_runtime_checkpoint(&self) -> Result<(), String> {",
     "    pub(super) fn try_write_runtime_checkpoint(&self) -> Result<(), String> {",
+)
+
+# Keep the stage enum compact and satisfy strict Clippy without weakening it.
+replace_once(
+    "src/app/category_lifecycle_view.rs",
+    "    Confirm(CategoryLifecycleReview),",
+    "    Confirm(Box<CategoryLifecycleReview>),",
+)
+replace_once(
+    "src/app/category_lifecycle_view.rs",
+    "                            overlay.stage = CategoryLifecycleStage::Confirm(review);",
+    "                            overlay.stage = CategoryLifecycleStage::Confirm(Box::new(review));",
+)
+replace_once(
+    "src/app/category_lifecycle_view.rs",
+    "                        let review = review.clone();",
+    "                        let review = review.as_ref().clone();",
+)
+replace_once(
+    "src/app/category_lifecycle_view.rs",
+    '''        let active_description = source_was_active
+            .then(|| {
+                self.time_tracker
+                    .category_description_by_id(review.source_id)
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .unwrap_or_default();
+''',
+    '''        let active_description = if source_was_active {
+            self.time_tracker
+                .category_description_by_id(review.source_id)
+                .unwrap_or_default()
+                .to_string()
+        } else {
+            String::new()
+        };
+''',
 )
 
 # SQLite lifecycle identity high-watermark adapter for TUI reload.
