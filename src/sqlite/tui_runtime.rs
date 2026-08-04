@@ -444,6 +444,20 @@ pub(crate) fn sync_categories(
     Ok(load_state(database_path)?.archived_categories)
 }
 
+pub(crate) fn update_active_description(
+    database_path: &Path,
+    expected_active_stable_id: &str,
+    description: &str,
+) -> Result<(), String> {
+    let mut repository = open_cli_repository(database_path)?;
+    runtime_coordination::update_active_description(
+        &mut repository,
+        expected_active_stable_id,
+        description,
+    )
+    .map_err(|error| error.to_string())
+}
+
 pub(crate) fn archive_category(
     database_path: &Path,
     category_id: CategoryId,

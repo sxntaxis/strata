@@ -33,6 +33,7 @@ pub(super) enum PersistenceOperation {
     ActiveFinish,
     ActiveSwitch,
     ActiveReset,
+    ActiveDescription,
     CategorySync,
     CategoryArchive,
     CategoryLifecycle,
@@ -57,6 +58,7 @@ impl fmt::Display for PersistenceOperation {
             Self::ActiveFinish => "active-session finish",
             Self::ActiveSwitch => "active-session switch",
             Self::ActiveReset => "active-session reset",
+            Self::ActiveDescription => "active-session description",
             Self::CategorySync => "category synchronization",
             Self::CategoryArchive => "category archive",
             Self::CategoryLifecycle => "category lifecycle",
@@ -432,9 +434,7 @@ impl App {
                         active.category_id.0
                     ));
                 }
-                let _ = self
-                    .time_tracker
-                    .set_category_description_by_id(active.category_id, active.description);
+                self.time_tracker.set_active_description(active.description);
                 self.session.active_session_stable_id = Some(active.stable_id);
                 self.begin_active_session_at(active.started_at_utc, false)?;
             } else {
@@ -443,11 +443,7 @@ impl App {
                     .set_active_category_by_id(DRIFT_CATEGORY_ID);
                 self.begin_active_session_now();
                 let category_id = self.time_tracker.active_category_id();
-                let description = self
-                    .time_tracker
-                    .category_description_by_id(category_id)
-                    .unwrap_or_default()
-                    .to_string();
+                let description = self.time_tracker.active_description().to_string();
                 let started_at = self
                     .session
                     .active_session_started_at_utc
@@ -626,11 +622,7 @@ impl App {
             .map(|started_at| EmergencyActiveSession {
                 stable_id: self.session.active_session_stable_id.clone(),
                 category_id: self.time_tracker.active_category_id().0,
-                description: self
-                    .time_tracker
-                    .category_description_by_id(self.time_tracker.active_category_id())
-                    .unwrap_or_default()
-                    .to_string(),
+                description: self.time_tracker.active_description().to_string(),
                 started_at_utc: started_at.to_rfc3339_opts(SecondsFormat::Millis, true),
             });
         let pending_mutations = self
@@ -640,8 +632,12 @@ impl App {
             .map(|event| QueuedMutationEventRecord {
                 execute_at_utc: event.execute_at_utc,
                 mutation: match event.mutation {
-                    QueuedMutation::SwitchLayer(category_id) => QueuedMutationRecord::SwitchLayer {
+                    QueuedMutation::SwitchLayer {
+                        category_id,
+                        ref description,
+                    } => QueuedMutationRecord::SwitchLayer {
                         category_id: category_id.0,
+                        description: description.clone(),
                     },
                     QueuedMutation::ClearAllSand => QueuedMutationRecord::ClearAllSand,
                     QueuedMutation::ClearDriftSand => QueuedMutationRecord::ClearDriftSand,

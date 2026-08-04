@@ -32,11 +32,16 @@ impl App {
                         view_style::text_color_for_bg(cat.color)
                     };
                     let layer_name = self.display_layer_name(&cat.name);
+                    let mode = if self.modal_editing_category_metadata {
+                        "metadata"
+                    } else {
+                        "draft"
+                    };
                     let description_text = if self.modal_description.is_empty() {
                         Span::raw("")
                     } else {
                         Span::styled(
-                            format!(" {}", self.modal_description),
+                            format!(" {mode}: {}", self.modal_description),
                             Style::default()
                                 .fg(text_color)
                                 .add_modifier(ratatui::style::Modifier::ITALIC),
@@ -45,6 +50,10 @@ impl App {
                     ListItem::new(Line::from(vec![
                         Span::raw(dot).fg(text_color),
                         Span::raw(layer_name).fg(text_color),
+                        Span::styled(
+                            format!(" · metadata: {}", cat.description),
+                            Style::default().fg(text_color),
+                        ),
                         description_text,
                     ]))
                     .style(Style::default().fg(text_color).bg(cat.color))

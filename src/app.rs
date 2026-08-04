@@ -138,9 +138,12 @@ struct ReportLogEditState {
     draft: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum QueuedMutation {
-    SwitchLayer(CategoryId),
+    SwitchLayer {
+        category_id: CategoryId,
+        description: String,
+    },
     ClearAllSand,
     ClearDriftSand,
 }
@@ -153,7 +156,11 @@ struct QueuedMutationEvent {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum QueuedMutationRecord {
-    SwitchLayer { category_id: u64 },
+    SwitchLayer {
+        category_id: u64,
+        #[serde(default)]
+        description: String,
+    },
     ClearAllSand,
     ClearDriftSand,
 }
@@ -369,15 +376,7 @@ fn stage_clear_all_active_state(
             receipt.operation_id, receipt.resulting_active.category_id
         ));
     }
-    if !tracker.set_category_description_by_id(
-        resulting_category_id,
-        receipt.resulting_active.description.clone(),
-    ) {
-        return Err(format!(
-            "clear-all receipt {} cannot restore its resulting description",
-            receipt.operation_id
-        ));
-    }
+    tracker.set_active_description(receipt.resulting_active.description.clone());
     let resulting_elapsed_seconds = if receipt.idle_reset {
         0
     } else {
@@ -446,23 +445,14 @@ fn publish_legacy_switch_replay(
         &mut staged_tracker.session_id_counter,
         receipt.completed_session.as_ref(),
     )?;
-    let previous_category_id = CategoryId::new(receipt.expected_previous_category_id);
-    if !staged_tracker.set_category_description_by_id(previous_category_id, String::new()) {
-        return Err(format!(
-            "legacy switch receipt {} references unavailable previous category {}",
-            receipt.operation_id, receipt.expected_previous_category_id
-        ));
-    }
     let resulting_category_id = CategoryId::new(receipt.resulting_active.category_id);
-    if !staged_tracker.set_category_description_by_id(
-        resulting_category_id,
-        receipt.resulting_active.description.clone(),
-    ) {
+    if !staged_tracker.set_active_category_by_id(resulting_category_id) {
         return Err(format!(
             "legacy switch receipt {} references unavailable resulting category {}",
             receipt.operation_id, receipt.resulting_active.category_id
         ));
     }
+    staged_tracker.set_active_description(receipt.resulting_active.description.clone());
 
     let mut catalog = staged_tracker.categories_for_storage();
     catalog.extend(archived_categories.iter().cloned());
@@ -543,13 +533,7 @@ fn publish_legacy_finish_replay(
         &mut staged_tracker.session_id_counter,
         receipt.completed_session.as_ref(),
     )?;
-    let previous_category_id = CategoryId::new(receipt.expected_previous_category_id);
-    if !staged_tracker.set_category_description_by_id(previous_category_id, String::new()) {
-        return Err(format!(
-            "legacy finish receipt {} references unavailable previous category {}",
-            receipt.operation_id, receipt.expected_previous_category_id
-        ));
-    }
+    staged_tracker.set_active_description(String::new());
     let mut catalog = staged_tracker.categories_for_storage();
     catalog.extend(archived_categories.iter().cloned());
     storage::save_sessions_to_csv(sessions_path, &staged_tracker.sessions, &catalog)?;
@@ -644,6 +628,7 @@ struct App {
     new_category_name: String,
     color_index: usize,
     modal_description: String,
+    modal_editing_category_metadata: bool,
     category_tags: storage::CategoryTagsState,
     modal_tag_index: Option<usize>,
     report_selected_index: usize,
@@ -779,6 +764,7 @@ impl App {
             new_category_name: String::new(),
             color_index: 0,
             modal_description: String::new(),
+            modal_editing_category_metadata: false,
             category_tags,
             modal_tag_index: None,
             report_selected_index: 0,
@@ -844,9 +830,7 @@ impl App {
                         active.category_id.0
                     ));
                 }
-                let _ = app
-                    .time_tracker
-                    .set_category_description_by_id(active.category_id, active.description);
+                app.time_tracker.set_active_description(active.description);
                 app.session.active_session_stable_id = Some(active.stable_id);
                 app.begin_active_session_at(active.started_at_utc, false)?;
             } else {
@@ -879,11 +863,7 @@ impl App {
             return true;
         };
         let category_id = self.time_tracker.active_category_id();
-        let description = self
-            .time_tracker
-            .category_description_by_id(category_id)
-            .unwrap_or_default()
-            .to_string();
+        let description = self.time_tracker.active_description().to_string();
         let Some(started_at_utc) = self.session.active_session_started_at_utc else {
             self.record_storage_result_for::<()>(
                 PersistenceOperation::ActiveStart,
@@ -963,6 +943,7 @@ impl App {
     fn close_modal(&mut self) {
         self.ui_mode = UiMode::Main;
         self.modal_description = String::new();
+        self.modal_editing_category_metadata = false;
         self.modal_tag_index = None;
         self.render_needed = true;
     }
@@ -1452,11 +1433,7 @@ impl App {
         let previous_tracker = self.time_tracker.clone();
         let previous_session = self.session.clone();
         let previous_category_id = self.time_tracker.active_category_id();
-        let previous_description = self
-            .time_tracker
-            .category_description_by_id(previous_category_id)
-            .unwrap_or_default()
-            .to_string();
+        let previous_description = self.time_tracker.active_description().to_string();
         let Some(previous_started_at_utc) = self.session.active_session_started_at_utc else {
             self.record_storage_result_for::<()>(
                 PersistenceOperation::ActiveFinish,
@@ -1566,15 +1543,11 @@ impl App {
                     elapsed,
                 ),
             )?;
-            let active_category_id = self.time_tracker.active_category_id();
-            let _ = self
-                .time_tracker
-                .set_category_description_by_id(active_category_id, String::new());
+            self.time_tracker.set_active_description(String::new());
             self.time_tracker.current_session_start = None;
             self.session.active_session_stable_id = None;
             self.session.active_session_started_at_utc = None;
             self.reload_sqlite_sessions();
-            self.persist_categories();
             return Some(elapsed);
         }
 
@@ -1588,6 +1561,7 @@ impl App {
     fn switch_active_category_at(
         &mut self,
         category_id: CategoryId,
+        next_description: String,
         switched_at_utc: DateTime<Utc>,
         clock_mode: SessionClockMode,
     ) -> bool {
@@ -1623,11 +1597,6 @@ impl App {
             let operational_day = operational_day_key_for_utc(interval.ended_at_utc)
                 .format("%Y-%m-%d")
                 .to_string();
-            let next_description = self
-                .time_tracker
-                .category_description_by_id(category_id)
-                .unwrap_or_default()
-                .to_string();
             let operation_id = transition_operation_id(
                 "switch",
                 &expected_stable_id,
@@ -1653,13 +1622,10 @@ impl App {
             ) else {
                 return false;
             };
-            let previous_category_id = self.time_tracker.active_category_id();
-            let _ = self
-                .time_tracker
-                .set_category_description_by_id(previous_category_id, String::new());
             if !self.time_tracker.set_active_category_by_id(category_id) {
                 return false;
             }
+            self.time_tracker.set_active_description(next_description);
             self.session.active_session_stable_id = receipt.resulting_active_stable_id;
             if let Err(error) = self.begin_transition_session(interval.ended_at_utc, clock_mode) {
                 self.record_storage_result_for::<()>(
@@ -1670,7 +1636,6 @@ impl App {
                 return false;
             }
             self.reload_sqlite_sessions();
-            self.persist_categories();
             self.sync_drift_idle_state();
             self.refresh_active_runtime_checkpoint();
             return !self.has_persistence_recovery();
@@ -1717,11 +1682,9 @@ impl App {
             return false;
         }
 
-        let resulting_description = self
-            .time_tracker
-            .category_description_by_id(category_id)
-            .unwrap_or_default()
-            .to_string();
+        self.time_tracker
+            .set_active_description(next_description.clone());
+        let resulting_description = next_description;
         let expected_identity = format!(
             "legacy:{}:{}",
             previous_category_id.0,
@@ -1920,11 +1883,7 @@ impl App {
         let previous_sand = self.sand_engine.snapshot_state();
         let previous_active = LegacyActiveReceipt {
             category_id: self.time_tracker.active_category_id().0,
-            description: self
-                .time_tracker
-                .category_description_by_id(self.time_tracker.active_category_id())
-                .unwrap_or_default()
-                .to_string(),
+            description: self.time_tracker.active_description().to_string(),
             started_at_utc: match self.session.active_session_started_at_utc {
                 Some(value) => value,
                 None => {
@@ -2213,8 +2172,11 @@ impl App {
         clock_mode: SessionClockMode,
     ) {
         match mutation {
-            QueuedMutation::SwitchLayer(category_id) => {
-                self.apply_switch_layer_at(category_id, scheduled_at_utc, clock_mode);
+            QueuedMutation::SwitchLayer {
+                category_id,
+                description,
+            } => {
+                self.apply_switch_layer_at(category_id, description, scheduled_at_utc, clock_mode);
             }
             QueuedMutation::ClearAllSand => {
                 self.apply_clear_all_at(scheduled_at_utc, clock_mode);
@@ -2230,10 +2192,11 @@ impl App {
     fn apply_switch_layer_at(
         &mut self,
         category_id: CategoryId,
+        description: String,
         scheduled_at_utc: DateTime<Utc>,
         clock_mode: SessionClockMode,
     ) {
-        self.switch_active_category_at(category_id, scheduled_at_utc, clock_mode);
+        self.switch_active_category_at(category_id, description, scheduled_at_utc, clock_mode);
     }
 
     fn advance_runtime(
@@ -2596,11 +2559,7 @@ impl App {
         }
 
         let active_category_id = self.time_tracker.active_category_id();
-        let active_description = self
-            .time_tracker
-            .category_description_by_id(active_category_id)
-            .unwrap_or_default()
-            .to_string();
+        let active_description = self.time_tracker.active_description().to_string();
         let spawn_accumulator_nanos =
             u64::try_from(self.simulation.spawn_accumulator.as_nanos())
                 .map_err(|_| "spawn accumulator exceeds checkpoint range".to_string())?;
@@ -2964,10 +2923,8 @@ impl App {
             ));
             return false;
         }
-        let _ = self.time_tracker.set_category_description_by_id(
-            active_category_id,
-            checkpoint.active_description.clone(),
-        );
+        self.time_tracker
+            .set_active_description(checkpoint.active_description.clone());
         if let Err(error) = self.begin_active_session_at(started_at_utc, true) {
             self.record_storage_result::<()>(Err(error));
             return false;
@@ -3811,10 +3768,10 @@ mod legacy_switch_replay_tests {
         }
     }
 
-    fn categories(before_switch: bool) -> Vec<Category> {
+    fn categories(_before_switch: bool) -> Vec<Category> {
         vec![
             category(DRIFT_CATEGORY_ID.0, "idle", ""),
-            category(1, "Previous", if before_switch { "focus" } else { "" }),
+            category(1, "Previous", "focus"),
             category(2, "Next", "next task"),
         ]
     }
@@ -3931,7 +3888,7 @@ mod legacy_switch_replay_tests {
             .iter()
             .find(|category| category.id == CategoryId::new(2))
             .unwrap();
-        assert_eq!(previous.description, "");
+        assert_eq!(previous.description, "focus");
         assert_eq!(next.description, "next task");
 
         let mut catalog = loaded_categories.categories.clone();
@@ -4070,10 +4027,10 @@ mod legacy_finish_replay_tests {
         }
     }
 
-    fn categories(before_finish: bool) -> Vec<Category> {
+    fn categories(_before_finish: bool) -> Vec<Category> {
         vec![
             category(DRIFT_CATEGORY_ID.0, "idle", ""),
-            category(1, "Work", if before_finish { "focus" } else { "" }),
+            category(1, "Work", "focus"),
         ]
     }
 
@@ -4183,7 +4140,7 @@ mod legacy_finish_replay_tests {
             .iter()
             .find(|category| category.id == CategoryId::new(1))
             .unwrap();
-        assert_eq!(work.description, "");
+        assert_eq!(work.description, "focus");
         let mut catalog = loaded_categories.categories.clone();
         catalog.extend(loaded_categories.archived_categories.iter().cloned());
         let loaded_sessions = storage::try_load_sessions_from_csv(sessions_path, &catalog).unwrap();

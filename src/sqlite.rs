@@ -61,6 +61,7 @@ pub(crate) use tui_runtime::{
     start_active_session_with_checkpoint as start_tui_active_session_with_checkpoint,
     switch_active_session as switch_tui_active_session, sync_categories as sync_tui_categories,
     sync_category_tags as sync_tui_category_tags, sync_sessions as sync_tui_sessions,
+    update_active_description as update_tui_active_description,
     update_session_description as update_tui_session_description,
 };
 

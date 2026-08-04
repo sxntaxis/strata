@@ -360,10 +360,6 @@ impl CategoryStore {
         self.by_id.get(&id)
     }
 
-    pub fn get_mut_by_id(&mut self, id: CategoryId) -> Option<&mut Category> {
-        self.by_id.get_mut(&id)
-    }
-
     pub fn get_by_index(&self, index: usize) -> Option<&Category> {
         let id = self.id_at_index(index)?;
         self.by_id.get(&id)
@@ -525,6 +521,7 @@ pub struct TimeTracker {
     pub current_session_start: Option<Instant>,
     pub session_id_counter: usize,
     active_category_id: CategoryId,
+    active_description: String,
 }
 
 impl TimeTracker {
@@ -535,6 +532,7 @@ impl TimeTracker {
             current_session_start: None,
             session_id_counter: 1,
             active_category_id: DRIFT_CATEGORY_ID,
+            active_description: String::new(),
         }
     }
 
@@ -555,6 +553,7 @@ impl TimeTracker {
             .is_none()
         {
             self.active_category_id = DRIFT_CATEGORY_ID;
+            self.active_description.clear();
         }
     }
 
@@ -591,13 +590,16 @@ impl TimeTracker {
         self.category_by_id(id).map(|category| category.color)
     }
 
-    pub fn category_description_by_id(&self, id: CategoryId) -> Option<&str> {
-        self.category_by_id(id)
-            .map(|category| category.description.as_str())
-    }
-
     pub fn active_category_id(&self) -> CategoryId {
         self.active_category_id
+    }
+
+    pub fn active_description(&self) -> &str {
+        &self.active_description
+    }
+
+    pub fn set_active_description(&mut self, description: String) {
+        self.active_description = description;
     }
 
     pub fn active_category_index(&self) -> Option<usize> {
@@ -616,19 +618,6 @@ impl TimeTracker {
     pub fn set_category_description_by_index(&mut self, index: usize, description: String) -> bool {
         self.category_store
             .set_description_by_index(index, description)
-    }
-
-    pub fn set_category_description_by_id(
-        &mut self,
-        category_id: CategoryId,
-        description: String,
-    ) -> bool {
-        let Some(category) = self.category_store.get_mut_by_id(category_id) else {
-            return false;
-        };
-
-        category.description = description;
-        true
     }
 
     pub fn set_category_color_by_index(&mut self, index: usize, color: Color) -> bool {
@@ -666,6 +655,7 @@ impl TimeTracker {
         if let Some(removed_id) = removed {
             if self.active_category_id == removed_id {
                 self.active_category_id = DRIFT_CATEGORY_ID;
+                self.active_description.clear();
             }
             return true;
         }
@@ -702,20 +692,13 @@ impl TimeTracker {
     {
         self.current_session_start?;
         let cat_id = self.active_category_id;
-        let cat_description = self
-            .category_store
-            .get_by_id(cat_id)
-            .map(|category| category.description.clone())
-            .unwrap_or_default();
+        let active_description = self.active_description.clone();
 
         if elapsed > 0 {
-            self.record_session_at(cat_id, &cat_description, elapsed, end_local);
+            self.record_session_at(cat_id, &active_description, elapsed, end_local);
         }
 
-        if let Some(category) = self.category_store.get_mut_by_id(cat_id) {
-            category.description.clear();
-        }
-
+        self.active_description.clear();
         self.current_session_start = None;
         Some(elapsed)
     }
@@ -1298,6 +1281,38 @@ mod tests {
     use chrono::{Datelike, TimeZone};
 
     use super::*;
+
+    #[test]
+    fn active_draft_is_independent_from_category_metadata() {
+        let mut tracker = TimeTracker::new();
+        let id = tracker
+            .add_category("Work".to_string(), "Stable metadata".to_string(), None)
+            .expect("category should be created");
+        assert!(tracker.set_active_category_by_id(id));
+        tracker.set_active_description("One-shot draft".to_string());
+        assert_eq!(tracker.active_description(), "One-shot draft");
+        assert_eq!(
+            tracker
+                .category_by_id(id)
+                .map(|category| category.description.as_str()),
+            Some("Stable metadata")
+        );
+        tracker.start_session();
+        tracker
+            .end_session_with_elapsed_at_local(1, Local::now())
+            .expect("active session should finish");
+        assert_eq!(
+            tracker.sessions.last().unwrap().description,
+            "One-shot draft"
+        );
+        assert_eq!(tracker.active_description(), "");
+        assert_eq!(
+            tracker
+                .category_by_id(id)
+                .map(|category| category.description.as_str()),
+            Some("Stable metadata")
+        );
+    }
 
     #[test]
     fn test_category_id_new() {

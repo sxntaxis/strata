@@ -338,10 +338,7 @@ impl App {
     fn apply_category_lifecycle(&mut self, review: CategoryLifecycleReview) {
         let source_was_active = self.time_tracker.active_category_id() == review.source_id;
         let active_description = if source_was_active {
-            self.time_tracker
-                .category_description_by_id(review.source_id)
-                .unwrap_or_default()
-                .to_string()
+            self.time_tracker.active_description().to_string()
         } else {
             String::new()
         };
@@ -409,9 +406,7 @@ impl App {
                 );
                 return;
             }
-            let _ = self
-                .time_tracker
-                .set_category_description_by_id(target_id, active_description);
+            self.time_tracker.set_active_description(active_description);
         }
 
         self.category_lifecycle_overlay = None;

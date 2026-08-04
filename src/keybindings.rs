@@ -66,6 +66,7 @@ pub(crate) enum Action {
 
     DeleteCategory,
     CategoryLifecycle,
+    EditCategoryDescription,
     IncreaseKarma,
     DecreaseKarma,
     Backspace,
@@ -79,7 +80,7 @@ pub(crate) enum Action {
 }
 
 impl Action {
-    const ALL: [Action; 29] = [
+    const ALL: [Action; 30] = [
         Action::Quit,
         Action::ToggleCommandPalette,
         Action::OpenCategoryModal,
@@ -101,6 +102,7 @@ impl Action {
         Action::Cancel,
         Action::DeleteCategory,
         Action::CategoryLifecycle,
+        Action::EditCategoryDescription,
         Action::IncreaseKarma,
         Action::DecreaseKarma,
         Action::Backspace,
@@ -140,6 +142,7 @@ impl Action {
 
             Action::DeleteCategory => "delete_layer",
             Action::CategoryLifecycle => "category_lifecycle",
+            Action::EditCategoryDescription => "edit_layer_metadata",
             Action::IncreaseKarma => "boost_layer_karma",
             Action::DecreaseKarma => "drain_layer_karma",
             Action::Backspace => "backspace",
@@ -182,6 +185,9 @@ impl Action {
             "category_lifecycle" | "merge_or_delete_layer" | "permanent_layer_lifecycle" => {
                 Some(Self::CategoryLifecycle)
             }
+            "edit_layer_metadata" | "edit_category_description" => {
+                Some(Self::EditCategoryDescription)
+            }
             "boost_layer_karma" | "increase_karma" => Some(Self::IncreaseKarma),
             "drain_layer_karma" | "decrease_karma" => Some(Self::DecreaseKarma),
             "backspace" => Some(Self::Backspace),
@@ -222,6 +228,7 @@ impl Action {
 
             Action::DeleteCategory => "Archive selected layer",
             Action::CategoryLifecycle => "Merge or permanently delete selected layer",
+            Action::EditCategoryDescription => "Toggle durable layer-metadata editing",
             Action::IncreaseKarma => "Set selected layer karma to +1",
             Action::DecreaseKarma => "Set selected layer karma to -1",
             Action::Backspace => "Delete one typed character in layer pop-up",
@@ -260,6 +267,7 @@ impl Action {
 
             Action::DeleteCategory
             | Action::CategoryLifecycle
+            | Action::EditCategoryDescription
             | Action::IncreaseKarma
             | Action::DecreaseKarma
             | Action::Backspace => ActionCategory::CategoryModal,
@@ -795,7 +803,7 @@ fn default_true() -> bool {
     true
 }
 
-const DEFAULT_BINDINGS: [(&str, Action); 31] = [
+const DEFAULT_BINDINGS: [(&str, Action); 32] = [
     ("q", Action::Quit),
     ("ctrl-p", Action::ToggleCommandPalette),
     ("enter", Action::Confirm),
@@ -816,6 +824,7 @@ const DEFAULT_BINDINGS: [(&str, Action); 31] = [
     ("shift-right", Action::ShiftRight),
     ("x", Action::DeleteCategory),
     ("shift-x", Action::CategoryLifecycle),
+    ("shift-e", Action::EditCategoryDescription),
     ("+", Action::IncreaseKarma),
     ("=", Action::IncreaseKarma),
     ("-", Action::DecreaseKarma),
