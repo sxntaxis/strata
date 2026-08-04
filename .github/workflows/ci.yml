@@ -1,6 +1,7 @@
 name: ci
 
 on:
+  pull_request:
   push:
     branches: [fix/005-legacy-publication-races]
 
