@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, fmt::Write as _};
+use std::{collections::BTreeSet, fmt::Write as _, path::Path};
 
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
@@ -10,7 +10,7 @@ use crate::{
         count_checkpoint_category_references, count_sand_state_category, count_snapshot_category,
         reassign_checkpoint_category, reassign_sand_state_category, reassign_snapshot_category,
     },
-    domain::OperationalDayPolicy,
+    domain::{CategoryId, OperationalDayPolicy},
     sand::{
         DailySedimentSlice, SandState, SedimentSnapshot, SedimentSnapshotKind,
         daily_contribution_from_slices,
@@ -91,6 +91,69 @@ pub(crate) struct CategoryLifecycleReceipt {
     pub references: CategoryReferenceCounts,
     pub applied_at_utc: String,
     pub already_applied: bool,
+}
+
+pub(crate) fn identity_high_watermark_at(database_path: &Path) -> Result<u64, String> {
+    let repository = SqliteRepository::open(database_path).map_err(|error| error.to_string())?;
+    let maximum: i64 = repository
+        .connection
+        .query_row(
+            "SELECT COALESCE(MAX(identity), 0)
+             FROM (
+                 SELECT id AS identity FROM categories
+                 UNION ALL
+                 SELECT source_category_id AS identity FROM category_lifecycle_receipts
+                 UNION ALL
+                 SELECT target_category_id AS identity FROM category_lifecycle_receipts
+                 WHERE target_category_id IS NOT NULL
+             )",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    u64::try_from(maximum)
+        .map_err(|_| "SQLite category identity high-watermark is negative".to_string())
+}
+
+pub(crate) fn preview_at(
+    database_path: &Path,
+    source_category_id: CategoryId,
+    target_category_id: Option<CategoryId>,
+) -> Result<CategoryLifecyclePreview, String> {
+    let repository = SqliteRepository::open(database_path).map_err(|error| error.to_string())?;
+    preview(
+        &repository,
+        i64::try_from(source_category_id.0)
+            .map_err(|_| "source category identity exceeds SQLite range".to_string())?,
+        target_category_id
+            .map(|target| i64::try_from(target.0))
+            .transpose()
+            .map_err(|_| "target category identity exceeds SQLite range".to_string())?,
+    )
+}
+
+pub(crate) fn apply_at(
+    database_path: &Path,
+    source_category_id: CategoryId,
+    target_category_id: Option<CategoryId>,
+    expected_revision: &str,
+    applied_at_utc: DateTime<Utc>,
+) -> Result<CategoryLifecycleReceipt, String> {
+    let mut repository =
+        SqliteRepository::open(database_path).map_err(|error| error.to_string())?;
+    apply(
+        &mut repository,
+        CategoryLifecycleRequest {
+            source_category_id: i64::try_from(source_category_id.0)
+                .map_err(|_| "source category identity exceeds SQLite range".to_string())?,
+            target_category_id: target_category_id
+                .map(|target| i64::try_from(target.0))
+                .transpose()
+                .map_err(|_| "target category identity exceeds SQLite range".to_string())?,
+            expected_revision,
+            applied_at_utc: &applied_at_utc.to_rfc3339(),
+        },
+    )
 }
 
 pub(crate) fn preview(

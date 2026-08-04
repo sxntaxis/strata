@@ -10,9 +10,7 @@ use ratatui::{
 
 use crate::{
     domain::{CategoryId, DRIFT_CATEGORY_ID},
-    legacy_category_lifecycle::{
-        LegacyCategoryLifecyclePaths, LegacyCategoryLifecycleReview,
-    },
+    legacy_category_lifecycle::{LegacyCategoryLifecyclePaths, LegacyCategoryLifecycleReview},
     sqlite,
 };
 
@@ -69,7 +67,7 @@ pub(super) struct CategoryLifecycleReview {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum CategoryLifecycleStage {
     SelectTarget,
-    Confirm(CategoryLifecycleReview),
+    Confirm(Box<CategoryLifecycleReview>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -84,18 +82,40 @@ pub(super) struct CategoryLifecycleOverlay {
 }
 
 impl App {
+    fn show_category_lifecycle_error(
+        &mut self,
+        source_id: CategoryId,
+        source_name: String,
+        error: String,
+    ) {
+        self.category_lifecycle_overlay = Some(CategoryLifecycleOverlay {
+            source_id,
+            source_name,
+            targets: Vec::new(),
+            selected_target: 0,
+            stage: CategoryLifecycleStage::SelectTarget,
+            confirmation_input: String::new(),
+            error: Some(error),
+        });
+        self.render_needed = true;
+    }
+
     pub(super) fn open_category_lifecycle_for_selected(&mut self) {
-        if self.is_on_insert_space() || self.selected_index == 0 {
-            self.category_action_error = Some(
+        if self.selected_index >= self.time_tracker.category_count() || self.selected_index == 0 {
+            self.show_category_lifecycle_error(
+                DRIFT_CATEGORY_ID,
+                "Unavailable".to_string(),
                 "Select a non-idle layer. Archive remains the ordinary retirement action."
                     .to_string(),
             );
-            self.render_needed = true;
             return;
         }
         let Some(source) = self.time_tracker.category_by_index(self.selected_index) else {
-            self.category_action_error = Some("Selected layer is unavailable.".to_string());
-            self.render_needed = true;
+            self.show_category_lifecycle_error(
+                DRIFT_CATEGORY_ID,
+                "Unavailable".to_string(),
+                "Selected layer is unavailable.".to_string(),
+            );
             return;
         };
         self.open_category_lifecycle(source.id);
@@ -105,17 +125,16 @@ impl App {
         let source_id = self.time_tracker.active_category_id();
         if source_id == DRIFT_CATEGORY_ID {
             self.open_modal();
-            self.category_action_error = Some(
-                "Idle cannot be merged or permanently deleted. Select another layer."
-                    .to_string(),
+            self.show_category_lifecycle_error(
+                DRIFT_CATEGORY_ID,
+                "idle".to_string(),
+                "Idle cannot be merged or permanently deleted. Select another layer.".to_string(),
             );
-            self.render_needed = true;
             return;
         }
         if let Some(index) = self.time_tracker.active_category_index() {
             self.open_modal();
             self.selected_index = index;
-            self.sync_modal_description_from_selection();
         }
         self.open_category_lifecycle(source_id);
     }
@@ -128,18 +147,19 @@ impl App {
             .chain(self.archived_categories.iter().cloned())
             .find(|category| category.id == source_id);
         let Some(source) = source else {
-            self.category_action_error = Some(format!(
-                "Layer {} is unavailable for lifecycle review.",
-                source_id.0
-            ));
-            self.render_needed = true;
+            self.show_category_lifecycle_error(
+                source_id,
+                "Unavailable".to_string(),
+                format!("Layer {} is unavailable for lifecycle review.", source_id.0),
+            );
             return;
         };
         if source.id == DRIFT_CATEGORY_ID {
-            self.category_action_error = Some(
+            self.show_category_lifecycle_error(
+                source_id,
+                source.name.clone(),
                 "Idle cannot be merged or permanently deleted.".to_string(),
             );
-            self.render_needed = true;
             return;
         }
 
@@ -179,7 +199,6 @@ impl App {
             confirmation_input: String::new(),
             error: None,
         });
-        self.category_action_error = None;
         self.render_needed = true;
     }
 
@@ -217,7 +236,7 @@ impl App {
                         .and_then(|target| target.category_id);
                     match self.build_category_lifecycle_review(overlay.source_id, target_id) {
                         Ok(review) => {
-                            overlay.stage = CategoryLifecycleStage::Confirm(review);
+                            overlay.stage = CategoryLifecycleStage::Confirm(Box::new(review));
                             overlay.confirmation_input.clear();
                             overlay.error = None;
                         }
@@ -246,11 +265,10 @@ impl App {
                 KeyCode::Enter => {
                     if overlay.confirmation_input != review.confirmation_phrase {
                         overlay.error = Some(
-                            "Confirmation does not exactly match the displayed phrase."
-                                .to_string(),
+                            "Confirmation does not exactly match the displayed phrase.".to_string(),
                         );
                     } else {
-                        let review = review.clone();
+                        let review = review.as_ref().clone();
                         self.category_lifecycle_overlay = Some(overlay);
                         self.apply_category_lifecycle(review);
                         self.render_needed = true;
@@ -266,16 +284,13 @@ impl App {
     }
 
     fn build_category_lifecycle_review(
-        &self,
+        &mut self,
         source_id: CategoryId,
         target_id: Option<CategoryId>,
     ) -> Result<CategoryLifecycleReview, String> {
         if let Some(database_path) = self.sqlite_database_path.as_deref() {
-            let preview = sqlite::preview_category_lifecycle_at(
-                database_path,
-                source_id,
-                target_id,
-            )?;
+            let preview =
+                sqlite::preview_category_lifecycle_at(database_path, source_id, target_id)?;
             let source_id = CategoryId::new(
                 u64::try_from(preview.source.id)
                     .map_err(|_| "SQLite source category identity is invalid".to_string())?,
@@ -286,11 +301,8 @@ impl App {
                 .map(|target| u64::try_from(target.id).map(CategoryId::new))
                 .transpose()
                 .map_err(|_| "SQLite target category identity is invalid".to_string())?;
-            let confirmation_phrase = lifecycle_confirmation_phrase(
-                source_id,
-                target_id,
-                &preview.revision,
-            );
+            let confirmation_phrase =
+                lifecycle_confirmation_phrase(source_id, target_id, &preview.revision);
             Ok(CategoryLifecycleReview {
                 source_id,
                 source_name: preview.source.name,
@@ -313,6 +325,7 @@ impl App {
                 confirmation_phrase,
             })
         } else {
+            self.try_write_runtime_checkpoint()?;
             let review = crate::legacy_category_lifecycle::build_review(
                 &LegacyCategoryLifecyclePaths::runtime(),
                 source_id.0,
@@ -324,18 +337,18 @@ impl App {
 
     fn apply_category_lifecycle(&mut self, review: CategoryLifecycleReview) {
         let source_was_active = self.time_tracker.active_category_id() == review.source_id;
-        let active_description = source_was_active
-            .then(|| {
-                self.time_tracker
-                    .category_description_by_id(review.source_id)
-                    .unwrap_or_default()
-                    .to_string()
-            })
-            .unwrap_or_default();
+        let active_description = if source_was_active {
+            self.time_tracker
+                .category_description_by_id(review.source_id)
+                .unwrap_or_default()
+                .to_string()
+        } else {
+            String::new()
+        };
 
-        let result = if let Some(database_path) = self.sqlite_database_path.as_deref() {
+        let result = if let Some(database_path) = self.sqlite_database_path.clone() {
             sqlite::apply_category_lifecycle_at(
-                database_path,
+                &database_path,
                 review.source_id,
                 review.target_id,
                 &review.revision,
@@ -351,9 +364,7 @@ impl App {
                 &review.revision,
                 Utc::now(),
             )
-            .and_then(|_| {
-                crate::legacy_category_lifecycle::replay_prepared(&paths).map(|_| ())
-            })
+            .and_then(|_| crate::legacy_category_lifecycle::replay_prepared(&paths).map(|_| ()))
         };
 
         if let Err(error) = result {
@@ -406,7 +417,6 @@ impl App {
         self.category_lifecycle_overlay = None;
         self.ui_mode = UiMode::Main;
         self.selected_index = 0;
-        self.category_action_error = None;
         self.render_needed = true;
     }
 
@@ -422,9 +432,7 @@ impl App {
         let mut lines = vec![
             Line::from(Span::styled(
                 "DESTRUCTIVE LAYER LIFECYCLE",
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             )),
             Line::from("Archive with x for ordinary retirement. This route transforms history."),
             Line::from(""),
@@ -523,7 +531,10 @@ impl App {
 
 fn normalize_legacy_review(review: LegacyCategoryLifecycleReview) -> CategoryLifecycleReview {
     let source_id = CategoryId::new(review.source.id);
-    let target_id = review.target.as_ref().map(|target| CategoryId::new(target.id));
+    let target_id = review
+        .target
+        .as_ref()
+        .map(|target| CategoryId::new(target.id));
     CategoryLifecycleReview {
         source_id,
         source_name: review.source.name,
@@ -592,11 +603,7 @@ mod tests {
     #[test]
     fn confirmation_phrase_binds_source_target_and_revision() {
         assert_eq!(
-            lifecycle_confirmation_phrase(
-                CategoryId::new(7),
-                Some(CategoryId::new(9)),
-                "abc123"
-            ),
+            lifecycle_confirmation_phrase(CategoryId::new(7), Some(CategoryId::new(9)), "abc123"),
             "MERGE 7 INTO 9 abc123"
         );
         assert_eq!(

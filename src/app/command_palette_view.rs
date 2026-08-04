@@ -143,6 +143,18 @@ impl App {
                 &["layers", "strata", "edit", "popup"],
             ),
             self.palette_action_entry(
+                Action::CategoryLifecycle,
+                "Merge or permanently delete active layer",
+                &[
+                    "layer",
+                    "merge",
+                    "reassign",
+                    "permanent",
+                    "delete",
+                    "destructive",
+                ],
+            ),
+            self.palette_action_entry(
                 Action::OpenReportModal,
                 "Open karma pop-up",
                 &["karma", "report", "popup"],

@@ -76,6 +76,8 @@ pub(crate) fn load_state(database_path: &Path) -> Result<SqliteTuiState, String>
         }
     }
     active_categories.sort_by_key(|category| category_sort_order(database_path, category.id.0));
+    max_category_id =
+        max_category_id.max(super::category_identity_high_watermark_at(database_path)?);
 
     let mut sessions = Vec::with_capacity(session_rows.len());
     let mut max_session_id = 0usize;

@@ -32,6 +32,7 @@ use crate::{
     sqlite, storage, temporal,
 };
 
+mod category_lifecycle_view;
 mod category_modal_view;
 mod category_state;
 mod command_palette_view;
@@ -47,6 +48,7 @@ mod time_format;
 mod ui_helpers;
 mod view_style;
 
+use category_lifecycle_view::CategoryLifecycleOverlay;
 use persistence_recovery::{PersistenceOperation, PersistenceRecoveryState, RecoveryAction};
 use terminal_lifecycle::{ManagedTerminal, TerminalSession};
 
@@ -672,6 +674,7 @@ struct App {
     render_needed: bool,
     sqlite_database_path: Option<PathBuf>,
     archived_categories: Vec<Category>,
+    category_lifecycle_overlay: Option<CategoryLifecycleOverlay>,
     checkpoint_recovery_active: bool,
     checkpoint_recovery_payload: Option<DetachedRuntimeCheckpoint>,
     recovery_statement: Option<RecoveryStatement>,
@@ -817,6 +820,7 @@ impl App {
             render_needed: true,
             sqlite_database_path,
             archived_categories,
+            category_lifecycle_overlay: None,
             checkpoint_recovery_active: false,
             checkpoint_recovery_payload: None,
             recovery_statement: None,
@@ -2623,7 +2627,7 @@ impl App {
         })
     }
 
-    fn try_write_runtime_checkpoint(&self) -> Result<(), String> {
+    pub(super) fn try_write_runtime_checkpoint(&self) -> Result<(), String> {
         let checkpoint = self.build_runtime_checkpoint()?;
         if let Some(database_path) = self.sqlite_database_path.clone() {
             let expected_stable_id = self

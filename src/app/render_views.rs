@@ -176,6 +176,10 @@ impl App {
             self.render_command_palette(f, size);
         }
 
+        if self.category_lifecycle_overlay.is_some() {
+            self.render_category_lifecycle(f, size);
+        }
+
         if self.recovery_statement.is_some() {
             self.render_recovery_statement(f, size);
         }

@@ -25,7 +25,9 @@ pub(crate) use authority::{
 pub(crate) use category_lifecycle::{
     CategoryLifecyclePreview, CategoryLifecycleReceipt, CategoryLifecycleRequest,
     CategoryReferenceCounts, apply as apply_category_lifecycle,
-    preview as preview_category_lifecycle,
+    apply_at as apply_category_lifecycle_at,
+    identity_high_watermark_at as category_identity_high_watermark_at,
+    preview as preview_category_lifecycle, preview_at as preview_category_lifecycle_at,
 };
 pub(crate) use cli_runtime::{
     acknowledge_stop as acknowledge_cli_stop, read_snapshot as read_cli_snapshot,
