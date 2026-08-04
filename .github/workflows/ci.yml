@@ -8,6 +8,7 @@ on:
 jobs:
   checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,5 +27,106 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Run tests
+      - name: Run debug tests
         run: cargo test --all-features
+
+      - name: Run release tests
+        run: cargo test --release --all-features
+
+      - name: Run serial tests
+        run: cargo test --all-features -- --test-threads=1
+
+      - name: Build audit binary
+        run: cargo build --all-features
+
+      - name: Run adversarial profile probes
+        shell: bash
+        run: |
+          set -u
+          mkdir -p bughunt-artifact
+          report=bughunt-artifact/adversarial-probes.md
+          printf '# Strata adversarial probes\n\n' > "$report"
+          printf 'Commit: `%s`\n\n' "$(git rev-parse HEAD)" >> "$report"
+
+          printf '## Explicit profile precedence\n\n' >> "$report"
+          root=$(mktemp -d)
+          set +e
+          STRATA_PROFILE="$root/env-a" STRATA_DATA_DIR="$root/env-b" \
+            target/debug/strata --profile "$root/cli" profile --json \
+            >"$root/precedence.out" 2>"$root/precedence.err"
+          status=$?
+          set -e
+          printf -- '- exit status: `%s`\n' "$status" >> "$report"
+          printf -- '- stdout: `%s`\n' "$(tr '\n' ' ' < "$root/precedence.out")" >> "$report"
+          printf -- '- stderr: `%s`\n\n' "$(tr '\n' ' ' < "$root/precedence.err")" >> "$report"
+          rm -rf "$root"
+
+          printf '## Concurrent first-use profile creation\n\n' >> "$report"
+          total_failures=0
+          divergent_rounds=0
+          for round in $(seq 1 40); do
+            root=$(mktemp -d)
+            rm -rf "$root"
+            mkdir -p "$root/out"
+            pids=""
+            for worker in $(seq 1 16); do
+              target/debug/strata --profile "$root/profile" profile --json \
+                >"$root/out/$worker.json" 2>"$root/out/$worker.err" &
+              pids="$pids $!"
+            done
+            failures=0
+            for pid in $pids; do
+              wait "$pid" || failures=$((failures + 1))
+            done
+            total_failures=$((total_failures + failures))
+            ids=$(python3 - "$root/out" <<'PY'
+import json
+import pathlib
+import sys
+ids = set()
+for path in pathlib.Path(sys.argv[1]).glob('*.json'):
+    try:
+        ids.add(json.loads(path.read_text())['profile_id'])
+    except Exception:
+        pass
+print(len(ids))
+PY
+)
+            if [ "$ids" -gt 1 ]; then
+              divergent_rounds=$((divergent_rounds + 1))
+            fi
+            rm -rf "$root"
+          done
+          printf -- '- process failures across 640 starts: `%s`\n' "$total_failures" >> "$report"
+          printf -- '- rounds returning multiple profile IDs: `%s`\n\n' "$divergent_rounds" >> "$report"
+
+          printf '## Repeated profile process suite\n\n' >> "$report"
+          profile_failures=0
+          for round in $(seq 1 12); do
+            cargo test --test profile_authority -- --test-threads=1 \
+              >"bughunt-artifact/profile-$round.log" 2>&1 || profile_failures=$((profile_failures + 1))
+          done
+          printf -- '- failures: `%s` of 12\n' "$profile_failures" >> "$report"
+
+      - name: Generate source-risk inventory
+        shell: bash
+        run: |
+          {
+            echo '# Strata source-risk inventory'
+            echo
+            echo 'Patterns: panic paths, ignored results, silent defaults, fixed temporary names, wall-clock backup names, renames, and environment authority.'
+            echo
+            grep -RInE 'unwrap\(|expect\(|panic!|todo!|unimplemented!|let _ =|\.ok\(\)|unwrap_or_default\(|with_extension\("tmp"\)|%Y%m%d_%H%M%S|fs::rename\(|var_os\(' src tests || true
+          } > bughunt-artifact/source-risk-inventory.md
+          {
+            echo '# Repository files'
+            echo
+            find src tests -maxdepth 5 -type f | sort
+          } > bughunt-artifact/repository-map.md
+
+      - name: Upload bug-hunt artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: strata-deep-bug-hunt
+          path: bughunt-artifact
+          if-no-files-found: error
