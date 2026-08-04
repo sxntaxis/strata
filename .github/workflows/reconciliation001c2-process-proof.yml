@@ -28,11 +28,14 @@ jobs:
           components: rustfmt, clippy
 
       - name: Add process proof
-        run: python tools/reconciliation001c2-process-proof.py
+        run: |
+          python tools/reconciliation001c2-process-proof.py
+          python tools/reconciliation001c2-process-proof-fix.py
 
       - name: Remove temporary proof machinery
         run: |
           rm -f tools/reconciliation001c2-process-proof.py
+          rm -f tools/reconciliation001c2-process-proof-fix.py
           rm -f .github/workflows/reconciliation001c2-process-proof.yml
 
       - name: Format
