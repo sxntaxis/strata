@@ -46,3 +46,29 @@ new = """assert_eq!(
 if text.count(old) != 2:
     raise SystemExit("active draft proof metadata marker missing")
 path.write_text(text.replace(old, new))
+
+path = Path("src/app.rs")
+text = path.read_text()
+replacements = [
+    (
+        'fn categories(before_switch: bool) -> Vec<Category> {\n        vec![\n            category(DRIFT_CATEGORY_ID.0, "idle", ""),\n            category(1, "Previous", if before_switch { "focus" } else { "" }),\n            category(2, "Next", "next task"),\n        ]\n    }',
+        'fn categories(_before_switch: bool) -> Vec<Category> {\n        vec![\n            category(DRIFT_CATEGORY_ID.0, "idle", ""),\n            category(1, "Previous", "focus"),\n            category(2, "Next", "next task"),\n        ]\n    }',
+    ),
+    (
+        'assert_eq!(previous.description, "");\n        assert_eq!(next.description, "next task");',
+        'assert_eq!(previous.description, "focus");\n        assert_eq!(next.description, "next task");',
+    ),
+    (
+        'fn categories(before_finish: bool) -> Vec<Category> {\n        vec![\n            category(DRIFT_CATEGORY_ID.0, "idle", ""),\n            category(1, "Work", if before_finish { "focus" } else { "" }),\n        ]\n    }',
+        'fn categories(_before_finish: bool) -> Vec<Category> {\n        vec![\n            category(DRIFT_CATEGORY_ID.0, "idle", ""),\n            category(1, "Work", "focus"),\n        ]\n    }',
+    ),
+    (
+        'assert_eq!(work.description, "");',
+        'assert_eq!(work.description, "focus");',
+    ),
+]
+for old, new in replacements:
+    if text.count(old) != 1:
+        raise SystemExit(f"legacy metadata preservation marker missing: {old[:40]}")
+    text = text.replace(old, new, 1)
+path.write_text(text)
