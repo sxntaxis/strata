@@ -38,5 +38,12 @@ pub fn get_keymap_path() -> PathBuf {
 ''',
 )
 path = Path("src/legacy_category_lifecycle.rs")
-content = path.read_text().replace("storage::write_private_json_atomic", "storage::write_json_atomic")
+content = path.read_text()
+content = content.replace("storage::write_private_json_atomic", "storage::write_json_atomic")
+content = content.replace("collections::{BTreeMap, BTreeSet}", "collections::BTreeSet")
+content = content.replace("use ratatui::style::Color;\n", "")
+content = content.replace(
+    "    daily_contribution_from_slices(operational_day, width, height, &slices)\n",
+    "    Ok(daily_contribution_from_slices(operational_day, width, height, &slices))\n",
+)
 path.write_text(content)
