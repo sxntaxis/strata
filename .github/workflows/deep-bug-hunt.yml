@@ -3,6 +3,8 @@ name: deep-bug-hunt
 on:
   push:
     branches: [audit/001-deep-bug-hunt]
+  pull_request:
+    branches: [main]
 
 jobs:
   audit:
