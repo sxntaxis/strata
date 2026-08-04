@@ -1,1 +1,1 @@
-profile authority trigger 5
+profile authority trigger 6
