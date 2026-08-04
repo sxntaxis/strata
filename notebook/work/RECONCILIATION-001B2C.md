@@ -1,10 +1,10 @@
 ---
 id: RECONCILIATION-001B2C
 kind: work
-state: active
-authority: working
+state: accepted
+authority: accepted
 created: 2026-08-02
-updated: 2026-08-02
+updated: 2026-08-03
 ---
 
 # RECONCILIATION-001B2C — clear-all sediment and idle-reset custody
@@ -39,6 +39,7 @@ The resulting runtime checkpoint carries one deterministic clear-all receipt bin
 - prior active category, description, and UTC start;
 - resulting active category, description, and UTC start;
 - whether idle reset occurred;
+- canonical prior elapsed seconds;
 - explicit affected operational days;
 - an empty canonical `SandState`.
 
@@ -77,3 +78,32 @@ Startup validates the receipt and resulting checkpoint generation before ordinar
 ## Boundary
 
 This unit does not yet close issue #10. Initial active-start/checkpoint coherence, final transition-edge sediment timing, and user-visible recovery cutoff/reconstruction semantics remain subsequent bounded work.
+
+
+## Implemented result
+
+- committed idle and non-idle session history is never deleted by clear-all;
+- idle clears start one new provisional idle generation without a completed row;
+- non-idle active stable identity, description, canonical elapsed, and UTC start survive;
+- SQLite owns one immediate transaction across active state, empty canonical sediment, every explicit daily replacement/deletion, and resulting checkpoint receipt;
+- legacy prepared publication rolls memory back before receipt durability and replays exact active/grid state before deriving daily contributions;
+- operation identity binds canonical elapsed and the complete affected-day set;
+- non-empty clear-all sediment payloads and ambiguous receipt boundaries fail closed;
+- every SQLite kill point (`before-write`, `active`, `sand`, `daily`, `checkpoint`, `commit`) rolls all authorities back;
+- cross-day idle intervals name every touched operational day, while non-idle clear names only the operation day;
+- stale now-empty daily artifacts are deleted explicitly.
+
+## Certification
+
+- formatting: pass;
+- strict Clippy, all targets/features, warnings denied: pass;
+- 215 library tests: pass;
+- 9 CLI lifecycle process tests: pass;
+- 6 configuration-authority tests: pass;
+- 1 report-help regression test: pass;
+- 12 SQLite/TUI process tests: pass;
+- 2 temporal-authority tests: pass;
+- 3 terminal-lifecycle PTY process tests: pass;
+- temporary transformation and audit machinery: absent from the permanent tree.
+
+The unit is accepted as a partial completion of issue #10. It does not claim initial active-start/checkpoint atomicity, complete transition-edge sediment attribution, or final user-visible recovery cutoff/reconstruction semantics.

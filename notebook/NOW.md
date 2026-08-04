@@ -3,17 +3,17 @@ id: NOW-001
 kind: status
 state: active
 created: 2026-08-01
-updated: 2026-08-02
+updated: 2026-08-03
 authority: working
-summary: Legacy switch and normal finish now use prepared receipts with idempotent kill-point replay; recovery preserves archived meaning. Issue #10 remains open for clear-all/reset, initial start, sediment-edge, and cutoff semantics.
-next: Implement RECONCILIATION-001B2C for clear-all/reset custody, then close the remaining initial-start and recovery-presentation gaps.
+summary: Legacy switch, finish, and clear-all now use deterministic prepared receipts with idempotent replay; committed history survives clear-all and SQLite publishes the operation atomically. Issue #10 remains open for initial start, remaining sediment-edge, and cutoff semantics.
+next: Complete issue #10 through initial active-start/checkpoint coherence, exact remaining transition-edge sediment attribution, and visible recovery cutoff/reconstruction semantics.
 ---
 
 # NOW — Strata
 
 ## Current phase
 
-The SQLite migration, startup authority, temporal, domain, reporting, sediment, interaction, category-integrity, active/checkpoint generation-coherence, and legacy switch/finish-replay units are complete.
+The SQLite migration, startup authority, temporal, domain, reporting, sediment, interaction, category-integrity, active/checkpoint generation-coherence, and legacy switch/finish/clear-all-replay units are complete.
 
 Strata now has:
 
@@ -37,7 +37,11 @@ Strata now has:
 - idempotent finish replay across session, catalog, sediment, and daily-contribution effects;
 - archived-safe recovery reload/flush and schema-2 emergency exports;
 - whole-second/subsecond transition validation consistent with canonical ledger semantics;
-- strict legacy session identity and temporal payload validation.
+- strict legacy session identity and temporal payload validation;
+- receipt-governed clear-all that preserves committed history and resets only provisional idle;
+- one SQLite clear-all transaction for active, empty sediment, explicit affected days, and resulting checkpoint;
+- deterministic legacy clear-all replay that restores exact canonical elapsed and grid state before daily reconstruction;
+- six-point SQLite rollback certification and cross-day stale-artifact deletion proofs.
 
 The project remains in **post-program issue reconciliation**.
 
@@ -76,17 +80,17 @@ The project remains in **post-program issue reconciliation**.
 - **RECONCILIATION-001B1** — partial issue #10: active/checkpoint generation coherence and semantic-edge refresh.
 - **RECONCILIATION-001B2A** — partial issue #10: prepared legacy switch receipts and idempotent kill-point replay.
 - **RECONCILIATION-001B2B** — partial issue #10: prepared legacy finish receipts, multi-authority replay, and archived recovery custody.
+- **RECONCILIATION-001B2C** — partial issue #10: non-destructive receipt-governed clear-all/provisional-idle reset with atomic SQLite publication and deterministic legacy replay.
 
 ## Active sequence
 
-1. Implement RECONCILIATION-001B2C: clear-all/reset receipt custody; then address initial active-start/checkpoint coherence, transition-edge sediment reconciliation, and user-visible recovery cutoff semantics.
+1. Complete issue #10 through initial active-start/checkpoint coherence, exact remaining transition-edge sediment reconciliation, and user-visible recovery cutoff semantics.
 2. Define the merge/reassignment and permanent-deletion transaction needed to complete issue #13.
 3. Later domain/UI distinction work under issue #22.
 4. Later profile authority, including complete isolation and deliberate switching under issue #15.
 
 ## Current risks
 
-- Legacy clear-all/reset still crosses session, sediment, daily-contribution, and checkpoint authorities without a certified receipt protocol.
 - SQLite initial active start and first checkpoint publication remain separate operations.
 - Exact sediment classification at active transition boundaries has not been certified against receipt replay.
 - The recovery interface does not yet expose a complete deterministic cutoff and uncertainty statement for reconstructed elapsed time.
@@ -97,4 +101,4 @@ The project remains in **post-program issue reconciliation**.
 
 ## Next
 
-Implement **RECONCILIATION-001B2C** for clear-all/reset. Bind deleted idle history, cleared sediment, replacement active state, daily contributions, and checkpoint evidence to one replayable operation. After that, reconcile initial active-start evidence and expose checkpoint capture, recovery target, reconstructed duration, and deterministic cutoff policy before issue #10 can close.
+Complete the remaining issue #10 units. First reconcile initial active-session creation with first checkpoint evidence. Then certify exact remaining sediment attribution at transition edges and expose checkpoint capture, recovery target, reconstructed duration, deterministic cutoff, and uncertainty in the recovery interface. After issue #10 closes, return to the category merge/reassignment and permanent-deletion transaction required by issue #13.

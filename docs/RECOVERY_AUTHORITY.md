@@ -1,9 +1,9 @@
 # Recovery authority
 
 Status: partially implemented and certified
-Current completed unit: RECONCILIATION-001B2B
+Current completed unit: RECONCILIATION-001B2C
 Issue in progress: #10
-Last reviewed: 2026-08-02
+Last reviewed: 2026-08-03
 
 ## Purpose
 
@@ -116,6 +116,23 @@ Kill-point tests certify receipt-only, receipt-plus-session, receipt-plus-sessio
 
 Normal legacy finish now persists the cleared active description. Legacy recovery flush and reload preserve active and archived category catalogs, archived session references, and archived sediment identities. Emergency recovery JSON schema 2 includes every category with an explicit `archived` flag.
 
+## Clear-all and provisional-idle reset receipts
+
+**Clear all sand and reset idle timer** is one receipt-governed operation, not a hidden ledger deletion.
+
+- every committed session row, including idle history, is preserved;
+- placed and pending canonical sediment become empty;
+- an active idle interval is discarded only as provisional state and replaced by a new idle generation at the operation timestamp;
+- a non-idle active generation preserves its stable identity, category, description, canonical elapsed duration, and UTC start;
+- the receipt binds the operation timestamp, prior and resulting active state, canonical prior elapsed seconds, the complete sorted affected-day set, and an empty canonical `SandState`;
+- affected days remain explicit even when the resulting ledger contribution is empty, so stale daily artifacts are deleted rather than becoming undiscoverable.
+
+SQLite applies active-generation replacement when required, empty sediment, every explicit daily-contribution replacement or deletion, and the resulting checkpoint receipt in one immediate transaction. Existing completed history is neither inserted nor deleted. Fault injection at `before-write`, `active`, `sand`, `daily`, `checkpoint`, and `commit` proves complete rollback.
+
+Legacy-file authority publishes the prepared resulting checkpoint and receipt before later effects. Prepared publication failure restores prior tracker, session, and sediment memory. Startup validates the receipt before ordinary detached recovery, restores the checkpoint's canonical grid and exact resulting active interval in memory, republishes empty sediment, reconciles every explicit operational day idempotently, and clears the receipt only after convergence. Repeated replay cannot duplicate elapsed time or restore pre-clear sediment.
+
+Receipt identity includes canonical elapsed and the affected-day list. Changing either invalidates replay identity. A receipt whose sand payload is non-empty, whose active classification changes, whose elapsed value diverges from its UTC interval beyond the accepted live-clock tolerance, or whose days are malformed, duplicated, or unsorted fails closed.
+
 ## Bounded sediment recovery
 
 The bounded sediment rules in `docs/SEDIMENT_AUTHORITY.md` remain authoritative:
@@ -138,16 +155,9 @@ Panic restoration returns the host terminal to normal state but does not claim a
 
 Mandatory Ctrl-C during visible persistence recovery exports current recovery evidence before requesting exit.
 
-## Remaining legacy transitions
+## Remaining issue #10 recovery work
 
-Legacy switch and normal finish now have certified receipt protocols. Clear-all/reset remains outside that boundary because it also mutates idle-session history and sediment state.
-
-Until a dedicated reset unit completes it:
-
-- issue #10 remains open;
-- reset multi-file atomicity is not claimed;
-- recovery must retain evidence and fail visibly rather than inventing cleared history;
-- switch or finish certification cannot be generalized to reset.
+Legacy switch, normal finish, and clear-all/provisional-idle reset now have certified receipt protocols. Issue #10 remains open for the initial active-start/checkpoint window, exact transition-edge sediment attribution beyond the clear-all contract, and user-visible recovery cutoff/reconstruction semantics.
 
 ## Initial active start
 
@@ -170,11 +180,11 @@ This presentation and policy remain unresolved. Recovery authority must not impl
 
 ## Certification
 
-RECONCILIATION-001B1, RECONCILIATION-001B2A, and RECONCILIATION-001B2B pass:
+RECONCILIATION-001B1, RECONCILIATION-001B2A, RECONCILIATION-001B2B, and RECONCILIATION-001B2C pass:
 
 - formatting;
 - strict Clippy with all targets/features and warnings denied;
-- 205 library tests;
+- 215 library tests;
 - 9 CLI lifecycle tests;
 - 6 configuration-authority tests;
 - 1 report-help regression test;
@@ -182,13 +192,12 @@ RECONCILIATION-001B1, RECONCILIATION-001B2A, and RECONCILIATION-001B2B pass:
 - 2 temporal-authority tests;
 - 3 terminal-lifecycle PTY process tests.
 
-Focused proofs cover transactional SQLite checkpoint retirement, protected recovery evidence, startup identity quarantine, immediate semantic-edge refresh, prepared legacy switch rollback, exact/idempotent session reconciliation, strict receipt payload validation, subsecond whole-second boundaries, all persisted switch and finish kill points, receipt retention after publication failure, multi-day finish reconciliation, archived-authority reload, and schema-2 emergency export custody.
+Focused proofs cover transactional SQLite checkpoint retirement, protected recovery evidence, startup identity quarantine, immediate semantic-edge refresh, prepared legacy switch and finish rollback, exact/idempotent session reconciliation, strict receipt payload validation, subsecond whole-second boundaries, all persisted switch and finish kill points, clear-all receipt identity over canonical elapsed and affected days, exact active-state staging before legacy daily reconstruction, cross-day idle authority, non-idle identity preservation, stale now-empty daily deletion, all six SQLite clear-all transaction kill points, archived-authority reload, and schema-2 emergency export custody.
 
 ## Unresolved boundary
 
 Full crash-recovery authority still requires:
 
-- a stable legacy clear-all/reset receipt with kill-point replay certification;
 - initial active-start/checkpoint coherence;
 - exact sediment classification at transition boundaries;
 - explicit user-visible recovery cutoff and uncertainty semantics;
