@@ -892,6 +892,13 @@ mod tests {
                 [],
             )
             .expect("schema 7 must retain typed daily contributions");
+        let snapshots = repository.list_sand_snapshots().unwrap();
+        assert!(
+            snapshots
+                .iter()
+                .any(|snapshot| snapshot.snapshot_kind
+                    == repository::SnapshotKind::DailyContribution)
+        );
     }
 
     #[test]

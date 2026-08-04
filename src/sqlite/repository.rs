@@ -150,6 +150,7 @@ pub(crate) struct SandStateRecord {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SnapshotKind {
     Daily,
+    DailyContribution,
     Manual,
     FormationEnd,
     Recovery,
@@ -159,6 +160,7 @@ impl SnapshotKind {
     fn as_str(self) -> &'static str {
         match self {
             Self::Daily => "daily",
+            Self::DailyContribution => "daily-contribution",
             Self::Manual => "manual",
             Self::FormationEnd => "formation_end",
             Self::Recovery => "recovery",
@@ -168,6 +170,7 @@ impl SnapshotKind {
     fn parse(value: &str) -> Result<Self, RepositoryError> {
         match value {
             "daily" => Ok(Self::Daily),
+            "daily-contribution" => Ok(Self::DailyContribution),
             "manual" => Ok(Self::Manual),
             "formation_end" => Ok(Self::FormationEnd),
             "recovery" => Ok(Self::Recovery),
@@ -848,7 +851,11 @@ fn validate_snapshot(snapshot: &NewSandSnapshotRecord<'_>) -> Result<(), Reposit
             "snapshot quantum must be positive".to_string(),
         ));
     }
-    if snapshot.snapshot_kind == SnapshotKind::Daily && snapshot.operational_day.is_none() {
+    if matches!(
+        snapshot.snapshot_kind,
+        SnapshotKind::Daily | SnapshotKind::DailyContribution
+    ) && snapshot.operational_day.is_none()
+    {
         return Err(RepositoryError::InvalidInput(
             "daily snapshots require an operational day".to_string(),
         ));

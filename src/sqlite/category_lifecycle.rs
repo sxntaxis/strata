@@ -1342,6 +1342,22 @@ mod tests {
         );
         assert!(count_checkpoint_category_references(&checkpoint, 2).unwrap() > 0);
 
+        let daily_json: String = repository
+            .connection
+            .query_row(
+                "SELECT payload_json FROM sand_snapshots
+                 WHERE snapshot_kind = 'daily-contribution'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let daily: SedimentSnapshot = serde_json::from_str(&daily_json).unwrap();
+        assert_eq!(
+            count_snapshot_category(&daily, 1).unwrap().total().unwrap(),
+            0
+        );
+        assert!(count_snapshot_category(&daily, 2).unwrap().total().unwrap() > 0);
+
         let residual = reference_counts_on(&repository.connection, 1).unwrap();
         assert_eq!(residual.total().unwrap(), 0);
         let receipt_count: i64 = repository
