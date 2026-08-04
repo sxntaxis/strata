@@ -114,7 +114,17 @@ impl App {
                 }
             }
         } else {
-            storage::load_sand_state(&storage::get_sand_state_path())
+            match storage::try_load_sand_state(&storage::get_sand_state_path()) {
+                Ok(value) => value,
+                Err(error) => {
+                    self.record_storage_result_for::<()>(
+                        PersistenceOperation::StateReload,
+                        RecoveryAction::ReloadAuthority,
+                        Err(error),
+                    );
+                    return;
+                }
+            }
         };
         let Some(state) = state else {
             return;
@@ -127,7 +137,13 @@ impl App {
             .chain(self.archived_categories.iter().cloned())
             .map(|category| category.id)
             .collect::<std::collections::HashSet<_>>();
-        self.sand_engine.restore_state(&state, &valid_category_ids);
+        if let Err(error) = self.sand_engine.restore_state(&state, &valid_category_ids) {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::StateReload,
+                RecoveryAction::ReloadAuthority,
+                Err(error),
+            );
+        }
     }
 
     pub(super) fn load_daily_sediment_snapshot(

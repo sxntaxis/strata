@@ -676,49 +676,45 @@ pub fn get_time_log_path() -> PathBuf {
     get_data_dir().join("time_log.csv")
 }
 
-pub fn load_sand_state(path: &Path) -> Option<SandState> {
+pub fn try_load_sand_state(path: &Path) -> Result<Option<SandState>, String> {
     if !path.exists() {
-        return None;
+        return Ok(None);
     }
 
-    match read_json::<SandState>(path) {
-        Ok(state) if state.version == SandState::VERSION => Some(state),
-        Ok(_) => {
-            eprintln!("Warning: Unsupported sand state version, ignoring saved layout");
-            None
-        }
-        Err(e) => {
-            eprintln!("Warning: Could not load sand state: {}", e);
-            None
-        }
+    let state = read_json::<SandState>(path)
+        .map_err(|error| format!("Could not load sand state {}: {error}", path.display()))?;
+    if state.version != SandState::VERSION && state.version != SandState::LEGACY_VERSION {
+        return Err(format!(
+            "Unsupported sand state version {} in {}",
+            state.version,
+            path.display()
+        ));
     }
+    Ok(Some(state))
 }
 
 pub fn save_sand_state(path: &Path, state: &SandState) -> Result<(), String> {
     write_json_atomic(path, state)
 }
 
-pub fn load_category_tags(path: &Path) -> CategoryTagsState {
+pub fn try_load_category_tags(path: &Path) -> Result<CategoryTagsState, String> {
     if !path.exists() {
-        return CategoryTagsState::default();
+        return Ok(CategoryTagsState::default());
     }
 
-    match read_json::<CategoryTagsState>(path) {
-        Ok(mut state) if state.version == CategoryTagsState::VERSION => {
-            for tags in state.tags_by_category.values_mut() {
-                tags.retain(|tag| !tag.trim().is_empty());
-            }
-            state
-        }
-        Ok(_) => {
-            eprintln!("Warning: Unsupported category tags version, ignoring saved tags");
-            CategoryTagsState::default()
-        }
-        Err(e) => {
-            eprintln!("Warning: Could not load category tags: {}", e);
-            CategoryTagsState::default()
-        }
+    let mut state = read_json::<CategoryTagsState>(path)
+        .map_err(|error| format!("Could not load category tags {}: {error}", path.display()))?;
+    if state.version != CategoryTagsState::VERSION {
+        return Err(format!(
+            "Unsupported category tags version {} in {}",
+            state.version,
+            path.display()
+        ));
     }
+    for tags in state.tags_by_category.values_mut() {
+        tags.retain(|tag| !tag.trim().is_empty());
+    }
+    Ok(state)
 }
 
 pub fn save_category_tags(path: &Path, tags_state: &CategoryTagsState) -> Result<(), String> {
@@ -1196,7 +1192,9 @@ mod tests {
         };
 
         save_sand_state(&path, &state).unwrap();
-        let loaded = load_sand_state(&path).expect("sand state should load");
+        let loaded = try_load_sand_state(&path)
+            .unwrap()
+            .expect("sand state should load");
         assert_eq!(loaded, state);
 
         delete_file_if_exists(&path).unwrap();
@@ -1224,7 +1222,7 @@ mod tests {
             .insert(0, vec!["idle".to_string(), "break".to_string()]);
 
         save_category_tags(&path, &state).unwrap();
-        let loaded = load_category_tags(&path);
+        let loaded = try_load_category_tags(&path).unwrap();
         assert_eq!(loaded, state);
 
         delete_file_if_exists(&path).unwrap();
