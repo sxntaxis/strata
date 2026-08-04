@@ -58,12 +58,6 @@ text = replace_once(
 )
 text = replace_once(
     text,
-    "        let keybindings::LoadedKeybindings {\n            keymap,\n            runtime_settings,\n            time_log_path: _,\n        } = loaded;",
-    "        let keybindings::LoadedKeybindings {\n            keymap,\n            runtime_settings,\n        } = loaded;",
-    "app loaded keybindings",
-)
-text = replace_once(
-    text,
     "        set_runtime_settings(self.runtime_settings);\n        storage::set_runtime_storage_settings(storage::RuntimeStorageSettings {\n            time_log_path: loaded.time_log_path,\n        });",
     "        set_runtime_settings(self.runtime_settings);",
     "hot runtime storage reload",
