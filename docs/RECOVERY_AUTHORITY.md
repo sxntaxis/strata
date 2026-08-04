@@ -1,7 +1,7 @@
 # Recovery authority
 
 Status: partially implemented and certified
-Current completed unit: RECONCILIATION-001B3A
+Current completed unit: RECONCILIATION-001B3B
 Issue in progress: #10
 Last reviewed: 2026-08-03
 
@@ -149,6 +149,21 @@ Legacy-file authority publishes the prepared resulting checkpoint and receipt be
 
 Receipt identity includes canonical elapsed and the affected-day list. Changing either invalidates replay identity. A receipt whose sand payload is non-empty, whose active classification changes, whose elapsed value diverges from its UTC interval beyond the accepted live-clock tolerance, or whose days are malformed, duplicated, or unsorted fails closed.
 
+## Exact transition-edge sediment
+
+Chronological transition timestamps and sediment formation now share one boundary.
+
+- before an immediate switch, clear, provisional-idle reset, or normal finish, simulation settles through the selected UTC boundary under the outgoing active category;
+- a grain due exactly at the boundary belongs to the outgoing interval; the first later grain belongs to the resulting category;
+- queued mutations at or before the boundary are processed in timestamp order after each preceding segment is settled under its then-authoritative category;
+- settlement uses checked periodic arithmetic and compressed FIFO runs, never one replay iteration per missed second;
+- existing canonical topology is preserved and skipped physics is explicit projection loss rather than mass or category loss;
+- clear operations occur only after pre-boundary mass is settled, so cleared elapsed mass cannot reappear afterward;
+- an uninitialized live `0×0` canvas preserves due mass as pending runs without inventing dimensions, while detached persisted-checkpoint recovery continues to reject an empty canvas;
+- settlement failure blocks the requested transition and enters existing visible recovery custody.
+
+The same settlement helper owns immediate and queued mutation boundaries. Normal finish settles before ledger reconciliation, so completed history and canonical sediment terminate at one timestamp.
+
 ## Bounded sediment recovery
 
 The bounded sediment rules in `docs/SEDIMENT_AUTHORITY.md` remain authoritative:
@@ -173,7 +188,7 @@ Mandatory Ctrl-C during visible persistence recovery exports current recovery ev
 
 ## Remaining issue #10 recovery work
 
-Legacy switch, normal finish, clear-all/provisional-idle reset, and initial SQLite active generation now have certified coherence boundaries. Issue #10 remains open only for exact transition-edge sediment attribution beyond the clear-all contract and user-visible recovery cutoff/reconstruction semantics.
+Legacy switch, normal finish, clear-all/provisional-idle reset, initial SQLite active generation, and transition-edge sediment now have certified coherence boundaries. Issue #10 remains open only for user-visible recovery cutoff/reconstruction semantics.
 
 ## User-visible recovery cutoff
 
@@ -190,11 +205,11 @@ This presentation and policy remain unresolved. Recovery authority must not impl
 
 ## Certification
 
-RECONCILIATION-001B1, RECONCILIATION-001B2A, RECONCILIATION-001B2B, RECONCILIATION-001B2C, and RECONCILIATION-001B3A pass:
+RECONCILIATION-001B1, RECONCILIATION-001B2A, RECONCILIATION-001B2B, RECONCILIATION-001B2C, RECONCILIATION-001B3A, and RECONCILIATION-001B3B pass:
 
 - formatting;
 - strict Clippy with all targets/features and warnings denied;
-- 219 library tests;
+- 223 library tests;
 - 9 CLI lifecycle tests;
 - 6 configuration-authority tests;
 - 1 report-help regression test;
@@ -202,12 +217,11 @@ RECONCILIATION-001B1, RECONCILIATION-001B2A, RECONCILIATION-001B2B, RECONCILIATI
 - 2 temporal-authority tests;
 - 3 terminal-lifecycle PTY process tests.
 
-Focused proofs cover transactional SQLite checkpoint retirement, protected recovery evidence, startup identity quarantine, immediate semantic-edge refresh, prepared legacy switch and finish rollback, exact/idempotent session reconciliation, strict receipt payload validation, subsecond whole-second boundaries, all persisted switch and finish kill points, clear-all receipt identity over canonical elapsed and affected days, exact active-state staging before legacy daily reconstruction, cross-day idle authority, non-idle identity preservation, stale now-empty daily deletion, all six SQLite clear-all transaction kill points, atomic initial active/checkpoint publication, four bootstrap rollback boundaries, pre-existing checkpoint preservation, real TUI failure/retry, archived-authority reload, and schema-2 emergency export custody.
+Focused proofs cover transactional SQLite checkpoint retirement, protected recovery evidence, startup identity quarantine, immediate semantic-edge refresh, prepared legacy switch and finish rollback, exact/idempotent session reconciliation, strict receipt payload validation, subsecond whole-second boundaries, all persisted switch and finish kill points, clear-all receipt identity over canonical elapsed and affected days, exact active-state staging before legacy daily reconstruction, cross-day idle authority, non-idle identity preservation, stale now-empty daily deletion, all six SQLite clear-all transaction kill points, atomic initial active/checkpoint publication, four bootstrap rollback boundaries, pre-existing checkpoint preservation, real TUI failure/retry, exact outgoing-category boundary attribution, post-clear non-reappearance, billion-second bounded settlement, uninitialized-canvas mass preservation, archived-authority reload, and schema-2 emergency export custody.
 
 ## Unresolved boundary
 
 Full crash-recovery authority still requires:
 
-- exact sediment classification at transition boundaries;
 - explicit user-visible recovery cutoff and uncertainty semantics;
 - any future safe queued-mutation replay based on stable cross-authority receipts.

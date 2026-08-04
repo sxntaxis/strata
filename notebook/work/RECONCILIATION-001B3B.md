@@ -1,8 +1,8 @@
 ---
 id: RECONCILIATION-001B3B
 kind: work
-state: active
-authority: working
+state: accepted
+authority: accepted
 created: 2026-08-03
 updated: 2026-08-03
 ---
@@ -40,3 +40,31 @@ Queued mutations already replay simulation to their recorded timestamp before ap
 ## Boundary
 
 This unit does not close issue #10. Visible checkpoint capture, recovery target, reconstructed duration, deterministic cutoff, and uncertainty semantics remain the final bounded recovery unit.
+
+
+## Implemented result
+
+- immediate switch, clear, provisional-idle reset, and normal finish settle simulation through one selected UTC boundary before changing chronological authority;
+- queued mutations at or before that boundary remain timestamp-ordered and each preceding segment settles under its authoritative category;
+- a grain due exactly at the boundary belongs to the outgoing category and the first later grain belongs to the resulting category;
+- settlement uses checked periodic arithmetic and compressed pending runs, including billion-second gaps without iterative replay;
+- existing canonical topology and FIFO category order are preserved while skipped physics remains explicit projection loss;
+- pre-clear elapsed mass is settled before clearing and cannot reappear afterward;
+- live uninitialized `0×0` canvases retain due mass as pending runs without invented dimensions;
+- detached persisted-checkpoint recovery remains strict and continues to reject an empty canvas;
+- settlement failure blocks the requested transition under visible persistence recovery.
+
+## Certification
+
+- formatting: pass;
+- strict Clippy, all targets/features, warnings denied: pass;
+- 223 library tests: pass;
+- 9 CLI lifecycle process tests: pass;
+- 6 configuration-authority tests: pass;
+- 1 report-help regression test: pass;
+- 13 SQLite/TUI process tests: pass;
+- 2 temporal-authority tests: pass;
+- 3 terminal-lifecycle PTY process tests: pass;
+- temporary transformation, diagnostic, and workflow machinery: absent from the permanent tree.
+
+The unit is accepted as a partial completion of issue #10. User-visible deterministic recovery cutoff, reconstruction, and uncertainty semantics remain the final unresolved boundary.
