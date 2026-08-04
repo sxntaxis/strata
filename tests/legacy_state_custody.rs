@@ -1,5 +1,6 @@
 #![cfg(target_os = "linux")]
 
+// These process proofs require damaged authority files to remain byte-for-byte untouched.
 use std::{
     fs,
     io::Write,
