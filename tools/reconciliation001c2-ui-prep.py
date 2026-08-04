@@ -43,6 +43,26 @@ if legacy_desired not in content or legacy_marker not in content:
 content = content.replace(legacy_desired, current_desired, 1)
 content = content.replace(legacy_marker, current_marker, 1)
 
+# Normalize the persistence-operation label marker to current terminology.
+content = content.replace(
+    '''            Self::CategoryArchive => "category archive",
+            Self::CategoryLifecycle => "category lifecycle",
+            Self::CategoryTagsSync => "category tags sync",
+''',
+    '''            Self::CategoryArchive => "category archive",
+            Self::CategoryLifecycle => "category lifecycle",
+            Self::CategoryTagsSync => "category-tag synchronization",
+''',
+)
+content = content.replace(
+    '''            Self::CategoryArchive => "category archive",
+            Self::CategoryTagsSync => "category tags sync",
+''',
+    '''            Self::CategoryArchive => "category archive",
+            Self::CategoryTagsSync => "category-tag synchronization",
+''',
+)
+
 # The retired-ID high-watermark is now added by the post-transform adapter
 # against the current load-state structure, so remove the obsolete earlier block.
 start = content.find('replace_once(\n    "src/sqlite/tui_runtime.rs",')
