@@ -21,7 +21,9 @@ use crate::{
     sqlite, storage,
 };
 
-use super::{App, QueuedMutation, QueuedMutationEventRecord, QueuedMutationRecord};
+use super::{
+    App, QueuedMutation, QueuedMutationEventRecord, QueuedMutationRecord, RecoveryStatement,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PersistenceOperation {
@@ -632,7 +634,7 @@ impl App {
             })
             .collect();
         let bundle = EmergencyRecoveryBundle {
-            schema_version: 2,
+            schema_version: 3,
             created_at_utc: now.to_rfc3339_opts(SecondsFormat::Millis, true),
             failure: EmergencyFailure {
                 operation: recovery.failure.operation.to_string(),
@@ -656,6 +658,7 @@ impl App {
                 .to_rfc3339_opts(SecondsFormat::Millis, true),
             pending_mutations,
             checkpoint_recovery_active: self.checkpoint_recovery_active,
+            recovery_statement: self.recovery_statement.clone(),
         };
         write_private_json_atomic(&path, &bundle)?;
         Ok(path)
@@ -843,6 +846,7 @@ struct EmergencyRecoveryBundle {
     simulation_time_utc: String,
     pending_mutations: Vec<QueuedMutationEventRecord>,
     checkpoint_recovery_active: bool,
+    recovery_statement: Option<RecoveryStatement>,
 }
 
 #[derive(Serialize)]
@@ -974,6 +978,79 @@ mod tests {
                 .iter()
                 .filter(|category| category.id != 7)
                 .all(|category| !category.archived)
+        );
+    }
+
+    #[test]
+    fn emergency_export_schema_three_carries_exact_recovery_statement() {
+        let captured = chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 8, 3, 18, 0, 2).unwrap();
+        let target = chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 8, 3, 18, 0, 7).unwrap();
+        let statement = RecoveryStatement {
+            checkpoint_captured_at_utc: captured,
+            checkpoint_simulation_at_utc: captured,
+            recovery_target_utc: target,
+            reconstructed_duration_nanos: 5_000_000_000,
+            recovered_interval_class: super::super::RecoveredIntervalClass::Reconstructed,
+            post_target_class: super::super::PostTargetClass::ProvisionalLiveTime,
+            active_stable_id: Some("stable-1".to_string()),
+            active_category_id: 1,
+            active_description: "Focused".to_string(),
+            active_session_started_at_utc: captured,
+            cutoff_policy: "persisted target; no post-target time is counted as recovered"
+                .to_string(),
+        };
+        let bundle = EmergencyRecoveryBundle {
+            schema_version: 3,
+            created_at_utc: target.to_rfc3339(),
+            failure: EmergencyFailure {
+                operation: "checkpoint recovery".to_string(),
+                class: PersistenceFailureClass::Commit,
+                detail: "injected".to_string(),
+                authority_path: None,
+                occurred_at_utc: target.to_rfc3339(),
+            },
+            categories: Vec::new(),
+            category_tags: storage::CategoryTagsState::default(),
+            sessions: Vec::new(),
+            active_session: Some(EmergencyActiveSession {
+                stable_id: Some("stable-1".to_string()),
+                category_id: 1,
+                description: "Focused".to_string(),
+                started_at_utc: captured.to_rfc3339(),
+            }),
+            sand_state: crate::sand::SandState {
+                version: crate::sand::SandState::VERSION,
+                grid_width: 2,
+                grid_height: 2,
+                grains: Vec::new(),
+                frame_count: 0,
+                sweep_left_to_right: true,
+                rng_state: 1,
+                pending_grains: Vec::new(),
+                pending_runs: Vec::new(),
+            },
+            simulation_time_utc: captured.to_rfc3339(),
+            pending_mutations: Vec::new(),
+            checkpoint_recovery_active: true,
+            recovery_statement: Some(statement),
+        };
+        let value = serde_json::to_value(bundle).unwrap();
+        assert_eq!(value["schema_version"], 3);
+        let exported_target = chrono::DateTime::parse_from_rfc3339(
+            value["recovery_statement"]["recovery_target_utc"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap()
+        .with_timezone(&Utc);
+        assert_eq!(exported_target, target);
+        assert_eq!(
+            value["recovery_statement"]["recovered_interval_class"],
+            "reconstructed"
+        );
+        assert_eq!(
+            value["recovery_statement"]["post_target_class"],
+            "provisional-live-time"
         );
     }
 

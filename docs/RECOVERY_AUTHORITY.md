@@ -1,8 +1,8 @@
 # Recovery authority
 
-Status: partially implemented and certified
-Current completed unit: RECONCILIATION-001B3B
-Issue in progress: #10
+Status: implemented and certified
+Current completed unit: RECONCILIATION-001B3C
+Completed issue: #10
 Last reviewed: 2026-08-03
 
 ## Purpose
@@ -130,7 +130,7 @@ Startup recognizes a finish receipt before ordinary active recovery. It validate
 
 Kill-point tests certify receipt-only, receipt-plus-session, receipt-plus-session-plus-catalog, and receipt-plus-session-plus-catalog-plus-sand states. A later publication failure retains the receipt. Retry also reconciles all affected days before receipt deletion, including multi-day sessions.
 
-Normal legacy finish now persists the cleared active description. Legacy recovery flush and reload preserve active and archived category catalogs, archived session references, and archived sediment identities. Emergency recovery JSON schema 2 includes every category with an explicit `archived` flag.
+Normal legacy finish now persists the cleared active description. Legacy recovery flush and reload preserve active and archived category catalogs, archived session references, and archived sediment identities. Emergency recovery JSON schema 3 includes every category with an explicit `archived` flag and carries the structured recovery statement when one exists.
 
 ## Clear-all and provisional-idle reset receipts
 
@@ -186,42 +186,69 @@ Panic restoration returns the host terminal to normal state but does not claim a
 
 Mandatory Ctrl-C during visible persistence recovery exports current recovery evidence before requesting exit.
 
-## Remaining issue #10 recovery work
+## Visible deterministic recovery cutoff
 
-Legacy switch, normal finish, clear-all/provisional-idle reset, initial SQLite active generation, and transition-edge sediment now have certified coherence boundaries. Issue #10 remains open only for user-visible recovery cutoff/reconstruction semantics.
+Every successful checkpoint recovery now creates one structured acknowledgment statement before ordinary controls resume.
 
-## User-visible recovery cutoff
+The statement exposes:
 
-Current checkpoint recovery reconstructs from persisted checkpoint evidence toward a fixed recovery target. The final product contract must expose:
+- active stable identity under SQLite, or explicit legacy-file generation wording;
+- active category, description, and original active-session UTC start;
+- checkpoint capture UTC;
+- checkpoint simulation UTC, the last sediment instant represented directly by the durable payload;
+- one recovery target UTC persisted before bounded reconstruction;
+- reconstructed duration from simulation UTC through target UTC;
+- recovered-interval classification: `exact` when reconstruction duration is zero, otherwise `reconstructed`;
+- post-target classification: `provisional live time`;
+- the cutoff policy: retry reuses the persisted target, and no later live time is counted as recovered history.
 
-- checkpoint capture time;
-- recovery target time;
-- active category and description;
-- reconstructed elapsed duration;
-- whether the interval is exact, provisional, or reconstructed;
-- the deterministic cutoff policy applied.
+Chronology validation requires:
 
-This presentation and policy remain unresolved. Recovery authority must not imply that elapsed time after the last durable evidence is exact without showing its reconstruction basis.
+```text
+active start <= durable simulation <= checkpoint capture <= recovery target
+```
+
+Impossible ordering fails closed before recovery is presented as successful.
+
+The acknowledgment modal blocks ordinary controls until Enter or Esc. Mandatory emergency quit remains available. Visible persistence recovery has higher priority and preserves the statement for later acknowledgment.
+
+SQLite claim/retry reuses `recovery_target_utc` already persisted in the checkpoint payload. A failed recovery commit followed by a later restart cannot move the target forward merely because wall time advanced. Process certification waits beyond the original target, retries the recovering checkpoint, and verifies the modal still displays the original UTC cutoff and `RECONSTRUCTED -> PROVISIONAL LIVE TIME` classification.
+
+Emergency recovery export schema 3 serializes the same structured statement. The modal and export therefore project one evidence object rather than separately reconstructed UI text.
+
+## Issue #10 closure
+
+Issue #10 is complete. Its original acceptance obligations are now covered by:
+
+- bounded, topology-preserving reconstruction without unbounded physics replay;
+- active/checkpoint identity and transaction coherence;
+- prepared legacy switch, finish, and clear-all receipts with idempotent kill-point replay;
+- non-destructive clear-all custody;
+- atomic initial SQLite active generation and first checkpoint;
+- exact outgoing-category sediment settlement at transition boundaries;
+- persisted deterministic cutoff reuse;
+- visible exact/reconstructed/provisional classification;
+- structured emergency export evidence;
+- repeated process failure/restart certification.
+
+Future queued-mutation replay, if ever introduced, still requires stable cross-authority receipt identity. It is not an unimplemented part of the current recovery contract because unsupported queued checkpoint mutations continue to fail closed.
 
 ## Certification
 
-RECONCILIATION-001B1, RECONCILIATION-001B2A, RECONCILIATION-001B2B, RECONCILIATION-001B2C, RECONCILIATION-001B3A, and RECONCILIATION-001B3B pass:
+RECONCILIATION-001B1, RECONCILIATION-001B2A, RECONCILIATION-001B2B, RECONCILIATION-001B2C, RECONCILIATION-001B3A, RECONCILIATION-001B3B, and RECONCILIATION-001B3C pass:
 
 - formatting;
 - strict Clippy with all targets/features and warnings denied;
-- 223 library tests;
+- 228 library tests;
 - 9 CLI lifecycle tests;
 - 6 configuration-authority tests;
 - 1 report-help regression test;
-- 13 SQLite/TUI process tests;
+- 14 SQLite/TUI process tests;
 - 2 temporal-authority tests;
 - 3 terminal-lifecycle PTY process tests.
 
-Focused proofs cover transactional SQLite checkpoint retirement, protected recovery evidence, startup identity quarantine, immediate semantic-edge refresh, prepared legacy switch and finish rollback, exact/idempotent session reconciliation, strict receipt payload validation, subsecond whole-second boundaries, all persisted switch and finish kill points, clear-all receipt identity over canonical elapsed and affected days, exact active-state staging before legacy daily reconstruction, cross-day idle authority, non-idle identity preservation, stale now-empty daily deletion, all six SQLite clear-all transaction kill points, atomic initial active/checkpoint publication, four bootstrap rollback boundaries, pre-existing checkpoint preservation, real TUI failure/retry, exact outgoing-category boundary attribution, post-clear non-reappearance, billion-second bounded settlement, uninitialized-canvas mass preservation, archived-authority reload, and schema-2 emergency export custody.
+Focused proofs cover transactional SQLite checkpoint retirement, protected recovery evidence, startup identity quarantine, immediate semantic-edge refresh, prepared legacy switch and finish rollback, exact/idempotent session reconciliation, strict receipt payload validation, subsecond whole-second boundaries, all persisted switch and finish kill points, clear-all receipt identity over canonical elapsed and affected days, exact active-state staging before legacy daily reconstruction, cross-day idle authority, non-idle identity preservation, stale now-empty daily deletion, all six SQLite clear-all transaction kill points, atomic initial active/checkpoint publication, four bootstrap rollback boundaries, pre-existing checkpoint preservation, real TUI failure/retry, exact outgoing-category boundary attribution, post-clear non-reappearance, billion-second bounded settlement, uninitialized-canvas mass preservation, monotonic recovery-statement chronology, exact versus reconstructed classification, persisted cutoff reuse after failed commit and delayed retry, acknowledgment input custody, archived-authority reload, and schema-3 emergency export parity.
 
-## Unresolved boundary
+## Unsupported future extension
 
-Full crash-recovery authority still requires:
-
-- explicit user-visible recovery cutoff and uncertainty semantics;
-- any future safe queued-mutation replay based on stable cross-authority receipts.
+Safe replay of queued checkpoint mutations would require stable cross-authority receipt identity. Current unsupported queued mutation evidence fails closed and is not represented as recoverable authority.

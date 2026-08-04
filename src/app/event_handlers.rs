@@ -54,6 +54,13 @@ impl App {
             return self.handle_persistence_recovery_key(key);
         }
 
+        if self.recovery_statement.is_some() {
+            if self.keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
+                return true;
+            }
+            return self.handle_recovery_statement_key(key);
+        }
+
         if self.keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
             return true;
         }
