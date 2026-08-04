@@ -1,0 +1,59 @@
+name: reconciliation001c2-core
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: reconciliation001c2-core
+  cancel-in-progress: true
+
+jobs:
+  core:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: reconciliation/001c2-legacy-category-lifecycle
+          fetch-depth: 0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Wire legacy lifecycle core
+        run: python tools/reconciliation001c2-core.py
+
+      - name: Remove temporary core machinery
+        run: |
+          rm -f tools/reconciliation001c2-core.py
+          rm -f .github/workflows/reconciliation001c2-core.yml
+
+      - name: Format
+        run: cargo fmt --all
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Strict Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test --all-targets --all-features
+
+      - name: Commit clean legacy core
+        run: |
+          if git diff --quiet && git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "feat(category): add crash-safe legacy lifecycle core"
+          git push origin HEAD:reconciliation/001c2-legacy-category-lifecycle
