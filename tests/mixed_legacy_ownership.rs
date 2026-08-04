@@ -6,7 +6,7 @@ use std::{
     path::PathBuf,
     process::{Child, Command, Output, Stdio},
     thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 struct Profile {
@@ -71,26 +71,23 @@ impl Drop for Profile {
     }
 }
 
-fn wait_for_active(profile: &Profile, child: &mut Child) {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < deadline {
-        assert!(
-            child.try_wait().unwrap().is_none(),
-            "TUI exited before publishing active state"
-        );
-        if profile.active_path().exists() {
-            return;
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
-    panic!("TUI did not publish active state before deadline");
-}
-
 #[test]
 fn cli_cannot_stop_generation_owned_by_live_legacy_tui() {
     let profile = Profile::new("tui-cli-stop");
+    let started = profile.run_cli(&["start", "tui-owned", "--category", "Work"]);
+    assert!(
+        started.status.success(),
+        "could not seed active generation: {}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    assert!(profile.active_path().exists());
+
     let mut tui = profile.launch_tui();
-    wait_for_active(&profile, &mut tui);
+    thread::sleep(Duration::from_millis(1_200));
+    assert!(
+        tui.try_wait().unwrap().is_none(),
+        "TUI exited before it could own the seeded generation"
+    );
 
     let stop = profile.run_cli(&["stop"]);
     assert!(
