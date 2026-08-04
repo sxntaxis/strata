@@ -27,7 +27,7 @@ use crate::{
     },
     sand::{
         RecoveryTiming, SandEngine, SandState, SandStateGrain, SedimentSnapshot,
-        recover_detached_sediment,
+        recover_detached_sediment, settle_transition_sediment,
     },
     sqlite, storage, temporal,
 };
@@ -89,6 +89,32 @@ struct PaletteEntry {
     title: String,
     search_text: String,
     hint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TransitionSedimentSettlement {
+    state: SandState,
+    spawn_remainder: Duration,
+    physics_remainder: Duration,
+    added_grains: usize,
+    skipped_physics_events: usize,
+}
+
+fn settle_transition_sediment_segment(
+    base_state: &SandState,
+    valid_category_ids: &HashSet<CategoryId>,
+    active_category_id: CategoryId,
+    timing: RecoveryTiming,
+) -> Result<TransitionSedimentSettlement, String> {
+    let recovered =
+        settle_transition_sediment(base_state, valid_category_ids, active_category_id, timing)?;
+    Ok(TransitionSedimentSettlement {
+        state: recovered.state,
+        spawn_remainder: recovered.spawn_remainder,
+        physics_remainder: recovered.physics_remainder,
+        added_grains: recovered.added_grains,
+        skipped_physics_events: recovered.skipped_physics_events,
+    })
 }
 
 fn valid_category_ids_for_catalog(
@@ -1288,26 +1314,32 @@ impl App {
         }
     }
 
-    fn end_active_session_now(&mut self) -> Option<usize> {
-        self.end_active_session_at(Utc::now(), SessionClockMode::LiveMonotonic)
-    }
-
     fn prepare_active_finish_for_exit(&mut self) -> Option<usize> {
-        if self.sqlite_database_path.is_some() {
-            return self.end_active_session_now();
+        let finished_at_utc = Utc::now();
+        if let Err(error) = self.settle_transition_boundary(finished_at_utc) {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::ActiveFinish,
+                RecoveryAction::FinishAndExit,
+                Err(error),
+            );
+            return None;
         }
-        let interval =
-            match self.reconciled_active_interval(Utc::now(), SessionClockMode::LiveMonotonic) {
-                Ok(interval) => interval,
-                Err(error) => {
-                    self.record_storage_result_for::<()>(
-                        PersistenceOperation::ActiveFinish,
-                        RecoveryAction::FinishAndExit,
-                        Err(error),
-                    );
-                    return None;
-                }
-            };
+        if self.sqlite_database_path.is_some() {
+            return self.end_active_session_at(finished_at_utc, SessionClockMode::LiveMonotonic);
+        }
+        let interval = match self
+            .reconciled_active_interval(finished_at_utc, SessionClockMode::LiveMonotonic)
+        {
+            Ok(interval) => interval,
+            Err(error) => {
+                self.record_storage_result_for::<()>(
+                    PersistenceOperation::ActiveFinish,
+                    RecoveryAction::FinishAndExit,
+                    Err(error),
+                );
+                return None;
+            }
+        };
         let previous_tracker = self.time_tracker.clone();
         let previous_session = self.session.clone();
         let previous_category_id = self.time_tracker.active_category_id();
@@ -1984,16 +2016,83 @@ impl App {
         self.sync_drift_idle_state();
     }
 
+    fn settle_simulation_segment_to(&mut self, target_utc: DateTime<Utc>) -> Result<(), String> {
+        if target_utc <= self.simulation.simulation_time_utc {
+            return Ok(());
+        }
+        let elapsed = (target_utc - self.simulation.simulation_time_utc)
+            .to_std()
+            .map_err(|error| error.to_string())?;
+        let mut valid_category_ids = self
+            .time_tracker
+            .categories_for_storage()
+            .into_iter()
+            .chain(self.archived_categories.iter().cloned())
+            .map(|category| category.id)
+            .collect::<HashSet<_>>();
+        valid_category_ids.insert(DRIFT_CATEGORY_ID);
+        let settlement = settle_transition_sediment_segment(
+            &self.sand_engine.snapshot_state(),
+            &valid_category_ids,
+            self.time_tracker.active_category_id(),
+            RecoveryTiming {
+                elapsed,
+                spawn_accumulator: self.simulation.spawn_accumulator,
+                physics_accumulator: self.simulation.physics_accumulator,
+                spawn_period: Duration::from_millis(TIME_SETTINGS.tick_ms),
+                physics_period: Duration::from_millis(TIME_SETTINGS.physics_ms),
+            },
+        )?;
+        self.sand_engine
+            .restore_state(&settlement.state, &valid_category_ids);
+        self.simulation.spawn_accumulator = settlement.spawn_remainder;
+        self.simulation.physics_accumulator = settlement.physics_remainder;
+        self.simulation.simulation_time_utc = target_utc;
+        if settlement.added_grains > 0 || settlement.skipped_physics_events > 0 {
+            self.render_needed = true;
+        }
+        Ok(())
+    }
+
+    fn settle_transition_boundary(&mut self, boundary_utc: DateTime<Utc>) -> Result<(), String> {
+        loop {
+            let Some(next) = self.simulation.pending_mutations.front().cloned() else {
+                break;
+            };
+            if next.execute_at_utc > boundary_utc {
+                break;
+            }
+            self.settle_simulation_segment_to(next.execute_at_utc)?;
+            self.simulation.pending_mutations.pop_front();
+            self.apply_mutation_at(
+                next.mutation,
+                next.execute_at_utc,
+                SessionClockMode::HistoricalWall,
+            );
+            if let Some(recovery) = self.persistence_recovery.as_ref() {
+                return Err(recovery.failure.summary());
+            }
+        }
+        self.settle_simulation_segment_to(boundary_utc)
+    }
+
     fn queue_or_apply_mutation(&mut self, mutation: QueuedMutation) {
+        let scheduled_at_utc = Utc::now();
         if self.is_catching_up() || !self.simulation.pending_mutations.is_empty() {
             self.simulation
                 .pending_mutations
                 .push_back(QueuedMutationEvent {
-                    execute_at_utc: Utc::now(),
+                    execute_at_utc: scheduled_at_utc,
                     mutation,
                 });
+        } else if let Err(error) = self.settle_transition_boundary(scheduled_at_utc) {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::SandStateSave,
+                RecoveryAction::ReloadAuthority,
+                Err(error),
+            );
         } else {
-            self.apply_mutation_at(mutation, Utc::now(), SessionClockMode::LiveMonotonic);
+            self.apply_mutation_at(mutation, scheduled_at_utc, SessionClockMode::LiveMonotonic);
         }
         self.render_needed = true;
     }
@@ -2987,6 +3086,142 @@ pub fn run_ui(loaded: keybindings::LoadedKeybindings) -> Result<(), io::Error> {
                 cleanup_result,
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod transition_edge_tests {
+    use std::{collections::HashSet, time::Duration};
+
+    use super::{RecoveryTiming, settle_transition_sediment_segment};
+    use crate::{
+        domain::CategoryId,
+        sand::{SandState, SandStateGrain},
+    };
+
+    fn categories() -> HashSet<CategoryId> {
+        HashSet::from([CategoryId::new(0), CategoryId::new(1), CategoryId::new(2)])
+    }
+
+    fn empty_state() -> SandState {
+        SandState {
+            version: SandState::VERSION,
+            grid_width: 2,
+            grid_height: 2,
+            grains: Vec::new(),
+            frame_count: 7,
+            sweep_left_to_right: true,
+            rng_state: 11,
+            pending_grains: Vec::new(),
+            pending_runs: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn exact_boundary_grain_belongs_to_outgoing_category() {
+        let outgoing = settle_transition_sediment_segment(
+            &empty_state(),
+            &categories(),
+            CategoryId::new(1),
+            RecoveryTiming {
+                elapsed: Duration::from_millis(100),
+                spawn_accumulator: Duration::from_millis(900),
+                physics_accumulator: Duration::ZERO,
+                spawn_period: Duration::from_secs(1),
+                physics_period: Duration::from_millis(50),
+            },
+        )
+        .unwrap();
+        assert_eq!(outgoing.added_grains, 1);
+        assert_eq!(outgoing.spawn_remainder, Duration::ZERO);
+        assert_eq!(outgoing.state.pending_runs.len(), 1);
+        assert_eq!(outgoing.state.pending_runs[0].category_id, 1);
+        assert_eq!(outgoing.state.pending_runs[0].count, 1);
+
+        let resulting = settle_transition_sediment_segment(
+            &outgoing.state,
+            &categories(),
+            CategoryId::new(2),
+            RecoveryTiming {
+                elapsed: Duration::from_secs(1),
+                spawn_accumulator: outgoing.spawn_remainder,
+                physics_accumulator: outgoing.physics_remainder,
+                spawn_period: Duration::from_secs(1),
+                physics_period: Duration::from_millis(50),
+            },
+        )
+        .unwrap();
+        assert_eq!(resulting.state.pending_runs.len(), 2);
+        assert_eq!(resulting.state.pending_runs[0].category_id, 1);
+        assert_eq!(resulting.state.pending_runs[0].count, 1);
+        assert_eq!(resulting.state.pending_runs[1].category_id, 2);
+        assert_eq!(resulting.state.pending_runs[1].count, 1);
+    }
+
+    #[test]
+    fn cleared_pre_boundary_mass_cannot_reappear_after_clear() {
+        let settled = settle_transition_sediment_segment(
+            &empty_state(),
+            &categories(),
+            CategoryId::new(1),
+            RecoveryTiming {
+                elapsed: Duration::from_millis(100),
+                spawn_accumulator: Duration::from_millis(900),
+                physics_accumulator: Duration::ZERO,
+                spawn_period: Duration::from_secs(1),
+                physics_period: Duration::from_millis(50),
+            },
+        )
+        .unwrap();
+        assert_eq!(settled.added_grains, 1);
+
+        let mut cleared = settled.state;
+        cleared.grains.clear();
+        cleared.pending_runs.clear();
+        let before_next_tick = settle_transition_sediment_segment(
+            &cleared,
+            &categories(),
+            CategoryId::new(2),
+            RecoveryTiming {
+                elapsed: Duration::from_millis(999),
+                spawn_accumulator: settled.spawn_remainder,
+                physics_accumulator: settled.physics_remainder,
+                spawn_period: Duration::from_secs(1),
+                physics_period: Duration::from_millis(50),
+            },
+        )
+        .unwrap();
+        assert_eq!(before_next_tick.added_grains, 0);
+        assert!(before_next_tick.state.grains.is_empty());
+        assert!(before_next_tick.state.pending_runs.is_empty());
+    }
+
+    #[test]
+    fn large_transition_gap_is_bounded_and_preserves_topology() {
+        let mut state = empty_state();
+        state.grains.push(SandStateGrain {
+            x: 0,
+            y: 1,
+            category_id: 1,
+        });
+        let settled = settle_transition_sediment_segment(
+            &state,
+            &categories(),
+            CategoryId::new(2),
+            RecoveryTiming {
+                elapsed: Duration::from_secs(1_000_000_000),
+                spawn_accumulator: Duration::ZERO,
+                physics_accumulator: Duration::ZERO,
+                spawn_period: Duration::from_secs(1),
+                physics_period: Duration::from_millis(50),
+            },
+        )
+        .unwrap();
+        assert_eq!(settled.added_grains, 1_000_000_000);
+        assert_eq!(settled.state.grains, state.grains);
+        assert_eq!(settled.state.pending_runs.len(), 1);
+        assert_eq!(settled.state.pending_runs[0].category_id, 2);
+        assert_eq!(settled.state.pending_runs[0].count, 1_000_000_000);
     }
 }
 

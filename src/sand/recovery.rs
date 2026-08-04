@@ -65,7 +65,44 @@ pub(crate) fn recover_detached_sediment(
     active_category_id: CategoryId,
     timing: RecoveryTiming,
 ) -> Result<RecoveredSediment, String> {
-    validate_checkpoint_state(base_state, valid_category_ids)?;
+    recover_sediment(
+        base_state,
+        valid_category_ids,
+        active_category_id,
+        timing,
+        CanvasPolicy::RequireInitialized,
+    )
+}
+
+pub(crate) fn settle_transition_sediment(
+    base_state: &SandState,
+    valid_category_ids: &HashSet<CategoryId>,
+    active_category_id: CategoryId,
+    timing: RecoveryTiming,
+) -> Result<RecoveredSediment, String> {
+    recover_sediment(
+        base_state,
+        valid_category_ids,
+        active_category_id,
+        timing,
+        CanvasPolicy::AllowUninitialized,
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CanvasPolicy {
+    RequireInitialized,
+    AllowUninitialized,
+}
+
+fn recover_sediment(
+    base_state: &SandState,
+    valid_category_ids: &HashSet<CategoryId>,
+    active_category_id: CategoryId,
+    timing: RecoveryTiming,
+    canvas_policy: CanvasPolicy,
+) -> Result<RecoveredSediment, String> {
+    validate_sediment_state(base_state, valid_category_ids, canvas_policy)?;
     if !valid_category_ids.contains(&active_category_id) {
         return Err(format!(
             "recovery active category {} does not exist",
@@ -84,9 +121,13 @@ pub(crate) fn recover_detached_sediment(
         timing.physics_period,
     )?;
 
-    let mut engine = SandEngine::new(1, 1);
-    engine.restore_state(base_state, valid_category_ids);
-    let mut state = engine.snapshot_state();
+    let mut state = if base_state.grid_width == 0 && base_state.grid_height == 0 {
+        migrate_uninitialized_state(base_state)?
+    } else {
+        let mut engine = SandEngine::new(1, 1);
+        engine.restore_state(base_state, valid_category_ids);
+        engine.snapshot_state()
+    };
     let pending_mass = state
         .pending_runs
         .iter()
@@ -124,9 +165,35 @@ pub(crate) fn recover_detached_sediment(
     })
 }
 
-fn validate_checkpoint_state(
+fn migrate_uninitialized_state(base_state: &SandState) -> Result<SandState, String> {
+    let mut state = base_state.clone();
+    if state.version == SandState::LEGACY_VERSION {
+        let mut runs: Vec<PendingGrainRun> = Vec::new();
+        for category_id in state.pending_grains.drain(..) {
+            if let Some(last) = runs.last_mut()
+                && last.category_id == category_id
+            {
+                last.count = last
+                    .count
+                    .checked_add(1)
+                    .ok_or_else(|| "legacy pending run exceeds the supported range".to_string())?;
+            } else {
+                runs.push(PendingGrainRun {
+                    category_id,
+                    count: 1,
+                });
+            }
+        }
+        state.pending_runs = runs;
+        state.version = SandState::VERSION;
+    }
+    Ok(state)
+}
+
+fn validate_sediment_state(
     state: &SandState,
     valid_category_ids: &HashSet<CategoryId>,
+    canvas_policy: CanvasPolicy,
 ) -> Result<(), String> {
     if state.version != SandState::VERSION && state.version != SandState::LEGACY_VERSION {
         return Err(format!(
@@ -134,8 +201,16 @@ fn validate_checkpoint_state(
             state.version
         ));
     }
-    if state.grid_width == 0 || state.grid_height == 0 {
-        return Err("recovery sediment canvas must be non-empty".to_string());
+    if (state.grid_width == 0) != (state.grid_height == 0) {
+        return Err("recovery sediment canvas has only one zero dimension".to_string());
+    }
+    if state.grid_width == 0 && state.grid_height == 0 {
+        if canvas_policy == CanvasPolicy::RequireInitialized {
+            return Err("recovery sediment canvas must be non-empty".to_string());
+        }
+        if !state.grains.is_empty() {
+            return Err("uninitialized sediment canvas contains placed grains".to_string());
+        }
     }
     if state.version == SandState::VERSION && !state.pending_grains.is_empty() {
         return Err("version 2 sediment state contains legacy pending grains".to_string());
@@ -187,7 +262,10 @@ fn validate_checkpoint_state(
 
 #[cfg(test)]
 mod tests {
-    use super::{PeriodicAdvance, RecoveryTiming, advance_periodic, recover_detached_sediment};
+    use super::{
+        PeriodicAdvance, RecoveryTiming, advance_periodic, recover_detached_sediment,
+        settle_transition_sediment,
+    };
     use crate::{
         domain::CategoryId,
         sand::{PendingGrainRun, SandState, SandStateGrain},
@@ -340,6 +418,40 @@ mod tests {
         assert_eq!(recovered.state.pending_runs[0].category_id, 2);
         assert_eq!(recovered.state.pending_runs[0].count, 1_000_000_000);
         assert_eq!(recovered.state.grains, base.grains);
+    }
+
+    #[test]
+    fn transition_settlement_preserves_mass_on_uninitialized_canvas() {
+        let state = SandState {
+            version: SandState::VERSION,
+            grid_width: 0,
+            grid_height: 0,
+            grains: Vec::new(),
+            frame_count: 0,
+            sweep_left_to_right: true,
+            rng_state: 1,
+            pending_grains: Vec::new(),
+            pending_runs: Vec::new(),
+        };
+        let timing = RecoveryTiming {
+            elapsed: Duration::from_millis(100),
+            spawn_accumulator: Duration::from_millis(900),
+            physics_accumulator: Duration::ZERO,
+            spawn_period: Duration::from_secs(1),
+            physics_period: Duration::from_millis(50),
+        };
+        assert!(
+            recover_detached_sediment(&state, &categories(), CategoryId::new(1), timing).is_err()
+        );
+        let settled =
+            settle_transition_sediment(&state, &categories(), CategoryId::new(1), timing).unwrap();
+        assert_eq!(settled.state.grid_width, 0);
+        assert_eq!(settled.state.grid_height, 0);
+        assert!(settled.state.grains.is_empty());
+        assert_eq!(settled.state.pending_runs.len(), 1);
+        assert_eq!(settled.state.pending_runs[0].category_id, 1);
+        assert_eq!(settled.state.pending_runs[0].count, 1);
+        assert_eq!(settled.spawn_remainder, Duration::ZERO);
     }
 
     #[test]
