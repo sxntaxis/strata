@@ -78,6 +78,65 @@ pub(crate) fn start_active_session(
     Ok(())
 }
 
+pub(crate) fn start_active_session_with_checkpoint(
+    repository: &mut SqliteRepository,
+    active: &NewActiveSession<'_>,
+    detached_at_utc: &str,
+    simulation_time_utc: &str,
+    payload_json: &str,
+) -> Result<(), CoordinationError> {
+    require_non_empty(active.stable_id, "active stable ID")?;
+    require_non_empty(detached_at_utc, "checkpoint capture timestamp")?;
+    require_non_empty(simulation_time_utc, "checkpoint simulation timestamp")?;
+    require_non_empty(payload_json, "checkpoint payload")?;
+    let transaction = repository
+        .connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)?;
+    maybe_inject_test_fault("active-bootstrap", "before-write")?;
+    if let Some(current) = query_active(&transaction)? {
+        return Err(CoordinationError::ActiveSessionConflict {
+            expected: "no active session".to_string(),
+            actual: current.stable_id,
+        });
+    }
+    let checkpoint: Option<(String, Option<String>)> = transaction
+        .query_row(
+            "SELECT status, active_session_stable_id
+             FROM runtime_checkpoint WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    if let Some((status, identity)) = checkpoint {
+        return Err(CoordinationError::CheckpointConflict {
+            expected: "no checkpoint before initial active generation".to_string(),
+            actual: format!(
+                "{status} for {}",
+                identity.as_deref().unwrap_or("no active identity")
+            ),
+        });
+    }
+
+    insert_active(&transaction, active)?;
+    maybe_inject_test_fault("active-bootstrap", "active")?;
+    transaction.execute(
+        "INSERT INTO runtime_checkpoint (
+            singleton, status, detached_at_utc, simulation_time_utc,
+            active_session_stable_id, payload_json, legacy_import_id
+         ) VALUES (1, 'pending', ?1, ?2, ?3, ?4, NULL)",
+        params![
+            detached_at_utc,
+            simulation_time_utc,
+            active.stable_id,
+            payload_json,
+        ],
+    )?;
+    maybe_inject_test_fault("active-bootstrap", "checkpoint")?;
+    maybe_inject_test_fault("active-bootstrap", "commit")?;
+    transaction.commit()?;
+    Ok(())
+}
+
 pub(crate) fn finish_active_session(
     repository: &mut SqliteRepository,
     expected_active_stable_id: &str,
@@ -1064,6 +1123,113 @@ mod tests {
             boundary_utc_offset_seconds: -21600,
             boundary_start_minutes: 360,
             source,
+        }
+    }
+
+    #[test]
+    fn initial_active_and_checkpoint_commit_as_one_generation() {
+        let path = database_path("initial-generation");
+        let mut repository = SqliteRepository::open(&path).unwrap();
+        repository
+            .create_category(&NewCategoryRecord {
+                name: "Work",
+                description: "",
+                color_index: 0,
+                balance_effect: 1,
+            })
+            .unwrap();
+        let active = NewActiveSession {
+            stable_id: "initial-active",
+            project: "",
+            category_id: 1,
+            description: "Focused",
+            started_at_utc: "2026-08-03T18:00:00Z",
+            recovery_kind: "live",
+        };
+
+        start_active_session_with_checkpoint(
+            &mut repository,
+            &active,
+            "2026-08-03T18:00:00Z",
+            "2026-08-03T18:00:00Z",
+            r#"{"schema_version":3}"#,
+        )
+        .unwrap();
+
+        let active_identity: String = repository
+            .connection
+            .query_row(
+                "SELECT stable_id FROM active_session WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let checkpoint: (String, String, String) = repository
+            .connection
+            .query_row(
+                "SELECT status, active_session_stable_id, payload_json
+                 FROM runtime_checkpoint WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(active_identity, "initial-active");
+        assert_eq!(checkpoint.0, "pending");
+        assert_eq!(checkpoint.1, active_identity);
+        assert_eq!(checkpoint.2, r#"{"schema_version":3}"#);
+        drop(repository);
+        remove_database(&path);
+    }
+
+    #[test]
+    fn initial_active_and_checkpoint_roll_back_at_every_fault_boundary() {
+        for phase in ["before-write", "active", "checkpoint", "commit"] {
+            let path = database_path(&format!("initial-generation-{phase}"));
+            let mut repository = SqliteRepository::open(&path).unwrap();
+            repository
+                .create_category(&NewCategoryRecord {
+                    name: "Work",
+                    description: "",
+                    color_index: 0,
+                    balance_effect: 1,
+                })
+                .unwrap();
+            let active = NewActiveSession {
+                stable_id: "initial-active",
+                project: "",
+                category_id: 1,
+                description: "Focused",
+                started_at_utc: "2026-08-03T18:00:00Z",
+                recovery_kind: "live",
+            };
+            let error = with_test_fault("active-bootstrap", phase, "kill", || {
+                start_active_session_with_checkpoint(
+                    &mut repository,
+                    &active,
+                    "2026-08-03T18:00:00Z",
+                    "2026-08-03T18:00:00Z",
+                    r#"{"schema_version":3}"#,
+                )
+            })
+            .unwrap_err();
+            assert!(matches!(error, CoordinationError::InjectedFailure { .. }));
+            let active_count: i64 = repository
+                .connection
+                .query_row("SELECT count(*) FROM active_session", [], |row| row.get(0))
+                .unwrap();
+            let checkpoint_count: i64 = repository
+                .connection
+                .query_row("SELECT count(*) FROM runtime_checkpoint", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(active_count, 0, "phase {phase} left an orphan active row");
+            assert_eq!(
+                checkpoint_count, 0,
+                "phase {phase} left an orphan checkpoint"
+            );
+            drop(repository);
+            remove_database(&path);
         }
     }
 

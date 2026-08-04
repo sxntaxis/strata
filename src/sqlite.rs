@@ -44,9 +44,10 @@ pub(crate) use tui_runtime::{
     load_state as load_tui_state, quarantine_checkpoint as quarantine_tui_checkpoint,
     replace_recovering_checkpoint as replace_tui_recovering_checkpoint,
     save_checkpoint as save_tui_checkpoint, save_daily_snapshot as save_tui_daily_snapshot,
-    save_sand_state as save_tui_sand_state, switch_active_session as switch_tui_active_session,
-    sync_categories as sync_tui_categories, sync_category_tags as sync_tui_category_tags,
-    sync_sessions as sync_tui_sessions,
+    save_sand_state as save_tui_sand_state,
+    start_active_session_with_checkpoint as start_tui_active_session_with_checkpoint,
+    switch_active_session as switch_tui_active_session, sync_categories as sync_tui_categories,
+    sync_category_tags as sync_tui_category_tags, sync_sessions as sync_tui_sessions,
     update_session_description as update_tui_session_description,
 };
 

@@ -200,6 +200,37 @@ pub(crate) fn ensure_active_session(
     Ok(stable_id)
 }
 
+pub(crate) fn start_active_session_with_checkpoint<T: Serialize>(
+    database_path: &Path,
+    category_id: CategoryId,
+    description: &str,
+    started_at_utc: DateTime<Utc>,
+    detached_at_utc: DateTime<Utc>,
+    simulation_time_utc: DateTime<Utc>,
+    checkpoint: &T,
+) -> Result<String, String> {
+    let mut repository = open_cli_repository(database_path)?;
+    let stable_id = stable_id("tui", started_at_utc);
+    let started = timestamp(started_at_utc);
+    let payload_json = serde_json::to_string(checkpoint).map_err(|error| error.to_string())?;
+    runtime_coordination::start_active_session_with_checkpoint(
+        &mut repository,
+        &NewActiveSession {
+            stable_id: &stable_id,
+            project: "",
+            category_id: as_i64(category_id.0, "category ID")?,
+            description,
+            started_at_utc: &started,
+            recovery_kind: "live",
+        },
+        &timestamp(detached_at_utc),
+        &timestamp(simulation_time_utc),
+        &payload_json,
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(stable_id)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn switch_active_session(
     database_path: &Path,

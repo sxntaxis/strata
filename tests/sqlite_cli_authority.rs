@@ -525,6 +525,46 @@ fn unacknowledged_cli_stop_is_recovered_without_duplicate_session() {
     assert!(stderr(&repeated).contains("No active session"));
 }
 
+#[test]
+fn initial_tui_bootstrap_failure_leaves_no_orphan_generation() {
+    for phase in ["before-write", "active", "checkpoint", "commit"] {
+        let profile = TestProfile::new(&format!("initial-bootstrap-{phase}"));
+        profile.migrate();
+        assert!(profile.activate().status.success());
+        let fault = format!("active-bootstrap:{phase}:commit");
+
+        let tui = profile.run_tui_with_input(b"q", Some(&fault));
+        assert!(
+            !tui.status.success(),
+            "injected {phase} failure unexpectedly succeeded"
+        );
+
+        let connection = Connection::open(profile.database_path()).expect("database should open");
+        let active_count: i64 = connection
+            .query_row("SELECT count(*) FROM active_session", [], |row| row.get(0))
+            .unwrap();
+        let checkpoint_count: i64 = connection
+            .query_row("SELECT count(*) FROM runtime_checkpoint", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(active_count, 0, "phase {phase} left an orphan active row");
+        assert_eq!(
+            checkpoint_count, 0,
+            "phase {phase} left an orphan checkpoint"
+        );
+        drop(connection);
+
+        let retry = profile.run_tui();
+        assert!(
+            retry.status.success(),
+            "retry after {phase} failed: stdout={} stderr={}",
+            stdout(&retry),
+            stderr(&retry)
+        );
+    }
+}
+
 fn recovery_bundle(profile: &TestProfile) -> Value {
     let files = profile.recovery_files();
     assert_eq!(files.len(), 1, "exactly one emergency export is expected");
