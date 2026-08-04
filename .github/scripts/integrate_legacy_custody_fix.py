@@ -22,12 +22,6 @@ path.write_text(text)
 # Authority reload must propagate strict tags/sediment validation for both SQLite and legacy.
 path = Path("src/app/persistence_recovery.rs")
 text = path.read_text()
-text = replace_once(
-    text,
-    '                self.sand_engine.restore_state(&state, &valid_category_ids);',
-    '                self.sand_engine\n                    .restore_state(&state, &valid_category_ids)?;',
-    "sqlite recovery sediment restore",
-)
 old = '''            self.archived_categories = archived_categories;
             self.category_tags = storage::load_category_tags(&storage::get_category_tags_path());
             if let Some(state) = storage::load_sand_state(&storage::get_sand_state_path()) {
@@ -59,6 +53,14 @@ new = '''            self.archived_categories = archived_categories;
             }
 '''
 text = replace_once(text, old, new, "legacy recovery authority")
+old_restore = '                self.sand_engine.restore_state(&state, &valid_category_ids);'
+count = text.count(old_restore)
+if count < 1:
+    raise SystemExit("strict recovery sediment restore: expected at least one remaining marker")
+text = text.replace(
+    old_restore,
+    '                self.sand_engine\n                    .restore_state(&state, &valid_category_ids)?;',
+)
 path.write_text(text)
 
 # Lifecycle preparation is also an authority read and may not default damaged tags.
