@@ -24,11 +24,14 @@ jobs:
           components: rustfmt, clippy
 
       - name: Promote B3B authority
-        run: python tools/reconciliation001b3b-docs.py
+        run: |
+          python tools/reconciliation001b3b-docs-fix.py
+          python tools/reconciliation001b3b-docs.py
 
       - name: Remove temporary documentation machinery
         run: |
           rm -f tools/reconciliation001b3b-docs.py
+          rm -f tools/reconciliation001b3b-docs-fix.py
           rm -f .github/workflows/reconciliation001b3b-docs.yml
 
       - name: Check formatting
