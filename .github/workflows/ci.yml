@@ -30,6 +30,9 @@ jobs:
       - name: Apply strict legacy custody
         run: python3 .github/scripts/apply_legacy_custody_fix.py
 
+      - name: Integrate strict custody callers
+        run: python3 .github/scripts/integrate_legacy_custody_fix.py
+
       - name: Format
         run: cargo fmt --all
 
@@ -43,6 +46,7 @@ jobs:
         if: success()
         run: |
           rm .github/scripts/apply_legacy_custody_fix.py
+          rm .github/scripts/integrate_legacy_custody_fix.py
           cat > .github/workflows/ci.yml <<'YAML'
           name: ci
 
