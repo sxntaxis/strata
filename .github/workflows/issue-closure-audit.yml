@@ -1,6 +1,9 @@
 name: issue-closure-audit
 
 on:
+  push:
+    branches:
+      - reconciliation/002-close-all-issues
   pull_request:
     branches:
       - main
