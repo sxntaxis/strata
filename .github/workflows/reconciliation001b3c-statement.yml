@@ -24,11 +24,14 @@ jobs:
           components: rustfmt, clippy
 
       - name: Apply visible recovery statement
-        run: python tools/reconciliation001b3c-statement.py
+        run: |
+          python tools/reconciliation001b3c-statement.py
+          python tools/reconciliation001b3c-ui-owned.py
 
       - name: Remove temporary machinery
         run: |
           rm -f tools/reconciliation001b3c-statement.py
+          rm -f tools/reconciliation001b3c-ui-owned.py
           rm -f .github/workflows/reconciliation001b3c-statement.yml
 
       - name: Format
