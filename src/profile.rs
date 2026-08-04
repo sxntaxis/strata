@@ -1,5 +1,6 @@
 use std::{
-    fs,
+    fs::{self, OpenOptions},
+    io::{ErrorKind, Write},
     path::{Path, PathBuf},
     sync::OnceLock,
 };
@@ -102,18 +103,23 @@ pub(crate) fn describe() -> serde_json::Value {
 }
 
 fn resolve_context(explicit_root: Option<PathBuf>) -> Result<ProfileContext, String> {
-    let env_profile = nonempty_env("STRATA_PROFILE");
-    let legacy_alias = nonempty_env("STRATA_DATA_DIR");
-    if let (Some(profile), Some(legacy)) = (&env_profile, &legacy_alias)
-        && profile != legacy
-    {
-        return Err(format!(
-            "STRATA_PROFILE ({}) conflicts with legacy STRATA_DATA_DIR ({}); select one complete profile",
-            profile.display(),
-            legacy.display()
-        ));
-    }
-    let root = explicit_root.or(env_profile).or(legacy_alias);
+    let root = if let Some(explicit_root) = explicit_root {
+        Some(explicit_root)
+    } else {
+        let env_profile = nonempty_env("STRATA_PROFILE");
+        let legacy_alias = nonempty_env("STRATA_DATA_DIR");
+        if let (Some(profile), Some(legacy)) = (&env_profile, &legacy_alias)
+            && profile != legacy
+        {
+            return Err(format!(
+                "STRATA_PROFILE ({}) conflicts with legacy STRATA_DATA_DIR ({}); select one complete profile",
+                profile.display(),
+                legacy.display()
+            ));
+        }
+        env_profile.or(legacy_alias)
+    };
+
     if let Some(root) = root {
         let root = absolute_directory(&root)?;
         let data_dir = root.join("data");
@@ -196,18 +202,26 @@ fn ensure_directory(path: &Path) -> Result<(), String> {
 
 fn load_or_create_manifest(path: &Path) -> Result<String, String> {
     if path.exists() {
-        let bytes = fs::read(path)
-            .map_err(|error| format!("cannot read profile manifest {}: {error}", path.display()))?;
-        let manifest: ProfileManifest = serde_json::from_slice(&bytes)
-            .map_err(|error| format!("invalid profile manifest {}: {error}", path.display()))?;
-        validate_manifest(&manifest, path)?;
-        return Ok(manifest.profile_id);
+        return read_manifest(path);
     }
+
     let manifest = ProfileManifest {
         schema_version: PROFILE_SCHEMA_VERSION,
         profile_id: new_uuid_v4(),
     };
-    write_manifest_atomic(path, &manifest)?;
+    if publish_manifest_if_absent(path, &manifest)? {
+        Ok(manifest.profile_id)
+    } else {
+        read_manifest(path)
+    }
+}
+
+fn read_manifest(path: &Path) -> Result<String, String> {
+    let bytes = fs::read(path)
+        .map_err(|error| format!("cannot read profile manifest {}: {error}", path.display()))?;
+    let manifest: ProfileManifest = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("invalid profile manifest {}: {error}", path.display()))?;
+    validate_manifest(&manifest, path)?;
     Ok(manifest.profile_id)
 }
 
@@ -229,21 +243,52 @@ fn validate_manifest(manifest: &ProfileManifest, path: &Path) -> Result<(), Stri
     Ok(())
 }
 
-fn write_manifest_atomic(path: &Path, manifest: &ProfileManifest) -> Result<(), String> {
+fn publish_manifest_if_absent(path: &Path, manifest: &ProfileManifest) -> Result<bool, String> {
     let parent = path
         .parent()
         .ok_or_else(|| format!("profile manifest {} has no parent", path.display()))?;
     ensure_directory(parent)?;
-    let temporary = parent.join(format!(".profile.json.tmp-{}", std::process::id()));
+    let temporary = parent.join(format!(
+        ".profile.json.tmp-{}-{}",
+        std::process::id(),
+        new_uuid_v4()
+    ));
     let bytes = serde_json::to_vec_pretty(manifest).map_err(|error| error.to_string())?;
-    fs::write(&temporary, bytes)
-        .map_err(|error| format!("cannot write profile manifest temporary file: {error}"))?;
-    fs::rename(&temporary, path).map_err(|error| {
+
+    let write_result = (|| -> Result<(), std::io::Error> {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(&bytes)?;
+        file.sync_all()
+    })();
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&temporary);
+        return Err(format!(
+            "cannot write profile manifest temporary file {}: {error}",
+            temporary.display()
+        ));
+    }
+
+    let published = match fs::hard_link(&temporary, path) {
+        Ok(()) => true,
+        Err(error) if error.kind() == ErrorKind::AlreadyExists => false,
+        Err(error) => {
+            let _ = fs::remove_file(&temporary);
+            return Err(format!(
+                "cannot publish profile manifest {}: {error}",
+                path.display()
+            ));
+        }
+    };
+    fs::remove_file(&temporary).map_err(|error| {
         format!(
-            "cannot publish profile manifest {}: {error}",
-            path.display()
+            "cannot remove profile manifest temporary file {}: {error}",
+            temporary.display()
         )
-    })
+    })?;
+    Ok(published)
 }
 
 fn new_uuid_v4() -> String {
