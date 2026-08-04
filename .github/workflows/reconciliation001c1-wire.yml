@@ -28,11 +28,14 @@ jobs:
           components: rustfmt, clippy
 
       - name: Apply lifecycle wiring
-        run: python tools/reconciliation001c1-wire.py
+        run: |
+          python tools/reconciliation001c1-wire.py
+          python tools/reconciliation001c1-schema-fix.py
 
       - name: Remove temporary machinery
         run: |
           rm -f tools/reconciliation001c1-wire.py
+          rm -f tools/reconciliation001c1-schema-fix.py
           rm -f .github/workflows/reconciliation001c1-wire.yml
 
       - name: Format
