@@ -10,6 +10,8 @@ mod constants;
 #[allow(clippy::unnecessary_sort_by)]
 mod domain;
 mod keybindings;
+#[allow(dead_code)]
+mod legacy_category_lifecycle;
 mod legacy_transition;
 #[allow(clippy::manual_checked_ops)]
 mod sand;

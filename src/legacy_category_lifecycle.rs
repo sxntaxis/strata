@@ -1,11 +1,10 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     fs,
     path::{Path, PathBuf},
 };
 
 use chrono::{DateTime, NaiveDate, Utc};
-use ratatui::style::Color;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -417,7 +416,9 @@ pub(crate) fn prepare(
         .find(|existing| existing.operation_id == receipt.operation_id)
     {
         if existing != &receipt {
-            return Err("legacy lifecycle operation ID conflicts with existing receipt".to_string());
+            return Err(
+                "legacy lifecycle operation ID conflicts with existing receipt".to_string(),
+            );
         }
     } else {
         result.ledger.receipts.push(receipt.clone());
@@ -430,7 +431,7 @@ pub(crate) fn prepare(
         result,
     };
     prepared.validate()?;
-    storage::write_private_json_atomic(&paths.prepared_json, &prepared)?;
+    storage::write_json_atomic(&paths.prepared_json, &prepared)?;
     Ok(prepared)
 }
 
@@ -498,8 +499,9 @@ fn load_authority(paths: &LegacyCategoryLifecyclePaths) -> Result<LoadedAuthorit
 
     let mut session_catalog = loaded_categories.categories.clone();
     session_catalog.extend(loaded_categories.archived_categories.iter().cloned());
-    let loaded_sessions = storage::try_load_sessions_from_csv(&paths.sessions_csv, &session_catalog)
-        .map_err(|error| error.to_string())?;
+    let loaded_sessions =
+        storage::try_load_sessions_from_csv(&paths.sessions_csv, &session_catalog)
+            .map_err(|error| error.to_string())?;
     let sessions = loaded_sessions
         .sessions
         .iter()
@@ -585,7 +587,8 @@ fn load_history(directory: &Path) -> Result<Vec<LoadedHistoryArtifact>, String> 
             .and_then(|value| value.to_str())
             .ok_or_else(|| "legacy sand history filename is not UTF-8".to_string())?
             .to_string();
-        if filename.contains('/') || filename.contains('\\') || filename == "." || filename == ".." {
+        if filename.contains('/') || filename.contains('\\') || filename == "." || filename == ".."
+        {
             return Err(format!("unsafe legacy sand history filename {filename}"));
         }
         let payload_json = fs::read_to_string(&path)
@@ -685,8 +688,7 @@ fn build_review_from_authority(
         if let Some(payload) = authority.detached_checkpoint_json.as_deref() {
             if checkpoint_has_transition_receipt(payload)? {
                 return Err(
-                    "detached runtime checkpoint carries unresolved transition custody"
-                        .to_string(),
+                    "detached runtime checkpoint carries unresolved transition custody".to_string(),
                 );
             }
             let value: Value = serde_json::from_str(payload)
@@ -732,7 +734,8 @@ fn build_review_from_authority(
             .as_bytes(),
     );
     let revision = format!("{:016x}", fnv1a(&material));
-    let confirmation_phrase = confirmation_phrase(source_category_id, target_category_id, &revision);
+    let confirmation_phrase =
+        confirmation_phrase(source_category_id, target_category_id, &revision);
     Ok(LegacyCategoryLifecycleReview {
         source,
         target,
@@ -752,7 +755,10 @@ fn stage_result(
     let target_id = review.target.as_ref().map(|target| target.id);
     let mut categories = authority.categories.clone();
     categories.retain(|category| category.id != source_id);
-    let current_ids = categories.iter().map(|category| category.id).collect::<BTreeSet<_>>();
+    let current_ids = categories
+        .iter()
+        .map(|category| category.id)
+        .collect::<BTreeSet<_>>();
     if current_ids.contains(&source_id) {
         return Err("legacy lifecycle staging retained the source category".to_string());
     }
@@ -807,12 +813,12 @@ fn stage_result(
                         .and_then(|day| NaiveDate::parse_from_str(day, "%Y-%m-%d").ok())
                         .is_some_and(|day| affected_days.contains(&day)) =>
             {
-                let day = snapshot
-                    .operational_day
-                    .as_deref()
-                    .ok_or_else(|| {
-                        format!("daily contribution {} has no operational day", artifact.filename)
-                    })?;
+                let day = snapshot.operational_day.as_deref().ok_or_else(|| {
+                    format!(
+                        "daily contribution {} has no operational day",
+                        artifact.filename
+                    )
+                })?;
                 regenerate_daily_contribution(
                     day,
                     snapshot.state.grid_width,
@@ -822,7 +828,10 @@ fn stage_result(
                 .map(|snapshot| serde_json::to_string(&snapshot))
                 .transpose()
                 .map_err(|error| {
-                    format!("cannot serialize daily contribution {}: {error}", artifact.filename)
+                    format!(
+                        "cannot serialize daily contribution {}: {error}",
+                        artifact.filename
+                    )
                 })?
             }
             ParsedHistory::Snapshot(snapshot) => {
@@ -894,7 +903,11 @@ fn stage_result(
 
     let receipt = LegacyLifecycleReceipt {
         operation_id: operation_id(
-            if target_id.is_some() { "merge" } else { "delete" },
+            if target_id.is_some() {
+                "merge"
+            } else {
+                "delete"
+            },
             source_id,
             target_id,
             &review.revision,
@@ -1013,7 +1026,12 @@ fn regenerate_daily_contribution(
             }
         }
     }
-    daily_contribution_from_slices(operational_day, width, height, &slices)
+    Ok(daily_contribution_from_slices(
+        operational_day,
+        width,
+        height,
+        &slices,
+    ))
 }
 
 fn validate_result(result: &LegacyLifecycleResult, source_category_id: u64) -> Result<(), String> {
@@ -1031,7 +1049,11 @@ fn validate_result(result: &LegacyLifecycleResult, source_category_id: u64) -> R
     {
         return Err("legacy lifecycle result retains source session identity".to_string());
     }
-    if result.tags.tags_by_category.contains_key(&source_category_id) {
+    if result
+        .tags
+        .tags_by_category
+        .contains_key(&source_category_id)
+    {
         return Err("legacy lifecycle result retains source tags".to_string());
     }
     if let Some(state) = result.sand_state.as_ref()
@@ -1162,7 +1184,7 @@ fn publish_result(
         &archived_categories,
     )?;
     maybe_inject_test_fault("catalog")?;
-    storage::write_private_json_atomic(&paths.ledger_json, &result.ledger)?;
+    storage::write_json_atomic(&paths.ledger_json, &result.ledger)?;
     maybe_inject_test_fault("ledger")?;
     Ok(())
 }
@@ -1180,8 +1202,12 @@ fn safe_history_path(directory: &Path, filename: &str) -> Result<PathBuf, String
 }
 
 fn write_raw_json_atomic(path: &Path, payload: &str) -> Result<(), String> {
-    let value: Value = serde_json::from_str(payload)
-        .map_err(|error| format!("invalid prepared JSON payload for {}: {error}", path.display()))?;
+    let value: Value = serde_json::from_str(payload).map_err(|error| {
+        format!(
+            "invalid prepared JSON payload for {}: {error}",
+            path.display()
+        )
+    })?;
     storage::write_json_atomic(path, &value)
 }
 
@@ -1223,21 +1249,14 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 }
 
 #[cfg(test)]
-fn test_fault_cell() -> &'static std::sync::RwLock<Option<String>> {
-    static CELL: std::sync::OnceLock<std::sync::RwLock<Option<String>>> =
-        std::sync::OnceLock::new();
-    CELL.get_or_init(|| std::sync::RwLock::new(None))
+thread_local! {
+    static TEST_FAULT: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 fn maybe_inject_test_fault(phase: &str) -> Result<(), String> {
     #[cfg(test)]
-    if test_fault_cell()
-        .read()
-        .ok()
-        .and_then(|guard| guard.clone())
-        .as_deref()
-        == Some(phase)
-    {
+    if TEST_FAULT.with(|fault| fault.borrow().as_deref() == Some(phase)) {
         return Err(format!("injected legacy lifecycle failure at {phase}"));
     }
     let _ = phase;
@@ -1245,15 +1264,20 @@ fn maybe_inject_test_fault(phase: &str) -> Result<(), String> {
 }
 
 #[cfg(test)]
+struct TestFaultReset;
+
+#[cfg(test)]
+impl Drop for TestFaultReset {
+    fn drop(&mut self) {
+        TEST_FAULT.with(|fault| *fault.borrow_mut() = None);
+    }
+}
+
+#[cfg(test)]
 fn with_test_fault<T>(phase: &str, operation: impl FnOnce() -> T) -> T {
-    if let Ok(mut guard) = test_fault_cell().write() {
-        *guard = Some(phase.to_string());
-    }
-    let result = operation();
-    if let Ok(mut guard) = test_fault_cell().write() {
-        *guard = None;
-    }
-    result
+    TEST_FAULT.with(|fault| *fault.borrow_mut() = Some(phase.to_string()));
+    let _reset = TestFaultReset;
+    operation()
 }
 
 #[cfg(test)]
@@ -1266,10 +1290,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        std::env::temp_dir().join(format!(
-            "strata-{label}-{}-{stamp}",
-            std::process::id()
-        ))
+        std::env::temp_dir().join(format!("strata-{label}-{}-{stamp}", std::process::id()))
     }
 
     fn paths(root: &Path) -> LegacyCategoryLifecyclePaths {
@@ -1380,14 +1401,10 @@ mod tests {
         )
         .unwrap();
         let mut tags = storage::CategoryTagsState::default();
-        tags.tags_by_category.insert(
-            1,
-            vec!["source".to_string(), "shared".to_string()],
-        );
-        tags.tags_by_category.insert(
-            2,
-            vec!["target".to_string(), "shared".to_string()],
-        );
+        tags.tags_by_category
+            .insert(1, vec!["source".to_string(), "shared".to_string()]);
+        tags.tags_by_category
+            .insert(2, vec!["target".to_string(), "shared".to_string()]);
         storage::save_category_tags(&paths.category_tags_json, &tags).unwrap();
         storage::save_sand_state(&paths.sand_state_json, &sand_state()).unwrap();
         write_raw_json_atomic(&paths.detached_runtime_json, &checkpoint()).unwrap();
@@ -1439,15 +1456,15 @@ mod tests {
         assert!(!paths.prepared_json.exists());
         let result = load_authority(&paths).unwrap();
         assert!(result.categories.iter().all(|category| category.id != 1));
-        assert!(result.sessions.iter().all(|session| session.category_id == 2));
+        assert!(
+            result
+                .sessions
+                .iter()
+                .all(|session| session.category_id == 2)
+        );
         assert!(!result.tags.tags_by_category.contains_key(&1));
         assert_eq!(
-            result
-                .tags
-                .tags_by_category
-                .get(&2)
-                .cloned()
-                .unwrap(),
+            result.tags.tags_by_category.get(&2).cloned().unwrap(),
             vec!["target", "shared", "source"]
         );
         assert_eq!(
@@ -1509,11 +1526,22 @@ mod tests {
         let root = unique_root("legacy-lifecycle-refusal");
         let paths = paths(&root);
         seed(&paths);
-        assert!(build_review(&paths, 0, Some(2)).unwrap_err().contains("idle"));
-        assert!(build_review(&paths, 1, Some(1)).unwrap_err().contains("differ"));
+        assert!(
+            build_review(&paths, 0, Some(2))
+                .unwrap_err()
+                .contains("idle")
+        );
+        assert!(
+            build_review(&paths, 1, Some(1))
+                .unwrap_err()
+                .contains("differ")
+        );
         let review = build_review(&paths, 1, Some(2)).unwrap();
         let mut tags = storage::load_category_tags(&paths.category_tags_json);
-        tags.tags_by_category.entry(2).or_default().push("changed".to_string());
+        tags.tags_by_category
+            .entry(2)
+            .or_default()
+            .push("changed".to_string());
         storage::save_category_tags(&paths.category_tags_json, &tags).unwrap();
         assert!(
             prepare(
