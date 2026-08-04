@@ -12,7 +12,7 @@ def replace_once(path: str, old: str, new: str) -> None:
 replace_once(
     "src/lib.rs",
     "mod keybindings;\nmod legacy_transition;\n",
-    "mod keybindings;\nmod legacy_category_lifecycle;\nmod legacy_transition;\n",
+    "mod keybindings;\n#[allow(dead_code)]\nmod legacy_category_lifecycle;\nmod legacy_transition;\n",
 )
 replace_once(
     "src/storage.rs",
@@ -26,10 +26,12 @@ pub fn get_keymap_path() -> PathBuf {
     get_state_dir().join("category_tags.json")
 }
 
+#[allow(dead_code)]
 pub fn get_category_lifecycle_prepared_path() -> PathBuf {
     get_state_dir().join("category_lifecycle_prepared.json")
 }
 
+#[allow(dead_code)]
 pub fn get_category_lifecycle_ledger_path() -> PathBuf {
     get_state_dir().join("category_lifecycle_ledger.json")
 }
