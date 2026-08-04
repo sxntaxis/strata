@@ -28,7 +28,7 @@ jobs:
           python tools/reconciliation001b3b-transition.py
           python tools/reconciliation001b3b-typed.py
           python tools/reconciliation001b3b-idle.py
-          python tools/reconciliation001b3b-diagnostic.py
+          python tools/reconciliation001b3b-zero-canvas.py
 
       - name: Remove temporary machinery
         run: |
@@ -36,6 +36,7 @@ jobs:
           rm -f tools/reconciliation001b3b-typed.py
           rm -f tools/reconciliation001b3b-idle.py
           rm -f tools/reconciliation001b3b-diagnostic.py
+          rm -f tools/reconciliation001b3b-zero-canvas.py
           rm -f .github/workflows/reconciliation001b3b-transition.yml
 
       - name: Format
