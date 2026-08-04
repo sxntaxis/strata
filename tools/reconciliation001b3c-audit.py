@@ -53,18 +53,6 @@ replace_once(
     }
 ''',
 )
-replace_once(
-    "src/app/persistence_recovery.rs",
-    '''use super::{
-    App, QueuedMutation, QueuedMutationEventRecord, QueuedMutationRecord, RecoveryStatement,
-};
-''',
-    '''use super::{
-    App, PostTargetClass, QueuedMutation, QueuedMutationEventRecord, QueuedMutationRecord,
-    RecoveredIntervalClass, RecoveryStatement,
-};
-''',
-)
 marker = '''    #[test]
     fn persistence_failure_classes_are_actionable() {
 '''
@@ -77,8 +65,8 @@ test = r'''    #[test]
             checkpoint_simulation_at_utc: captured,
             recovery_target_utc: target,
             reconstructed_duration_nanos: 5_000_000_000,
-            recovered_interval_class: RecoveredIntervalClass::Reconstructed,
-            post_target_class: PostTargetClass::ProvisionalLiveTime,
+            recovered_interval_class: super::super::RecoveredIntervalClass::Reconstructed,
+            post_target_class: super::super::PostTargetClass::ProvisionalLiveTime,
             active_stable_id: Some("stable-1".to_string()),
             active_category_id: 1,
             active_description: "Focused".to_string(),
@@ -97,15 +85,16 @@ test = r'''    #[test]
                 occurred_at_utc: target.to_rfc3339(),
             },
             categories: Vec::new(),
+            category_tags: storage::CategoryTagsState::default(),
             sessions: Vec::new(),
-            active_session: EmergencyActiveSession {
+            active_session: Some(EmergencyActiveSession {
                 stable_id: Some("stable-1".to_string()),
                 category_id: 1,
                 description: "Focused".to_string(),
                 started_at_utc: captured.to_rfc3339(),
-            },
-            sand_state: SandState {
-                version: SandState::VERSION,
+            }),
+            sand_state: crate::sand::SandState {
+                version: crate::sand::SandState::VERSION,
                 grid_width: 2,
                 grid_height: 2,
                 grains: Vec::new(),
