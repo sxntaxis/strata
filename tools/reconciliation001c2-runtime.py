@@ -10,11 +10,6 @@ def replace_once(path: str, old: str, new: str) -> None:
 
 
 replace_once(
-    "src/lib.rs",
-    "#[allow(dead_code)]\nmod legacy_category_lifecycle;",
-    "mod legacy_category_lifecycle;",
-)
-replace_once(
     "src/storage.rs",
     "#[allow(dead_code)]\npub fn get_category_lifecycle_prepared_path() -> PathBuf {",
     "pub fn get_category_lifecycle_prepared_path() -> PathBuf {",
