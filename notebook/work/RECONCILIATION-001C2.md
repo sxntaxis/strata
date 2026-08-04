@@ -98,7 +98,6 @@ Startup detects a prepared receipt before ordinary detached recovery, validates 
 - SQLite TUI lifecycle uses the same review/confirmation surface and delegates mutation to C1;
 - issue #13 closes only after both authorities and the complete interaction/process suite pass.
 
-
 ## Implemented result
 
 - `legacy_category_lifecycle` inventories catalog/session/active/tag/canonical-sediment/daily-artifact/checkpoint references and binds them with a deterministic revision;
