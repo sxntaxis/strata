@@ -255,8 +255,10 @@ fn build_recovery_statement(
     let started_at_utc = checkpoint
         .active_session_started_at_utc
         .ok_or_else(|| "recovery statement has no active-session start".to_string())?;
-    if started_at_utc > target_utc {
-        return Err("recovery statement active session starts after its target".to_string());
+    if started_at_utc > checkpoint.simulation_time_utc {
+        return Err(
+            "recovery statement active session starts after durable simulation time".to_string(),
+        );
     }
     let reconstructed = (target_utc - checkpoint.simulation_time_utc)
         .to_std()
@@ -3283,6 +3285,14 @@ mod recovery_statement_tests {
             build_recovery_statement(&invalid, None, timestamp(5))
                 .unwrap_err()
                 .contains("not monotonic")
+        );
+
+        let mut invalid_start = checkpoint(2, 3);
+        invalid_start.active_session_started_at_utc = Some(timestamp(4));
+        assert!(
+            build_recovery_statement(&invalid_start, None, timestamp(5))
+                .unwrap_err()
+                .contains("starts after durable simulation time")
         );
     }
 }
