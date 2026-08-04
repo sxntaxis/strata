@@ -200,7 +200,10 @@ fn concurrent_first_use_converges_on_one_durable_profile_identity() {
             .filter(|output| !output.status.success())
             .map(stderr)
             .collect::<Vec<_>>();
-        assert!(failures.is_empty(), "concurrent starts failed: {failures:?}");
+        assert!(
+            failures.is_empty(),
+            "concurrent starts failed: {failures:?}"
+        );
 
         let ids = outputs
             .iter()
@@ -213,7 +216,11 @@ fn concurrent_first_use_converges_on_one_durable_profile_identity() {
                     .to_string()
             })
             .collect::<HashSet<_>>();
-        assert_eq!(ids.len(), 1, "workers observed divergent profile IDs: {ids:?}");
+        assert_eq!(
+            ids.len(),
+            1,
+            "workers observed divergent profile IDs: {ids:?}"
+        );
 
         let manifest: serde_json::Value = serde_json::from_slice(
             &fs::read(profile.join("profile.json")).expect("durable profile manifest"),
