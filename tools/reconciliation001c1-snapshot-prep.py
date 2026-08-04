@@ -72,3 +72,22 @@ normalized = '''    let mut category_ids = BTreeSet::new();
 
 '''
 path.write_text(content[:start] + normalized + content[end:])
+
+path = Path("src/sqlite/category_lifecycle.rs")
+content = path.read_text()
+formatted = '''        assert_eq!(
+            count_checkpoint_category_references(&checkpoint, 1).unwrap(),
+            0
+        );
+        assert!(count_checkpoint_category_references(&checkpoint, 2).unwrap() > 0);
+
+        let residual = reference_counts_on(&repository.connection, 1).unwrap();
+'''
+normalized = '''        assert_eq!(count_checkpoint_category_references(&checkpoint, 1).unwrap(), 0);
+        assert!(count_checkpoint_category_references(&checkpoint, 2).unwrap() > 0);
+
+        let residual = reference_counts_on(&repository.connection, 1).unwrap();
+'''
+if formatted not in content:
+    raise SystemExit("formatted lifecycle checkpoint assertion missing")
+path.write_text(content.replace(formatted, normalized, 1))
