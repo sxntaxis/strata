@@ -1,0 +1,157 @@
+name: deep-bug-hunt
+
+on:
+  push:
+    branches: [audit/001-deep-bug-hunt]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Baseline gates
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test --all-features
+          cargo test --release --all-features
+          cargo test --all-features -- --test-threads=1
+
+      - name: Build audit binary
+        run: cargo build --all-features
+
+      - name: Run adversarial probes
+        shell: bash
+        run: |
+          set -u
+          mkdir -p bughunt-artifact
+          report=bughunt-artifact/adversarial-probes.md
+          printf '# Strata adversarial probes\n\n' > "$report"
+          printf 'Commit: `%s`\n\n' "$(git rev-parse HEAD)" >> "$report"
+
+          printf '## Explicit profile precedence\n\n' >> "$report"
+          root=$(mktemp -d)
+          set +e
+          STRATA_PROFILE="$root/env-a" STRATA_DATA_DIR="$root/env-b" \
+            target/debug/strata --profile "$root/cli" profile --json \
+            >"$root/precedence.out" 2>"$root/precedence.err"
+          status=$?
+          set -e
+          printf -- '- exit status: `%s`\n' "$status" >> "$report"
+          printf -- '- stdout: `%s`\n' "$(tr '\n' ' ' < "$root/precedence.out" | sed 's/`/\\`/g')" >> "$report"
+          printf -- '- stderr: `%s`\n\n' "$(tr '\n' ' ' < "$root/precedence.err" | sed 's/`/\\`/g')" >> "$report"
+          rm -rf "$root"
+
+          printf '## Concurrent first-use profile creation\n\n' >> "$report"
+          total_failures=0
+          divergent_runs=0
+          for round in $(seq 1 40); do
+            root=$(mktemp -d)
+            rm -rf "$root"
+            mkdir -p "$root/out"
+            pids=""
+            for worker in $(seq 1 16); do
+              target/debug/strata --profile "$root/profile" profile --json \
+                >"$root/out/$worker.json" 2>"$root/out/$worker.err" &
+              pids="$pids $!"
+            done
+            failures=0
+            for pid in $pids; do
+              wait "$pid" || failures=$((failures + 1))
+            done
+            total_failures=$((total_failures + failures))
+            ids=$(python3 - "$root/out" <<'PY'
+import json
+import pathlib
+import sys
+ids = set()
+for path in pathlib.Path(sys.argv[1]).glob('*.json'):
+    try:
+        ids.add(json.loads(path.read_text())['profile_id'])
+    except Exception:
+        pass
+print(len(ids))
+PY
+)
+            if [ "$ids" -gt 1 ]; then
+              divergent_runs=$((divergent_runs + 1))
+            fi
+            rm -rf "$root"
+          done
+          printf -- '- process failures across 640 starts: `%s`\n' "$total_failures" >> "$report"
+          printf -- '- rounds returning multiple profile IDs: `%s`\n\n' "$divergent_runs" >> "$report"
+
+          printf '## Repeated process suites\n\n' >> "$report"
+          profile_failures=0
+          for round in $(seq 1 12); do
+            cargo test --test profile_authority -- --test-threads=1 \
+              >"bughunt-artifact/profile-$round.log" 2>&1 || profile_failures=$((profile_failures + 1))
+          done
+          printf -- '- profile-authority rerun failures: `%s` of 12\n' "$profile_failures" >> "$report"
+
+      - name: Generate source-risk inventory
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          roots = [Path('src'), Path('tests')]
+          patterns = {
+              'panic-path': re.compile(r'\b(?:unwrap|expect|panic!|todo!|unimplemented!)\b'),
+              'ignored-result': re.compile(r'\blet\s+_\s*=|\.ok\(\)'),
+              'fallback-default': re.compile(r'unwrap_or_default\(|return\s+[^;]*(?:default\(\)|None)'),
+              'exists-then-mutate': re.compile(r'\.exists\(\)'),
+              'fixed-temp-name': re.compile(r'with_extension\("tmp"\)|\.tmp-\{\}'),
+              'wall-clock-name': re.compile(r'format\("%Y%m%d_%H%M%S"\)'),
+              'filesystem-rename': re.compile(r'fs::rename\('),
+              'environment-authority': re.compile(r'std::env|var_os\('),
+          }
+          out = ['# Strata source-risk inventory', '', 'Generated from current branch.', '']
+          counts = {name: 0 for name in patterns}
+          for path in sorted(p for root in roots for p in root.rglob('*.rs')):
+              lines = path.read_text(errors='replace').splitlines()
+              hits = []
+              for i, line in enumerate(lines, 1):
+                  matched = [name for name, rx in patterns.items() if rx.search(line)]
+                  if matched:
+                      for name in matched:
+                          counts[name] += 1
+                      hits.append((i, matched, line.strip()))
+              if hits:
+                  out.extend([f'## `{path}`', ''])
+                  for i, matched, line in hits:
+                      out.append(f'- L{i} [{", ".join(matched)}] `{line.replace("`", "\\`")}`')
+                  out.append('')
+          out.insert(4, '## Totals')
+          out.insert(5, '')
+          for offset, (name, count) in enumerate(sorted(counts.items()), 6):
+              out.insert(offset, f'- {name}: {count}')
+          out.insert(6 + len(counts), '')
+          Path('bughunt-artifact/source-risk-inventory.md').write_text('\n'.join(out) + '\n')
+          PY
+
+      - name: Capture repository map
+        run: |
+          {
+            echo '# Repository files'
+            echo
+            find src tests -type f -maxdepth 5 | sort | sed 's/^/- `/' | sed 's/$/`/'
+          } > bughunt-artifact/repository-map.md
+
+      - name: Upload bug-hunt artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: strata-deep-bug-hunt
+          path: bughunt-artifact
+          if-no-files-found: error
