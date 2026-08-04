@@ -1,10 +1,12 @@
 #![cfg(target_os = "linux")]
 
 use std::{
+    collections::HashSet,
     fs,
     io::Write,
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
+    sync::{Arc, Barrier},
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -145,4 +147,91 @@ fn copied_detached_checkpoint_is_refused_by_target_profile() {
 
     fs::remove_dir_all(a).ok();
     fs::remove_dir_all(b).ok();
+}
+
+#[test]
+fn explicit_profile_overrides_conflicting_environment_selectors() {
+    let explicit = root("explicit-precedence");
+    let env_profile = root("environment-profile");
+    let legacy_alias = root("legacy-alias");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_strata"))
+        .arg("--profile")
+        .arg(&explicit)
+        .args(["profile", "--json"])
+        .env("STRATA_PROFILE", &env_profile)
+        .env("STRATA_DATA_DIR", &legacy_alias)
+        .output()
+        .expect("Strata process should run");
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let description: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(description["root"], explicit.to_string_lossy().as_ref());
+    assert!(explicit.join("profile.json").exists());
+    assert!(!env_profile.exists());
+    assert!(!legacy_alias.exists());
+
+    fs::remove_dir_all(explicit).ok();
+}
+
+#[test]
+fn concurrent_first_use_converges_on_one_durable_profile_identity() {
+    for round in 0..8 {
+        let profile = root(&format!("concurrent-first-use-{round}"));
+        let workers = 24;
+        let barrier = Arc::new(Barrier::new(workers));
+        let mut handles = Vec::with_capacity(workers);
+
+        for _ in 0..workers {
+            let profile = profile.clone();
+            let barrier = Arc::clone(&barrier);
+            handles.push(thread::spawn(move || {
+                barrier.wait();
+                run(&profile, &["profile", "--json"])
+            }));
+        }
+
+        let outputs = handles
+            .into_iter()
+            .map(|handle| handle.join().expect("profile worker should finish"))
+            .collect::<Vec<_>>();
+        let failures = outputs
+            .iter()
+            .filter(|output| !output.status.success())
+            .map(stderr)
+            .collect::<Vec<_>>();
+        assert!(
+            failures.is_empty(),
+            "concurrent starts failed: {failures:?}"
+        );
+
+        let ids = outputs
+            .iter()
+            .map(|output| {
+                let description: serde_json::Value =
+                    serde_json::from_slice(&output.stdout).expect("valid profile JSON");
+                description["profile_id"]
+                    .as_str()
+                    .expect("profile ID should be present")
+                    .to_string()
+            })
+            .collect::<HashSet<_>>();
+        assert_eq!(
+            ids.len(),
+            1,
+            "workers observed divergent profile IDs: {ids:?}"
+        );
+
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &fs::read(profile.join("profile.json")).expect("durable profile manifest"),
+        )
+        .expect("valid durable profile manifest");
+        assert_eq!(
+            manifest["profile_id"].as_str(),
+            ids.iter().next().map(String::as_str),
+            "process identity must match the durable manifest"
+        );
+
+        fs::remove_dir_all(profile).ok();
+    }
 }
