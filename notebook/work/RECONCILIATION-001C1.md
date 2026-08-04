@@ -1,8 +1,8 @@
 ---
 id: RECONCILIATION-001C1
 kind: work
-state: active
-authority: working
+state: accepted
+authority: accepted
 created: 2026-08-03
 updated: 2026-08-03
 ---
@@ -81,3 +81,38 @@ Idle cannot be deleted. Archive remains the ordinary retirement operation.
 - legacy-file prepared receipt and idempotent replay across categories, sessions, tags, sand, daily artifacts, and detached checkpoint evidence;
 - user-visible preview and explicit confirmation workflow;
 - end-to-end archive/restore coexistence and final issue closure.
+
+
+## Implemented result
+
+- SQLite schema version 7 adds strict `category_lifecycle_receipts` authority;
+- one typed preview resolves source and optional target by stable ID, inventories completed and active sessions, tags, canonical sediment, persisted snapshots, daily contributions, and runtime-checkpoint references, and binds them with a deterministic revision;
+- one immediate transaction rejects stale previews, protected or malformed recovery evidence, source idle, self-merge, and unresolved transition receipts before publication;
+- merge reassigns only category identity while preserving completed-session ID/stable ID, project, description, UTC chronology, elapsed duration, active stable identity, active start, and target metadata;
+- target-first ordered tags deduplicate deterministically;
+- placed, legacy-pending, and compressed-pending sediment preserve total mass and FIFO category order;
+- cumulative/manual snapshots remap identity and daily contributions are regenerated from reassigned canonical ledger slices;
+- receipt-free checkpoint payloads remap active identity, sediment, and queued switch mutations; receipt-bearing evidence fails closed;
+- targetless permanent deletion is permitted only after a complete zero-reference preview;
+- every merge or deletion records source/target metadata, preview revision, reference counts, and application time;
+- repeated application of the same reviewed operation returns the existing receipt without duplicate mutation;
+- retired source IDs remain permanently unavailable to category allocation;
+- raw backup/restore and portable bundle schema 3 preserve lifecycle receipts and retired-ID custody;
+- `sqlite doctor` rejects malformed receipt metadata/counts/timestamps and catalog reuse of retired identities.
+
+## Certification
+
+- formatting: pass;
+- strict Clippy, all targets/features, warnings denied: pass;
+- 238 library tests: pass;
+- 9 CLI lifecycle process tests: pass;
+- 6 configuration-authority tests: pass;
+- 1 report-help regression test: pass;
+- 14 SQLite/TUI process tests: pass;
+- 2 temporal-authority tests: pass;
+- 3 terminal-lifecycle PTY process tests: pass;
+- ten lifecycle publication fault boundaries: complete rollback;
+- stale-preview, protected-checkpoint, receipt-custody, daily-revision, idempotent-retry, bundle round-trip, retired-ID nonreuse, and doctor-tamper proofs: pass;
+- temporary transformation, audit, proof, and workflow machinery: absent from the permanent tree.
+
+RECONCILIATION-001C1 completes the SQLite authority half of issue #13. The issue remains open for C2: a prepared legacy-file lifecycle receipt with idempotent replay and an explicit user-visible review/confirmation surface shared across supported authorities.

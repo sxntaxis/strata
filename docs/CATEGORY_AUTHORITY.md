@@ -1,10 +1,10 @@
 # Category authority
 
-Status: implemented and certified
-Current completed unit: RECONCILIATION-001A
+Status: partially implemented and certified
+Current completed unit: RECONCILIATION-001C1
 Issue completed: #5
 Issue narrowed: #13
-Last reviewed: 2026-08-02
+Last reviewed: 2026-08-03
 
 ## Purpose
 
@@ -50,6 +50,39 @@ SQLite stores archival state through `archived_at_utc`.
 - active and archived categories load into separate projections while retaining one identity space;
 - reports, sand, and persistence combine the projections whenever historical metadata is required;
 - restore reactivates the existing row.
+
+## SQLite lifecycle transformation
+
+Archive remains the ordinary retirement operation. Merge/reassignment and permanent deletion are distinct reviewed lifecycle operations.
+
+Before either operation, SQLite builds one typed preview that:
+
+- names an explicit source stable ID and optional explicit target stable ID;
+- rejects idle, self-merge, and missing identities;
+- resolves active and archived rows without name ambiguity;
+- inventories completed sessions, active state, tags, placed and pending canonical sediment, every persisted snapshot, daily contributions, and runtime-checkpoint payload references;
+- exposes checkpoint custody status and source/target metadata snapshots;
+- binds all mutation-relevant authority state with a deterministic revision.
+
+Application recomputes that revision inside one immediate transaction. A stale preview, protected `recovering`/`quarantined` checkpoint, malformed payload, or unresolved transition/finish/clear receipt blocks the operation before any authority changes.
+
+A merge changes category identity only:
+
+- completed session ID, stable ID, project, description, UTC chronology, operational-day policy, and elapsed duration remain unchanged;
+- active stable ID, start, description, and recovery kind remain unchanged;
+- target name, description, color, balance effect, archival state, and sort identity remain target-owned;
+- target tags precede source-only tags and exact duplicates collapse;
+- placed and pending sediment preserve mass and FIFO order;
+- cumulative/manual snapshots remap category identity;
+- daily contributions are regenerated from reassigned canonical session slices and receive matching source revisions;
+- receipt-free checkpoints remap active, sediment, and queued-switch identity;
+- the source row is removed only after a complete zero-residual-reference check.
+
+Permanent deletion without a target is allowed only when the same complete preview reports zero references in every family. Idle cannot be deleted.
+
+Each committed operation writes an immutable lifecycle receipt with source and target metadata, preview revision, affected counts, and application timestamp. Retry returns the same receipt idempotently. Receipt source IDs are retired forever and category allocation advances beyond all current and retired identities.
+
+SQLite schema version 7 owns lifecycle receipts. Consistent repository snapshots, raw backup/restore, portable bundle schema 3, import validation, and `sqlite doctor` preserve and validate those receipts. A bundle or database that reintroduces a retired source ID fails integrity validation.
 
 ## Legacy-file authority
 
@@ -126,6 +159,17 @@ SQLite archival remains transactional. Neither authority may claim successful re
 
 ## Certified proofs
 
+- complete SQLite reference preview and deterministic stale-preview rejection;
+- atomic merge across completed/active sessions, tags, canonical sediment, snapshots, daily contributions, checkpoint payload, source removal, and receipt;
+- ten injected publication boundaries with full rollback;
+- completed-session and active-generation identity/chronology preservation;
+- target metadata preservation and deterministic tag deduplication;
+- sediment mass/FIFO preservation and daily-revision regeneration;
+- protected or receipt-bearing checkpoint refusal;
+- zero-reference-only permanent deletion and idle refusal;
+- idempotent lifecycle retry;
+- retired-ID nonreuse before and after portable bundle round trip;
+- lifecycle receipt validation and doctor detection of tamper or retired-ID collision;
 - legacy catalog backward compatibility;
 - active/archived catalog round trip;
 - malformed and unknown session-reference rejection;
@@ -137,6 +181,8 @@ SQLite archival remains transactional. Neither authority may claim successful re
 - archived legacy migration into SQLite;
 - existing report, sediment, migration, TUI, CLI, interaction, failure-recovery, and PTY suites remain green.
 
-## Unresolved boundary
+## Remaining issue #13 boundary
 
-Category merge/reassignment and permanent destructive deletion are not implemented. Any future permanent deletion must require zero references or one reviewed transaction that reassigns every session, snapshot, sediment contribution, tag, and other category-owned record before removing the identity.
+SQLite lifecycle authority is implemented and certified. Issue #13 remains open because legacy-file authority still needs a prepared receipt and idempotent crash replay across catalog, sessions, tags, canonical sediment, daily artifacts, detached checkpoint evidence, and retired-ID custody.
+
+The product also needs one explicit review and confirmation surface that presents the complete preview and refuses stale confirmation under both supported authorities. Until C2 is complete, archive remains the only ordinary TUI retirement operation and no legacy merge or permanent deletion may claim success.
