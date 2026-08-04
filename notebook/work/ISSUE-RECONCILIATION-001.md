@@ -23,7 +23,7 @@ The original issue descriptions predate the completed SQLite migration. Their ac
 | #2, #12 | Completed by DOMAIN-001: project/category identity, explicit classification, and idle vocabulary. | none |
 | #1, #3, #14, #17, #28 | Completed by REPORT-001: truthful ranges/help, provisional active projection, valid ICS, and deterministic ordering. | none |
 | #5 | Completed by RECONCILIATION-001A: malformed or unknown legacy session category IDs fail closed, retain the original value for repair, and are never reinterpreted as idle. | none |
-| #10 | Partially completed by RECONCILIATION-001B1, B2A, B2B, B2C, and B3A: SQLite active/checkpoint generations and initial bootstrap are transactional; legacy switch, finish, and clear-all use deterministic prepared receipts with idempotent replay; clear-all preserves committed history; first TUI startup publishes active state and checkpoint together after sediment restoration. Remaining scope is exact transition-edge sediment reconciliation and explicit recovery-cutoff/uncertainty presentation. | next bounded RECONCILIATION-001B unit |
+| #10 | Partially completed by RECONCILIATION-001B1, B2A, B2B, B2C, B3A, and B3B: active/checkpoint generations, legacy replay, clear-all, initial bootstrap, and exact transition-edge sediment are certified. Remaining scope is explicit recovery-cutoff/reconstruction/uncertainty presentation. | RECONCILIATION-001B3C |
 | #13 | Historical data-loss defect completed by RECONCILIATION-001A: active/archived metadata, reports, sand, tags, restore, and migration retain stable meaning under SQLite and legacy authority. Remaining scope is explicit merge/reassignment plus permanent-deletion policy and tests. | DOMAIN-002 or dedicated category-merge unit |
 | #6, #7, #16, #18, #26 | Completed by SEDIMENT-001: conserved mass/topology/recovery and truthful immutable historical artifacts. | none |
 | #19 | Completed by INTERACTION-001A: explicit report-log edit mode, stable-ID draft, atomic commit, full cancel, and command/text separation. | none |
@@ -33,10 +33,10 @@ The original issue descriptions predate the completed SQLite migration. Their ac
 
 ## Immediate action
 
-Continue issue #10 after accepted RECONCILIATION-001B3A:
+Continue issue #10 after accepted RECONCILIATION-001B3B:
 
-1. certify exact remaining sediment classification at active transition boundaries;
-2. expose checkpoint capture, recovery target, reconstructed duration, deterministic cutoff, and uncertainty in the recovery interface;
-3. close issue #10 only when repeated restart and crash-during-recovery evidence satisfies its full acceptance criteria.
+1. expose checkpoint capture, recovery target, reconstructed duration, deterministic cutoff, and uncertainty in the recovery interface;
+2. certify repeated restart and crash-during-recovery behavior against the visible statement;
+3. close issue #10 only when the full acceptance criteria are evidence-backed.
 
 After issue #10 reaches evidence-based closure, return to the merge/reassignment transaction required to complete issue #13.

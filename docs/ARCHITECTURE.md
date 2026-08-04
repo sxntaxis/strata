@@ -31,7 +31,7 @@ Current responsibility map:
 - `src/app.rs` and `src/app/**` — TUI orchestration, active/archived category projections, semantic-edge checkpoint refresh, legacy switch/finish/clear-all receipt publication and replay, explicit modal/edit state, persistence reconciliation, bounded recovery, historical artifact selection, context selection, resolver execution, palette/atlas projection, and rendering.
 - `src/app/terminal_lifecycle.rs` — raw-mode/alternate-screen RAII, process-wide panic restoration, exactly-once cleanup, runtime failure composition, and debug fault certification.
 - `src/sand/engine.rs` — canonical logical grains, compressed pending mass, physics, viewport projection, and Braille rendering.
-- `src/sand/recovery.rs` — bounded recovery arithmetic and topology-preserving detached contribution.
+- `src/sand/recovery.rs` — bounded recovery arithmetic, topology-preserving detached contribution, and exact transition-boundary settlement with separate initialized/uninitialized canvas policy.
 - `src/sand/snapshot.rs` — snapshot kinds, exact daily contribution construction, provenance, revisions, selection, and immutable rendering.
 
 ## Established authority
@@ -100,6 +100,8 @@ Legacy recovery flush/reload validate both active and archived catalogs, retain 
 Clear-all/provisional-idle reset uses a third certified receipt boundary. It preserves all committed history, binds canonical prior elapsed and every affected day, restores exact active and grid state before legacy replay derives daily contributions, and applies active/sand/daily/checkpoint effects atomically in SQLite. Six transaction kill points and deterministic legacy replay are certified.
 
 Initial SQLite TUI startup uses a typed atomic bootstrap request. The active row and first pending checkpoint share one stable identity column and commit together only after runtime state is staged. Four transaction fault boundaries, pre-existing checkpoint refusal, and real process failure/retry are certified.
+
+Immediate and queued switches, clear operations, and normal finish settle sediment to the same UTC boundary used by chronological reconciliation before changing active state. Exact-boundary mass belongs to the outgoing category; bounded compressed settlement preserves category order and topology, and fresh `0×0` live canvases retain due mass without weakening persisted-checkpoint validation.
 
 The recovery contract and remaining issue #10 boundary are recorded in `docs/RECOVERY_AUTHORITY.md`.
 
@@ -215,7 +217,7 @@ TUI and CLI translate user intent and present state. Neither may own an independ
 
 Persistence, temporal, domain, report, sediment, interaction, cross-authority category integrity, active/checkpoint generation coherence, and legacy switch/finish/clear-all replay are complete. The next priorities are:
 
-1. complete issue #10 through exact remaining transition-edge sediment attribution and visible deterministic recovery cutoff/reconstruction semantics;
+1. complete issue #10 through visible deterministic recovery cutoff/reconstruction semantics;
 2. design the explicit merge/reassignment and permanent-deletion remainder of issue #13;
 3. later domain/UI distinction work under issue #22;
 4. later profile authority, including complete isolation and deliberate switching under issue #15.
