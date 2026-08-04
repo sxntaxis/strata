@@ -28,12 +28,14 @@ jobs:
           python tools/reconciliation001b3c-statement.py
           python tools/reconciliation001b3c-ui-owned.py
           python tools/reconciliation001b3c-valid-fixture.py
+          python tools/reconciliation001b3c-pty-size.py
 
       - name: Remove temporary machinery
         run: |
           rm -f tools/reconciliation001b3c-statement.py
           rm -f tools/reconciliation001b3c-ui-owned.py
           rm -f tools/reconciliation001b3c-valid-fixture.py
+          rm -f tools/reconciliation001b3c-pty-size.py
           rm -f .github/workflows/reconciliation001b3c-statement.yml
 
       - name: Format
