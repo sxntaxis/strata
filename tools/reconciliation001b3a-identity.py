@@ -57,17 +57,6 @@ pub(crate) fn start_active_session_with_checkpoint<T: Serialize>(
     let mut repository = open_cli_repository(database_path)?;
     let started = timestamp(started_at_utc);
     let payload_json = serde_json::to_string(checkpoint).map_err(|error| error.to_string())?;
-    let payload: serde_json::Value =
-        serde_json::from_str(&payload_json).map_err(|error| error.to_string())?;
-    let payload_identity = payload
-        .get("active_session_stable_id")
-        .and_then(serde_json::Value::as_str);
-    if payload_identity != Some(active_stable_id) {
-        return Err(format!(
-            "initial checkpoint active identity {} does not match bootstrap identity {active_stable_id}",
-            payload_identity.unwrap_or("missing")
-        ));
-    }
     runtime_coordination::start_active_session_with_checkpoint(
         &mut repository,
         &NewActiveSession {
@@ -172,7 +161,7 @@ replace_once(
 
 tests = r'''    #[derive(serde::Serialize)]
     struct BootstrapCheckpointFixture {
-        active_session_stable_id: Option<String>,
+        schema_version: u8,
     }
 
     fn prepare_bootstrap_repository(path: &Path) {
@@ -191,16 +180,14 @@ tests = r'''    #[derive(serde::Serialize)]
     }
 
     #[test]
-    fn initial_bootstrap_binds_row_and_payload_identity() {
+    fn initial_bootstrap_binds_active_and_checkpoint_row_identity() {
         let path = repository_file("initial-bootstrap-identity");
         prepare_bootstrap_repository(&path);
         let started_at_utc = DateTime::parse_from_rfc3339("2026-08-03T18:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
         let stable_id = initial_active_stable_id(started_at_utc);
-        let checkpoint = BootstrapCheckpointFixture {
-            active_session_stable_id: Some(stable_id.clone()),
-        };
+        let checkpoint = BootstrapCheckpointFixture { schema_version: 3 };
 
         start_active_session_with_checkpoint(
             &path,
@@ -232,28 +219,34 @@ tests = r'''    #[derive(serde::Serialize)]
         let payload: serde_json::Value = serde_json::from_str(&row.2).unwrap();
         assert_eq!(row.0, stable_id);
         assert_eq!(row.1, stable_id);
-        assert_eq!(
-            payload
-                .get("active_session_stable_id")
-                .and_then(serde_json::Value::as_str),
-            Some(stable_id.as_str())
-        );
+        assert_eq!(payload.get("schema_version").and_then(serde_json::Value::as_u64), Some(3));
         drop(repository);
         std::fs::remove_file(path).ok();
     }
 
     #[test]
-    fn initial_bootstrap_rejects_payload_identity_mismatch_without_rows() {
-        let path = repository_file("initial-bootstrap-mismatch");
+    fn initial_bootstrap_refuses_preexisting_checkpoint_without_overwrite() {
+        let path = repository_file("initial-bootstrap-existing-checkpoint");
         prepare_bootstrap_repository(&path);
+        let repository = open_cli_repository(&path).unwrap();
+        repository
+            .connection
+            .execute(
+                "INSERT INTO runtime_checkpoint (
+                    singleton, status, detached_at_utc, simulation_time_utc,
+                    active_session_stable_id, payload_json, legacy_import_id
+                 ) VALUES (1, 'quarantined', '2026-08-03T17:00:00Z',
+                    '2026-08-03T17:00:00Z', NULL, '{}', NULL)",
+                [],
+            )
+            .unwrap();
+        drop(repository);
+
         let started_at_utc = DateTime::parse_from_rfc3339("2026-08-03T18:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
         let stable_id = initial_active_stable_id(started_at_utc);
-        let checkpoint = BootstrapCheckpointFixture {
-            active_session_stable_id: Some("different-generation".to_string()),
-        };
-
+        let checkpoint = BootstrapCheckpointFixture { schema_version: 3 };
         let error = start_active_session_with_checkpoint(
             &path,
             InitialActiveGenerationRequest {
@@ -267,19 +260,24 @@ tests = r'''    #[derive(serde::Serialize)]
             },
         )
         .unwrap_err();
-        assert!(error.contains("does not match bootstrap identity"));
+        assert!(error.contains("no checkpoint before initial active generation"));
 
         let repository = open_cli_repository(&path).unwrap();
         let active_count: i64 = repository
             .connection
             .query_row("SELECT count(*) FROM active_session", [], |row| row.get(0))
             .unwrap();
-        let checkpoint_count: i64 = repository
+        let checkpoint: (String, String) = repository
             .connection
-            .query_row("SELECT count(*) FROM runtime_checkpoint", [], |row| row.get(0))
+            .query_row(
+                "SELECT status, payload_json FROM runtime_checkpoint WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
             .unwrap();
         assert_eq!(active_count, 0);
-        assert_eq!(checkpoint_count, 0);
+        assert_eq!(checkpoint.0, "quarantined");
+        assert_eq!(checkpoint.1, "{}");
         drop(repository);
         std::fs::remove_file(path).ok();
     }
