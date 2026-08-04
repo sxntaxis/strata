@@ -1,27 +1,16 @@
 name: ci
 
 on:
-  pull_request:
   push:
-    branches: [fix/006-legacy-cli-lifecycle-lock]
-
-permissions:
-  contents: write
-
-concurrency:
-  group: fix-006-legacy-cli-lifecycle-lock
-  cancel-in-progress: true
+    branches: [main]
+  pull_request:
 
 jobs:
   checks:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
     steps:
-      - name: Checkout branch
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: fix/006-legacy-cli-lifecycle-lock
-          fetch-depth: 0
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -31,56 +20,11 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Apply legacy lifecycle lock
-        run: python3 .github/scripts/apply_legacy_cli_lock.py
+      - name: Check formatting
+        run: cargo fmt --all -- --check
 
-      - name: Format
-        run: cargo fmt --all
-
-      - name: Strict Clippy
+      - name: Run clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Full suite
+      - name: Run tests
         run: cargo test --all-features
-
-      - name: Publish clean product commit
-        if: success()
-        run: |
-          rm .github/scripts/apply_legacy_cli_lock.py
-          cat > .github/workflows/ci.yml <<'YAML'
-          name: ci
-
-          on:
-            push:
-              branches: [main]
-            pull_request:
-
-          jobs:
-            checks:
-              runs-on: ubuntu-latest
-              steps:
-                - name: Checkout
-                  uses: actions/checkout@v4
-
-                - name: Set up Rust
-                  uses: dtolnay/rust-toolchain@stable
-                  with:
-                    components: rustfmt, clippy
-
-                - name: Cache cargo
-                  uses: Swatinem/rust-cache@v2
-
-                - name: Check formatting
-                  run: cargo fmt --all -- --check
-
-                - name: Run clippy
-                  run: cargo clippy --all-targets --all-features -- -D warnings
-
-                - name: Run tests
-                  run: cargo test --all-features
-          YAML
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
-          git commit -m "fix(cli): serialize legacy lifecycle transitions"
-          git push origin HEAD:fix/006-legacy-cli-lifecycle-lock
