@@ -64,3 +64,11 @@ replace_once(
     "                    expected_revision: &preview.revision,\n                    applied_at_utc: \"2026-08-03T19:00:00Z\",\n",
     "                    expected_revision: &referenced_preview.revision,\n                    applied_at_utc: \"2026-08-03T19:00:00Z\",\n",
 )
+
+sqlite_path = Path("src/sqlite.rs")
+sqlite_content = sqlite_path.read_text()
+old_assertion = "assert_eq!(version, 6);"
+assertion_count = sqlite_content.count(old_assertion)
+if assertion_count != 3:
+    raise SystemExit(f"expected 3 schema-six assertions, found {assertion_count}")
+sqlite_path.write_text(sqlite_content.replace(old_assertion, "assert_eq!(version, 7);"))
