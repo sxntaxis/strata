@@ -82,7 +82,6 @@ Idle cannot be deleted. Archive remains the ordinary retirement operation.
 - user-visible preview and explicit confirmation workflow;
 - end-to-end archive/restore coexistence and final issue closure.
 
-
 ## Implemented result
 
 - SQLite schema version 7 adds strict `category_lifecycle_receipts` authority;
@@ -113,6 +112,7 @@ Idle cannot be deleted. Archive remains the ordinary retirement operation.
 - 3 terminal-lifecycle PTY process tests: pass;
 - ten lifecycle publication fault boundaries: complete rollback;
 - stale-preview, protected-checkpoint, receipt-custody, daily-revision, idempotent-retry, bundle round-trip, retired-ID nonreuse, and doctor-tamper proofs: pass;
+- permanent diff audit: 12 intended source, test, authority, and Notebook files;
 - temporary transformation, audit, proof, and workflow machinery: absent from the permanent tree.
 
 RECONCILIATION-001C1 completes the SQLite authority half of issue #13. The issue remains open for C2: a prepared legacy-file lifecycle receipt with idempotent replay and an explicit user-visible review/confirmation surface shared across supported authorities.
