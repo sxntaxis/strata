@@ -1,14 +1,14 @@
 #![cfg(target_os = "linux")]
 
+use rusqlite::Connection;
 use std::{
     collections::HashSet,
     fs,
-    io::Write,
     path::{Path, PathBuf},
-    process::{Command, Output, Stdio},
+    process::{Command, Output},
     sync::{Arc, Barrier},
     thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 fn root(label: &str) -> PathBuf {
@@ -22,13 +22,8 @@ fn root(label: &str) -> PathBuf {
     ))
 }
 
-fn seed(profile: &Path, description: &str) {
-    fs::create_dir_all(profile.join("data")).unwrap();
-    fs::write(
-        profile.join("data/categories.csv"),
-        format!("id,name,description,color_index,karma_effect\n1,Work,{description},0,1\n"),
-    )
-    .unwrap();
+fn database_path(profile: &Path) -> PathBuf {
+    profile.join("data/strata.sqlite3")
 }
 
 fn run(profile: &Path, args: &[&str]) -> Output {
@@ -46,31 +41,30 @@ fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
-fn detach(profile: &Path) -> Output {
-    let command_line = format!(
-        "stty cols 100 rows 30; exec {} --profile {}",
-        env!("CARGO_BIN_EXE_strata"),
-        profile.display()
-    );
-    let mut child = Command::new("timeout")
-        .args(["12s", "script", "-qefc", &command_line, "/dev/null"])
-        .env_remove("STRATA_PROFILE")
-        .env_remove("STRATA_DATA_DIR")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("TUI should start in a PTY");
-    thread::sleep(Duration::from_millis(1200));
-    let mut stdin = child.stdin.take().unwrap();
-    stdin.write_all(b"d").unwrap();
-    stdin.flush().unwrap();
-    drop(stdin);
-    child.wait_with_output().expect("TUI should finish")
+fn seed(profile: &Path, description: &str) {
+    let initialized = run(profile, &["report", "--today"]);
+    assert!(initialized.status.success(), "{}", stderr(&initialized));
+    Connection::open(database_path(profile))
+        .unwrap()
+        .execute(
+            "INSERT INTO categories(id, name, description, color_index, balance_effect, sort_order)
+             VALUES (1, 'Work', ?1, 0, 1, 1)",
+            [description],
+        )
+        .unwrap();
+}
+
+fn row_count(profile: &Path, table: &str) -> i64 {
+    Connection::open(database_path(profile))
+        .unwrap()
+        .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+            row.get(0)
+        })
+        .unwrap()
 }
 
 #[test]
-fn rooted_profiles_isolate_paths_and_bind_active_state() {
+fn rooted_profiles_isolate_database_state() {
     let a = root("a");
     let b = root("b");
     seed(&a, "A metadata");
@@ -87,80 +81,59 @@ fn rooted_profiles_isolate_paths_and_bind_active_state() {
 
     let started = run(&a, &["start", "A project", "--category", "Work"]);
     assert!(started.status.success(), "{}", stderr(&started));
-    assert!(a.join("state/active_session.json").exists());
-    assert!(!b.join("state/active_session.json").exists());
+    assert_eq!(row_count(&a, "active_session"), 1);
+    assert_eq!(row_count(&b, "active_session"), 0);
 
     let wrong_stop = run(&b, &["stop"]);
     assert!(!wrong_stop.status.success());
     assert!(stderr(&wrong_stop).contains("No active session"));
 
-    fs::create_dir_all(b.join("state")).unwrap();
-    fs::copy(
-        a.join("state/active_session.json"),
-        b.join("state/active_session.json"),
-    )
-    .unwrap();
-    let copied_stop = run(&b, &["stop"]);
-    assert!(!copied_stop.status.success());
-    assert!(stderr(&copied_stop).contains("belongs to profile"));
-
-    thread::sleep(Duration::from_millis(1_100));
+    Connection::open(database_path(&a))
+        .unwrap()
+        .execute(
+            "UPDATE active_session SET started_at_utc = datetime('now', '-2 seconds')",
+            [],
+        )
+        .unwrap();
     let stopped = run(&a, &["stop"]);
     assert!(stopped.status.success(), "{}", stderr(&stopped));
-    assert!(a.join("data/time_log.csv").exists());
-    assert!(!b.join("data/time_log.csv").exists());
+    assert_eq!(row_count(&a, "sessions"), 1);
+    assert_eq!(row_count(&b, "sessions"), 0);
+
+    assert!(!a.join("data/categories.csv").exists());
+    assert!(!a.join("data/time_log.csv").exists());
+    assert!(!a.join("state/active_session.json").exists());
 
     fs::remove_dir_all(a).ok();
     fs::remove_dir_all(b).ok();
 }
 
 #[test]
-fn copied_detached_checkpoint_is_refused_by_target_profile() {
-    let a = root("checkpoint-a");
-    let b = root("checkpoint-b");
+fn copied_database_is_refused_by_target_profile() {
+    let a = root("database-a");
+    let b = root("database-b");
     seed(&a, "A metadata");
     seed(&b, "B metadata");
 
-    let detached = detach(&a);
-    assert!(detached.status.success(), "{}", stderr(&detached));
-    let checkpoint = a.join("state/detached_runtime.json");
-    assert!(checkpoint.exists());
-    fs::create_dir_all(b.join("state")).unwrap();
-    fs::copy(&checkpoint, b.join("state/detached_runtime.json")).unwrap();
-
-    let command_line = format!(
-        "exec {} --profile {}",
-        env!("CARGO_BIN_EXE_strata"),
-        b.display()
-    );
-    let target = Command::new("timeout")
-        .args(["8s", "script", "-qefc", &command_line, "/dev/null"])
-        .output()
-        .expect("target TUI should run under a PTY");
+    fs::copy(database_path(&a), database_path(&b)).unwrap();
+    let target = run(&b, &["report", "--today"]);
     assert!(!target.status.success());
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&target.stdout),
-        String::from_utf8_lossy(&target.stderr)
-    );
-    assert!(combined.contains("belongs to profile"), "{combined}");
+    assert!(stderr(&target).contains("database belongs to profile"));
 
     fs::remove_dir_all(a).ok();
     fs::remove_dir_all(b).ok();
 }
 
 #[test]
-fn explicit_profile_overrides_conflicting_environment_selectors() {
+fn explicit_profile_overrides_conflicting_environment_selector() {
     let explicit = root("explicit-precedence");
     let env_profile = root("environment-profile");
-    let legacy_alias = root("legacy-alias");
 
     let output = Command::new(env!("CARGO_BIN_EXE_strata"))
         .arg("--profile")
         .arg(&explicit)
         .args(["profile", "--json"])
         .env("STRATA_PROFILE", &env_profile)
-        .env("STRATA_DATA_DIR", &legacy_alias)
         .output()
         .expect("Strata process should run");
 
@@ -169,7 +142,6 @@ fn explicit_profile_overrides_conflicting_environment_selectors() {
     assert_eq!(description["root"], explicit.to_string_lossy().as_ref());
     assert!(explicit.join("profile.json").exists());
     assert!(!env_profile.exists());
-    assert!(!legacy_alias.exists());
 
     fs::remove_dir_all(explicit).ok();
 }
