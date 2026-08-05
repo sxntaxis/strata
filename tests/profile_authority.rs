@@ -1,5 +1,6 @@
 #![cfg(target_os = "linux")]
 
+use chrono::{Duration as ChronoDuration, Utc};
 use rusqlite::Connection;
 use std::{
     collections::HashSet,
@@ -88,11 +89,12 @@ fn rooted_profiles_isolate_database_state() {
     assert!(!wrong_stop.status.success());
     assert!(stderr(&wrong_stop).contains("No active session"));
 
+    let started_at = (Utc::now() - ChronoDuration::seconds(2)).to_rfc3339();
     Connection::open(database_path(&a))
         .unwrap()
         .execute(
-            "UPDATE active_session SET started_at_utc = datetime('now', '-2 seconds')",
-            [],
+            "UPDATE active_session SET started_at_utc = ?1",
+            [started_at],
         )
         .unwrap();
     let stopped = run(&a, &["stop"]);
