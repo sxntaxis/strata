@@ -78,22 +78,24 @@ path.write_text(text)
 
 path = Path("src/app.rs")
 text = path.read_text()
-text = sub_once(
-    text,
-    r"\nfn stage_clear_all_active_state\(.*?\n\}\n\nfn sand_state_is_empty",
-    "\nfn sand_state_is_empty",
-    "obsolete clear-all active staging",
-)
+if "fn stage_clear_all_active_state" in text:
+    text = sub_once(
+        text,
+        r"\nfn stage_clear_all_active_state\(.*?\n\}\n\nfn sand_state_is_empty",
+        "\nfn sand_state_is_empty",
+        "obsolete clear-all active staging",
+    )
 path.write_text(text)
 
 path = Path("src/storage.rs")
 text = path.read_text()
-text = sub_once(
-    text,
-    r"\npub fn file_exists\(.*?\nfn unique_publication_sibling",
-    "\nfn unique_publication_sibling",
-    "unused JSON file helpers",
-)
+if "pub fn file_exists" in text:
+    text = sub_once(
+        text,
+        r"\npub fn file_exists\(.*?\nfn unique_publication_sibling",
+        "\nfn unique_publication_sibling",
+        "unused JSON file helpers",
+    )
 text = text.replace(
     "use serde::{Deserialize, Serialize, de::DeserializeOwned};",
     "use serde::{Deserialize, Serialize};",
