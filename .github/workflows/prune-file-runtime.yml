@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/prune-file-runtime.yml'
       - '.github/scripts/prune_file_runtime.py'
+      - '.github/scripts/prune_file_runtime_cleanup.py'
 
 permissions:
   contents: write
@@ -29,7 +30,9 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
       - name: Prune file runtime
-        run: python3 .github/scripts/prune_file_runtime.py
+        run: |
+          python3 .github/scripts/prune_file_runtime.py
+          python3 .github/scripts/prune_file_runtime_cleanup.py
       - name: Format
         run: cargo fmt --all
       - name: Strict Clippy
@@ -41,6 +44,7 @@ jobs:
           BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
           rm -f .github/scripts/prune_file_runtime.py
+          rm -f .github/scripts/prune_file_runtime_cleanup.py
           rm -f .github/workflows/prune-file-runtime.yml
           rm -f .github/workflows/sqlite-only-prune-inventory.yml
           git config user.name github-actions[bot]
