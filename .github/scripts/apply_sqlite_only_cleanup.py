@@ -141,7 +141,9 @@ path.write_text(text)
 for rust_path in Path("src").rglob("*.rs"):
     source = rust_path.read_text()
     updated = source.replace("sqlite-candidate", "sqlite")
-    updated = updated.replace('Some("sqlite" | "sqlite" | "sqlite-cli")', 'Some("sqlite" | "sqlite-cli")')
+    updated = updated.replace("sqlite-cli", "sqlite")
+    updated = updated.replace('Some("sqlite" | "sqlite" | "sqlite")', 'Some("sqlite")')
+    updated = updated.replace('Some("sqlite" | "sqlite")', 'Some("sqlite")')
     if updated != source:
         rust_path.write_text(updated)
 
