@@ -6,6 +6,7 @@ on:
       - '.github/workflows/sqlite-only-runtime.yml'
       - '.github/scripts/apply_sqlite_only_runtime.py'
       - '.github/scripts/apply_sqlite_only_cleanup.py'
+      - 'tests/config_authority.rs'
 
 permissions:
   contents: write
