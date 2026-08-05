@@ -19,4 +19,4 @@ jobs:
           printf '%s\n' '=== files ==='
           find src tests docs notebook -type f | sort
           printf '%s\n' '=== matches ==='
-          rg -n -i 'legacy|RuntimeAuthority|storage_authority|MigrateSqlite|ActivateSqlite|legacy_import_id|migrate-sqlite|activate-sqlite' src tests docs notebook || true
+          grep -RInE 'legacy|RuntimeAuthority|storage_authority|MigrateSqlite|ActivateSqlite|legacy_import_id|migrate-sqlite|activate-sqlite' src tests docs notebook || true
