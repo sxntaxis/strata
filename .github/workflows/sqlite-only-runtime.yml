@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/sqlite-only-runtime.yml'
       - '.github/scripts/apply_sqlite_only_runtime.py'
+      - '.github/scripts/apply_sqlite_only_cleanup.py'
 
 permissions:
   contents: write
@@ -32,7 +33,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Apply SQLite-only runtime
-        run: python3 .github/scripts/apply_sqlite_only_runtime.py
+        run: |
+          python3 .github/scripts/apply_sqlite_only_runtime.py
+          python3 .github/scripts/apply_sqlite_only_cleanup.py
 
       - name: Format
         run: cargo fmt --all
@@ -48,6 +51,7 @@ jobs:
           BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
           rm -f .github/scripts/apply_sqlite_only_runtime.py
+          rm -f .github/scripts/apply_sqlite_only_cleanup.py
           rm -f .github/workflows/sqlite-only-runtime.yml
           rm -f .github/workflows/sqlite-only-inventory.yml
           git config user.name github-actions[bot]
