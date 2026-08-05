@@ -109,6 +109,12 @@ path = Path("src/app/persistence_recovery.rs")
 text = path.read_text()
 text = sub_once(
     text,
+    r"\n    fn unique_path\(.*?\n    \}\n\n    fn recovery_category",
+    "\n    fn recovery_category",
+    "obsolete recovery path helper",
+)
+text = sub_once(
+    text,
     r"\n    #\[test\]\n    fn legacy_recovery_reload_accepts_archived_session_references\(\) \{.*?\n    \}\n\n    #\[test\]\n    fn emergency_export_categories_preserve_archived_state",
     "\n    #[test]\n    fn emergency_export_categories_preserve_archived_state",
     "legacy recovery test",
@@ -119,8 +125,85 @@ path = Path("src/app.rs")
 text = path.read_text()
 text = text.replace("    path::{Path, PathBuf},", "    path::PathBuf,")
 text = text.replace("RuntimeSettings, TimeTracker, civil_time_for_utc,", "RuntimeSettings, TimeTracker,")
+text = text.replace("let Some(mut checkpoint) = self.checkpoint_recovery_payload.clone()", "let Some(checkpoint) = self.checkpoint_recovery_payload.clone()")
 text = re.sub(r"\n\s*version: ClearAllReceipt::VERSION,", "", text)
 text = re.sub(r"\n\s*checkpoint\.legacy_recovery_committed = (?:true|false);", "", text)
+path.write_text(text)
+
+# SQLite owns session publication; delete the former local record writer.
+path = Path("src/domain.rs")
+text = path.read_text()
+text = sub_once(
+    text,
+    r"\n    pub fn end_session_with_elapsed_at_local<Tz>\(.*?\n    \}\n\n    pub fn record_session_at<Tz>\(.*?\n    \}\n",
+    "\n",
+    "obsolete local session writer",
+)
+path.write_text(text)
+
+# Reduce storage.rs to profile paths and generic atomic publication helpers.
+path = Path("src/storage.rs")
+text = path.read_text()
+text = sub_once(
+    text,
+    r"use std::\{.*?\n\};\n\nuse chrono::\{.*?\};\nuse csv::\{.*?\};\nuse ratatui::style::Color;\nuse serde::\{Deserialize, Serialize, de::DeserializeOwned\};\nuse thiserror::Error;\n\nuse crate::\{.*?\n\};",
+    '''use std::{
+    collections::HashMap,
+    fs::{self, File, OpenOptions},
+    io::Write,
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+};
+
+use chrono::Local;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+
+use crate::domain::{Category, Session};''',
+    "storage imports",
+)
+text = text.replace("    pub archived_categories: Vec<Category>,\n", "")
+text = sub_once(
+    text,
+    r"const LEGACY_CATEGORIES_HEADER:.*?const BACKUP_RETENTION_MAX_FILES: usize = 10;",
+    "const BACKUP_RETENTION_MAX_FILES: usize = 10;",
+    "CSV constants",
+)
+text = sub_once(
+    text,
+    r"\n#\[derive\(Debug, Error\)\]\npub enum StorageError \{.*?\n\}\n",
+    "\n",
+    "storage error",
+)
+text = sub_once(
+    text,
+    r"\nfn default_categories_loaded\(\).*?\n\}\n\npub fn save_category_catalog_to_csv",
+    "\npub fn save_category_catalog_to_csv",
+    "CSV loaders",
+)
+text = sub_once(
+    text,
+    r"\npub fn save_category_catalog_to_csv\(.*?\n\}\n\npub fn get_data_dir",
+    "\npub fn get_data_dir",
+    "CSV writers",
+)
+text = sub_once(
+    text,
+    r"\npub fn get_detached_runtime_path\(\).*?\n\}\n\npub fn get_keymap_path",
+    "\npub fn get_keymap_path",
+    "file runtime paths",
+)
+text = sub_once(
+    text,
+    r"\npub fn get_categories_path\(\).*?\n\}\n\npub fn file_exists",
+    "\npub fn file_exists",
+    "file runtime serializers",
+)
+text = sub_once(
+    text,
+    r"\n#\[cfg\(test\)\]\nmod tests \{.*?\n\}\n\n#\[cfg\(test\)\]\nmod publication_race_tests",
+    "\n#[cfg(test)]\nmod publication_race_tests",
+    "obsolete storage tests",
+)
 path.write_text(text)
 
 print("file-runtime prune cleanup applied")
