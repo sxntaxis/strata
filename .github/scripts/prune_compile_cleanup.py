@@ -92,8 +92,8 @@ text = path.read_text()
 if "pub fn file_exists" in text:
     text = sub_once(
         text,
-        r"\npub fn file_exists\(.*?\nfn unique_publication_sibling",
-        "\nfn unique_publication_sibling",
+        r"\npub fn file_exists\(.*?\n\npub fn write_text_file",
+        "\n\npub fn write_text_file",
         "unused JSON file helpers",
     )
 text = text.replace(
