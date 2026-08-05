@@ -1,0 +1,18 @@
+name: sqlite-only-prune-inventory
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/sqlite-only-prune-inventory.yml'
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inventory obsolete runtime compatibility
+        run: |
+          echo '=== source modules ==='
+          find src -type f | sort
+          echo '=== compatibility matches ==='
+          grep -RInE 'legacy_import|legacy_import_id|legacy_|Legacy|MIGRATION_[1-9]|schema_migrations|transition_storage_authority|storage_authority|categories\.csv|time_log\.csv|detached_runtime\.json|sand_state\.json|category_tags\.json' src tests || true
