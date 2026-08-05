@@ -9,6 +9,7 @@ on:
       - 'tests/config_authority.rs'
       - 'tests/profile_authority.rs'
       - 'tests/temporal_authority.rs'
+      - 'tests/terminal_lifecycle.rs'
 
 permissions:
   contents: write
