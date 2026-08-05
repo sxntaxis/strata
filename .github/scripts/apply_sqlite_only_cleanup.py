@@ -137,4 +137,11 @@ text = sub_once(
 )
 path.write_text(text)
 
+# A fresh application database is final authority, never a migration candidate.
+for rust_path in Path("src").rglob("*.rs"):
+    source = rust_path.read_text()
+    updated = source.replace("sqlite-candidate", "sqlite")
+    if updated != source:
+        rust_path.write_text(updated)
+
 print("SQLite-only compile cleanup applied")
