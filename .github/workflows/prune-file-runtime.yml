@@ -6,6 +6,7 @@ on:
       - '.github/workflows/prune-file-runtime.yml'
       - '.github/scripts/prune_file_runtime.py'
       - '.github/scripts/prune_file_runtime_cleanup.py'
+      - '.github/scripts/prune_file_runtime_final.py'
 
 permissions:
   contents: write
@@ -33,6 +34,7 @@ jobs:
         run: |
           python3 .github/scripts/prune_file_runtime.py
           python3 .github/scripts/prune_file_runtime_cleanup.py
+          python3 .github/scripts/prune_file_runtime_final.py
       - name: Format
         run: cargo fmt --all
       - name: Strict Clippy
@@ -45,6 +47,7 @@ jobs:
         run: |
           rm -f .github/scripts/prune_file_runtime.py
           rm -f .github/scripts/prune_file_runtime_cleanup.py
+          rm -f .github/scripts/prune_file_runtime_final.py
           rm -f .github/workflows/prune-file-runtime.yml
           rm -f .github/workflows/sqlite-only-prune-inventory.yml
           git config user.name github-actions[bot]
