@@ -106,18 +106,7 @@ fn resolve_context(explicit_root: Option<PathBuf>) -> Result<ProfileContext, Str
     let root = if let Some(explicit_root) = explicit_root {
         Some(explicit_root)
     } else {
-        let env_profile = nonempty_env("STRATA_PROFILE");
-        let legacy_alias = nonempty_env("STRATA_DATA_DIR");
-        if let (Some(profile), Some(legacy)) = (&env_profile, &legacy_alias)
-            && profile != legacy
-        {
-            return Err(format!(
-                "STRATA_PROFILE ({}) conflicts with legacy STRATA_DATA_DIR ({}); select one complete profile",
-                profile.display(),
-                legacy.display()
-            ));
-        }
-        env_profile.or(legacy_alias)
+        nonempty_env("STRATA_PROFILE")
     };
 
     if let Some(root) = root {

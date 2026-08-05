@@ -197,7 +197,7 @@ fn validate_checkpoint_shape(value: &Value) -> Result<(), String> {
         .get("schema_version")
         .and_then(Value::as_u64)
         .ok_or_else(|| "runtime checkpoint has no numeric schema_version".to_string())?;
-    if !(1..=3).contains(&version) {
+    if version != 1 {
         return Err(format!(
             "runtime checkpoint schema version {version} is unsupported for category reassignment"
         ));
@@ -209,9 +209,9 @@ fn checkpoint_has_transition_receipt_value(value: &Value) -> Result<bool, String
     let object = value
         .as_object()
         .ok_or_else(|| "runtime checkpoint payload is not a JSON object".to_string())?;
-    Ok(["legacy_transition", "legacy_finish", "clear_all"]
-        .iter()
-        .any(|field| object.get(*field).is_some_and(|value| !value.is_null())))
+    Ok(object
+        .get("clear_all")
+        .is_some_and(|value| !value.is_null()))
 }
 
 fn visit_checkpoint_value(
@@ -374,7 +374,7 @@ mod tests {
     #[test]
     fn checkpoint_reassignment_covers_current_identity_paths() {
         let payload = json!({
-            "schema_version": 3,
+            "schema_version": 1,
             "active_category_id": 1,
             "sand_state": {
                 "version": 2,
@@ -388,8 +388,6 @@ mod tests {
                 {"SwitchLayer": {"category_id": 1}},
                 "ClearAllSand"
             ],
-            "legacy_transition": null,
-            "legacy_finish": null,
             "clear_all": null
         })
         .to_string();
@@ -412,7 +410,7 @@ mod tests {
     #[test]
     fn receipt_bearing_checkpoint_fails_closed() {
         let payload = json!({
-            "schema_version": 3,
+            "schema_version": 1,
             "active_category_id": 1,
             "sand_state": {
                 "version": 2,
@@ -423,9 +421,7 @@ mod tests {
                 "pending_runs": []
             },
             "pending_mutations": [],
-            "legacy_transition": {"expected_previous_category_id": 1},
-            "legacy_finish": null,
-            "clear_all": null
+            "clear_all": {"operation_id": "pending-clear"}
         })
         .to_string();
         assert!(checkpoint_has_transition_receipt(&payload).unwrap());

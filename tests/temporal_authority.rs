@@ -1,14 +1,13 @@
 #![cfg(target_os = "linux")]
 
+use chrono::{Duration as ChronoDuration, Utc};
+use rusqlite::Connection;
 use std::{
     fs,
     path::PathBuf,
     process::{Command, Output},
     time::{SystemTime, UNIX_EPOCH},
 };
-
-use chrono::{Duration as ChronoDuration, SecondsFormat, Utc};
-use serde_json::json;
 
 struct TestProfile {
     root: PathBuf,
@@ -33,40 +32,48 @@ impl TestProfile {
         fs::create_dir_all(data_home.join("strata")).unwrap();
         fs::create_dir_all(state_home.join("strata")).unwrap();
         fs::create_dir_all(config_home.join("strata")).unwrap();
-        fs::write(
-            data_home.join("strata/categories.csv"),
-            "id,name,description,color_index,karma_effect\n1,Work,,0,1\n",
-        )
-        .unwrap();
-        Self {
+        let profile = Self {
             root,
             data_home,
             state_home,
             config_home,
-        }
+        };
+        let initialized = profile.run(&["report", "--today"]);
+        assert!(initialized.status.success(), "{}", stderr(&initialized));
+        Connection::open(profile.database_path())
+            .unwrap()
+            .execute(
+                "INSERT INTO categories(id, name, description, color_index, balance_effect, sort_order)
+                 VALUES (1, 'Work', '', 0, 1, 1)",
+                [],
+            )
+            .unwrap();
+        profile
     }
 
-    fn active_path(&self) -> PathBuf {
-        self.state_home.join("strata/active_session.json")
+    fn database_path(&self) -> PathBuf {
+        self.data_home.join("strata/strata.sqlite3")
     }
 
-    fn time_log_path(&self) -> PathBuf {
-        self.data_home.join("strata/time_log.csv")
+    fn seed_active_start(&self, started_at: chrono::DateTime<Utc>) {
+        let started = self.run(&["start", "clock-test", "--category", "Work"]);
+        assert!(started.status.success(), "{}", stderr(&started));
+        Connection::open(self.database_path())
+            .unwrap()
+            .execute(
+                "UPDATE active_session SET started_at_utc = ?1 WHERE singleton = 1",
+                [started_at.to_rfc3339()],
+            )
+            .unwrap();
     }
 
-    fn write_active_start(&self, started_at: chrono::DateTime<Utc>) {
-        fs::write(
-            self.active_path(),
-            serde_json::to_vec_pretty(&json!({
-                "project": "clock-test",
-                "description": "",
-                "category_id": 1,
-                "category_name": "Work",
-                "start_time": started_at.to_rfc3339_opts(SecondsFormat::Millis, true),
-            }))
-            .unwrap(),
-        )
-        .unwrap();
+    fn row_count(&self, table: &str) -> i64 {
+        Connection::open(self.database_path())
+            .unwrap()
+            .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap()
     }
 
     fn run(&self, args: &[&str]) -> Output {
@@ -75,6 +82,7 @@ impl TestProfile {
             .env("XDG_DATA_HOME", &self.data_home)
             .env("XDG_STATE_HOME", &self.state_home)
             .env("XDG_CONFIG_HOME", &self.config_home)
+            .env_remove("STRATA_PROFILE")
             .env_remove("STRATA_DATA_DIR")
             .output()
             .unwrap()
@@ -92,35 +100,31 @@ fn stderr(output: &Output) -> String {
 }
 
 #[test]
-fn future_legacy_start_is_rejected_without_consuming_active_state() {
+fn future_start_is_rejected_without_consuming_active_state() {
     let profile = TestProfile::new("future");
-    profile.write_active_start(Utc::now() + ChronoDuration::hours(2));
+    profile.seed_active_start(Utc::now() + ChronoDuration::hours(2));
 
     let output = profile.run(&["stop"]);
 
     assert!(!output.status.success());
     assert!(stderr(&output).contains("starts in the future"));
-    assert!(profile.active_path().exists());
-    assert!(!profile.time_log_path().exists());
+    assert_eq!(profile.row_count("active_session"), 1);
+    assert_eq!(profile.row_count("sessions"), 0);
 }
 
 #[test]
 fn large_wall_interval_requires_explicit_clock_jump_acceptance() {
     let profile = TestProfile::new("forward");
-    profile.write_active_start(Utc::now() - ChronoDuration::days(8));
+    profile.seed_active_start(Utc::now() - ChronoDuration::days(8));
 
     let blocked = profile.run(&["stop"]);
     assert!(!blocked.status.success());
     assert!(stderr(&blocked).contains("--accept-clock-jump"));
-    assert!(profile.active_path().exists());
-    assert!(!profile.time_log_path().exists());
+    assert_eq!(profile.row_count("active_session"), 1);
+    assert_eq!(profile.row_count("sessions"), 0);
 
     let accepted = profile.run(&["stop", "--accept-clock-jump"]);
     assert!(accepted.status.success(), "{}", stderr(&accepted));
-    assert!(!profile.active_path().exists());
-    let log = fs::read_to_string(profile.time_log_path()).unwrap();
-    assert!(
-        log.lines().count() >= 2,
-        "expected header plus a committed session row"
-    );
+    assert_eq!(profile.row_count("active_session"), 0);
+    assert_eq!(profile.row_count("sessions"), 1);
 }

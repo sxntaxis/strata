@@ -1,5 +1,6 @@
 #![cfg(target_os = "linux")]
 
+use rusqlite::Connection;
 use std::{
     fs,
     path::PathBuf,
@@ -30,11 +31,6 @@ impl TestProfile {
         fs::create_dir_all(data_home.join("strata")).expect("create data profile");
         fs::create_dir_all(state_home.join("strata")).expect("create state profile");
         fs::create_dir_all(config_home.join("strata")).expect("create config profile");
-        fs::write(
-            data_home.join("strata/categories.csv"),
-            "id,name,description,color_index,karma_effect\n1,Work,,0,1\n",
-        )
-        .expect("write categories");
         Self {
             root,
             data_home,
@@ -45,10 +41,6 @@ impl TestProfile {
 
     fn config_path(&self) -> PathBuf {
         self.config_home.join("strata/keymap.json")
-    }
-
-    fn active_path(&self) -> PathBuf {
-        self.state_home.join("strata/active_session.json")
     }
 
     fn database_path(&self) -> PathBuf {
@@ -62,19 +54,31 @@ impl TestProfile {
             .env("XDG_DATA_HOME", &self.data_home)
             .env("XDG_STATE_HOME", &self.state_home)
             .env("XDG_CONFIG_HOME", &self.config_home)
+            .env_remove("STRATA_PROFILE")
             .env_remove("STRATA_DATA_DIR");
         command.output().expect("Strata process should run")
     }
 
     fn assert_no_authority_write(&self) {
-        assert!(!self.active_path().exists());
         assert!(!self.database_path().exists());
+        assert!(!self.state_home.join("strata/active_session.json").exists());
         assert!(
             !self
                 .state_home
                 .join("strata/storage_authority.json")
                 .exists()
         );
+    }
+
+    fn active_project(&self) -> Option<String> {
+        Connection::open(self.database_path())
+            .expect("open profile database")
+            .query_row(
+                "SELECT project FROM active_session WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .ok()
     }
 }
 
@@ -106,7 +110,7 @@ fn malformed_json_blocks_mutation_before_authority_open() {
     let profile = TestProfile::new("malformed");
     fs::write(profile.config_path(), "{ broken").expect("write malformed config");
 
-    let output = profile.run(&["start", "unsafe", "--category", "Work"]);
+    let output = profile.run(&["start", "unsafe", "--category", "idle"]);
     assert_config_failure(&profile, &output, "Failed parsing keymap JSON");
 }
 
@@ -129,7 +133,7 @@ fn invalid_timezone_blocks_mutation_before_default_database_creation() {
     fs::write(profile.config_path(), r#"{"utc_offset_seconds":86400}"#)
         .expect("write invalid timezone config");
 
-    let output = profile.run(&["start", "unsafe", "--category", "Work"]);
+    let output = profile.run(&["start", "unsafe", "--category", "idle"]);
     assert_config_failure(&profile, &output, "Invalid utc_offset_seconds");
 }
 
@@ -142,7 +146,7 @@ fn time_log_path_hot_redirect_is_rejected() {
     )
     .expect("write obsolete partial-path config");
 
-    let output = profile.run(&["start", "unsafe", "--category", "Work"]);
+    let output = profile.run(&["start", "unsafe", "--category", "idle"]);
     assert_config_failure(&profile, &output, "time_log_path");
     assert!(stderr(&output).contains("--profile"));
 }
@@ -157,12 +161,20 @@ fn ignore_config_is_an_explicit_deliberate_default_override() {
         "start",
         "deliberate-default",
         "--category",
-        "Work",
+        "idle",
     ]);
     assert!(output.status.success(), "{}", stderr(&output));
-    let active = fs::read_to_string(profile.active_path()).expect("active state should exist");
-    assert!(active.contains("deliberate-default"));
-    assert!(!profile.database_path().exists());
+    assert!(profile.database_path().exists());
+    assert_eq!(
+        profile.active_project().as_deref(),
+        Some("deliberate-default")
+    );
+    assert!(
+        !profile
+            .state_home
+            .join("strata/active_session.json")
+            .exists()
+    );
 }
 
 #[test]
@@ -172,7 +184,7 @@ fn removed_sunrise_mode_is_migrated_visibly_to_fixed_policy() {
         profile.config_path(),
         r#"{"day_start_mode":"sunrise","day_start_hour":5,"day_start_minute":45}"#,
     )
-    .expect("write legacy sunrise config");
+    .expect("write removed sunrise config");
 
     let output = profile.run(&["report", "--today"]);
     assert!(output.status.success(), "{}", stderr(&output));
@@ -190,5 +202,12 @@ fn removed_sunrise_mode_is_migrated_visibly_to_fixed_policy() {
     assert!(migrated.contains("\"day_start_mode\": \"fixed\""));
     assert!(migrated.contains("\"day_start_hour\": 5"));
     assert!(migrated.contains("\"day_start_minute\": 45"));
-    profile.assert_no_authority_write();
+    assert!(profile.database_path().exists());
+    assert_eq!(profile.active_project(), None);
+    assert!(
+        !profile
+            .state_home
+            .join("strata/storage_authority.json")
+            .exists()
+    );
 }

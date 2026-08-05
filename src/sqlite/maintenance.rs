@@ -766,10 +766,7 @@ fn doctor_at(
     } else {
         None
     };
-    let authority_ok = matches!(
-        metadata_authority.as_deref(),
-        Some("sqlite-candidate" | "sqlite" | "sqlite-cli")
-    );
+    let authority_ok = matches!(metadata_authority.as_deref(), Some("sqlite"));
     checks.push(check(
         "database-authority-metadata",
         authority_ok,
