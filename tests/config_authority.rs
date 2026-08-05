@@ -61,12 +61,7 @@ impl TestProfile {
 
     fn assert_no_authority_write(&self) {
         assert!(!self.database_path().exists());
-        assert!(
-            !self
-                .state_home
-                .join("strata/active_session.json")
-                .exists()
-        );
+        assert!(!self.state_home.join("strata/active_session.json").exists());
         assert!(
             !self
                 .state_home

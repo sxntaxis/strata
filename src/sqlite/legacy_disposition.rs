@@ -696,7 +696,7 @@ fn load_context(marker_path: &Path) -> Result<EvidenceContext, LegacyEvidenceErr
 
 fn validate_marker(marker: &StorageAuthorityMarker) -> Result<(), LegacyEvidenceError> {
     if marker.schema_version != MARKER_SCHEMA_VERSION
-        || marker.active_authority != "sqlite-cli"
+        || marker.active_authority != "sqlite"
         || marker.sqlite_candidate.status != "verified"
     {
         return Err(LegacyEvidenceError::SqliteNotActive);
@@ -738,7 +738,7 @@ fn verify_database(
             )
             .optional()
     };
-    if metadata("storage_authority")?.as_deref() != Some("sqlite-cli")
+    if metadata("storage_authority")?.as_deref() != Some("sqlite")
         || metadata("legacy_import_fingerprint")?.as_deref() != Some(fingerprint)
         || metadata("legacy_import_status")?.as_deref() != Some("verified")
     {

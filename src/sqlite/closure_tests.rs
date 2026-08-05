@@ -182,7 +182,7 @@ impl EvidenceFixture {
         repository
             .connection
             .execute(
-                "UPDATE database_metadata SET value = 'sqlite-cli' WHERE key = 'storage_authority'",
+                "UPDATE database_metadata SET value = 'sqlite' WHERE key = 'storage_authority'",
                 [],
             )
             .unwrap();
@@ -238,7 +238,7 @@ impl EvidenceFixture {
         let marker = state.join("storage_authority.json");
         let marker_value = TestMarker {
             schema_version: 1,
-            active_authority: "sqlite-cli",
+            active_authority: "sqlite",
             sqlite_candidate: TestCandidate {
                 status: "verified",
                 source_fingerprint: &fingerprint,

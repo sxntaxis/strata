@@ -94,7 +94,9 @@ impl TerminalProfile {
         }
         let connection = Connection::open(self.database_path()).expect("open profile database");
         let count: i64 = connection
-            .query_row("SELECT count(*) FROM runtime_checkpoint", [], |row| row.get(0))
+            .query_row("SELECT count(*) FROM runtime_checkpoint", [], |row| {
+                row.get(0)
+            })
             .expect("query runtime checkpoint custody");
         count > 0
     }

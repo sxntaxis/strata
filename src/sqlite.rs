@@ -18,9 +18,7 @@ mod repository;
 mod runtime_coordination;
 mod tui_runtime;
 
-pub(crate) use authority::{
-    RuntimeAuthority, SqliteCliActivationOptions, activate_sqlite_cli, resolve_runtime_authority,
-};
+pub(crate) use authority::resolve_runtime_database;
 #[allow(unused_imports)]
 pub(crate) use category_lifecycle::{
     CategoryLifecyclePreview, CategoryLifecycleReceipt, CategoryLifecycleRequest,
@@ -237,7 +235,7 @@ INSERT INTO schema_migrations(version, applied_at_utc)
 VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
 
 INSERT INTO database_metadata(key, value)
-VALUES ('storage_authority', 'sqlite-candidate');
+VALUES ('storage_authority', 'sqlite');
 
 PRAGMA user_version = 1;
 "#;

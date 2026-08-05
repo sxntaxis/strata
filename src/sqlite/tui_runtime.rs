@@ -1268,7 +1268,7 @@ mod tests {
     fn prepare_bootstrap_repository(path: &Path) {
         let mut repository = SqliteRepository::open(path).unwrap();
         repository
-            .transition_storage_authority("sqlite-candidate", "sqlite-cli", "2026-08-03T18:00:00Z")
+            .transition_storage_authority("sqlite", "sqlite", "2026-08-03T18:00:00Z")
             .unwrap();
         repository
             .create_category(&NewCategoryRecord {
@@ -1393,7 +1393,7 @@ mod tests {
         let path = repository_file("categories");
         let mut repository = SqliteRepository::open(&path).unwrap();
         repository
-            .transition_storage_authority("sqlite-candidate", "sqlite-cli", "2026-08-01T12:00:00Z")
+            .transition_storage_authority("sqlite", "sqlite", "2026-08-01T12:00:00Z")
             .unwrap();
         repository
             .create_category(&NewCategoryRecord {
@@ -1451,7 +1451,7 @@ mod tests {
         let path = repository_file("sessions");
         let mut repository = SqliteRepository::open(&path).unwrap();
         repository
-            .transition_storage_authority("sqlite-candidate", "sqlite-cli", "2026-08-01T12:00:00Z")
+            .transition_storage_authority("sqlite", "sqlite", "2026-08-01T12:00:00Z")
             .unwrap();
         repository
             .create_category(&NewCategoryRecord {
@@ -1549,7 +1549,7 @@ mod tests {
         let path = repository_file("runtime-state");
         let mut repository = SqliteRepository::open(&path).unwrap();
         repository
-            .transition_storage_authority("sqlite-candidate", "sqlite-cli", "2026-08-01T12:00:00Z")
+            .transition_storage_authority("sqlite", "sqlite", "2026-08-01T12:00:00Z")
             .unwrap();
         repository
             .start_session(&NewActiveSession {
@@ -1672,7 +1672,7 @@ mod checkpoint_identity_tests {
         repository
             .connection
             .execute(
-                "UPDATE database_metadata SET value = 'sqlite-cli' WHERE key = 'storage_authority'",
+                "UPDATE database_metadata SET value = 'sqlite' WHERE key = 'storage_authority'",
                 [],
             )
             .unwrap();
@@ -1778,7 +1778,7 @@ mod clear_all_transaction_tests {
     fn seed(path: &Path) {
         let mut repository = SqliteRepository::open(path).unwrap();
         repository
-            .transition_storage_authority("sqlite-candidate", "sqlite-cli", "2026-08-01T12:00:00Z")
+            .transition_storage_authority("sqlite", "sqlite", "2026-08-01T12:00:00Z")
             .unwrap();
         repository
             .connection
@@ -1954,7 +1954,7 @@ mod clear_all_additional_transaction_tests {
     fn seed(path: &Path) {
         let mut repository = SqliteRepository::open(path).unwrap();
         repository
-            .transition_storage_authority("sqlite-candidate", "sqlite-cli", "2026-08-01T12:00:00Z")
+            .transition_storage_authority("sqlite", "sqlite", "2026-08-01T12:00:00Z")
             .unwrap();
         repository
             .connection

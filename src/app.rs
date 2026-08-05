@@ -690,57 +690,14 @@ impl App {
         let keymap_error = None;
 
         let mut tracker = TimeTracker::new();
-        let authority = sqlite::resolve_runtime_authority()?;
-        let (
-            sqlite_database_path,
-            loaded_categories,
-            loaded_sessions,
-            mut category_tags,
-            archived_categories,
-            sqlite_active_session,
-        ) = match authority {
-            sqlite::RuntimeAuthority::LegacyFiles => {
-                let lifecycle_paths =
-                    crate::legacy_category_lifecycle::LegacyCategoryLifecyclePaths::runtime();
-                crate::legacy_category_lifecycle::replay_prepared(&lifecycle_paths)?;
-                let ledger = crate::legacy_category_lifecycle::load_ledger(&lifecycle_paths)?;
-                let categories_path = storage::get_categories_path();
-                let sessions_path = storage::get_time_log_path();
-                let mut loaded_categories = storage::try_load_categories_from_csv(&categories_path)
-                    .map_err(|error| error.to_string())?;
-                loaded_categories.next_category_id =
-                    crate::legacy_category_lifecycle::next_category_id(
-                        loaded_categories.next_category_id,
-                        &ledger,
-                    )?;
-                let mut session_categories = loaded_categories.categories.clone();
-                session_categories.extend(loaded_categories.archived_categories.iter().cloned());
-                let loaded_sessions =
-                    storage::try_load_sessions_from_csv(&sessions_path, &session_categories)
-                        .map_err(|error| error.to_string())?;
-                let tags = storage::try_load_category_tags(&storage::get_category_tags_path())?;
-                let archived_categories = loaded_categories.archived_categories.clone();
-                (
-                    None,
-                    loaded_categories,
-                    loaded_sessions,
-                    tags,
-                    archived_categories,
-                    None,
-                )
-            }
-            sqlite::RuntimeAuthority::SqliteCli { database_path } => {
-                let state = sqlite::load_tui_state(&database_path)?;
-                (
-                    Some(database_path),
-                    state.loaded_categories,
-                    state.loaded_sessions,
-                    state.category_tags,
-                    state.archived_categories,
-                    state.active_session,
-                )
-            }
-        };
+        let database_path = sqlite::resolve_runtime_database()?;
+        let state = sqlite::load_tui_state(&database_path)?;
+        let sqlite_database_path = Some(database_path);
+        let loaded_categories = state.loaded_categories;
+        let loaded_sessions = state.loaded_sessions;
+        let mut category_tags = state.category_tags;
+        let archived_categories = state.archived_categories;
+        let sqlite_active_session = state.active_session;
         tracker.apply_loaded_state(
             loaded_categories.categories,
             loaded_categories.next_category_id,

@@ -3,18 +3,18 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, SecondsFormat, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     constants::COLORS,
     domain::{
-        CategoryId, DRIFT_CATEGORY_CONFIG_NAME, OperationalDayPolicy, ReportPeriod, Session,
-        build_period_report, build_report_for_date_range, civil_time_for_utc, day_boundary_config,
-        operational_day_key_for_utc, runtime_settings,
+        CategoryId, OperationalDayPolicy, ReportPeriod, Session, build_period_report,
+        build_report_for_date_range, civil_time_for_utc, day_boundary_config,
+        operational_day_key_for_utc,
     },
-    profile, sqlite, storage, temporal,
+    profile, sqlite, storage,
 };
 
 #[derive(Parser, Debug)]
@@ -130,68 +130,6 @@ pub enum Cli {
         completed_only: bool,
     },
 
-    #[command(about = "Validate and publish a verified SQLite migration candidate")]
-    MigrateSqlite {
-        #[arg(
-            long,
-            help = "Validate without creating backups, reports, markers, or a database"
-        )]
-        dry_run: bool,
-
-        #[arg(
-            long,
-            help = "Explicitly include an active or detached recovery interval"
-        )]
-        include_active_recovery: bool,
-
-        #[arg(long, value_name = "PATH", help = "SQLite candidate output path")]
-        database: Option<PathBuf>,
-
-        #[arg(
-            long,
-            value_name = "PATH",
-            help = "Machine-readable migration report path"
-        )]
-        report_out: Option<PathBuf>,
-
-        #[arg(
-            long,
-            value_name = "SECONDS",
-            help = "Fixed UTC offset used to reconstruct legacy wall-clock timestamps"
-        )]
-        utc_offset_seconds: Option<i32>,
-
-        #[arg(
-            long,
-            value_name = "MINUTES",
-            help = "Operational-day start as minutes after midnight"
-        )]
-        day_start_minutes: Option<u16>,
-
-        #[arg(
-            long,
-            default_value_t = 1,
-            value_name = "SECONDS",
-            help = "Seconds represented by one sediment quantum"
-        )]
-        quantum_seconds: i64,
-
-        #[arg(long, help = "Print the migration result as JSON")]
-        json: bool,
-    },
-
-    #[command(about = "Activate a verified SQLite candidate for CLI runtime operations")]
-    ActivateSqlite {
-        #[arg(long, value_name = "PATH", help = "Verified SQLite candidate path")]
-        database: Option<PathBuf>,
-
-        #[arg(long, help = "Confirm the one-way CLI authority switch")]
-        confirm: bool,
-
-        #[arg(long, help = "Print the activation result as JSON")]
-        json: bool,
-    },
-
     #[command(about = "Export a deterministic portable bundle from SQLite")]
     SqliteExport {
         #[arg(long, value_name = "PATH", help = "SQLite database path")]
@@ -227,9 +165,6 @@ pub enum Cli {
         #[arg(long, value_name = "PATH", help = "SQLite database path")]
         database: Option<PathBuf>,
 
-        #[arg(long, value_name = "PATH", help = "Authority marker to validate")]
-        authority_marker: Option<PathBuf>,
-
         #[arg(long, help = "Print the result as JSON")]
         json: bool,
     },
@@ -261,53 +196,6 @@ pub enum Cli {
         json: bool,
     },
 
-    #[command(about = "Inventory verified legacy migration evidence")]
-    SqliteLegacyInventory {
-        #[arg(long, value_name = "PATH", help = "Storage authority marker path")]
-        authority_marker: Option<PathBuf>,
-
-        #[arg(long, help = "Print the result as JSON")]
-        json: bool,
-    },
-
-    #[command(about = "Archive verified legacy migration evidence")]
-    SqliteLegacyArchive {
-        #[arg(long, value_name = "DIRECTORY", help = "New archive directory")]
-        out: PathBuf,
-
-        #[arg(long, value_name = "PATH", help = "Storage authority marker path")]
-        authority_marker: Option<PathBuf>,
-
-        #[arg(long, help = "Confirm archive publication")]
-        confirm: bool,
-
-        #[arg(long, help = "Print the result as JSON")]
-        json: bool,
-    },
-
-    #[command(about = "Remove legacy files after a verified archive exists")]
-    SqliteLegacyRemove {
-        #[arg(
-            long,
-            value_name = "DIRECTORY",
-            help = "Verified legacy evidence archive"
-        )]
-        archive: PathBuf,
-
-        #[arg(long, value_name = "PATH", help = "Storage authority marker path")]
-        authority_marker: Option<PathBuf>,
-
-        #[arg(
-            long,
-            value_name = "FINGERPRINT",
-            help = "Exact migration fingerprint confirming irreversible removal"
-        )]
-        confirm_fingerprint: String,
-
-        #[arg(long, help = "Print the result as JSON")]
-        json: bool,
-    },
-
     #[command(about = "Generate shell completions")]
     Completions {
         #[arg(help = "Shell type (bash, zsh, fish)")]
@@ -319,17 +207,6 @@ pub enum Cli {
 pub enum ExportFormat {
     Json,
     Ics,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ActiveSession {
-    #[serde(default)]
-    pub profile_id: Option<String>,
-    pub project: String,
-    pub description: String,
-    pub category_id: u64,
-    pub category_name: String,
-    pub start_time: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -377,146 +254,27 @@ pub fn start_session(
     if category_name.trim().is_empty() {
         return Err("Category is required; use --category idle for baseline time".to_string());
     }
-    match sqlite::resolve_runtime_authority()? {
-        sqlite::RuntimeAuthority::LegacyFiles => {
-            start_session_legacy(project, description, category_name)
-        }
-        sqlite::RuntimeAuthority::SqliteCli { database_path } => {
-            let started =
-                sqlite::start_cli_session(&database_path, project, description, category_name)?;
-            println!(
-                "Started session for project '{}' in category '{}'",
-                started.project, started.category_name
-            );
-            Ok(())
-        }
-    }
-}
-
-fn start_session_legacy(
-    project: String,
-    description: Option<String>,
-    category_name: String,
-) -> Result<(), String> {
-    let _lifecycle_lock = storage::try_acquire_legacy_lifecycle_lock()?;
-    let categories_path = storage::get_categories_path();
-    let categories = storage::try_load_categories_from_csv(&categories_path)
-        .map_err(|error| error.to_string())?
-        .categories;
-
-    let requested = category_name.trim();
-    let category = if crate::domain::is_drift_name(requested) || requested == "0" {
-        categories
-            .iter()
-            .find(|category| category.id == CategoryId::new(0))
-    } else {
-        categories.iter().find(|category| {
-            category.name.eq_ignore_ascii_case(requested) || category.id.0.to_string() == requested
-        })
-    }
-    .ok_or_else(|| format!("Category '{requested}' not found"))?;
-
-    let session_path = storage::get_active_session_path();
-    if storage::file_exists(&session_path) {
-        return Err(
-            "An active session is already running; stop it before starting another".to_string(),
-        );
-    }
-
-    let session = ActiveSession {
-        profile_id: Some(profile::profile_id()),
-        project: project.clone(),
-        description: description.unwrap_or_default(),
-        category_id: category.id.0,
-        category_name: category.name.clone(),
-        start_time: Utc::now(),
-    };
-
-    storage::write_json_atomic(&session_path, &session)?;
-
+    let database_path = sqlite::resolve_runtime_database()?;
+    let started = sqlite::start_cli_session(&database_path, project, description, category_name)?;
     println!(
         "Started session for project '{}' in category '{}'",
-        project, category.name
+        started.project, started.category_name
     );
     Ok(())
 }
 
 pub fn stop_session(accept_clock_jump: bool) -> Result<usize, String> {
-    match sqlite::resolve_runtime_authority()? {
-        sqlite::RuntimeAuthority::LegacyFiles => stop_session_legacy(accept_clock_jump),
-        sqlite::RuntimeAuthority::SqliteCli { database_path } => {
-            let stopped = sqlite::stop_cli_session(&database_path, accept_clock_jump)?;
-            let elapsed = stopped.elapsed_seconds;
-            println!(
-                "Stopped session. Elapsed time: {:02}:{:02}:{:02}",
-                elapsed / 3600,
-                (elapsed % 3600) / 60,
-                elapsed % 60
-            );
-            io::stdout().flush().map_err(|error| error.to_string())?;
-            sqlite::acknowledge_cli_stop(&database_path, &stopped.operation_id)?;
-            Ok(elapsed)
-        }
-    }
-}
-
-fn stop_session_legacy(accept_clock_jump: bool) -> Result<usize, String> {
-    let _lifecycle_lock = storage::try_acquire_legacy_lifecycle_lock()?;
-    let session_path = storage::get_active_session_path();
-    if !storage::file_exists(&session_path) {
-        return Err("No active session to stop".to_string());
-    }
-
-    let active_session: ActiveSession = storage::read_json(&session_path)?;
-    profile::validate_artifact_profile(active_session.profile_id.as_deref(), "active session")?;
-
-    let now_utc = Utc::now();
-    let interval =
-        temporal::checked_wall_interval(active_session.start_time, now_utc, accept_clock_jump)?;
-    let elapsed = interval.elapsed_seconds;
-
-    let sessions_path = storage::get_time_log_path();
-    let categories_path = storage::get_categories_path();
-
-    let categories = storage::try_load_categories_from_csv(&categories_path)
-        .map_err(|error| error.to_string())?
-        .categories;
-    let mut sessions = storage::try_load_sessions_from_csv(&sessions_path, &categories)
-        .map_err(|error| error.to_string())?
-        .sessions;
-
-    let now = civil_time_for_utc(interval.ended_at_utc);
-    let today = operational_day_key_for_utc(interval.ended_at_utc)
-        .format("%Y-%m-%d")
-        .to_string();
-    let start_time = now - ChronoDuration::seconds(elapsed as i64);
-
-    if elapsed > 0 {
-        let new_id = sessions.iter().map(|s| s.id).max().unwrap_or(0) + 1;
-        sessions.push(Session {
-            id: new_id,
-            date: today,
-            category_id: CategoryId::new(active_session.category_id),
-            project: active_session.project.clone(),
-            description: active_session.description.clone(),
-            start_time: start_time.format("%H:%M:%S").to_string(),
-            end_time: now.format("%H:%M:%S").to_string(),
-            elapsed_seconds: elapsed,
-            started_at_utc: Some(active_session.start_time),
-            ended_at_utc: Some(interval.ended_at_utc),
-            operational_day_policy: Some(OperationalDayPolicy::from_config(day_boundary_config())),
-        });
-        storage::save_sessions_to_csv(&sessions_path, &sessions, &categories)?;
-    }
-
-    storage::delete_file_if_exists(&session_path)?;
-
+    let database_path = sqlite::resolve_runtime_database()?;
+    let stopped = sqlite::stop_cli_session(&database_path, accept_clock_jump)?;
+    let elapsed = stopped.elapsed_seconds;
     println!(
         "Stopped session. Elapsed time: {:02}:{:02}:{:02}",
         elapsed / 3600,
         (elapsed % 3600) / 60,
         elapsed % 60
     );
+    io::stdout().flush().map_err(|error| error.to_string())?;
+    sqlite::acknowledge_cli_stop(&database_path, &stopped.operation_id)?;
     Ok(elapsed)
 }
 
@@ -527,12 +285,8 @@ pub enum ReportSelection {
 }
 
 pub fn report(selection: ReportSelection, completed_only: bool) -> Result<(), String> {
-    match sqlite::resolve_runtime_authority()? {
-        sqlite::RuntimeAuthority::LegacyFiles => report_legacy(selection, completed_only),
-        sqlite::RuntimeAuthority::SqliteCli { database_path } => {
-            report_sqlite(&database_path, selection, completed_only)
-        }
-    }
+    let database_path = sqlite::resolve_runtime_database()?;
+    report_sqlite(&database_path, selection, completed_only)
 }
 
 fn report_sqlite(
@@ -561,35 +315,6 @@ fn report_sqlite(
         sessions.push(provisional);
     }
     print_report(&sessions, &snapshot.categories, selection, !completed_only)
-}
-
-fn report_legacy(selection: ReportSelection, completed_only: bool) -> Result<(), String> {
-    let sessions_path = storage::get_time_log_path();
-    let categories_path = storage::get_categories_path();
-    let categories = storage::try_load_categories_from_csv(&categories_path)
-        .map_err(|error| error.to_string())?
-        .categories;
-    let mut sessions = storage::try_load_sessions_from_csv(&sessions_path, &categories)
-        .map_err(|error| error.to_string())?
-        .sessions;
-    if !completed_only {
-        let active_path = storage::get_active_session_path();
-        if storage::file_exists(&active_path) {
-            let active: ActiveSession = storage::read_json(&active_path)?;
-            profile::validate_artifact_profile(active.profile_id.as_deref(), "active session")?;
-            if let Some(provisional) = provisional_session(
-                &active.project,
-                active.category_id,
-                &active.description,
-                active.start_time,
-                Utc::now(),
-                sessions.iter().map(|session| session.id).max().unwrap_or(0) + 1,
-            )? {
-                sessions.push(provisional);
-            }
-        }
-    }
-    print_report(&sessions, &categories, selection, !completed_only)
 }
 
 fn print_report(
@@ -691,14 +416,8 @@ pub fn export_data(
     out_path: Option<PathBuf>,
     completed_only: bool,
 ) -> Result<(), String> {
-    match sqlite::resolve_runtime_authority()? {
-        sqlite::RuntimeAuthority::LegacyFiles => {
-            export_data_legacy(format, out_path, completed_only)
-        }
-        sqlite::RuntimeAuthority::SqliteCli { database_path } => {
-            export_data_sqlite(&database_path, format, out_path, completed_only)
-        }
-    }
+    let database_path = sqlite::resolve_runtime_database()?;
+    export_data_sqlite(&database_path, format, out_path, completed_only)
 }
 
 fn export_data_sqlite(
@@ -775,89 +494,6 @@ fn export_data_sqlite(
         format,
         out_path,
     )
-}
-
-fn export_data_legacy(
-    format: ExportFormat,
-    out_path: Option<PathBuf>,
-    completed_only: bool,
-) -> Result<(), String> {
-    let categories_path = storage::get_categories_path();
-    let categories = storage::try_load_categories_from_csv(&categories_path)
-        .map_err(|error| error.to_string())?
-        .categories;
-    let sessions_path = storage::get_time_log_path();
-    let completed = storage::try_load_sessions_from_csv(&sessions_path, &categories)
-        .map_err(|error| error.to_string())?
-        .sessions;
-    let snapshot_at = Utc::now();
-    let mut sessions = completed
-        .into_iter()
-        .map(|session| {
-            let category_name = category_name(&categories, session.category_id);
-            let uid = format!("legacy-session-{}@strata", session.id);
-            session_export_from_domain(session, category_name, uid, false)
-        })
-        .collect::<Vec<_>>();
-    if !completed_only {
-        let active_path = storage::get_active_session_path();
-        if storage::file_exists(&active_path) {
-            let active: ActiveSession = storage::read_json(&active_path)?;
-            if let Some(session) = provisional_session(
-                &active.project,
-                active.category_id,
-                &active.description,
-                active.start_time,
-                snapshot_at,
-                0,
-            )? {
-                sessions.push(session_export_from_domain(
-                    session,
-                    active.category_name,
-                    format!(
-                        "legacy-active-{}@strata",
-                        active
-                            .start_time
-                            .to_rfc3339_opts(SecondsFormat::Nanos, true)
-                    ),
-                    true,
-                ));
-            }
-        }
-    }
-    let mut category_exports = categories
-        .iter()
-        .filter(|category| category.id.0 != 0)
-        .map(|category| CategoryExport {
-            id: category.id.0,
-            name: category.name.clone(),
-            description: category.description.clone(),
-            color_index: COLORS
-                .iter()
-                .position(|&color| color == category.color)
-                .unwrap_or(0),
-            karma_effect: category.karma_effect,
-        })
-        .collect::<Vec<_>>();
-    sort_exports(&mut category_exports, &mut sessions);
-    write_export(
-        DataExport {
-            schema_version: 2,
-            exported_at: snapshot_at,
-            categories: category_exports,
-            sessions,
-        },
-        format,
-        out_path,
-    )
-}
-
-fn category_name(categories: &[crate::domain::Category], category_id: CategoryId) -> String {
-    categories
-        .iter()
-        .find(|category| category.id == category_id)
-        .map(|category| category.name.clone())
-        .unwrap_or_else(|| DRIFT_CATEGORY_CONFIG_NAME.to_string())
 }
 
 fn session_export_from_domain(
@@ -1018,77 +654,8 @@ fn format_ics_timestamp(dt: DateTime<Utc>) -> String {
     dt.format("%Y%m%dT%H%M%SZ").to_string()
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn migrate_sqlite(
-    dry_run: bool,
-    include_active_recovery: bool,
-    database: Option<PathBuf>,
-    report_out: Option<PathBuf>,
-    utc_offset_seconds: Option<i32>,
-    day_start_minutes: Option<u16>,
-    quantum_seconds: i64,
-    json: bool,
-) -> Result<(), String> {
-    if dry_run && report_out.is_some() {
-        return Err(
-            "--report-out cannot be used with --dry-run; use --json for a machine-readable preview"
-                .to_string(),
-        );
-    }
-
-    let settings = runtime_settings();
-    let resolved_day_start = match day_start_minutes {
-        Some(value) => value,
-        None => {
-            let minutes = settings
-                .day_boundary
-                .fixed_hour
-                .checked_mul(60)
-                .and_then(|value| value.checked_add(settings.day_boundary.fixed_minute))
-                .ok_or_else(|| "Configured operational-day boundary overflows".to_string())?;
-            u16::try_from(minutes)
-                .map_err(|_| "Configured operational-day boundary is invalid".to_string())?
-        }
-    };
-
-    let report = sqlite::run_controlled_migration(sqlite::ControlledMigrationOptions {
-        dry_run,
-        include_active_recovery,
-        database_path: database,
-        report_path: report_out,
-        utc_offset_seconds: utc_offset_seconds.unwrap_or(settings.day_boundary.utc_offset_seconds),
-        operational_day_start_minutes: resolved_day_start,
-        quantum_seconds,
-    })
-    .map_err(|error| error.to_string())?;
-
-    if json {
-        println!("{}", report.to_pretty_json()?);
-    } else {
-        report.print_human();
-    }
-    Ok(())
-}
-
-pub fn activate_sqlite(database: Option<PathBuf>, confirm: bool, json: bool) -> Result<(), String> {
-    let report = sqlite::activate_sqlite_cli(sqlite::SqliteCliActivationOptions {
-        database_path: database,
-        confirm,
-    })?;
-    if json {
-        println!("{}", report.to_pretty_json()?);
-    } else {
-        report.print_human();
-    }
-    Ok(())
-}
-
 fn default_sqlite_database_path() -> PathBuf {
     storage::get_data_dir().join("strata.sqlite3")
-}
-
-fn default_authority_marker_path() -> PathBuf {
-    storage::get_state_dir().join("storage_authority.json")
 }
 
 fn print_maintenance_report(
@@ -1135,16 +702,10 @@ pub fn sqlite_import(
     print_maintenance_report(report, json)
 }
 
-pub fn sqlite_doctor(
-    database: Option<PathBuf>,
-    authority_marker: Option<PathBuf>,
-    json: bool,
-) -> Result<(), String> {
-    let use_default_marker = database.is_none() && authority_marker.is_none();
+pub fn sqlite_doctor(database: Option<PathBuf>, json: bool) -> Result<(), String> {
     let report = sqlite::run_doctor(sqlite::DoctorOptions {
         database_path: database.unwrap_or_else(default_sqlite_database_path),
-        authority_marker_path: authority_marker
-            .or_else(|| use_default_marker.then(default_authority_marker_path)),
+        authority_marker_path: None,
     })?;
     print_maintenance_report(report, json)
 }
@@ -1169,61 +730,6 @@ pub fn sqlite_restore(
         replace,
     })?;
     print_maintenance_report(report, json)
-}
-
-fn print_legacy_evidence_report(
-    report: sqlite::LegacyEvidenceReport,
-    json: bool,
-) -> Result<(), String> {
-    let healthy = report.is_healthy();
-    if json {
-        println!("{}", report.to_pretty_json()?);
-    } else {
-        report.print_human();
-    }
-    if healthy {
-        Ok(())
-    } else {
-        Err("legacy evidence differs from the verified migration backup".to_string())
-    }
-}
-
-pub fn sqlite_legacy_inventory(
-    authority_marker: Option<PathBuf>,
-    json: bool,
-) -> Result<(), String> {
-    let report = sqlite::run_legacy_evidence_inventory(sqlite::LegacyEvidenceInventoryOptions {
-        authority_marker_path: authority_marker.unwrap_or_else(default_authority_marker_path),
-    })?;
-    print_legacy_evidence_report(report, json)
-}
-
-pub fn sqlite_legacy_archive(
-    out: PathBuf,
-    authority_marker: Option<PathBuf>,
-    confirm: bool,
-    json: bool,
-) -> Result<(), String> {
-    let report = sqlite::run_legacy_evidence_archive(sqlite::LegacyEvidenceArchiveOptions {
-        authority_marker_path: authority_marker.unwrap_or_else(default_authority_marker_path),
-        output_directory: out,
-        confirm,
-    })?;
-    print_legacy_evidence_report(report, json)
-}
-
-pub fn sqlite_legacy_remove(
-    archive: PathBuf,
-    authority_marker: Option<PathBuf>,
-    confirm_fingerprint: String,
-    json: bool,
-) -> Result<(), String> {
-    let report = sqlite::run_legacy_evidence_remove(sqlite::LegacyEvidenceRemoveOptions {
-        authority_marker_path: authority_marker.unwrap_or_else(default_authority_marker_path),
-        archive_directory: archive,
-        confirm_fingerprint,
-    })?;
-    print_legacy_evidence_report(report, json)
 }
 
 pub fn show_profile(json: bool) -> Result<(), String> {
@@ -1358,41 +864,6 @@ pub fn run_command(cli: Cli) {
                 std::process::exit(1);
             }
         }
-        Cli::MigrateSqlite {
-            dry_run,
-            include_active_recovery,
-            database,
-            report_out,
-            utc_offset_seconds,
-            day_start_minutes,
-            quantum_seconds,
-            json,
-        } => {
-            if let Err(e) = migrate_sqlite(
-                dry_run,
-                include_active_recovery,
-                database,
-                report_out,
-                utc_offset_seconds,
-                day_start_minutes,
-                quantum_seconds,
-                json,
-            ) {
-                eprintln!("Error: {}", e);
-                std::process::exit(1);
-            }
-        }
-
-        Cli::ActivateSqlite {
-            database,
-            confirm,
-            json,
-        } => {
-            if let Err(error) = activate_sqlite(database, confirm, json) {
-                eprintln!("Error: {}", error);
-                std::process::exit(1);
-            }
-        }
 
         Cli::SqliteExport {
             database,
@@ -1415,12 +886,8 @@ pub fn run_command(cli: Cli) {
                 std::process::exit(1);
             }
         }
-        Cli::SqliteDoctor {
-            database,
-            authority_marker,
-            json,
-        } => {
-            if let Err(error) = sqlite_doctor(database, authority_marker, json) {
+        Cli::SqliteDoctor { database, json, .. } => {
+            if let Err(error) = sqlite_doctor(database, json) {
                 eprintln!("Error: {}", error);
                 std::process::exit(1);
             }
@@ -1442,40 +909,6 @@ pub fn run_command(cli: Cli) {
             json,
         } => {
             if let Err(error) = sqlite_restore(backup, database, replace, json) {
-                eprintln!("Error: {}", error);
-                std::process::exit(1);
-            }
-        }
-
-        Cli::SqliteLegacyInventory {
-            authority_marker,
-            json,
-        } => {
-            if let Err(error) = sqlite_legacy_inventory(authority_marker, json) {
-                eprintln!("Error: {}", error);
-                std::process::exit(1);
-            }
-        }
-        Cli::SqliteLegacyArchive {
-            out,
-            authority_marker,
-            confirm,
-            json,
-        } => {
-            if let Err(error) = sqlite_legacy_archive(out, authority_marker, confirm, json) {
-                eprintln!("Error: {}", error);
-                std::process::exit(1);
-            }
-        }
-        Cli::SqliteLegacyRemove {
-            archive,
-            authority_marker,
-            confirm_fingerprint,
-            json,
-        } => {
-            if let Err(error) =
-                sqlite_legacy_remove(archive, authority_marker, confirm_fingerprint, json)
-            {
                 eprintln!("Error: {}", error);
                 std::process::exit(1);
             }

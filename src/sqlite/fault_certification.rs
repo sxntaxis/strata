@@ -37,7 +37,7 @@ fn remove_database(path: &Path) {
 fn seed(path: &Path) {
     let mut repository = SqliteRepository::open(path).unwrap();
     repository
-        .transition_storage_authority("sqlite-candidate", "sqlite-cli", "2026-08-01T12:00:00Z")
+        .transition_storage_authority("sqlite", "sqlite", "2026-08-01T12:00:00Z")
         .unwrap();
     repository
         .create_category(&NewCategoryRecord {
