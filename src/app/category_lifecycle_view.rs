@@ -10,7 +10,6 @@ use ratatui::{
 
 use crate::{
     domain::{CategoryId, DRIFT_CATEGORY_ID},
-    legacy_category_lifecycle::{LegacyCategoryLifecyclePaths, LegacyCategoryLifecycleReview},
     sqlite,
 };
 
@@ -288,100 +287,65 @@ impl App {
         source_id: CategoryId,
         target_id: Option<CategoryId>,
     ) -> Result<CategoryLifecycleReview, String> {
-        if let Some(database_path) = self.sqlite_database_path.as_deref() {
-            let preview =
-                sqlite::preview_category_lifecycle_at(database_path, source_id, target_id)?;
-            let source_id = CategoryId::new(
-                u64::try_from(preview.source.id)
-                    .map_err(|_| "SQLite source category identity is invalid".to_string())?,
-            );
-            let target_id = preview
-                .target
-                .as_ref()
-                .map(|target| u64::try_from(target.id).map(CategoryId::new))
-                .transpose()
-                .map_err(|_| "SQLite target category identity is invalid".to_string())?;
-            let confirmation_phrase =
-                lifecycle_confirmation_phrase(source_id, target_id, &preview.revision);
-            Ok(CategoryLifecycleReview {
-                source_id,
-                source_name: preview.source.name,
-                target_id,
-                target_name: preview.target.map(|target| target.name),
-                counts: CategoryLifecycleCounts {
-                    completed_sessions: preview.references.completed_sessions,
-                    active_sessions: preview.references.active_sessions,
-                    tags: preview.references.tags,
-                    sand_placed: preview.references.sand_placed,
-                    sand_pending: preview.references.sand_pending,
-                    history_placed: preview.references.snapshot_placed,
-                    history_pending: preview.references.snapshot_pending,
-                    checkpoint_references: preview.references.checkpoint_references,
-                },
-                checkpoint_custody: preview
-                    .checkpoint_status
-                    .unwrap_or_else(|| "absent".to_string()),
-                revision: preview.revision,
-                confirmation_phrase,
-            })
-        } else {
-            self.try_write_runtime_checkpoint()?;
-            let review = crate::legacy_category_lifecycle::build_review(
-                &LegacyCategoryLifecyclePaths::runtime(),
-                source_id.0,
-                target_id.map(|target| target.0),
-            )?;
-            Ok(normalize_legacy_review(review))
-        }
+        let database_path = self
+            .sqlite_database_path
+            .as_deref()
+            .ok_or_else(|| "SQLite authority is unavailable".to_string())?;
+        let preview = sqlite::preview_category_lifecycle_at(database_path, source_id, target_id)?;
+        let source_id = CategoryId::new(
+            u64::try_from(preview.source.id)
+                .map_err(|_| "SQLite source category identity is invalid".to_string())?,
+        );
+        let target_id = preview
+            .target
+            .as_ref()
+            .map(|target| u64::try_from(target.id).map(CategoryId::new))
+            .transpose()
+            .map_err(|_| "SQLite target category identity is invalid".to_string())?;
+        let confirmation_phrase =
+            lifecycle_confirmation_phrase(source_id, target_id, &preview.revision);
+        Ok(CategoryLifecycleReview {
+            source_id,
+            source_name: preview.source.name,
+            target_id,
+            target_name: preview.target.map(|target| target.name),
+            counts: CategoryLifecycleCounts {
+                completed_sessions: preview.references.completed_sessions,
+                active_sessions: preview.references.active_sessions,
+                tags: preview.references.tags,
+                sand_placed: preview.references.sand_placed,
+                sand_pending: preview.references.sand_pending,
+                history_placed: preview.references.snapshot_placed,
+                history_pending: preview.references.snapshot_pending,
+                checkpoint_references: preview.references.checkpoint_references,
+            },
+            checkpoint_custody: preview
+                .checkpoint_status
+                .unwrap_or_else(|| "absent".to_string()),
+            revision: preview.revision,
+            confirmation_phrase,
+        })
     }
 
     fn apply_category_lifecycle(&mut self, review: CategoryLifecycleReview) {
-        let source_was_active = self.time_tracker.active_category_id() == review.source_id;
-        let active_description = if source_was_active {
-            self.time_tracker.active_description().to_string()
-        } else {
-            String::new()
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            return;
         };
-
-        let result = if let Some(database_path) = self.sqlite_database_path.clone() {
-            sqlite::apply_category_lifecycle_at(
-                &database_path,
-                review.source_id,
-                review.target_id,
-                &review.revision,
-                Utc::now(),
-            )
-            .map(|_| ())
-        } else {
-            let paths = LegacyCategoryLifecyclePaths::runtime();
-            crate::legacy_category_lifecycle::prepare(
-                &paths,
-                review.source_id.0,
-                review.target_id.map(|target| target.0),
-                &review.revision,
-                Utc::now(),
-            )
-            .and_then(|_| crate::legacy_category_lifecycle::replay_prepared(&paths).map(|_| ()))
-        };
-
+        let result = sqlite::apply_category_lifecycle_at(
+            &database_path,
+            review.source_id,
+            review.target_id,
+            &review.revision,
+            Utc::now(),
+        )
+        .map(|_| ());
         if let Err(error) = result {
-            let prepared = self.sqlite_database_path.is_none()
-                && crate::legacy_category_lifecycle::has_prepared(
-                    &LegacyCategoryLifecyclePaths::runtime(),
-                );
-            if prepared {
-                let _ = self.record_storage_result_for::<()>(
-                    PersistenceOperation::CategoryLifecycle,
-                    RecoveryAction::ReloadAuthority,
-                    Err(error),
-                );
-            } else if let Some(overlay) = self.category_lifecycle_overlay.as_mut() {
+            if let Some(overlay) = self.category_lifecycle_overlay.as_mut() {
                 overlay.error = Some(error);
                 overlay.confirmation_input.clear();
             }
             return;
         }
-
         if let Err(error) = self.try_reload_authority() {
             let _ = self.record_storage_result_for::<()>(
                 PersistenceOperation::CategoryLifecycle,
@@ -390,25 +354,6 @@ impl App {
             );
             return;
         }
-
-        if self.sqlite_database_path.is_none()
-            && source_was_active
-            && let Some(target_id) = review.target_id
-        {
-            if !self.time_tracker.set_active_category_by_id(target_id) {
-                let _ = self.record_storage_result_for::<()>(
-                    PersistenceOperation::CategoryLifecycle,
-                    RecoveryAction::ReloadAuthority,
-                    Err(format!(
-                        "legacy lifecycle target {} is unavailable after reload",
-                        target_id.0
-                    )),
-                );
-                return;
-            }
-            self.time_tracker.set_active_description(active_description);
-        }
-
         self.category_lifecycle_overlay = None;
         self.ui_mode = UiMode::Main;
         self.selected_index = 0;
@@ -524,33 +469,6 @@ impl App {
     }
 }
 
-fn normalize_legacy_review(review: LegacyCategoryLifecycleReview) -> CategoryLifecycleReview {
-    let source_id = CategoryId::new(review.source.id);
-    let target_id = review
-        .target
-        .as_ref()
-        .map(|target| CategoryId::new(target.id));
-    CategoryLifecycleReview {
-        source_id,
-        source_name: review.source.name,
-        target_id,
-        target_name: review.target.map(|target| target.name),
-        counts: CategoryLifecycleCounts {
-            completed_sessions: review.references.completed_sessions,
-            active_sessions: review.references.active_session,
-            tags: review.references.tags,
-            sand_placed: review.references.sand_placed,
-            sand_pending: review.references.sand_pending,
-            history_placed: review.references.history_placed,
-            history_pending: review.references.history_pending,
-            checkpoint_references: review.references.checkpoint_references,
-        },
-        checkpoint_custody: review.checkpoint_custody,
-        revision: review.revision.clone(),
-        confirmation_phrase: review.confirmation_phrase,
-    }
-}
-
 fn lifecycle_confirmation_phrase(
     source: CategoryId,
     target: Option<CategoryId>,
@@ -610,7 +528,6 @@ mod tests {
     #[test]
     fn exact_confirmation_is_not_case_or_whitespace_fuzzy() {
         let expected = "MERGE 1 INTO 2 deadbeef";
-        assert_eq!(expected, "MERGE 1 INTO 2 deadbeef");
         assert_ne!(expected, "merge 1 into 2 deadbeef");
         assert_ne!(expected, "MERGE 1 INTO 2 deadbeef ");
     }

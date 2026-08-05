@@ -1303,7 +1303,7 @@ mod tests {
 
     fn checkpoint_json(with_receipt: bool) -> String {
         serde_json::json!({
-            "schema_version": 3,
+            "schema_version": 1,
             "detached_at_utc": "2026-08-03T18:00:00Z",
             "simulation_time_utc": "2026-08-03T18:00:00Z",
             "spawn_accumulator_nanos": 0,
@@ -1314,14 +1314,11 @@ mod tests {
             "sand_state": sand_state(),
             "pending_mutations": [{"SwitchLayer": {"category_id": 1}}],
             "recovery_target_utc": null,
-            "legacy_recovery_committed": false,
-            "legacy_transition": if with_receipt {
-                serde_json::json!({"expected_previous_category_id": 1})
+            "clear_all": if with_receipt {
+                serde_json::json!({"operation_id": "pending-clear"})
             } else {
                 serde_json::Value::Null
-            },
-            "legacy_finish": null,
-            "clear_all": null
+            }
         })
         .to_string()
     }

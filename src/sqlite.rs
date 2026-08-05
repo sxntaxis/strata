@@ -7,13 +7,8 @@ mod authority;
 mod category_lifecycle;
 mod cli_runtime;
 #[cfg(test)]
-mod closure_tests;
-#[cfg(test)]
 mod fault_certification;
-mod legacy_disposition;
-mod legacy_import;
 mod maintenance;
-mod migration_command;
 mod repository;
 mod runtime_coordination;
 mod tui_runtime;
@@ -31,15 +26,10 @@ pub(crate) use cli_runtime::{
     acknowledge_stop as acknowledge_cli_stop, read_snapshot as read_cli_snapshot,
     start_session as start_cli_session, stop_session as stop_cli_session,
 };
-pub(crate) use legacy_disposition::{
-    LegacyEvidenceArchiveOptions, LegacyEvidenceInventoryOptions, LegacyEvidenceRemoveOptions,
-    LegacyEvidenceReport,
-};
 pub(crate) use maintenance::{
     BackupOptions, BundleExportOptions, BundleImportOptions, DoctorOptions, RestoreOptions,
     SqliteMaintenanceReport,
 };
-pub(crate) use migration_command::{ControlledMigrationOptions, ControlledMigrationReport};
 pub(crate) use tui_runtime::{
     ClearAllStateRequest as TuiClearAllStateRequest,
     InitialActiveGenerationRequest as TuiInitialActiveGenerationRequest,
@@ -66,30 +56,6 @@ pub(crate) use tui_runtime::{
 pub(crate) fn inject_tui_test_fault(operation: &str, phase: &str) -> Result<(), String> {
     runtime_coordination::maybe_inject_test_fault(operation, phase)
         .map_err(|error| error.to_string())
-}
-
-pub(crate) fn run_controlled_migration(
-    options: ControlledMigrationOptions,
-) -> Result<ControlledMigrationReport, String> {
-    migration_command::run_controlled_migration(options).map_err(|error| error.to_string())
-}
-
-pub(crate) fn run_legacy_evidence_inventory(
-    options: LegacyEvidenceInventoryOptions,
-) -> Result<LegacyEvidenceReport, String> {
-    legacy_disposition::inventory(options)
-}
-
-pub(crate) fn run_legacy_evidence_archive(
-    options: LegacyEvidenceArchiveOptions,
-) -> Result<LegacyEvidenceReport, String> {
-    legacy_disposition::archive(options)
-}
-
-pub(crate) fn run_legacy_evidence_remove(
-    options: LegacyEvidenceRemoveOptions,
-) -> Result<LegacyEvidenceReport, String> {
-    legacy_disposition::remove(options)
 }
 
 pub(crate) fn run_bundle_export(

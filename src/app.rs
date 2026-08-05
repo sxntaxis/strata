@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeSet, HashSet, VecDeque},
     io,
-    path::{Path, PathBuf},
+    path::PathBuf,
     time::{Duration, Instant, SystemTime},
 };
 
@@ -17,14 +17,11 @@ use crate::{
     },
     domain::{
         Category, CategoryId, DRIFT_CATEGORY_DISPLAY_NAME, DRIFT_CATEGORY_ID, FirstDayOfWeek,
-        OperationalDayPolicy, ReportPeriod, RuntimeSettings, TimeTracker, civil_time_for_utc,
-        is_drift_category_id, operational_day_key_for_utc, set_runtime_settings,
+        OperationalDayPolicy, ReportPeriod, RuntimeSettings, TimeTracker, is_drift_category_id,
+        operational_day_key_for_utc, set_runtime_settings,
     },
     keybindings::{self, Action, ActionBindingState, KeyBinding},
-    legacy_transition::{
-        ClearAllReceipt, LegacyActiveReceipt, LegacyFinishReceipt, LegacySessionReceipt,
-        LegacyTransitionKind, LegacyTransitionReceipt, reconcile_completed_session,
-    },
+    runtime_receipts::{ActiveIntervalReceipt, ClearAllReceipt},
     sand::{
         RecoveryTiming, SandEngine, SandState, SandStateGrain, SedimentSnapshot,
         recover_detached_sediment, settle_transition_sediment,
@@ -186,19 +183,11 @@ struct DetachedRuntimeCheckpoint {
     #[serde(default)]
     recovery_target_utc: Option<DateTime<Utc>>,
     #[serde(default)]
-    legacy_recovery_committed: bool,
-    #[serde(default)]
-    legacy_transition: Option<LegacyTransitionReceipt>,
-    #[serde(default)]
-    legacy_finish: Option<LegacyFinishReceipt>,
-    #[serde(default)]
     clear_all: Option<ClearAllReceipt>,
 }
 
 impl DetachedRuntimeCheckpoint {
-    const VERSION: u8 = 3;
-    const PREVIOUS_VERSION: u8 = 2;
-    const LEGACY_VERSION: u8 = 1;
+    const VERSION: u8 = 1;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -315,7 +304,7 @@ fn transition_operation_id(
 }
 
 fn clear_all_operation_id(
-    previous_active: &LegacyActiveReceipt,
+    previous_active: &ActiveIntervalReceipt,
     applied_at_utc: DateTime<Utc>,
     idle_reset: bool,
     previous_elapsed_seconds: usize,
@@ -369,6 +358,7 @@ fn clear_all_affected_days_for_interval(
     Ok(days)
 }
 
+#[cfg(test)]
 fn stage_clear_all_active_state(
     tracker: &mut TimeTracker,
     active_session_started_at_utc: &mut Option<DateTime<Utc>>,
@@ -392,165 +382,6 @@ fn stage_clear_all_active_state(
     Ok(())
 }
 
-fn validate_legacy_switch_checkpoint(
-    checkpoint: &DetachedRuntimeCheckpoint,
-    receipt: &LegacyTransitionReceipt,
-) -> Result<(), String> {
-    if checkpoint.schema_version != DetachedRuntimeCheckpoint::VERSION {
-        return Err(format!(
-            "legacy transition receipt requires checkpoint schema {}, found {}; evidence retained",
-            DetachedRuntimeCheckpoint::VERSION,
-            checkpoint.schema_version
-        ));
-    }
-    receipt.validate_switch_boundaries()?;
-    let expected_identity = format!(
-        "legacy:{}:{}",
-        receipt.expected_previous_category_id,
-        receipt
-            .expected_previous_started_at_utc
-            .to_rfc3339_opts(SecondsFormat::Nanos, true)
-    );
-    let expected_operation_id = transition_operation_id(
-        "legacy-switch",
-        &expected_identity,
-        receipt.transition_at_utc,
-        &receipt.resulting_active.category_id.to_string(),
-    );
-    if receipt.operation_id != expected_operation_id {
-        return Err(format!(
-            "legacy switch receipt operation ID {} is inconsistent; evidence retained",
-            receipt.operation_id
-        ));
-    }
-    if checkpoint.active_category_id != receipt.resulting_active.category_id
-        || checkpoint.active_description != receipt.resulting_active.description
-        || checkpoint.active_session_started_at_utc != Some(receipt.resulting_active.started_at_utc)
-    {
-        return Err(format!(
-            "legacy switch receipt {} does not match its resulting checkpoint generation",
-            receipt.operation_id
-        ));
-    }
-    Ok(())
-}
-
-fn publish_legacy_switch_replay(
-    tracker: &TimeTracker,
-    archived_categories: &[Category],
-    checkpoint: &mut DetachedRuntimeCheckpoint,
-    receipt: &LegacyTransitionReceipt,
-    sessions_path: &Path,
-    categories_path: &Path,
-    checkpoint_path: &Path,
-) -> Result<TimeTracker, String> {
-    let mut staged_tracker = tracker.clone();
-    reconcile_completed_session(
-        &mut staged_tracker.sessions,
-        &mut staged_tracker.session_id_counter,
-        receipt.completed_session.as_ref(),
-    )?;
-    let resulting_category_id = CategoryId::new(receipt.resulting_active.category_id);
-    if !staged_tracker.set_active_category_by_id(resulting_category_id) {
-        return Err(format!(
-            "legacy switch receipt {} references unavailable resulting category {}",
-            receipt.operation_id, receipt.resulting_active.category_id
-        ));
-    }
-    staged_tracker.set_active_description(receipt.resulting_active.description.clone());
-
-    let mut catalog = staged_tracker.categories_for_storage();
-    catalog.extend(archived_categories.iter().cloned());
-    storage::save_sessions_to_csv(sessions_path, &staged_tracker.sessions, &catalog)?;
-    storage::save_category_catalog_to_csv(
-        categories_path,
-        &staged_tracker.categories_for_storage(),
-        archived_categories,
-    )?;
-
-    checkpoint.legacy_transition = None;
-    checkpoint.schema_version = DetachedRuntimeCheckpoint::VERSION;
-    storage::write_json_atomic(checkpoint_path, checkpoint)?;
-    Ok(staged_tracker)
-}
-
-fn validate_legacy_finish_checkpoint(
-    checkpoint: &DetachedRuntimeCheckpoint,
-    receipt: &LegacyFinishReceipt,
-) -> Result<(), String> {
-    if checkpoint.schema_version != DetachedRuntimeCheckpoint::VERSION {
-        return Err(format!(
-            "legacy finish receipt requires checkpoint schema {}, found {}; evidence retained",
-            DetachedRuntimeCheckpoint::VERSION,
-            checkpoint.schema_version
-        ));
-    }
-    if checkpoint.legacy_transition.is_some() {
-        return Err(
-            "checkpoint contains both switch and finish receipts; evidence retained".to_string(),
-        );
-    }
-    receipt.validate_boundaries()?;
-    let expected_identity = format!(
-        "legacy:{}:{}",
-        receipt.expected_previous_category_id,
-        receipt
-            .expected_previous_started_at_utc
-            .to_rfc3339_opts(SecondsFormat::Nanos, true)
-    );
-    let expected_operation_id = transition_operation_id(
-        "legacy-finish",
-        &expected_identity,
-        receipt.finished_at_utc,
-        "complete",
-    );
-    if receipt.operation_id != expected_operation_id {
-        return Err(format!(
-            "legacy finish receipt operation ID {} is inconsistent; evidence retained",
-            receipt.operation_id
-        ));
-    }
-    if checkpoint.active_category_id != receipt.expected_previous_category_id
-        || checkpoint.active_description != receipt.expected_previous_description
-        || checkpoint.active_session_started_at_utc
-            != Some(receipt.expected_previous_started_at_utc)
-    {
-        return Err(format!(
-            "legacy finish receipt {} does not match its prior checkpoint generation",
-            receipt.operation_id
-        ));
-    }
-    Ok(())
-}
-
-fn publish_legacy_finish_replay(
-    tracker: &TimeTracker,
-    archived_categories: &[Category],
-    checkpoint: &DetachedRuntimeCheckpoint,
-    receipt: &LegacyFinishReceipt,
-    sessions_path: &Path,
-    categories_path: &Path,
-    sand_path: &Path,
-) -> Result<TimeTracker, String> {
-    let mut staged_tracker = tracker.clone();
-    reconcile_completed_session(
-        &mut staged_tracker.sessions,
-        &mut staged_tracker.session_id_counter,
-        receipt.completed_session.as_ref(),
-    )?;
-    staged_tracker.set_active_description(String::new());
-    let mut catalog = staged_tracker.categories_for_storage();
-    catalog.extend(archived_categories.iter().cloned());
-    storage::save_sessions_to_csv(sessions_path, &staged_tracker.sessions, &catalog)?;
-    storage::save_category_catalog_to_csv(
-        categories_path,
-        &staged_tracker.categories_for_storage(),
-        archived_categories,
-    )?;
-    storage::save_sand_state(sand_path, &checkpoint.sand_state)?;
-    Ok(staged_tracker)
-}
-
 fn sand_state_is_empty(state: &SandState) -> bool {
     state.grains.is_empty() && state.pending_grains.is_empty() && state.pending_runs.is_empty()
 }
@@ -565,11 +396,6 @@ fn validate_clear_all_checkpoint(
             DetachedRuntimeCheckpoint::VERSION,
             checkpoint.schema_version
         ));
-    }
-    if checkpoint.legacy_transition.is_some() || checkpoint.legacy_finish.is_some() {
-        return Err(
-            "checkpoint contains overlapping transition receipts; evidence retained".to_string(),
-        );
     }
     receipt.validate_boundaries()?;
     let expected_operation_id = clear_all_operation_id(
@@ -1363,89 +1189,7 @@ impl App {
             );
             return None;
         }
-        if self.sqlite_database_path.is_some() {
-            return self.end_active_session_at(finished_at_utc, SessionClockMode::LiveMonotonic);
-        }
-        let interval = match self
-            .reconciled_active_interval(finished_at_utc, SessionClockMode::LiveMonotonic)
-        {
-            Ok(interval) => interval,
-            Err(error) => {
-                self.record_storage_result_for::<()>(
-                    PersistenceOperation::ActiveFinish,
-                    RecoveryAction::FinishAndExit,
-                    Err(error),
-                );
-                return None;
-            }
-        };
-        let previous_tracker = self.time_tracker.clone();
-        let previous_session = self.session.clone();
-        let previous_category_id = self.time_tracker.active_category_id();
-        let previous_description = self.time_tracker.active_description().to_string();
-        let Some(previous_started_at_utc) = self.session.active_session_started_at_utc else {
-            self.record_storage_result_for::<()>(
-                PersistenceOperation::ActiveFinish,
-                RecoveryAction::FinishAndExit,
-                Err("legacy runtime has no active UTC start timestamp to finish".to_string()),
-            );
-            return None;
-        };
-        let mut prepared_checkpoint = match self.build_runtime_checkpoint() {
-            Ok(checkpoint) => checkpoint,
-            Err(error) => {
-                self.record_storage_result_for::<()>(
-                    PersistenceOperation::CheckpointSave,
-                    RecoveryAction::FinishAndExit,
-                    Err(error),
-                );
-                return None;
-            }
-        };
-        let previous_session_count = self.time_tracker.sessions.len();
-        let ended_civil = civil_time_for_utc(interval.ended_at_utc);
-        let result = self
-            .time_tracker
-            .end_session_with_elapsed_at_local(interval.elapsed_seconds, ended_civil);
-        self.session.active_session_started_at_utc = None;
-        let completed_session = self
-            .time_tracker
-            .sessions
-            .get(previous_session_count)
-            .map(LegacySessionReceipt::from_session);
-        let expected_identity = format!(
-            "legacy:{}:{}",
-            previous_category_id.0,
-            previous_started_at_utc.to_rfc3339_opts(SecondsFormat::Nanos, true)
-        );
-        let receipt = LegacyFinishReceipt {
-            version: LegacyFinishReceipt::VERSION,
-            operation_id: transition_operation_id(
-                "legacy-finish",
-                &expected_identity,
-                interval.ended_at_utc,
-                "complete",
-            ),
-            expected_previous_category_id: previous_category_id.0,
-            expected_previous_description: previous_description,
-            expected_previous_started_at_utc: previous_started_at_utc,
-            finished_at_utc: interval.ended_at_utc,
-            completed_session,
-        };
-        prepared_checkpoint.legacy_finish = Some(receipt);
-        if let Err(error) =
-            storage::write_json_atomic(&storage::get_detached_runtime_path(), &prepared_checkpoint)
-        {
-            self.time_tracker = previous_tracker;
-            self.session = previous_session;
-            self.record_storage_result_for::<()>(
-                PersistenceOperation::CheckpointSave,
-                RecoveryAction::FinishAndExit,
-                Err(error),
-            );
-            return None;
-        }
-        result
+        self.end_active_session_at(finished_at_utc, SessionClockMode::LiveMonotonic)
     }
 
     fn end_active_session_at(
@@ -1465,46 +1209,37 @@ impl App {
             }
         };
         let elapsed = interval.elapsed_seconds;
-        let ended_civil = civil_time_for_utc(interval.ended_at_utc);
-
-        if let Some(database_path) = self.sqlite_database_path.clone() {
-            let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
-                self.record_storage_result_for::<()>(
-                    PersistenceOperation::ActiveFinish,
-                    RecoveryAction::ReloadAuthority,
-                    Err("SQLite runtime has no active stable identity to finish".to_string()),
-                );
-                return None;
-            };
-            let operational_day = operational_day_key_for_utc(interval.ended_at_utc)
-                .format("%Y-%m-%d")
-                .to_string();
-            let operation_id = format!("finish:{expected_stable_id}");
-            self.record_storage_result_for(
+        let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
+            self.record_storage_result_for::<()>(
                 PersistenceOperation::ActiveFinish,
                 RecoveryAction::ReloadAuthority,
-                sqlite::finish_tui_active_session(
-                    &database_path,
-                    &expected_stable_id,
-                    &operation_id,
-                    interval.ended_at_utc,
-                    &operational_day,
-                    elapsed,
-                ),
-            )?;
-            self.time_tracker.set_active_description(String::new());
-            self.time_tracker.current_session_start = None;
-            self.session.active_session_stable_id = None;
-            self.session.active_session_started_at_utc = None;
-            self.reload_sqlite_sessions();
-            return Some(elapsed);
-        }
-
-        let result = self
-            .time_tracker
-            .end_session_with_elapsed_at_local(elapsed, ended_civil);
+                Err("SQLite runtime has no active stable identity to finish".to_string()),
+            );
+            return None;
+        };
+        let database_path = self.sqlite_database_path.clone()?;
+        let operational_day = operational_day_key_for_utc(interval.ended_at_utc)
+            .format("%Y-%m-%d")
+            .to_string();
+        let operation_id = format!("finish:{expected_stable_id}");
+        self.record_storage_result_for(
+            PersistenceOperation::ActiveFinish,
+            RecoveryAction::ReloadAuthority,
+            sqlite::finish_tui_active_session(
+                &database_path,
+                &expected_stable_id,
+                &operation_id,
+                interval.ended_at_utc,
+                &operational_day,
+                elapsed,
+            ),
+        )?;
+        self.time_tracker.set_active_description(String::new());
+        self.time_tracker.current_session_start = None;
+        self.session.active_session_stable_id = None;
         self.session.active_session_started_at_utc = None;
-        result
+        self.reload_sqlite_sessions();
+        Some(elapsed)
     }
 
     fn switch_active_category_at(
@@ -1514,115 +1249,68 @@ impl App {
         switched_at_utc: DateTime<Utc>,
         clock_mode: SessionClockMode,
     ) -> bool {
-        if self.time_tracker.active_category_id() == category_id {
+        if self.time_tracker.active_category_id() == category_id
+            || self.time_tracker.category_by_id(category_id).is_none()
+        {
             return false;
         }
-
-        if self.time_tracker.category_by_id(category_id).is_none() {
+        let Some(database_path) = self.sqlite_database_path.clone() else {
             return false;
-        }
-
-        if let Some(database_path) = self.sqlite_database_path.clone() {
-            let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
-                self.record_storage_result_for::<()>(
-                    PersistenceOperation::ActiveSwitch,
-                    RecoveryAction::ReloadAuthority,
-                    Err("SQLite runtime has no active stable identity to switch".to_string()),
-                );
-                return false;
-            };
-            let interval = match self.reconciled_active_interval(switched_at_utc, clock_mode) {
-                Ok(interval) => interval,
-                Err(error) => {
-                    self.record_storage_result_for::<()>(
-                        PersistenceOperation::ActiveSwitch,
-                        RecoveryAction::ReloadAuthority,
-                        Err(error),
-                    );
-                    return false;
-                }
-            };
-            let elapsed = interval.elapsed_seconds;
-            let operational_day = operational_day_key_for_utc(interval.ended_at_utc)
-                .format("%Y-%m-%d")
-                .to_string();
-            let operation_id = transition_operation_id(
-                "switch",
-                &expected_stable_id,
-                interval.ended_at_utc,
-                &category_id.0.to_string(),
-            );
-            let next_stable_id = format!("tui-active:{operation_id}");
-            let result = sqlite::switch_tui_active_session(
-                &database_path,
-                &expected_stable_id,
-                &operation_id,
-                &next_stable_id,
-                category_id,
-                &next_description,
-                interval.ended_at_utc,
-                &operational_day,
-                elapsed,
-            );
-            let Some(receipt) = self.record_storage_result_for(
+        };
+        let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
+            self.record_storage_result_for::<()>(
                 PersistenceOperation::ActiveSwitch,
                 RecoveryAction::ReloadAuthority,
-                result,
-            ) else {
-                return false;
-            };
-            if !self.time_tracker.set_active_category_by_id(category_id) {
-                return false;
-            }
-            self.time_tracker.set_active_description(next_description);
-            self.session.active_session_stable_id = receipt.resulting_active_stable_id;
-            if let Err(error) = self.begin_transition_session(interval.ended_at_utc, clock_mode) {
+                Err("SQLite runtime has no active stable identity to switch".to_string()),
+            );
+            return false;
+        };
+        let interval = match self.reconciled_active_interval(switched_at_utc, clock_mode) {
+            Ok(interval) => interval,
+            Err(error) => {
                 self.record_storage_result_for::<()>(
-                    PersistenceOperation::ActiveStart,
+                    PersistenceOperation::ActiveSwitch,
                     RecoveryAction::ReloadAuthority,
                     Err(error),
                 );
                 return false;
             }
-            self.reload_sqlite_sessions();
-            self.sync_drift_idle_state();
-            self.refresh_active_runtime_checkpoint();
-            return !self.has_persistence_recovery();
-        }
-
-        let previous_tracker = self.time_tracker.clone();
-        let previous_session = self.session.clone();
-        let previous_category_id = self.time_tracker.active_category_id();
-        let Some(previous_started_at_utc) = self.session.active_session_started_at_utc else {
-            self.record_storage_result_for::<()>(
-                PersistenceOperation::ActiveSwitch,
-                RecoveryAction::ReloadAuthority,
-                Err("legacy runtime has no active UTC start timestamp to switch".to_string()),
-            );
+        };
+        let elapsed = interval.elapsed_seconds;
+        let operational_day = operational_day_key_for_utc(interval.ended_at_utc)
+            .format("%Y-%m-%d")
+            .to_string();
+        let operation_id = transition_operation_id(
+            "switch",
+            &expected_stable_id,
+            interval.ended_at_utc,
+            &category_id.0.to_string(),
+        );
+        let next_stable_id = format!("tui-active:{operation_id}");
+        let result = sqlite::switch_tui_active_session(
+            &database_path,
+            &expected_stable_id,
+            &operation_id,
+            &next_stable_id,
+            category_id,
+            &next_description,
+            interval.ended_at_utc,
+            &operational_day,
+            elapsed,
+        );
+        let Some(receipt) = self.record_storage_result_for(
+            PersistenceOperation::ActiveSwitch,
+            RecoveryAction::ReloadAuthority,
+            result,
+        ) else {
             return false;
         };
-        let previous_session_count = self.time_tracker.sessions.len();
-
-        if self
-            .end_active_session_at(switched_at_utc, clock_mode)
-            .is_none()
-        {
-            return false;
-        }
-        let completed_session = self
-            .time_tracker
-            .sessions
-            .get(previous_session_count)
-            .map(LegacySessionReceipt::from_session);
-
         if !self.time_tracker.set_active_category_by_id(category_id) {
-            self.time_tracker = previous_tracker;
-            self.session = previous_session;
             return false;
         }
-        if let Err(error) = self.begin_transition_session(switched_at_utc, clock_mode) {
-            self.time_tracker = previous_tracker;
-            self.session = previous_session;
+        self.time_tracker.set_active_description(next_description);
+        self.session.active_session_stable_id = receipt.resulting_active_stable_id;
+        if let Err(error) = self.begin_transition_session(interval.ended_at_utc, clock_mode) {
             self.record_storage_result_for::<()>(
                 PersistenceOperation::ActiveStart,
                 RecoveryAction::ReloadAuthority,
@@ -1630,73 +1318,9 @@ impl App {
             );
             return false;
         }
-
-        self.time_tracker
-            .set_active_description(next_description.clone());
-        let resulting_description = next_description;
-        let expected_identity = format!(
-            "legacy:{}:{}",
-            previous_category_id.0,
-            previous_started_at_utc.to_rfc3339_opts(SecondsFormat::Nanos, true)
-        );
-        let operation_id = transition_operation_id(
-            "legacy-switch",
-            &expected_identity,
-            switched_at_utc,
-            &category_id.0.to_string(),
-        );
-        let receipt = LegacyTransitionReceipt {
-            version: LegacyTransitionReceipt::VERSION,
-            operation_id,
-            kind: LegacyTransitionKind::Switch,
-            expected_previous_category_id: previous_category_id.0,
-            expected_previous_started_at_utc: previous_started_at_utc,
-            transition_at_utc: switched_at_utc,
-            completed_session,
-            resulting_active: LegacyActiveReceipt {
-                category_id: category_id.0,
-                description: resulting_description,
-                started_at_utc: switched_at_utc,
-            },
-        };
-        let mut prepared_checkpoint = match self.build_runtime_checkpoint() {
-            Ok(checkpoint) => checkpoint,
-            Err(error) => {
-                self.time_tracker = previous_tracker;
-                self.session = previous_session;
-                self.record_storage_result_for::<()>(
-                    PersistenceOperation::CheckpointSave,
-                    RecoveryAction::ReloadAuthority,
-                    Err(error),
-                );
-                return false;
-            }
-        };
-        prepared_checkpoint.legacy_transition = Some(receipt);
-        if let Err(error) =
-            storage::write_json_atomic(&storage::get_detached_runtime_path(), &prepared_checkpoint)
-        {
-            self.time_tracker = previous_tracker;
-            self.session = previous_session;
-            self.record_storage_result_for::<()>(
-                PersistenceOperation::CheckpointSave,
-                RecoveryAction::ReloadAuthority,
-                Err(error),
-            );
-            return false;
-        }
-
-        self.persist_sessions();
-        if self.has_persistence_recovery() {
-            return false;
-        }
-        self.persist_categories();
-        if self.has_persistence_recovery() {
-            return false;
-        }
+        self.reload_sqlite_sessions();
         self.sync_drift_idle_state();
         self.refresh_active_runtime_checkpoint();
-
         !self.has_persistence_recovery()
     }
 
@@ -1770,47 +1394,17 @@ impl App {
             return Ok(());
         };
         validate_clear_all_checkpoint(checkpoint, &receipt)?;
-        if self.sqlite_database_path.is_none() {
-            let valid_category_ids = self
-                .time_tracker
-                .categories_for_storage()
-                .into_iter()
-                .chain(self.archived_categories.iter().cloned())
-                .map(|category| category.id)
-                .collect::<HashSet<_>>();
-            self.sand_engine
-                .restore_state(&checkpoint.sand_state, &valid_category_ids)?;
-            stage_clear_all_active_state(
-                &mut self.time_tracker,
-                &mut self.session.active_session_started_at_utc,
-                &receipt,
-            )?;
-            storage::save_sand_state(&storage::get_sand_state_path(), &checkpoint.sand_state)?;
-            for value in &receipt.affected_operational_days {
-                let day = NaiveDate::parse_from_str(value, "%Y-%m-%d")
-                    .map_err(|error| error.to_string())?;
-                self.reconcile_daily_contribution(day);
-                if let Some(recovery) = self.persistence_recovery.as_ref() {
-                    return Err(recovery.failure.summary());
-                }
-            }
-            checkpoint.clear_all = None;
-            storage::write_json_atomic(&storage::get_detached_runtime_path(), checkpoint)?;
-        } else if let Some(database_path) = self.sqlite_database_path.clone() {
-            let expected_stable_id = self
-                .session
-                .active_session_stable_id
-                .as_deref()
-                .ok_or_else(|| {
-                    "SQLite clear-all recovery has no active stable identity".to_string()
-                })?;
-            checkpoint.clear_all = None;
-            sqlite::replace_tui_recovering_checkpoint(
-                &database_path,
-                expected_stable_id,
-                checkpoint,
-            )?;
-        }
+        let database_path = self
+            .sqlite_database_path
+            .clone()
+            .ok_or_else(|| "SQLite authority is unavailable".to_string())?;
+        let expected_stable_id = self
+            .session
+            .active_session_stable_id
+            .as_deref()
+            .ok_or_else(|| "SQLite clear-all recovery has no active stable identity".to_string())?;
+        checkpoint.clear_all = None;
+        sqlite::replace_tui_recovering_checkpoint(&database_path, expected_stable_id, checkpoint)?;
         Ok(())
     }
 
@@ -1830,7 +1424,22 @@ impl App {
         let previous_tracker = self.time_tracker.clone();
         let previous_session = self.session.clone();
         let previous_sand = self.sand_engine.snapshot_state();
-        let previous_active = LegacyActiveReceipt {
+        let rollback = |app: &mut Self| {
+            app.time_tracker = previous_tracker.clone();
+            app.session = previous_session.clone();
+            app.sand_engine
+                .restore_state(
+                    &previous_sand,
+                    &app.time_tracker
+                        .categories_for_storage()
+                        .into_iter()
+                        .chain(app.archived_categories.iter().cloned())
+                        .map(|category| category.id)
+                        .collect(),
+                )
+                .expect("captured rollback sediment must remain valid");
+        };
+        let previous_active = ActiveIntervalReceipt {
             category_id: self.time_tracker.active_category_id().0,
             description: self.time_tracker.active_description().to_string(),
             started_at_utc: match self.session.active_session_started_at_utc {
@@ -1846,22 +1455,10 @@ impl App {
             },
         };
         let idle_reset = is_drift_category_id(self.time_tracker.active_category_id());
-
         self.sand_engine.clear();
         if idle_reset && let Err(error) = self.begin_transition_session(applied_at_utc, clock_mode)
         {
-            self.sand_engine
-                .restore_state(
-                    &previous_sand,
-                    &self
-                        .time_tracker
-                        .categories_for_storage()
-                        .into_iter()
-                        .chain(self.archived_categories.iter().cloned())
-                        .map(|category| category.id)
-                        .collect(),
-                )
-                .expect("captured rollback sediment must remain valid");
+            rollback(self);
             self.record_storage_result_for::<()>(
                 PersistenceOperation::ActiveReset,
                 RecoveryAction::ReloadAuthority,
@@ -1869,7 +1466,7 @@ impl App {
             );
             return;
         }
-        let resulting_active = LegacyActiveReceipt {
+        let resulting_active = ActiveIntervalReceipt {
             category_id: previous_active.category_id,
             description: previous_active.description.clone(),
             started_at_utc: if idle_reset {
@@ -1890,7 +1487,6 @@ impl App {
             &affected_operational_days,
         );
         let receipt = ClearAllReceipt {
-            version: ClearAllReceipt::VERSION,
             operation_id,
             applied_at_utc,
             previous_active,
@@ -1902,20 +1498,7 @@ impl App {
         let mut checkpoint = match self.build_runtime_checkpoint() {
             Ok(value) => value,
             Err(error) => {
-                self.time_tracker = previous_tracker;
-                self.session = previous_session;
-                self.sand_engine
-                    .restore_state(
-                        &previous_sand,
-                        &self
-                            .time_tracker
-                            .categories_for_storage()
-                            .into_iter()
-                            .chain(self.archived_categories.iter().cloned())
-                            .map(|category| category.id)
-                            .collect(),
-                    )
-                    .expect("captured rollback sediment must remain valid");
+                rollback(self);
                 self.record_storage_result_for::<()>(
                     PersistenceOperation::CheckpointSave,
                     RecoveryAction::ReloadAuthority,
@@ -1925,121 +1508,63 @@ impl App {
             }
         };
         checkpoint.clear_all = Some(receipt.clone());
-
-        if let Some(database_path) = self.sqlite_database_path.clone() {
-            let Some(expected_stable_id) = previous_session.active_session_stable_id.clone() else {
-                self.time_tracker = previous_tracker;
-                self.session = previous_session;
-                self.sand_engine
-                    .restore_state(
-                        &previous_sand,
-                        &self
-                            .time_tracker
-                            .categories_for_storage()
-                            .into_iter()
-                            .chain(self.archived_categories.iter().cloned())
-                            .map(|category| category.id)
-                            .collect(),
-                    )
-                    .expect("captured rollback sediment must remain valid");
-                self.record_storage_result_for::<()>(
-                    PersistenceOperation::ActiveReset,
-                    RecoveryAction::ReloadAuthority,
-                    Err("SQLite clear-all has no active stable identity".to_string()),
-                );
-                return;
-            };
-            let resulting_stable_id = if idle_reset {
-                format!("tui-active:{}", receipt.operation_id)
-            } else {
-                expected_stable_id.clone()
-            };
-            let daily_updates = affected_days
-                .iter()
-                .map(|day| {
-                    (
-                        day.format("%Y-%m-%d").to_string(),
-                        self.daily_contribution_from_time_log(*day),
-                    )
-                })
-                .collect::<Vec<_>>();
-            let result = sqlite::clear_tui_state(
-                &database_path,
-                sqlite::TuiClearAllStateRequest {
-                    expected_active_stable_id: &expected_stable_id,
-                    resulting_active_stable_id: &resulting_stable_id,
-                    resulting_started_at_utc: receipt.resulting_active.started_at_utc,
-                    state: &checkpoint.sand_state,
-                    daily_updates: &daily_updates,
-                    detached_at_utc: checkpoint.detached_at_utc,
-                    simulation_time_utc: checkpoint.simulation_time_utc,
-                    checkpoint: &checkpoint,
-                },
-            );
-            if self
-                .record_storage_result_for(
-                    PersistenceOperation::SandStateSave,
-                    RecoveryAction::ReloadAuthority,
-                    result,
-                )
-                .is_none()
-            {
-                self.time_tracker = previous_tracker;
-                self.session = previous_session;
-                self.sand_engine
-                    .restore_state(
-                        &previous_sand,
-                        &self
-                            .time_tracker
-                            .categories_for_storage()
-                            .into_iter()
-                            .chain(self.archived_categories.iter().cloned())
-                            .map(|category| category.id)
-                            .collect(),
-                    )
-                    .expect("captured rollback sediment must remain valid");
-                return;
-            }
-            self.session.active_session_stable_id = Some(resulting_stable_id);
-            self.sync_drift_idle_state();
-            return;
-        }
-
-        if let Err(error) =
-            storage::write_json_atomic(&storage::get_detached_runtime_path(), &checkpoint)
-        {
-            self.time_tracker = previous_tracker;
-            self.session = previous_session;
-            self.sand_engine
-                .restore_state(
-                    &previous_sand,
-                    &self
-                        .time_tracker
-                        .categories_for_storage()
-                        .into_iter()
-                        .chain(self.archived_categories.iter().cloned())
-                        .map(|category| category.id)
-                        .collect(),
-                )
-                .expect("captured rollback sediment must remain valid");
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            rollback(self);
             self.record_storage_result_for::<()>(
-                PersistenceOperation::CheckpointSave,
+                PersistenceOperation::SandStateSave,
                 RecoveryAction::ReloadAuthority,
-                Err(error),
+                Err("SQLite authority is unavailable".to_string()),
             );
             return;
-        }
-        self.persist_sand_state();
-        if self.has_persistence_recovery() {
+        };
+        let Some(expected_stable_id) = previous_session.active_session_stable_id.clone() else {
+            rollback(self);
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::ActiveReset,
+                RecoveryAction::ReloadAuthority,
+                Err("SQLite clear-all has no active stable identity".to_string()),
+            );
+            return;
+        };
+        let resulting_stable_id = if idle_reset {
+            format!("tui-active:{}", receipt.operation_id)
+        } else {
+            expected_stable_id.clone()
+        };
+        let daily_updates = affected_days
+            .iter()
+            .map(|day| {
+                (
+                    day.format("%Y-%m-%d").to_string(),
+                    self.daily_contribution_from_time_log(*day),
+                )
+            })
+            .collect::<Vec<_>>();
+        let result = sqlite::clear_tui_state(
+            &database_path,
+            sqlite::TuiClearAllStateRequest {
+                expected_active_stable_id: &expected_stable_id,
+                resulting_active_stable_id: &resulting_stable_id,
+                resulting_started_at_utc: receipt.resulting_active.started_at_utc,
+                state: &checkpoint.sand_state,
+                daily_updates: &daily_updates,
+                detached_at_utc: checkpoint.detached_at_utc,
+                simulation_time_utc: checkpoint.simulation_time_utc,
+                checkpoint: &checkpoint,
+            },
+        );
+        if self
+            .record_storage_result_for(
+                PersistenceOperation::SandStateSave,
+                RecoveryAction::ReloadAuthority,
+                result,
+            )
+            .is_none()
+        {
+            rollback(self);
             return;
         }
-        for day in affected_days {
-            self.reconcile_daily_contribution(day);
-            if self.has_persistence_recovery() {
-                return;
-            }
-        }
-        self.refresh_active_runtime_checkpoint();
+        self.session.active_session_stable_id = Some(resulting_stable_id);
         self.sync_drift_idle_state();
     }
 
@@ -2541,33 +2066,30 @@ impl App {
             sand_state: self.sand_engine.snapshot_state(),
             pending_mutations: Vec::new(),
             recovery_target_utc: None,
-            legacy_recovery_committed: false,
-            legacy_transition: None,
-            legacy_finish: None,
             clear_all: None,
         })
     }
 
     pub(super) fn try_write_runtime_checkpoint(&self) -> Result<(), String> {
         let checkpoint = self.build_runtime_checkpoint()?;
-        if let Some(database_path) = self.sqlite_database_path.clone() {
-            let expected_stable_id = self
-                .session
-                .active_session_stable_id
-                .as_deref()
-                .ok_or_else(|| {
-                    "SQLite runtime has no active stable identity to checkpoint".to_string()
-                })?;
-            sqlite::save_tui_checkpoint(
-                &database_path,
-                expected_stable_id,
-                checkpoint.detached_at_utc,
-                checkpoint.simulation_time_utc,
-                &checkpoint,
-            )
-        } else {
-            storage::write_json_atomic(&storage::get_detached_runtime_path(), &checkpoint)
-        }
+        let database_path = self
+            .sqlite_database_path
+            .clone()
+            .ok_or_else(|| "SQLite authority is unavailable".to_string())?;
+        let expected_stable_id = self
+            .session
+            .active_session_stable_id
+            .as_deref()
+            .ok_or_else(|| {
+                "SQLite runtime has no active stable identity to checkpoint".to_string()
+            })?;
+        sqlite::save_tui_checkpoint(
+            &database_path,
+            expected_stable_id,
+            checkpoint.detached_at_utc,
+            checkpoint.simulation_time_utc,
+            &checkpoint,
+        )
     }
 
     fn try_emergency_runtime_checkpoint(&self) -> Result<(), String> {
@@ -2594,82 +2116,22 @@ impl App {
     }
 
     fn clear_detached_checkpoint(&mut self) {
-        if let Some(database_path) = self.sqlite_database_path.clone() {
-            let result = sqlite::clear_tui_checkpoint(&database_path);
-            self.record_storage_result_for(
-                PersistenceOperation::CheckpointClear,
-                RecoveryAction::FlushCurrentState,
-                result,
-            );
-        } else {
-            let path = storage::get_detached_runtime_path();
-            if let Err(error) = storage::delete_file_if_exists(&path) {
-                self.record_storage_result::<()>(Err(error));
-            }
-        }
-    }
-
-    fn reconcile_legacy_transition_receipt(
-        &mut self,
-        checkpoint: &mut DetachedRuntimeCheckpoint,
-    ) -> Result<bool, String> {
-        if self.sqlite_database_path.is_some()
-            && (checkpoint.legacy_transition.is_some() || checkpoint.legacy_finish.is_some())
-        {
-            return Err(
-                "legacy transition receipt appeared under SQLite authority; evidence retained"
-                    .to_string(),
-            );
-        }
-        if let Some(receipt) = checkpoint.legacy_finish.clone() {
-            validate_legacy_finish_checkpoint(checkpoint, &receipt)?;
-            let staged_tracker = publish_legacy_finish_replay(
-                &self.time_tracker,
-                &self.archived_categories,
-                checkpoint,
-                &receipt,
-                &storage::get_time_log_path(),
-                &storage::get_categories_path(),
-                &storage::get_sand_state_path(),
-            )?;
-            self.time_tracker = staged_tracker;
-            let valid_category_ids = self
-                .time_tracker
-                .categories_for_storage()
-                .into_iter()
-                .chain(self.archived_categories.iter().cloned())
-                .map(|category| category.id)
-                .collect::<HashSet<_>>();
-            self.sand_engine
-                .restore_state(&checkpoint.sand_state, &valid_category_ids)?;
-            self.reconcile_all_daily_contributions();
-            if let Some(recovery) = self.persistence_recovery.as_ref() {
-                return Err(recovery.failure.summary());
-            }
-            storage::delete_file_if_exists(&storage::get_detached_runtime_path())?;
-            return Ok(true);
-        }
-        let Some(receipt) = checkpoint.legacy_transition.clone() else {
-            return Ok(false);
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            return;
         };
-        validate_legacy_switch_checkpoint(checkpoint, &receipt)?;
-        let staged_tracker = publish_legacy_switch_replay(
-            &self.time_tracker,
-            &self.archived_categories,
-            checkpoint,
-            &receipt,
-            &storage::get_time_log_path(),
-            &storage::get_categories_path(),
-            &storage::get_detached_runtime_path(),
-        )?;
-        self.time_tracker = staged_tracker;
-        Ok(false)
+        let result = sqlite::clear_tui_checkpoint(&database_path);
+        self.record_storage_result_for(
+            PersistenceOperation::CheckpointClear,
+            RecoveryAction::FlushCurrentState,
+            result,
+        );
     }
 
     fn restore_from_detached_checkpoint(&mut self) -> bool {
-        let mut checkpoint: DetachedRuntimeCheckpoint = if let Some(database_path) =
-            self.sqlite_database_path.clone()
-        {
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            return false;
+        };
+        let mut checkpoint: DetachedRuntimeCheckpoint =
             match sqlite::load_tui_checkpoint(&database_path) {
                 Ok(Some(claimed)) => {
                     let Some(active_stable_id) = claimed.active_session_stable_id else {
@@ -2687,20 +2149,7 @@ impl App {
                     self.record_storage_result::<()>(Err(error));
                     return false;
                 }
-            }
-        } else {
-            let path = storage::get_detached_runtime_path();
-            if !storage::file_exists(&path) {
-                return false;
-            }
-            match storage::read_json::<DetachedRuntimeCheckpoint>(&path) {
-                Ok(value) => value,
-                Err(error) => {
-                    self.record_storage_result::<()>(Err(error));
-                    return false;
-                }
-            }
-        };
+            };
 
         if let Err(error) = crate::profile::validate_artifact_profile(
             checkpoint.profile_id.as_deref(),
@@ -2725,27 +2174,9 @@ impl App {
             return false;
         }
 
-        if self.sqlite_database_path.is_none() {
-            match self.reconcile_legacy_transition_receipt(&mut checkpoint) {
-                Ok(true) => return false,
-                Ok(false) => {}
-                Err(error) => {
-                    self.record_storage_result_for::<()>(
-                        PersistenceOperation::CheckpointRecovery,
-                        RecoveryAction::ReloadAuthority,
-                        Err(error),
-                    );
-                    return false;
-                }
-            }
-        }
-
         self.checkpoint_recovery_active = true;
 
-        if checkpoint.schema_version != DetachedRuntimeCheckpoint::VERSION
-            && checkpoint.schema_version != DetachedRuntimeCheckpoint::PREVIOUS_VERSION
-            && checkpoint.schema_version != DetachedRuntimeCheckpoint::LEGACY_VERSION
-        {
+        if checkpoint.schema_version != DetachedRuntimeCheckpoint::VERSION {
             if let Some(database_path) = self.sqlite_database_path.clone() {
                 let _ = sqlite::quarantine_tui_checkpoint(&database_path);
             }
@@ -2782,16 +2213,19 @@ impl App {
 
         checkpoint.schema_version = DetachedRuntimeCheckpoint::VERSION;
         checkpoint.recovery_target_utc = Some(target_utc);
-        checkpoint.legacy_recovery_committed = false;
 
-        let claim_persisted = if let Some(database_path) = self.sqlite_database_path.clone() {
-            let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
-                self.record_storage_result::<()>(Err(
-                    "SQLite recovery checkpoint has no stable identity".to_string(),
-                ));
-                return false;
-            };
-            self.record_storage_result_for(
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            self.record_storage_result::<()>(Err("SQLite authority is unavailable".to_string()));
+            return false;
+        };
+        let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
+            self.record_storage_result::<()>(Err(
+                "SQLite recovery checkpoint has no stable identity".to_string(),
+            ));
+            return false;
+        };
+        let claim_persisted = self
+            .record_storage_result_for(
                 PersistenceOperation::CheckpointRecovery,
                 RecoveryAction::CommitCheckpointRecovery,
                 sqlite::replace_tui_recovering_checkpoint(
@@ -2800,16 +2234,7 @@ impl App {
                     &checkpoint,
                 ),
             )
-            .is_some()
-        } else {
-            let path = storage::get_detached_runtime_path();
-            self.record_storage_result_for(
-                PersistenceOperation::CheckpointRecovery,
-                RecoveryAction::CommitCheckpointRecovery,
-                storage::write_json_atomic(&path, &checkpoint),
-            )
-            .is_some()
-        };
+            .is_some();
         if !claim_persisted {
             return false;
         }
@@ -2926,7 +2351,7 @@ impl App {
         if !self.checkpoint_recovery_active {
             return;
         }
-        let Some(mut checkpoint) = self.checkpoint_recovery_payload.clone() else {
+        let Some(_checkpoint) = self.checkpoint_recovery_payload.clone() else {
             self.record_storage_result::<()>(Err(
                 "checkpoint recovery payload is unavailable for commit".to_string(),
             ));
@@ -2943,53 +2368,32 @@ impl App {
             ));
             return;
         };
-
-        if let Some(database_path) = self.sqlite_database_path.clone() {
-            let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
-                self.record_storage_result::<()>(Err(
-                    "SQLite recovery has no active stable identity to commit".to_string(),
-                ));
-                return;
-            };
-            if self
-                .record_storage_result_for(
-                    PersistenceOperation::CheckpointRecovery,
-                    RecoveryAction::CommitCheckpointRecovery,
-                    sqlite::commit_tui_checkpoint_recovery(
-                        &database_path,
-                        &expected_stable_id,
-                        &operational_day,
-                        &state,
-                        &daily_contribution,
-                    ),
-                )
-                .is_none()
-            {
-                return;
-            }
-        } else {
-            if let Err(error) = self.try_flush_current_state() {
-                self.record_storage_result_for::<()>(
-                    PersistenceOperation::CheckpointRecovery,
-                    RecoveryAction::CommitCheckpointRecovery,
-                    Err(error),
-                );
-                return;
-            }
-            checkpoint.legacy_recovery_committed = true;
-            let path = storage::get_detached_runtime_path();
-            if self
-                .record_storage_result_for(
-                    PersistenceOperation::CheckpointRecovery,
-                    RecoveryAction::CommitCheckpointRecovery,
-                    storage::write_json_atomic(&path, &checkpoint),
-                )
-                .is_none()
-            {
-                return;
-            }
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            self.record_storage_result::<()>(Err("SQLite authority is unavailable".to_string()));
+            return;
+        };
+        let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
+            self.record_storage_result::<()>(Err(
+                "SQLite recovery has no active stable identity to commit".to_string(),
+            ));
+            return;
+        };
+        if self
+            .record_storage_result_for(
+                PersistenceOperation::CheckpointRecovery,
+                RecoveryAction::CommitCheckpointRecovery,
+                sqlite::commit_tui_checkpoint_recovery(
+                    &database_path,
+                    &expected_stable_id,
+                    &operational_day,
+                    &state,
+                    &daily_contribution,
+                ),
+            )
+            .is_none()
+        {
+            return;
         }
-
         self.checkpoint_recovery_active = false;
         self.checkpoint_recovery_payload = None;
         self.reconcile_all_daily_contributions();
@@ -3178,9 +2582,6 @@ mod recovery_statement_tests {
             },
             pending_mutations: Vec::new(),
             recovery_target_utc: None,
-            legacy_recovery_committed: false,
-            legacy_transition: None,
-            legacy_finish: None,
             clear_all: None,
         }
     }
@@ -3389,7 +2790,7 @@ mod clear_all_replay_tests {
     use ratatui::style::Color;
 
     use super::{
-        ClearAllReceipt, DetachedRuntimeCheckpoint, LegacyActiveReceipt,
+        ActiveIntervalReceipt, ClearAllReceipt, DetachedRuntimeCheckpoint,
         clear_all_affected_days_for_interval, clear_all_operation_id, stage_clear_all_active_state,
         validate_clear_all_checkpoint,
     };
@@ -3420,7 +2821,7 @@ mod clear_all_replay_tests {
     fn receipt(idle_reset: bool) -> ClearAllReceipt {
         let previous_started_at_utc = Utc.with_ymd_and_hms(2026, 8, 1, 23, 0, 0).unwrap();
         let applied_at_utc = Utc.with_ymd_and_hms(2026, 8, 2, 1, 0, 0).unwrap();
-        let previous_active = LegacyActiveReceipt {
+        let previous_active = ActiveIntervalReceipt {
             category_id: if idle_reset { 0 } else { 1 },
             description: if idle_reset { "" } else { "focus" }.to_string(),
             started_at_utc: previous_started_at_utc,
@@ -3432,7 +2833,6 @@ mod clear_all_replay_tests {
         };
         let previous_elapsed_seconds = 7_200;
         ClearAllReceipt {
-            version: ClearAllReceipt::VERSION,
             operation_id: clear_all_operation_id(
                 &previous_active,
                 applied_at_utc,
@@ -3441,7 +2841,7 @@ mod clear_all_replay_tests {
                 &affected_operational_days,
             ),
             applied_at_utc,
-            resulting_active: LegacyActiveReceipt {
+            resulting_active: ActiveIntervalReceipt {
                 category_id: previous_active.category_id,
                 description: previous_active.description.clone(),
                 started_at_utc: if idle_reset {
@@ -3481,9 +2881,6 @@ mod clear_all_replay_tests {
             },
             pending_mutations: Vec::new(),
             recovery_target_utc: None,
-            legacy_recovery_committed: false,
-            legacy_transition: None,
-            legacy_finish: None,
             clear_all: Some(receipt),
         }
     }
@@ -3606,76 +3003,6 @@ mod clear_all_replay_tests {
 }
 
 #[cfg(test)]
-mod bounded_checkpoint_tests {
-    use super::DetachedRuntimeCheckpoint;
-    use crate::sand::SandState;
-    use chrono::{TimeZone, Utc};
-
-    fn checkpoint() -> DetachedRuntimeCheckpoint {
-        DetachedRuntimeCheckpoint {
-            schema_version: DetachedRuntimeCheckpoint::VERSION,
-            profile_id: Some(crate::profile::profile_id()),
-            detached_at_utc: Utc.with_ymd_and_hms(2026, 8, 2, 12, 0, 0).unwrap(),
-            simulation_time_utc: Utc.with_ymd_and_hms(2026, 8, 2, 12, 0, 0).unwrap(),
-            spawn_accumulator_nanos: 0,
-            physics_accumulator_nanos: 0,
-            active_category_id: 0,
-            active_description: String::new(),
-            active_session_started_at_utc: Some(
-                Utc.with_ymd_and_hms(2026, 8, 2, 11, 0, 0).unwrap(),
-            ),
-            sand_state: SandState {
-                version: SandState::VERSION,
-                grid_width: 2,
-                grid_height: 4,
-                grains: Vec::new(),
-                frame_count: 0,
-                sweep_left_to_right: true,
-                rng_state: 1,
-                pending_grains: Vec::new(),
-                pending_runs: Vec::new(),
-            },
-            pending_mutations: Vec::new(),
-            recovery_target_utc: None,
-            legacy_recovery_committed: false,
-            legacy_transition: None,
-            legacy_finish: None,
-            clear_all: None,
-        }
-    }
-
-    #[test]
-    fn new_checkpoint_fields_are_backward_compatible() {
-        let value = serde_json::json!({
-            "schema_version": 1,
-            "detached_at_utc": "2026-08-02T12:00:00Z",
-            "simulation_time_utc": "2026-08-02T12:00:00Z",
-            "spawn_accumulator_nanos": 0,
-            "physics_accumulator_nanos": 0,
-            "active_category_id": 0,
-            "active_description": "",
-            "active_session_started_at_utc": "2026-08-02T11:00:00Z",
-            "sand_state": checkpoint().sand_state,
-            "pending_mutations": []
-        });
-        let decoded: DetachedRuntimeCheckpoint = serde_json::from_value(value).unwrap();
-        assert_eq!(decoded.recovery_target_utc, None);
-        assert!(!decoded.legacy_recovery_committed);
-    }
-
-    #[test]
-    fn committed_legacy_evidence_remains_explicit_in_payload() {
-        let mut value = checkpoint();
-        value.recovery_target_utc = Some(Utc.with_ymd_and_hms(2026, 8, 2, 13, 0, 0).unwrap());
-        value.legacy_recovery_committed = true;
-        let encoded = serde_json::to_string(&value).unwrap();
-        let decoded: DetachedRuntimeCheckpoint = serde_json::from_str(&encoded).unwrap();
-        assert!(decoded.legacy_recovery_committed);
-        assert_eq!(decoded.recovery_target_utc, value.recovery_target_utc);
-    }
-}
-
-#[cfg(test)]
 mod category_catalog_tests {
     use super::valid_category_ids_for_catalog;
     use crate::domain::{Category, CategoryId, DRIFT_CATEGORY_ID};
@@ -3702,522 +3029,5 @@ mod category_catalog_tests {
         assert!(ids.contains(&DRIFT_CATEGORY_ID.0));
         assert!(ids.contains(&1));
         assert!(ids.contains(&7));
-    }
-}
-
-#[cfg(test)]
-mod legacy_switch_replay_tests {
-    use std::{fs, path::PathBuf, time::SystemTime};
-
-    use chrono::{TimeZone, Utc};
-    use ratatui::style::Color;
-
-    use super::{
-        DetachedRuntimeCheckpoint, publish_legacy_switch_replay, transition_operation_id,
-        validate_legacy_switch_checkpoint,
-    };
-    use crate::{
-        domain::{
-            Category, CategoryId, DRIFT_CATEGORY_ID, OperationalDayPolicy, Session, TimeTracker,
-        },
-        legacy_transition::{
-            LegacyActiveReceipt, LegacySessionReceipt, LegacyTransitionKind,
-            LegacyTransitionReceipt,
-        },
-        sand::SandState,
-        storage,
-    };
-
-    fn unique_dir(label: &str) -> PathBuf {
-        let stamp = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        std::env::temp_dir().join(format!("strata-{label}-{}-{stamp}", std::process::id()))
-    }
-
-    fn category(id: u64, name: &str, description: &str) -> Category {
-        Category {
-            id: CategoryId::new(id),
-            name: name.to_string(),
-            color: if id == DRIFT_CATEGORY_ID.0 {
-                Color::White
-            } else {
-                crate::constants::COLORS[((id - 1) as usize) % crate::constants::COLORS.len()]
-            },
-            description: description.to_string(),
-            karma_effect: if id == DRIFT_CATEGORY_ID.0 { 0 } else { 1 },
-        }
-    }
-
-    fn categories(_before_switch: bool) -> Vec<Category> {
-        vec![
-            category(DRIFT_CATEGORY_ID.0, "idle", ""),
-            category(1, "Previous", "focus"),
-            category(2, "Next", "next task"),
-        ]
-    }
-
-    fn completed_session() -> Session {
-        Session {
-            id: 1,
-            date: "2026-08-02".to_string(),
-            category_id: CategoryId::new(1),
-            project: String::new(),
-            description: "focus".to_string(),
-            start_time: "10:00:00".to_string(),
-            end_time: "11:00:00".to_string(),
-            elapsed_seconds: 3600,
-            started_at_utc: Some(Utc.with_ymd_and_hms(2026, 8, 2, 16, 0, 0).unwrap()),
-            ended_at_utc: Some(Utc.with_ymd_and_hms(2026, 8, 2, 17, 0, 0).unwrap()),
-            operational_day_policy: Some(OperationalDayPolicy {
-                utc_offset_seconds: -21600,
-                start_minutes: 360,
-            }),
-        }
-    }
-
-    fn receipt() -> LegacyTransitionReceipt {
-        let previous_start = Utc.with_ymd_and_hms(2026, 8, 2, 16, 0, 0).unwrap();
-        let transition = Utc.with_ymd_and_hms(2026, 8, 2, 17, 0, 0).unwrap();
-        let expected_identity = format!(
-            "legacy:1:{}",
-            previous_start.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
-        );
-        LegacyTransitionReceipt {
-            version: LegacyTransitionReceipt::VERSION,
-            operation_id: transition_operation_id(
-                "legacy-switch",
-                &expected_identity,
-                transition,
-                "2",
-            ),
-            kind: LegacyTransitionKind::Switch,
-            expected_previous_category_id: 1,
-            expected_previous_started_at_utc: previous_start,
-            transition_at_utc: transition,
-            completed_session: Some(LegacySessionReceipt::from_session(&completed_session())),
-            resulting_active: LegacyActiveReceipt {
-                category_id: 2,
-                description: "next task".to_string(),
-                started_at_utc: transition,
-            },
-        }
-    }
-
-    fn checkpoint(receipt: LegacyTransitionReceipt) -> DetachedRuntimeCheckpoint {
-        let transition = receipt.transition_at_utc;
-        DetachedRuntimeCheckpoint {
-            schema_version: DetachedRuntimeCheckpoint::VERSION,
-            profile_id: Some(crate::profile::profile_id()),
-            detached_at_utc: transition,
-            simulation_time_utc: transition,
-            spawn_accumulator_nanos: 0,
-            physics_accumulator_nanos: 0,
-            active_category_id: 2,
-            active_description: "next task".to_string(),
-            active_session_started_at_utc: Some(transition),
-            sand_state: SandState {
-                version: SandState::VERSION,
-                grid_width: 2,
-                grid_height: 4,
-                grains: Vec::new(),
-                frame_count: 0,
-                sweep_left_to_right: true,
-                rng_state: 1,
-                pending_grains: Vec::new(),
-                pending_runs: Vec::new(),
-            },
-            pending_mutations: Vec::new(),
-            recovery_target_utc: None,
-            legacy_recovery_committed: false,
-            legacy_transition: Some(receipt),
-            legacy_finish: None,
-            clear_all: None,
-        }
-    }
-
-    fn load_tracker(
-        categories_path: &std::path::Path,
-        sessions_path: &std::path::Path,
-    ) -> TimeTracker {
-        let loaded_categories = storage::try_load_categories_from_csv(categories_path).unwrap();
-        let mut catalog = loaded_categories.categories.clone();
-        catalog.extend(loaded_categories.archived_categories.iter().cloned());
-        let loaded_sessions = storage::try_load_sessions_from_csv(sessions_path, &catalog).unwrap();
-        let mut tracker = TimeTracker::new();
-        tracker.apply_loaded_state(
-            loaded_categories.categories,
-            loaded_categories.next_category_id,
-            loaded_sessions.sessions,
-            loaded_sessions.next_session_id,
-        );
-        tracker
-    }
-
-    fn assert_converged(
-        categories_path: &std::path::Path,
-        sessions_path: &std::path::Path,
-        checkpoint_path: &std::path::Path,
-    ) {
-        let loaded_categories = storage::try_load_categories_from_csv(categories_path).unwrap();
-        let previous = loaded_categories
-            .categories
-            .iter()
-            .find(|category| category.id == CategoryId::new(1))
-            .unwrap();
-        let next = loaded_categories
-            .categories
-            .iter()
-            .find(|category| category.id == CategoryId::new(2))
-            .unwrap();
-        assert_eq!(previous.description, "focus");
-        assert_eq!(next.description, "next task");
-
-        let mut catalog = loaded_categories.categories.clone();
-        catalog.extend(loaded_categories.archived_categories.iter().cloned());
-        let loaded_sessions = storage::try_load_sessions_from_csv(sessions_path, &catalog).unwrap();
-        assert_eq!(loaded_sessions.sessions.len(), 1);
-        assert_eq!(loaded_sessions.sessions[0].id, 1);
-        assert_eq!(loaded_sessions.sessions[0].elapsed_seconds, 3600);
-
-        let checkpoint: DetachedRuntimeCheckpoint = storage::read_json(checkpoint_path).unwrap();
-        assert!(checkpoint.legacy_transition.is_none());
-    }
-
-    #[test]
-    fn every_persisted_switch_kill_point_converges_without_duplicate_time() {
-        for phase in 0..3 {
-            let dir = unique_dir(&format!("legacy-switch-phase-{phase}"));
-            fs::create_dir_all(&dir).unwrap();
-            let categories_path = dir.join("categories.csv");
-            let sessions_path = dir.join("time_log.csv");
-            let checkpoint_path = dir.join("detached_runtime.json");
-            let receipt = receipt();
-            let checkpoint = checkpoint(receipt.clone());
-
-            let seeded_categories = categories(phase < 2);
-            storage::save_category_catalog_to_csv(&categories_path, &seeded_categories, &[])
-                .unwrap();
-            if phase >= 1 {
-                storage::save_sessions_to_csv(
-                    &sessions_path,
-                    &[completed_session()],
-                    &seeded_categories,
-                )
-                .unwrap();
-            }
-            storage::write_json_atomic(&checkpoint_path, &checkpoint).unwrap();
-
-            let tracker = load_tracker(&categories_path, &sessions_path);
-            let mut loaded_checkpoint: DetachedRuntimeCheckpoint =
-                storage::read_json(&checkpoint_path).unwrap();
-            validate_legacy_switch_checkpoint(&loaded_checkpoint, &receipt).unwrap();
-            let replayed = publish_legacy_switch_replay(
-                &tracker,
-                &[],
-                &mut loaded_checkpoint,
-                &receipt,
-                &sessions_path,
-                &categories_path,
-                &checkpoint_path,
-            )
-            .unwrap();
-            assert_eq!(replayed.sessions.len(), 1);
-            assert_converged(&categories_path, &sessions_path, &checkpoint_path);
-            fs::remove_dir_all(dir).ok();
-        }
-    }
-
-    #[test]
-    fn failed_catalog_publication_retains_receipt_after_session_converges() {
-        let dir = unique_dir("legacy-switch-catalog-failure");
-        fs::create_dir_all(&dir).unwrap();
-        let categories_path = dir.join("categories-as-directory");
-        let sessions_path = dir.join("time_log.csv");
-        let checkpoint_path = dir.join("detached_runtime.json");
-        fs::create_dir_all(&categories_path).unwrap();
-
-        let receipt = receipt();
-        let mut checkpoint = checkpoint(receipt.clone());
-        storage::write_json_atomic(&checkpoint_path, &checkpoint).unwrap();
-        let mut tracker = TimeTracker::new();
-        tracker.apply_loaded_state(categories(true), 3, Vec::new(), 1);
-
-        let error = match publish_legacy_switch_replay(
-            &tracker,
-            &[],
-            &mut checkpoint,
-            &receipt,
-            &sessions_path,
-            &categories_path,
-            &checkpoint_path,
-        ) {
-            Ok(_) => panic!("catalog publication unexpectedly succeeded"),
-            Err(error) => error,
-        };
-        assert!(!error.is_empty());
-
-        let disk_checkpoint: DetachedRuntimeCheckpoint =
-            storage::read_json(&checkpoint_path).unwrap();
-        assert!(disk_checkpoint.legacy_transition.is_some());
-        let loaded_sessions =
-            storage::try_load_sessions_from_csv(&sessions_path, &categories(true)).unwrap();
-        assert_eq!(loaded_sessions.sessions.len(), 1);
-        fs::remove_dir_all(dir).ok();
-    }
-}
-
-#[cfg(test)]
-mod legacy_finish_replay_tests {
-    use std::{fs, path::PathBuf, time::SystemTime};
-
-    use chrono::{TimeZone, Utc};
-    use ratatui::style::Color;
-
-    use super::{
-        DetachedRuntimeCheckpoint, publish_legacy_finish_replay, transition_operation_id,
-        validate_legacy_finish_checkpoint,
-    };
-    use crate::{
-        domain::{
-            Category, CategoryId, DRIFT_CATEGORY_ID, OperationalDayPolicy, Session, TimeTracker,
-        },
-        legacy_transition::{LegacyFinishReceipt, LegacySessionReceipt},
-        sand::SandState,
-        storage,
-    };
-
-    fn unique_dir(label: &str) -> PathBuf {
-        let stamp = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        std::env::temp_dir().join(format!("strata-{label}-{}-{stamp}", std::process::id()))
-    }
-
-    fn category(id: u64, name: &str, description: &str) -> Category {
-        Category {
-            id: CategoryId::new(id),
-            name: name.to_string(),
-            color: if id == DRIFT_CATEGORY_ID.0 {
-                Color::White
-            } else {
-                crate::constants::COLORS[((id - 1) as usize) % crate::constants::COLORS.len()]
-            },
-            description: description.to_string(),
-            karma_effect: if id == DRIFT_CATEGORY_ID.0 { 0 } else { 1 },
-        }
-    }
-
-    fn categories(_before_finish: bool) -> Vec<Category> {
-        vec![
-            category(DRIFT_CATEGORY_ID.0, "idle", ""),
-            category(1, "Work", "focus"),
-        ]
-    }
-
-    fn completed_session() -> Session {
-        Session {
-            id: 1,
-            date: "2026-08-02".to_string(),
-            category_id: CategoryId::new(1),
-            project: String::new(),
-            description: "focus".to_string(),
-            start_time: "10:00:00".to_string(),
-            end_time: "11:00:00".to_string(),
-            elapsed_seconds: 3600,
-            started_at_utc: Some(Utc.with_ymd_and_hms(2026, 8, 2, 16, 0, 0).unwrap()),
-            ended_at_utc: Some(Utc.with_ymd_and_hms(2026, 8, 2, 17, 0, 0).unwrap()),
-            operational_day_policy: Some(OperationalDayPolicy {
-                utc_offset_seconds: -21600,
-                start_minutes: 360,
-            }),
-        }
-    }
-
-    fn receipt() -> LegacyFinishReceipt {
-        let previous_start = Utc.with_ymd_and_hms(2026, 8, 2, 16, 0, 0).unwrap();
-        let finished = Utc.with_ymd_and_hms(2026, 8, 2, 17, 0, 0).unwrap();
-        let expected_identity = format!(
-            "legacy:1:{}",
-            previous_start.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
-        );
-        LegacyFinishReceipt {
-            version: LegacyFinishReceipt::VERSION,
-            operation_id: transition_operation_id(
-                "legacy-finish",
-                &expected_identity,
-                finished,
-                "complete",
-            ),
-            expected_previous_category_id: 1,
-            expected_previous_description: "focus".to_string(),
-            expected_previous_started_at_utc: previous_start,
-            finished_at_utc: finished,
-            completed_session: Some(LegacySessionReceipt::from_session(&completed_session())),
-        }
-    }
-
-    fn sand_state() -> SandState {
-        SandState {
-            version: SandState::VERSION,
-            grid_width: 2,
-            grid_height: 4,
-            grains: Vec::new(),
-            frame_count: 17,
-            sweep_left_to_right: true,
-            rng_state: 19,
-            pending_grains: Vec::new(),
-            pending_runs: Vec::new(),
-        }
-    }
-
-    fn checkpoint(receipt: LegacyFinishReceipt) -> DetachedRuntimeCheckpoint {
-        let finished = receipt.finished_at_utc;
-        DetachedRuntimeCheckpoint {
-            schema_version: DetachedRuntimeCheckpoint::VERSION,
-            profile_id: Some(crate::profile::profile_id()),
-            detached_at_utc: finished,
-            simulation_time_utc: finished,
-            spawn_accumulator_nanos: 0,
-            physics_accumulator_nanos: 0,
-            active_category_id: 1,
-            active_description: "focus".to_string(),
-            active_session_started_at_utc: Some(receipt.expected_previous_started_at_utc),
-            sand_state: sand_state(),
-            pending_mutations: Vec::new(),
-            recovery_target_utc: None,
-            legacy_recovery_committed: false,
-            legacy_transition: None,
-            legacy_finish: Some(receipt),
-            clear_all: None,
-        }
-    }
-
-    fn load_tracker(
-        categories_path: &std::path::Path,
-        sessions_path: &std::path::Path,
-    ) -> TimeTracker {
-        let loaded_categories = storage::try_load_categories_from_csv(categories_path).unwrap();
-        let mut catalog = loaded_categories.categories.clone();
-        catalog.extend(loaded_categories.archived_categories.iter().cloned());
-        let loaded_sessions = storage::try_load_sessions_from_csv(sessions_path, &catalog).unwrap();
-        let mut tracker = TimeTracker::new();
-        tracker.apply_loaded_state(
-            loaded_categories.categories,
-            loaded_categories.next_category_id,
-            loaded_sessions.sessions,
-            loaded_sessions.next_session_id,
-        );
-        tracker
-    }
-
-    fn assert_converged(
-        categories_path: &std::path::Path,
-        sessions_path: &std::path::Path,
-        sand_path: &std::path::Path,
-    ) {
-        let loaded_categories = storage::try_load_categories_from_csv(categories_path).unwrap();
-        let work = loaded_categories
-            .categories
-            .iter()
-            .find(|category| category.id == CategoryId::new(1))
-            .unwrap();
-        assert_eq!(work.description, "focus");
-        let mut catalog = loaded_categories.categories.clone();
-        catalog.extend(loaded_categories.archived_categories.iter().cloned());
-        let loaded_sessions = storage::try_load_sessions_from_csv(sessions_path, &catalog).unwrap();
-        assert_eq!(loaded_sessions.sessions.len(), 1);
-        assert_eq!(loaded_sessions.sessions[0].id, 1);
-        assert_eq!(loaded_sessions.sessions[0].elapsed_seconds, 3600);
-        let persisted_sand = storage::try_load_sand_state(sand_path).unwrap().unwrap();
-        assert_eq!(persisted_sand.frame_count, 17);
-        assert_eq!(persisted_sand.rng_state, 19);
-    }
-
-    #[test]
-    fn every_persisted_finish_kill_point_converges_without_duplicate_time() {
-        for phase in 0..4 {
-            let dir = unique_dir(&format!("legacy-finish-phase-{phase}"));
-            fs::create_dir_all(&dir).unwrap();
-            let categories_path = dir.join("categories.csv");
-            let sessions_path = dir.join("time_log.csv");
-            let sand_path = dir.join("sand_state.json");
-            let checkpoint_path = dir.join("detached_runtime.json");
-            let receipt = receipt();
-            let checkpoint = checkpoint(receipt.clone());
-
-            let seeded_categories = categories(phase < 2);
-            storage::save_category_catalog_to_csv(&categories_path, &seeded_categories, &[])
-                .unwrap();
-            if phase >= 1 {
-                storage::save_sessions_to_csv(
-                    &sessions_path,
-                    &[completed_session()],
-                    &seeded_categories,
-                )
-                .unwrap();
-            }
-            if phase >= 3 {
-                storage::save_sand_state(&sand_path, &sand_state()).unwrap();
-            }
-            storage::write_json_atomic(&checkpoint_path, &checkpoint).unwrap();
-
-            let tracker = load_tracker(&categories_path, &sessions_path);
-            validate_legacy_finish_checkpoint(&checkpoint, &receipt).unwrap();
-            let replayed = publish_legacy_finish_replay(
-                &tracker,
-                &[],
-                &checkpoint,
-                &receipt,
-                &sessions_path,
-                &categories_path,
-                &sand_path,
-            )
-            .unwrap();
-            assert_eq!(replayed.sessions.len(), 1);
-            assert_converged(&categories_path, &sessions_path, &sand_path);
-            let retained: DetachedRuntimeCheckpoint = storage::read_json(&checkpoint_path).unwrap();
-            assert!(retained.legacy_finish.is_some());
-            fs::remove_dir_all(dir).ok();
-        }
-    }
-
-    #[test]
-    fn failed_finish_catalog_publication_retains_receipt_after_session_converges() {
-        let dir = unique_dir("legacy-finish-catalog-failure");
-        fs::create_dir_all(&dir).unwrap();
-        let categories_path = dir.join("categories-as-directory");
-        let sessions_path = dir.join("time_log.csv");
-        let sand_path = dir.join("sand_state.json");
-        let checkpoint_path = dir.join("detached_runtime.json");
-        fs::create_dir_all(&categories_path).unwrap();
-        let receipt = receipt();
-        let checkpoint = checkpoint(receipt.clone());
-        storage::write_json_atomic(&checkpoint_path, &checkpoint).unwrap();
-        let mut tracker = TimeTracker::new();
-        tracker.apply_loaded_state(categories(true), 2, Vec::new(), 1);
-
-        let error = match publish_legacy_finish_replay(
-            &tracker,
-            &[],
-            &checkpoint,
-            &receipt,
-            &sessions_path,
-            &categories_path,
-            &sand_path,
-        ) {
-            Ok(_) => panic!("catalog publication unexpectedly succeeded"),
-            Err(error) => error,
-        };
-        assert!(!error.is_empty());
-        let retained: DetachedRuntimeCheckpoint = storage::read_json(&checkpoint_path).unwrap();
-        assert!(retained.legacy_finish.is_some());
-        let loaded_sessions =
-            storage::try_load_sessions_from_csv(&sessions_path, &categories(true)).unwrap();
-        assert_eq!(loaded_sessions.sessions.len(), 1);
-        assert!(!sand_path.exists());
-        fs::remove_dir_all(dir).ok();
     }
 }

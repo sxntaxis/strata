@@ -231,9 +231,6 @@ impl App {
                 .remove_category_grains(category_id, removed_seconds);
         }
 
-        if self.sqlite_database_path.is_none() {
-            self.persist_sessions();
-        }
         for day in affected_days {
             self.reconcile_daily_contribution(day);
         }
@@ -281,63 +278,34 @@ impl App {
         {
             return false;
         }
-
-        if let Some(database_path) = self.sqlite_database_path.clone() {
-            let result = crate::sqlite::update_tui_session_description(
-                &database_path,
-                edit.session_id,
-                &edit.draft,
-            );
-            if self
-                .record_storage_result_for(
-                    PersistenceOperation::SessionEdit,
-                    RecoveryAction::ReloadAuthority,
-                    result,
-                )
-                .is_none()
-            {
-                retain_report_edit_after_commit(&mut self.report_log_edit, false);
-                self.render_needed = true;
-                return false;
-            }
-            if !self
-                .time_tracker
-                .set_session_description_by_id(edit.session_id, edit.draft)
-            {
-                return false;
-            }
-        } else {
-            let mut sessions = self.time_tracker.sessions.clone();
-            let Some(session) = sessions
-                .iter_mut()
-                .find(|session| session.id == edit.session_id)
-            else {
-                return false;
-            };
-            session.description = edit.draft.clone();
-            let mut categories = self.time_tracker.categories_for_storage();
-            categories.extend(self.archived_categories.iter().cloned());
-            let result = crate::storage::save_sessions_to_csv(
-                &crate::storage::get_time_log_path(),
-                &sessions,
-                &categories,
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            retain_report_edit_after_commit(&mut self.report_log_edit, false);
+            self.render_needed = true;
+            return false;
+        };
+        let result = crate::sqlite::update_tui_session_description(
+            &database_path,
+            edit.session_id,
+            &edit.draft,
+        );
+        if self
+            .record_storage_result_for(
+                PersistenceOperation::SessionEdit,
+                RecoveryAction::ReloadAuthority,
+                result,
             )
-            .map_err(|error| error.to_string());
-            if self
-                .record_storage_result_for(
-                    PersistenceOperation::SessionEdit,
-                    RecoveryAction::ReloadAuthority,
-                    result,
-                )
-                .is_none()
-            {
-                retain_report_edit_after_commit(&mut self.report_log_edit, false);
-                self.render_needed = true;
-                return false;
-            }
-            self.time_tracker.sessions = sessions;
+            .is_none()
+        {
+            retain_report_edit_after_commit(&mut self.report_log_edit, false);
+            self.render_needed = true;
+            return false;
         }
-
+        if !self
+            .time_tracker
+            .set_session_description_by_id(edit.session_id, edit.draft)
+        {
+            return false;
+        }
         retain_report_edit_after_commit(&mut self.report_log_edit, true);
         self.render_needed = true;
         true
