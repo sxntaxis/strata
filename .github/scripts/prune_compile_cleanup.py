@@ -78,12 +78,11 @@ path.write_text(text)
 
 path = Path("src/app.rs")
 text = path.read_text()
-if "fn stage_clear_all_active_state" in text:
-    text = sub_once(
-        text,
-        r"\nfn stage_clear_all_active_state\(.*?\n\}\n\nfn sand_state_is_empty",
-        "\nfn sand_state_is_empty",
-        "obsolete clear-all active staging",
+if "fn stage_clear_all_active_state" in text and "#[cfg(test)]\nfn stage_clear_all_active_state" not in text:
+    text = text.replace(
+        "fn stage_clear_all_active_state(",
+        "#[cfg(test)]\nfn stage_clear_all_active_state(",
+        1,
     )
 path.write_text(text)
 
