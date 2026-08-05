@@ -92,14 +92,11 @@ impl TerminalProfile {
         if !self.database_path().exists() {
             return false;
         }
-        Connection::open(self.database_path())
-            .and_then(|connection| {
-                connection.query_row("SELECT count(*) FROM runtime_checkpoints", [], |row| {
-                    row.get::<_, i64>(0)
-                })
-            })
-            .map(|count| count > 0)
-            .unwrap_or(false)
+        let connection = Connection::open(self.database_path()).expect("open profile database");
+        let count: i64 = connection
+            .query_row("SELECT count(*) FROM runtime_checkpoint", [], |row| row.get(0))
+            .expect("query runtime checkpoint custody");
+        count > 0
     }
 }
 
