@@ -8,6 +8,7 @@ on:
       - '.github/scripts/apply_sqlite_only_cleanup.py'
       - 'tests/config_authority.rs'
       - 'tests/profile_authority.rs'
+      - 'tests/temporal_authority.rs'
 
 permissions:
   contents: write
