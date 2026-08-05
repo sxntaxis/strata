@@ -7,6 +7,7 @@ on:
       - '.github/scripts/apply_current_schema.py'
       - '.github/scripts/normalize_current_schema_script.py'
       - '.github/scripts/cleanup_current_schema.py'
+      - '.github/scripts/normalize_cleanup_current_schema.py'
 
 permissions:
   contents: write
@@ -34,6 +35,7 @@ jobs:
         run: |
           python3 .github/scripts/normalize_current_schema_script.py
           python3 .github/scripts/apply_current_schema.py
+          python3 .github/scripts/normalize_cleanup_current_schema.py
           python3 .github/scripts/cleanup_current_schema.py
       - name: Format
         run: cargo fmt --all
@@ -48,6 +50,7 @@ jobs:
           rm -f .github/scripts/apply_current_schema.py
           rm -f .github/scripts/normalize_current_schema_script.py
           rm -f .github/scripts/cleanup_current_schema.py
+          rm -f .github/scripts/normalize_cleanup_current_schema.py
           rm -f .github/workflows/current-schema.yml
           rm -f .github/workflows/schema-inventory.yml
           git config user.name github-actions[bot]
