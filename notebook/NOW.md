@@ -52,14 +52,10 @@ SQLite-owned.
 ## Verified final baseline
 
 - formatting and strict Clippy pass;
-- 248 library tests;
-- 9 CLI lifecycle tests;
-- 6 configuration-authority tests;
-- 2 profile-authority process tests;
-- 1 report-help test;
-- 15 SQLite/TUI process tests;
-- 2 temporal-authority tests;
-- 3 terminal-lifecycle PTY tests.
+- `cargo test --all-features` passes with 194 library tests plus the integration, process, and PTY suites;
+- fresh-profile direct-SQLite smoke proof passes;
+- CLI help exposes no retired migration or activation commands;
+- GitHub Actions run 31340435742 passes on ARCH-001 head `6f7f7df7808e4e919a92a206eb71559b896378a0`.
 
 ## Certification evidence
 
