@@ -2188,7 +2188,7 @@ impl App {
         }
         if !checkpoint.pending_mutations.is_empty() {
             self.record_storage_result::<()>(Err(
-                "detached checkpoint contains queued mutations that cannot be recovered without a stable legacy receipt identity; evidence retained"
+                "detached checkpoint contains queued mutations that cannot be recovered without a stable receipt identity; evidence retained"
                     .to_string(),
             ));
             return false;

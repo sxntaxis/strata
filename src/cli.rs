@@ -160,7 +160,7 @@ pub enum Cli {
         json: bool,
     },
 
-    #[command(about = "Check SQLite integrity, schema, foreign keys, and authority metadata")]
+    #[command(about = "Check SQLite integrity, schema, foreign keys, and profile binding")]
     SqliteDoctor {
         #[arg(long, value_name = "PATH", help = "SQLite database path")]
         database: Option<PathBuf>,
@@ -705,7 +705,6 @@ pub fn sqlite_import(
 pub fn sqlite_doctor(database: Option<PathBuf>, json: bool) -> Result<(), String> {
     let report = sqlite::run_doctor(sqlite::DoctorOptions {
         database_path: database.unwrap_or_else(default_sqlite_database_path),
-        authority_marker_path: None,
     })?;
     print_maintenance_report(report, json)
 }

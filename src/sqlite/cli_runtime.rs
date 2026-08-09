@@ -12,7 +12,7 @@ use crate::{
 };
 
 use super::{
-    NewActiveSession, SessionCompletion, authority::open_cli_repository, runtime_coordination,
+    NewActiveSession, SessionCompletion, runtime::open_cli_repository, runtime_coordination,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

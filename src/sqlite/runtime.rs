@@ -12,7 +12,6 @@ use crate::{profile, storage};
 
 use super::SqliteRepository;
 
-const STORAGE_AUTHORITY: &str = "sqlite";
 const PROFILE_ID_KEY: &str = "profile_id";
 
 pub(crate) fn profile_database_path() -> PathBuf {
@@ -80,16 +79,6 @@ pub(crate) fn open_cli_repository(path: &Path) -> Result<SqliteRepository, Strin
 }
 
 fn validate_and_bind_profile(repository: &SqliteRepository) -> Result<(), String> {
-    let authority = repository
-        .metadata_value("storage_authority")
-        .map_err(|error| error.to_string())?
-        .unwrap_or_else(|| "missing".to_string());
-    if authority != STORAGE_AUTHORITY {
-        return Err(format!(
-            "database storage authority is {authority}, expected {STORAGE_AUTHORITY}; remove or rebuild this development database"
-        ));
-    }
-
     let expected_profile = profile::profile_id();
     let existing: Option<String> = repository
         .connection

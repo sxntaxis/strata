@@ -16,4 +16,8 @@ The product target is one clean implementation:
 - the database is created from one current schema rather than replaying obsolete production migrations;
 - development fixtures may be discarded or rebuilt; compatibility code is not a product requirement.
 
+Portable CSV bundles are deterministic interchange only. Doctor, backup, and restore operate directly on
+the SQLite database; runtime recovery, checkpoints, receipts, categories, sessions, and sediment are
+SQLite-owned.
+
 The mixed TUI/CLI ownership failure is treated as evidence against dual authority, not as a reason to add another lock around the obsolete file-backed runtime.

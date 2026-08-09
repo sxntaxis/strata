@@ -33,7 +33,7 @@ impl App {
         let active_identity = statement
             .active_stable_id
             .as_deref()
-            .unwrap_or("legacy-file active generation");
+            .unwrap_or("active generation");
         let description = if statement.active_description.is_empty() {
             "(empty)"
         } else {

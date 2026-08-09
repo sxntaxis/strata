@@ -3,17 +3,16 @@ use std::{path::Path, time::Duration};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use thiserror::Error;
 
-mod authority;
 mod category_lifecycle;
 mod cli_runtime;
 #[cfg(test)]
 mod fault_certification;
 mod maintenance;
 mod repository;
+mod runtime;
 mod runtime_coordination;
 mod tui_runtime;
 
-pub(crate) use authority::resolve_runtime_database;
 #[allow(unused_imports)]
 pub(crate) use category_lifecycle::{
     CategoryLifecyclePreview, CategoryLifecycleReceipt, CategoryLifecycleRequest,
@@ -30,6 +29,7 @@ pub(crate) use maintenance::{
     BackupOptions, BundleExportOptions, BundleImportOptions, DoctorOptions, RestoreOptions,
     SqliteMaintenanceReport,
 };
+pub(crate) use runtime::resolve_runtime_database;
 pub(crate) use tui_runtime::{
     ClearAllStateRequest as TuiClearAllStateRequest,
     InitialActiveGenerationRequest as TuiInitialActiveGenerationRequest,
@@ -82,15 +82,10 @@ pub(crate) fn run_restore(options: RestoreOptions) -> Result<SqliteMaintenanceRe
     maintenance::restore(options).map_err(|error| error.to_string())
 }
 
-const CURRENT_SCHEMA_VERSION: i64 = 7;
+const CURRENT_SCHEMA_VERSION: i64 = 1;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
-const MIGRATION_1: &str = r#"
-CREATE TABLE schema_migrations (
-    version INTEGER PRIMARY KEY,
-    applied_at_utc TEXT NOT NULL
-) STRICT;
-
+const CURRENT_SCHEMA: &str = r#"
 CREATE TABLE database_metadata (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -102,21 +97,19 @@ CREATE TABLE categories (
     description TEXT NOT NULL DEFAULT '',
     color_index INTEGER NOT NULL CHECK (color_index >= 0),
     balance_effect INTEGER NOT NULL DEFAULT 0 CHECK (balance_effect BETWEEN -1 AND 1),
-    archived_at_utc TEXT
+    archived_at_utc TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0 CHECK (sort_order >= 0)
 ) STRICT;
 
 CREATE UNIQUE INDEX categories_active_name_unique
     ON categories(name)
     WHERE archived_at_utc IS NULL;
+CREATE INDEX categories_active_order_index
+    ON categories(archived_at_utc, sort_order, id);
 
 INSERT INTO categories (
-    id,
-    name,
-    description,
-    color_index,
-    balance_effect,
-    archived_at_utc
-) VALUES (0, 'idle', '', 0, 0, NULL);
+    id, name, description, color_index, balance_effect, archived_at_utc, sort_order
+) VALUES (0, 'idle', '', 0, 0, NULL, 0);
 
 CREATE TABLE projects (
     id INTEGER PRIMARY KEY,
@@ -137,17 +130,38 @@ CREATE TABLE sessions (
     started_at_utc TEXT NOT NULL,
     ended_at_utc TEXT NOT NULL,
     operational_day TEXT NOT NULL,
-    elapsed_seconds INTEGER NOT NULL CHECK (elapsed_seconds >= 0),
+    elapsed_seconds INTEGER NOT NULL CHECK (elapsed_seconds > 0),
     source TEXT NOT NULL DEFAULT 'runtime',
+    boundary_utc_offset_seconds INTEGER
+        CHECK (boundary_utc_offset_seconds BETWEEN -86399 AND 86399),
+    boundary_start_minutes INTEGER
+        CHECK (boundary_start_minutes BETWEEN 0 AND 1439),
     FOREIGN KEY (category_id) REFERENCES categories(id)
         ON UPDATE RESTRICT
-        ON DELETE RESTRICT
+        ON DELETE RESTRICT,
+    CHECK ((boundary_utc_offset_seconds IS NULL) = (boundary_start_minutes IS NULL))
 ) STRICT;
 
 CREATE INDEX sessions_operational_day_index
     ON sessions(operational_day, started_at_utc);
 CREATE INDEX sessions_category_index
     ON sessions(category_id, started_at_utc);
+
+CREATE TRIGGER sessions_temporal_insert_guard
+BEFORE INSERT ON sessions
+WHEN NEW.elapsed_seconds <= 0
+   OR ((NEW.boundary_utc_offset_seconds IS NULL) != (NEW.boundary_start_minutes IS NULL))
+BEGIN
+    SELECT RAISE(ABORT, 'completed sessions require positive elapsed time and complete boundary provenance');
+END;
+
+CREATE TRIGGER sessions_temporal_update_guard
+BEFORE UPDATE OF elapsed_seconds, boundary_utc_offset_seconds, boundary_start_minutes ON sessions
+WHEN NEW.elapsed_seconds <= 0
+   OR ((NEW.boundary_utc_offset_seconds IS NULL) != (NEW.boundary_start_minutes IS NULL))
+BEGIN
+    SELECT RAISE(ABORT, 'completed sessions require positive elapsed time and complete boundary provenance');
+END;
 
 CREATE TABLE active_session (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -187,7 +201,9 @@ CREATE TABLE sand_snapshots (
     id INTEGER PRIMARY KEY,
     formation_id TEXT NOT NULL,
     snapshot_kind TEXT NOT NULL
-        CHECK (snapshot_kind IN ('daily', 'manual', 'formation_end', 'recovery')),
+        CHECK (snapshot_kind IN (
+            'daily', 'daily-contribution', 'manual', 'formation_end', 'recovery'
+        )),
     operational_day TEXT,
     quantum_seconds INTEGER NOT NULL CHECK (quantum_seconds > 0),
     payload_json TEXT NOT NULL,
@@ -197,98 +213,17 @@ CREATE TABLE sand_snapshots (
 CREATE INDEX sand_snapshots_formation_index
     ON sand_snapshots(formation_id, captured_at_utc);
 
-INSERT INTO schema_migrations(version, applied_at_utc)
-VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
-
-INSERT INTO database_metadata(key, value)
-VALUES ('storage_authority', 'sqlite');
-
-PRAGMA user_version = 1;
-"#;
-
-const MIGRATION_2: &str = r#"
-CREATE TABLE legacy_imports (
-    id INTEGER PRIMARY KEY,
-    source_fingerprint TEXT NOT NULL UNIQUE,
-    status TEXT NOT NULL CHECK (status IN ('pending', 'verified')),
-    source_manifest_json TEXT NOT NULL,
-    utc_offset_seconds INTEGER NOT NULL
-        CHECK (utc_offset_seconds BETWEEN -86399 AND 86399),
-    operational_day_start_minutes INTEGER NOT NULL
-        CHECK (operational_day_start_minutes BETWEEN 0 AND 1439),
-    quantum_seconds INTEGER NOT NULL CHECK (quantum_seconds > 0),
-    category_count INTEGER NOT NULL CHECK (category_count >= 0),
-    session_count INTEGER NOT NULL CHECK (session_count >= 0),
-    total_elapsed_seconds INTEGER NOT NULL CHECK (total_elapsed_seconds >= 0),
-    active_session_present INTEGER NOT NULL
-        CHECK (active_session_present IN (0, 1)),
-    checkpoint_present INTEGER NOT NULL
-        CHECK (checkpoint_present IN (0, 1)),
-    sand_state_present INTEGER NOT NULL
-        CHECK (sand_state_present IN (0, 1)),
-    snapshot_count INTEGER NOT NULL CHECK (snapshot_count >= 0),
-    verification_json TEXT,
-    started_at_utc TEXT NOT NULL,
-    completed_at_utc TEXT
-) STRICT;
-
 CREATE TABLE category_tags (
     category_id INTEGER NOT NULL,
     ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
     tag TEXT NOT NULL CHECK (length(trim(tag)) > 0),
-    legacy_import_id INTEGER,
     PRIMARY KEY (category_id, ordinal),
     UNIQUE (category_id, tag),
     FOREIGN KEY (category_id) REFERENCES categories(id)
         ON UPDATE RESTRICT
-        ON DELETE CASCADE,
-    FOREIGN KEY (legacy_import_id) REFERENCES legacy_imports(id)
-        ON DELETE RESTRICT
+        ON DELETE CASCADE
 ) STRICT;
 
-ALTER TABLE sessions
-    ADD COLUMN legacy_import_id INTEGER
-        REFERENCES legacy_imports(id) ON DELETE RESTRICT;
-ALTER TABLE active_session
-    ADD COLUMN legacy_import_id INTEGER
-        REFERENCES legacy_imports(id) ON DELETE RESTRICT;
-ALTER TABLE runtime_checkpoint
-    ADD COLUMN legacy_import_id INTEGER
-        REFERENCES legacy_imports(id) ON DELETE RESTRICT;
-ALTER TABLE sand_state
-    ADD COLUMN legacy_import_id INTEGER
-        REFERENCES legacy_imports(id) ON DELETE RESTRICT;
-ALTER TABLE sand_snapshots
-    ADD COLUMN legacy_import_id INTEGER
-        REFERENCES legacy_imports(id) ON DELETE RESTRICT;
-
-CREATE INDEX sessions_legacy_import_index
-    ON sessions(legacy_import_id, id);
-CREATE INDEX sand_snapshots_legacy_import_index
-    ON sand_snapshots(legacy_import_id, id);
-
-INSERT INTO schema_migrations(version, applied_at_utc)
-VALUES (2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
-
-PRAGMA user_version = 2;
-"#;
-
-const MIGRATION_3: &str = r#"
-ALTER TABLE categories
-    ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0 CHECK (sort_order >= 0);
-
-UPDATE categories SET sort_order = id;
-
-CREATE INDEX categories_active_order_index
-    ON categories(archived_at_utc, sort_order, id);
-
-INSERT INTO schema_migrations(version, applied_at_utc)
-VALUES (3, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
-
-PRAGMA user_version = 3;
-"#;
-
-const MIGRATION_4: &str = r#"
 CREATE TABLE runtime_transitions (
     operation_id TEXT PRIMARY KEY,
     operation_kind TEXT NOT NULL
@@ -310,82 +245,6 @@ CREATE INDEX runtime_transitions_unacknowledged_index
 CREATE INDEX runtime_transitions_expected_active_index
     ON runtime_transitions(expected_active_stable_id, applied_at_utc);
 
-INSERT INTO schema_migrations(version, applied_at_utc)
-VALUES (4, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
-
-PRAGMA user_version = 4;
-"#;
-
-const MIGRATION_5: &str = r#"
-ALTER TABLE sessions
-    ADD COLUMN boundary_utc_offset_seconds INTEGER
-        CHECK (boundary_utc_offset_seconds BETWEEN -86399 AND 86399);
-ALTER TABLE sessions
-    ADD COLUMN boundary_start_minutes INTEGER
-        CHECK (boundary_start_minutes BETWEEN 0 AND 1439);
-
-CREATE TRIGGER sessions_temporal_insert_guard
-BEFORE INSERT ON sessions
-WHEN NEW.elapsed_seconds <= 0
-   OR ((NEW.boundary_utc_offset_seconds IS NULL) != (NEW.boundary_start_minutes IS NULL))
-BEGIN
-    SELECT RAISE(ABORT, 'completed sessions require positive elapsed time and complete boundary provenance');
-END;
-
-CREATE TRIGGER sessions_temporal_update_guard
-BEFORE UPDATE OF elapsed_seconds, boundary_utc_offset_seconds, boundary_start_minutes ON sessions
-WHEN NEW.elapsed_seconds <= 0
-   OR ((NEW.boundary_utc_offset_seconds IS NULL) != (NEW.boundary_start_minutes IS NULL))
-BEGIN
-    SELECT RAISE(ABORT, 'completed sessions require positive elapsed time and complete boundary provenance');
-END;
-
-INSERT INTO schema_migrations(version, applied_at_utc)
-VALUES (5, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
-
-PRAGMA user_version = 5;
-"#;
-
-const MIGRATION_6: &str = r#"
-CREATE TABLE sand_snapshots_v6 (
-    id INTEGER PRIMARY KEY,
-    formation_id TEXT NOT NULL,
-    snapshot_kind TEXT NOT NULL
-        CHECK (snapshot_kind IN (
-            'daily', 'daily-contribution', 'manual', 'formation_end', 'recovery'
-        )),
-    operational_day TEXT,
-    quantum_seconds INTEGER NOT NULL CHECK (quantum_seconds > 0),
-    payload_json TEXT NOT NULL,
-    captured_at_utc TEXT NOT NULL,
-    legacy_import_id INTEGER
-        REFERENCES legacy_imports(id) ON DELETE RESTRICT
-) STRICT;
-
-INSERT INTO sand_snapshots_v6 (
-    id, formation_id, snapshot_kind, operational_day, quantum_seconds,
-    payload_json, captured_at_utc, legacy_import_id
-)
-SELECT
-    id, formation_id, snapshot_kind, operational_day, quantum_seconds,
-    payload_json, captured_at_utc, legacy_import_id
-FROM sand_snapshots;
-
-DROP TABLE sand_snapshots;
-ALTER TABLE sand_snapshots_v6 RENAME TO sand_snapshots;
-
-CREATE INDEX sand_snapshots_formation_index
-    ON sand_snapshots(formation_id, captured_at_utc);
-CREATE INDEX sand_snapshots_legacy_import_index
-    ON sand_snapshots(legacy_import_id, id);
-
-INSERT INTO schema_migrations(version, applied_at_utc)
-VALUES (6, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
-
-PRAGMA user_version = 6;
-"#;
-
-const MIGRATION_7: &str = r#"
 CREATE TABLE category_lifecycle_receipts (
     operation_id TEXT PRIMARY KEY,
     operation_kind TEXT NOT NULL CHECK (operation_kind IN ('merge', 'delete')),
@@ -410,10 +269,7 @@ CREATE UNIQUE INDEX category_lifecycle_receipts_preview_unique
         preview_revision
     );
 
-INSERT INTO schema_migrations(version, applied_at_utc)
-VALUES (7, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
-
-PRAGMA user_version = 7;
+PRAGMA user_version = 1;
 "#;
 
 #[derive(Debug, Error)]
@@ -424,8 +280,6 @@ pub(crate) enum SqliteStoreError {
     UnsupportedSchema { found: i64, supported: i64 },
     #[error("there is no active session to finish")]
     NoActiveSession,
-    #[error("SQLite storage authority conflict: expected {expected}, found {found}")]
-    AuthorityConflict { expected: String, found: String },
     #[error("completed sessions must have positive elapsed time")]
     InvalidSessionDuration,
 }
@@ -472,68 +326,21 @@ impl SqliteRepository {
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "synchronous", "NORMAL")?;
 
-        let mut version: i64 =
-            connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version > CURRENT_SCHEMA_VERSION {
-            return Err(SqliteStoreError::UnsupportedSchema {
-                found: version,
-                supported: CURRENT_SCHEMA_VERSION,
-            });
-        }
-
-        if version < 1 {
-            let transaction =
-                connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            transaction.execute_batch(MIGRATION_1)?;
-            transaction.commit()?;
-            version = 1;
-        }
-
-        if version < 2 {
-            let transaction =
-                connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            transaction.execute_batch(MIGRATION_2)?;
-            transaction.commit()?;
-            version = 2;
-        }
-
-        if version < 3 {
-            let transaction =
-                connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            transaction.execute_batch(MIGRATION_3)?;
-            transaction.commit()?;
-            version = 3;
-        }
-
-        if version < 4 {
-            let transaction =
-                connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            transaction.execute_batch(MIGRATION_4)?;
-            transaction.commit()?;
-            version = 4;
-        }
-
-        if version < 5 {
-            let transaction =
-                connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            transaction.execute_batch(MIGRATION_5)?;
-            transaction.commit()?;
-            version = 5;
-        }
-
-        if version < 6 {
-            let transaction =
-                connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            transaction.execute_batch(MIGRATION_6)?;
-            transaction.commit()?;
-            version = 6;
-        }
-
-        if version < 7 {
-            let transaction =
-                connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            transaction.execute_batch(MIGRATION_7)?;
-            transaction.commit()?;
+        let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        match version {
+            0 => {
+                let transaction =
+                    connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                transaction.execute_batch(CURRENT_SCHEMA)?;
+                transaction.commit()?;
+            }
+            CURRENT_SCHEMA_VERSION => {}
+            found => {
+                return Err(SqliteStoreError::UnsupportedSchema {
+                    found,
+                    supported: CURRENT_SCHEMA_VERSION,
+                });
+            }
         }
 
         Ok(Self { connection })
@@ -560,43 +367,6 @@ impl SqliteRepository {
                 |row| row.get(0),
             )
             .optional()?)
-    }
-
-    pub fn transition_storage_authority(
-        &mut self,
-        expected: &str,
-        next: &str,
-        activated_at_utc: &str,
-    ) -> Result<(), SqliteStoreError> {
-        let transaction = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current: Option<String> = transaction
-            .query_row(
-                "SELECT value FROM database_metadata WHERE key = 'storage_authority'",
-                [],
-                |row| row.get(0),
-            )
-            .optional()?;
-        let found = current.unwrap_or_else(|| "missing".to_string());
-        if found != expected {
-            return Err(SqliteStoreError::AuthorityConflict {
-                expected: expected.to_string(),
-                found,
-            });
-        }
-        transaction.execute(
-            "UPDATE database_metadata SET value = ?1 WHERE key = 'storage_authority'",
-            params![next],
-        )?;
-        transaction.execute(
-            "INSERT INTO database_metadata(key, value)
-             VALUES ('sqlite_cli_activated_at_utc', ?1)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![activated_at_utc],
-        )?;
-        transaction.commit()?;
-        Ok(())
     }
 
     pub fn start_session(&mut self, active: &NewActiveSession<'_>) -> Result<(), SqliteStoreError> {
@@ -733,10 +503,10 @@ mod tests {
     }
 
     #[test]
-    fn new_database_applies_schema_and_idle_category() {
+    fn new_database_applies_current_schema_and_idle_category() {
         let repository = SqliteRepository::open_in_memory().expect("database should open");
 
-        assert_eq!(repository.schema_version().unwrap(), 7);
+        assert_eq!(repository.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
         assert_eq!(repository.integrity_check().unwrap(), "ok");
         let idle: (String, i64) = repository
             .connection
@@ -747,125 +517,137 @@ mod tests {
             )
             .unwrap();
         assert_eq!(idle, ("idle".to_string(), 0));
+    }
 
-        let import_table: String = repository
+    #[test]
+    fn current_schema_has_exact_product_tables_and_columns() {
+        let repository = SqliteRepository::open_in_memory().expect("database should open");
+        let mut statement = repository
             .connection
-            .query_row(
+            .prepare(
                 "SELECT name FROM sqlite_schema
-                 WHERE type = 'table' AND name = 'legacy_imports'",
-                [],
-                |row| row.get(0),
+                 WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+                 ORDER BY name",
             )
             .unwrap();
-        assert_eq!(import_table, "legacy_imports");
-    }
-
-    #[test]
-    fn version_one_database_is_upgraded_without_losing_history() {
-        let connection = Connection::open_in_memory().unwrap();
-        connection.execute_batch(MIGRATION_1).unwrap();
-        connection
-            .execute(
-                "INSERT INTO categories(id, name, color_index, balance_effect)
-                 VALUES (1, 'Study', 1, 1)",
-                [],
-            )
+        let tables = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        connection
-            .execute(
-                "INSERT INTO sessions (
-                    id,
-                    stable_id,
-                    project,
-                    category_id,
-                    description,
-                    started_at_utc,
-                    ended_at_utc,
-                    operational_day,
-                    elapsed_seconds,
-                    source
-                ) VALUES (
-                    7,
-                    'existing-session',
-                    '',
-                    1,
-                    '',
-                    '2026-08-01T10:00:00Z',
-                    '2026-08-01T11:00:00Z',
-                    '2026-08-01',
-                    3600,
-                    'runtime'
-                )",
-                [],
-            )
-            .unwrap();
-
-        let repository =
-            SqliteRepository::from_connection(connection).expect("migration should succeed");
-
-        assert_eq!(repository.schema_version().unwrap(), 7);
-        assert_eq!(repository.completed_session_count().unwrap(), 1);
-        let legacy_import_id: Option<i64> = repository
-            .connection
-            .query_row(
-                "SELECT legacy_import_id FROM sessions WHERE id = 7",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(legacy_import_id, None);
-    }
-
-    #[test]
-    fn version_five_snapshot_schema_upgrades_without_losing_legacy_evidence() {
-        let connection = Connection::open_in_memory().unwrap();
-        connection.execute_batch(MIGRATION_1).unwrap();
-        connection.execute_batch(MIGRATION_2).unwrap();
-        connection.execute_batch(MIGRATION_3).unwrap();
-        connection.execute_batch(MIGRATION_4).unwrap();
-        connection.execute_batch(MIGRATION_5).unwrap();
-        connection
-            .execute(
-                "INSERT INTO sand_snapshots (
-                    formation_id, snapshot_kind, operational_day, quantum_seconds,
-                    payload_json, captured_at_utc, legacy_import_id
-                 ) VALUES ('default', 'daily', '2026-08-01', 1, '{}',
-                           '2026-08-01T12:00:00Z', NULL)",
-                [],
-            )
-            .unwrap();
-
-        let repository =
-            SqliteRepository::from_connection(connection).expect("migration should succeed");
-
-        assert_eq!(repository.schema_version().unwrap(), 7);
-        let legacy_count: i64 = repository
-            .connection
-            .query_row(
-                "SELECT count(*) FROM sand_snapshots WHERE snapshot_kind = 'daily'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(legacy_count, 1);
-        repository
-            .connection
-            .execute(
-                "INSERT INTO sand_snapshots (
-                    formation_id, snapshot_kind, operational_day, quantum_seconds,
-                    payload_json, captured_at_utc, legacy_import_id
-                 ) VALUES ('default', 'daily-contribution', '2026-08-01', 1, '{}',
-                           '2026-08-01T13:00:00Z', NULL)",
-                [],
-            )
-            .expect("schema 7 must retain typed daily contributions");
-        let snapshots = repository.list_sand_snapshots().unwrap();
-        assert!(
-            snapshots
-                .iter()
-                .any(|snapshot| snapshot.snapshot_kind
-                    == repository::SnapshotKind::DailyContribution)
+        assert_eq!(
+            tables,
+            [
+                "active_session",
+                "categories",
+                "category_lifecycle_receipts",
+                "category_tags",
+                "database_metadata",
+                "projects",
+                "runtime_checkpoint",
+                "runtime_transitions",
+                "sand_snapshots",
+                "sand_state",
+                "sessions",
+            ]
         );
+
+        let expected_columns = [
+            (
+                "sessions",
+                vec![
+                    "id",
+                    "stable_id",
+                    "project",
+                    "category_id",
+                    "description",
+                    "started_at_utc",
+                    "ended_at_utc",
+                    "operational_day",
+                    "elapsed_seconds",
+                    "source",
+                    "boundary_utc_offset_seconds",
+                    "boundary_start_minutes",
+                ],
+            ),
+            (
+                "active_session",
+                vec![
+                    "singleton",
+                    "stable_id",
+                    "project",
+                    "category_id",
+                    "description",
+                    "started_at_utc",
+                    "recovery_kind",
+                ],
+            ),
+            (
+                "runtime_checkpoint",
+                vec![
+                    "singleton",
+                    "status",
+                    "detached_at_utc",
+                    "simulation_time_utc",
+                    "active_session_stable_id",
+                    "payload_json",
+                ],
+            ),
+            (
+                "sand_state",
+                vec![
+                    "singleton",
+                    "formation_id",
+                    "quantum_seconds",
+                    "grid_width",
+                    "grid_height",
+                    "payload_json",
+                    "updated_at_utc",
+                ],
+            ),
+            (
+                "sand_snapshots",
+                vec![
+                    "id",
+                    "formation_id",
+                    "snapshot_kind",
+                    "operational_day",
+                    "quantum_seconds",
+                    "payload_json",
+                    "captured_at_utc",
+                ],
+            ),
+            ("category_tags", vec!["category_id", "ordinal", "tag"]),
+        ];
+        for (table, expected) in expected_columns {
+            let mut statement = repository
+                .connection
+                .prepare(&format!("PRAGMA table_info({table})"))
+                .unwrap();
+            let columns = statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert_eq!(columns, expected, "unexpected columns for {table}");
+        }
+    }
+
+    #[test]
+    fn non_current_database_version_is_rejected() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.pragma_update(None, "user_version", 7).unwrap();
+        let error = match SqliteRepository::from_connection(connection) {
+            Ok(_) => panic!("non-current development database must be rejected"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            SqliteStoreError::UnsupportedSchema {
+                found: 7,
+                supported: CURRENT_SCHEMA_VERSION
+            }
+        ));
     }
 
     #[test]

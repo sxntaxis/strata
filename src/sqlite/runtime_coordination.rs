@@ -122,8 +122,8 @@ pub(crate) fn start_active_session_with_checkpoint(
     transaction.execute(
         "INSERT INTO runtime_checkpoint (
             singleton, status, detached_at_utc, simulation_time_utc,
-            active_session_stable_id, payload_json, legacy_import_id
-         ) VALUES (1, 'pending', ?1, ?2, ?3, ?4, NULL)",
+            active_session_stable_id, payload_json
+         ) VALUES (1, 'pending', ?1, ?2, ?3, ?4)",
         params![
             detached_at_utc,
             simulation_time_utc,
@@ -419,15 +419,14 @@ pub(crate) fn save_checkpoint(
     transaction.execute(
         "INSERT INTO runtime_checkpoint (
             singleton, status, detached_at_utc, simulation_time_utc,
-            active_session_stable_id, payload_json, legacy_import_id
-         ) VALUES (1, 'pending', ?1, ?2, ?3, ?4, NULL)
+            active_session_stable_id, payload_json
+         ) VALUES (1, 'pending', ?1, ?2, ?3, ?4)
          ON CONFLICT(singleton) DO UPDATE SET
             status = 'pending',
             detached_at_utc = excluded.detached_at_utc,
             simulation_time_utc = excluded.simulation_time_utc,
             active_session_stable_id = excluded.active_session_stable_id,
-            payload_json = excluded.payload_json,
-            legacy_import_id = NULL",
+            payload_json = excluded.payload_json",
         params![
             detached_at_utc,
             simulation_time_utc,
@@ -609,16 +608,15 @@ pub(crate) fn commit_checkpoint_recovery(
     transaction.execute(
         "INSERT INTO sand_state (
             singleton, formation_id, quantum_seconds, grid_width, grid_height,
-            payload_json, updated_at_utc, legacy_import_id
-         ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, NULL)
+            payload_json, updated_at_utc
+         ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)
          ON CONFLICT(singleton) DO UPDATE SET
             formation_id = excluded.formation_id,
             quantum_seconds = excluded.quantum_seconds,
             grid_width = excluded.grid_width,
             grid_height = excluded.grid_height,
             payload_json = excluded.payload_json,
-            updated_at_utc = excluded.updated_at_utc,
-            legacy_import_id = NULL",
+            updated_at_utc = excluded.updated_at_utc",
         params![
             state.formation_id,
             state.quantum_seconds,
@@ -636,8 +634,8 @@ pub(crate) fn commit_checkpoint_recovery(
     transaction.execute(
         "INSERT INTO sand_snapshots (
             formation_id, snapshot_kind, operational_day, quantum_seconds,
-            payload_json, captured_at_utc, legacy_import_id
-         ) VALUES (?1, 'daily-contribution', ?2, ?3, ?4, ?5, NULL)",
+            payload_json, captured_at_utc
+         ) VALUES (?1, 'daily-contribution', ?2, ?3, ?4, ?5)",
         params![
             state.formation_id,
             operational_day,
@@ -938,8 +936,8 @@ fn insert_active(
     transaction.execute(
         "INSERT INTO active_session (
             singleton, stable_id, project, category_id, description,
-            started_at_utc, recovery_kind, legacy_import_id
-         ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, NULL)",
+            started_at_utc, recovery_kind
+         ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             active.stable_id,
             active.project,
@@ -962,8 +960,8 @@ fn insert_completed(
             stable_id, project, category_id, description, started_at_utc,
             ended_at_utc, operational_day, elapsed_seconds,
             boundary_utc_offset_seconds, boundary_start_minutes,
-            source, legacy_import_id
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL)",
+            source
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
             active.stable_id,
             active.project,

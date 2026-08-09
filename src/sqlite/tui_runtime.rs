@@ -19,8 +19,8 @@ use crate::{
 };
 
 use super::{
-    NewActiveSession, SessionCompletion, authority::open_cli_repository,
-    repository::SandStateRecord, runtime_coordination,
+    NewActiveSession, SessionCompletion, repository::SandStateRecord, runtime::open_cli_repository,
+    runtime_coordination,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -700,16 +700,15 @@ pub(crate) fn save_sand_state(database_path: &Path, state: &SandState) -> Result
         .execute(
             "INSERT INTO sand_state (
                 singleton, formation_id, quantum_seconds, grid_width, grid_height,
-                payload_json, updated_at_utc, legacy_import_id
-             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, NULL)
+                payload_json, updated_at_utc
+             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(singleton) DO UPDATE SET
                 formation_id = excluded.formation_id,
                 quantum_seconds = excluded.quantum_seconds,
                 grid_width = excluded.grid_width,
                 grid_height = excluded.grid_height,
                 payload_json = excluded.payload_json,
-                updated_at_utc = excluded.updated_at_utc,
-                legacy_import_id = NULL",
+                updated_at_utc = excluded.updated_at_utc",
             params![
                 formation_id,
                 quantum_seconds,
@@ -899,16 +898,15 @@ pub(crate) fn clear_all_state<T: Serialize>(
         .execute(
             "INSERT INTO sand_state (
                 singleton, formation_id, quantum_seconds, grid_width, grid_height,
-                payload_json, updated_at_utc, legacy_import_id
-             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, NULL)
+                payload_json, updated_at_utc
+             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(singleton) DO UPDATE SET
                 formation_id = excluded.formation_id,
                 quantum_seconds = excluded.quantum_seconds,
                 grid_width = excluded.grid_width,
                 grid_height = excluded.grid_height,
                 payload_json = excluded.payload_json,
-                updated_at_utc = excluded.updated_at_utc,
-                legacy_import_id = NULL",
+                updated_at_utc = excluded.updated_at_utc",
             params![
                 formation_id,
                 quantum_seconds,
@@ -938,8 +936,8 @@ pub(crate) fn clear_all_state<T: Serialize>(
                 .execute(
                     "INSERT INTO sand_snapshots (
                         formation_id, snapshot_kind, operational_day, quantum_seconds,
-                        payload_json, captured_at_utc, legacy_import_id
-                     ) VALUES (?1, 'daily-contribution', ?2, ?3, ?4, ?5, NULL)",
+                        payload_json, captured_at_utc
+                     ) VALUES (?1, 'daily-contribution', ?2, ?3, ?4, ?5)",
                     params![
                         formation_id,
                         operational_day,
@@ -958,15 +956,14 @@ pub(crate) fn clear_all_state<T: Serialize>(
         .execute(
             "INSERT INTO runtime_checkpoint (
                 singleton, status, detached_at_utc, simulation_time_utc,
-                active_session_stable_id, payload_json, legacy_import_id
-             ) VALUES (1, 'pending', ?1, ?2, ?3, ?4, NULL)
+                active_session_stable_id, payload_json
+             ) VALUES (1, 'pending', ?1, ?2, ?3, ?4)
              ON CONFLICT(singleton) DO UPDATE SET
                 status = 'pending',
                 detached_at_utc = excluded.detached_at_utc,
                 simulation_time_utc = excluded.simulation_time_utc,
                 active_session_stable_id = excluded.active_session_stable_id,
-                payload_json = excluded.payload_json,
-                legacy_import_id = NULL",
+                payload_json = excluded.payload_json",
             params![
                 timestamp(detached_at_utc),
                 timestamp(simulation_time_utc),
@@ -1267,9 +1264,6 @@ mod tests {
     fn prepare_bootstrap_repository(path: &Path) {
         let mut repository = SqliteRepository::open(path).unwrap();
         repository
-            .transition_storage_authority("sqlite", "sqlite", "2026-08-03T18:00:00Z")
-            .unwrap();
-        repository
             .create_category(&NewCategoryRecord {
                 name: "Work",
                 description: "",
@@ -1339,9 +1333,9 @@ mod tests {
             .execute(
                 "INSERT INTO runtime_checkpoint (
                     singleton, status, detached_at_utc, simulation_time_utc,
-                    active_session_stable_id, payload_json, legacy_import_id
+                    active_session_stable_id, payload_json
                  ) VALUES (1, 'quarantined', '2026-08-03T17:00:00Z',
-                    '2026-08-03T17:00:00Z', NULL, '{}', NULL)",
+                    '2026-08-03T17:00:00Z', NULL, '{}')",
                 [],
             )
             .unwrap();
@@ -1391,9 +1385,6 @@ mod tests {
     fn category_order_and_archival_round_trip() {
         let path = repository_file("categories");
         let mut repository = SqliteRepository::open(&path).unwrap();
-        repository
-            .transition_storage_authority("sqlite", "sqlite", "2026-08-01T12:00:00Z")
-            .unwrap();
         repository
             .create_category(&NewCategoryRecord {
                 name: "Work",
@@ -1449,9 +1440,6 @@ mod tests {
     fn session_sync_preserves_project_and_chronology() {
         let path = repository_file("sessions");
         let mut repository = SqliteRepository::open(&path).unwrap();
-        repository
-            .transition_storage_authority("sqlite", "sqlite", "2026-08-01T12:00:00Z")
-            .unwrap();
         repository
             .create_category(&NewCategoryRecord {
                 name: "Work",
@@ -1548,9 +1536,6 @@ mod tests {
         let path = repository_file("runtime-state");
         let mut repository = SqliteRepository::open(&path).unwrap();
         repository
-            .transition_storage_authority("sqlite", "sqlite", "2026-08-01T12:00:00Z")
-            .unwrap();
-        repository
             .start_session(&NewActiveSession {
                 stable_id: "checkpoint-active",
                 project: "",
@@ -1606,7 +1591,7 @@ mod tests {
         drop(repository);
         save_daily_snapshot(&path, "2026-08-01", &daily).unwrap();
         let repository = open_cli_repository(&path).unwrap();
-        let legacy_count: i64 = repository
+        let daily_count: i64 = repository
             .connection
             .query_row(
                 "SELECT count(*) FROM sand_snapshots
@@ -1616,8 +1601,8 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            legacy_count, 1,
-            "legacy daily evidence must remain untouched"
+            daily_count, 1,
+            "existing daily snapshot must remain untouched"
         );
         drop(repository);
 
@@ -1668,13 +1653,6 @@ mod checkpoint_identity_tests {
     fn startup_quarantines_checkpoint_without_active_identity() {
         let path = database_path();
         let mut repository = SqliteRepository::open(&path).unwrap();
-        repository
-            .connection
-            .execute(
-                "UPDATE database_metadata SET value = 'sqlite' WHERE key = 'storage_authority'",
-                [],
-            )
-            .unwrap();
         repository
             .create_category(&NewCategoryRecord {
                 name: "Work",
@@ -1776,9 +1754,6 @@ mod clear_all_transaction_tests {
 
     fn seed(path: &Path) {
         let mut repository = SqliteRepository::open(path).unwrap();
-        repository
-            .transition_storage_authority("sqlite", "sqlite", "2026-08-01T12:00:00Z")
-            .unwrap();
         repository
             .connection
             .execute(
@@ -1952,9 +1927,6 @@ mod clear_all_additional_transaction_tests {
 
     fn seed(path: &Path) {
         let mut repository = SqliteRepository::open(path).unwrap();
-        repository
-            .transition_storage_authority("sqlite", "sqlite", "2026-08-01T12:00:00Z")
-            .unwrap();
         repository
             .connection
             .execute(

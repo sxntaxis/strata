@@ -10,7 +10,7 @@ use std::{
 
 use chrono::DateTime;
 use csv::{ReaderBuilder, StringRecord, Terminator, WriterBuilder};
-use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -62,7 +62,6 @@ pub(crate) struct BundleImportOptions {
 #[derive(Debug, Clone)]
 pub(crate) struct DoctorOptions {
     pub database_path: PathBuf,
-    pub authority_marker_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -511,12 +510,7 @@ fn dry_run_import_path() -> Result<PathBuf, MaintenanceError> {
 
 pub(super) fn doctor(options: DoctorOptions) -> Result<SqliteMaintenanceReport, MaintenanceError> {
     let database_path = absolute_existing_path(&options.database_path)?;
-    let marker_path = options
-        .authority_marker_path
-        .as_deref()
-        .map(absolute_output_path)
-        .transpose()?;
-    doctor_at(&database_path, marker_path.as_deref())
+    doctor_at(&database_path)
 }
 
 pub(super) fn backup(options: BackupOptions) -> Result<SqliteMaintenanceReport, MaintenanceError> {
@@ -672,10 +666,7 @@ pub(super) fn restore(
     result
 }
 
-fn doctor_at(
-    database_path: &Path,
-    authority_marker_path: Option<&Path>,
-) -> Result<SqliteMaintenanceReport, MaintenanceError> {
+fn doctor_at(database_path: &Path) -> Result<SqliteMaintenanceReport, MaintenanceError> {
     let connection = Connection::open_with_flags(
         database_path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -712,15 +703,14 @@ fn doctor_at(
     ));
 
     let required_tables = [
-        "schema_migrations",
         "database_metadata",
+        "projects",
         "categories",
         "sessions",
         "active_session",
         "runtime_checkpoint",
         "sand_state",
         "sand_snapshots",
-        "legacy_imports",
         "category_tags",
         "category_lifecycle_receipts",
     ];
@@ -755,47 +745,6 @@ fn doctor_at(
         },
     ));
 
-    let metadata_authority = if existing_tables.contains("database_metadata") {
-        connection
-            .query_row(
-                "SELECT value FROM database_metadata WHERE key = 'storage_authority'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?
-    } else {
-        None
-    };
-    let authority_ok = matches!(metadata_authority.as_deref(), Some("sqlite"));
-    checks.push(check(
-        "database-authority-metadata",
-        authority_ok,
-        metadata_authority.unwrap_or_else(|| "missing".to_string()),
-    ));
-
-    let pending_imports = if existing_tables.contains("legacy_imports") {
-        connection.query_row(
-            "SELECT count(*) FROM legacy_imports WHERE status = 'pending'",
-            [],
-            |row| row.get::<_, i64>(0),
-        )?
-    } else {
-        -1
-    };
-    checks.push(check(
-        "pending-imports",
-        pending_imports == 0,
-        if pending_imports >= 0 {
-            pending_imports.to_string()
-        } else {
-            "legacy_imports table missing".to_string()
-        },
-    ));
-
-    if let Some(marker_path) = authority_marker_path {
-        checks.push(check_authority_marker(marker_path, database_path)?);
-    }
-
     let healthy = checks.iter().all(|item| item.passed);
     let counts = if healthy {
         Some(SnapshotCounts::from_snapshot(&read_repository_snapshot(
@@ -825,59 +774,12 @@ fn doctor_at(
 }
 
 fn require_healthy_database(path: &Path) -> Result<(), MaintenanceError> {
-    let report = doctor_at(path, None)?;
+    let report = doctor_at(path)?;
     if report.is_healthy() {
         Ok(())
     } else {
         Err(MaintenanceError::DoctorFailed)
     }
-}
-
-fn check_authority_marker(
-    marker_path: &Path,
-    database_path: &Path,
-) -> Result<MaintenanceCheck, MaintenanceError> {
-    if !marker_path.exists() {
-        return Ok(check(
-            "authority-marker",
-            false,
-            format!("missing {}", display_path(marker_path)),
-        ));
-    }
-    let bytes = read_bytes(marker_path)?;
-    let value: serde_json::Value =
-        serde_json::from_slice(&bytes).map_err(|error| MaintenanceError::Json {
-            path: display_path(marker_path),
-            message: error.to_string(),
-        })?;
-    let active_authority = value
-        .get("active_authority")
-        .and_then(serde_json::Value::as_str);
-    let candidate = value.get("sqlite_candidate");
-    let status = candidate
-        .and_then(|entry| entry.get("status"))
-        .and_then(serde_json::Value::as_str);
-    let marked_database = candidate
-        .and_then(|entry| entry.get("database_path"))
-        .and_then(serde_json::Value::as_str);
-    let marked_path_matches = marked_database
-        .map(Path::new)
-        .map(absolute_output_path)
-        .transpose()?
-        .is_some_and(|path| path == database_path);
-    let passed = active_authority == Some("legacy-files")
-        && status == Some("verified")
-        && marked_path_matches;
-    Ok(check(
-        "authority-marker",
-        passed,
-        format!(
-            "active={}, candidate={}, path-match={}",
-            active_authority.unwrap_or("missing"),
-            status.unwrap_or("missing"),
-            marked_path_matches
-        ),
-    ))
 }
 
 fn serialize_snapshot(
@@ -2671,7 +2573,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(read_repository_snapshot(&imported).unwrap(), expected);
-        assert!(doctor_at(&imported, None).unwrap().is_healthy());
+        assert!(doctor_at(&imported).unwrap().is_healthy());
         let mut imported_repository = SqliteRepository::open(&imported).unwrap();
         let post_import_id = imported_repository
             .create_category(&NewCategoryRecord {
@@ -2726,7 +2628,7 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let database = root.join("lifecycle.sqlite3");
         fixture_database(&database);
-        assert!(doctor_at(&database, None).unwrap().is_healthy());
+        assert!(doctor_at(&database).unwrap().is_healthy());
 
         let connection = Connection::open(&database).unwrap();
         connection
@@ -2748,7 +2650,7 @@ mod tests {
             .unwrap();
         drop(connection);
 
-        let report = doctor_at(&database, None).unwrap();
+        let report = doctor_at(&database).unwrap();
         assert!(!report.is_healthy());
         let lifecycle = report
             .checks
@@ -2785,7 +2687,7 @@ mod tests {
                 .unwrap();
         }
 
-        let report = doctor_at(&database, None).unwrap();
+        let report = doctor_at(&database).unwrap();
         assert!(!report.is_healthy());
         assert!(
             report
@@ -2863,7 +2765,7 @@ mod tests {
         .unwrap();
         let previous = report.previous_database_path.unwrap();
         assert!(Path::new(&previous).exists());
-        assert!(doctor_at(&target, None).unwrap().is_healthy());
+        assert!(doctor_at(&target).unwrap().is_healthy());
 
         let _ = fs::remove_dir_all(root);
     }

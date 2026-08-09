@@ -596,36 +596,36 @@ fn preview_revision(
     append_rows(
         connection,
         &mut material,
-        "SELECT category_id, ordinal, tag, legacy_import_id
+        "SELECT category_id, ordinal, tag
          FROM category_tags ORDER BY category_id, ordinal",
-        4,
+        3,
         "tag",
     )?;
     append_rows(
         connection,
         &mut material,
         "SELECT singleton, formation_id, quantum_seconds, grid_width, grid_height,
-                payload_json, updated_at_utc, legacy_import_id
+                payload_json, updated_at_utc
          FROM sand_state ORDER BY singleton",
-        8,
+        7,
         "sand",
     )?;
     append_rows(
         connection,
         &mut material,
         "SELECT id, formation_id, snapshot_kind, operational_day, quantum_seconds,
-                payload_json, captured_at_utc, legacy_import_id
+                payload_json, captured_at_utc
          FROM sand_snapshots ORDER BY id",
-        8,
+        7,
         "snapshot",
     )?;
     append_rows(
         connection,
         &mut material,
         "SELECT singleton, status, detached_at_utc, simulation_time_utc,
-                active_session_stable_id, payload_json, legacy_import_id
+                active_session_stable_id, payload_json
          FROM runtime_checkpoint ORDER BY singleton",
-        7,
+        6,
         "checkpoint",
     )?;
     append_rows(
@@ -692,7 +692,7 @@ fn stable_bytes(bytes: &[u8]) -> String {
 
 #[derive(Debug)]
 struct StagedMerge {
-    tags: Vec<(String, Option<i64>)>,
+    tags: Vec<String>,
     sand_state_json: Option<String>,
     snapshots: Vec<StagedSnapshot>,
     checkpoint_json: Option<String>,
@@ -798,25 +798,23 @@ fn merged_tags(
     connection: &Connection,
     source_category_id: i64,
     target_category_id: i64,
-) -> Result<Vec<(String, Option<i64>)>, String> {
+) -> Result<Vec<String>, String> {
     let mut merged = Vec::new();
     let mut seen = BTreeSet::new();
     for category_id in [target_category_id, source_category_id] {
         let mut statement = connection
             .prepare(
-                "SELECT tag, legacy_import_id FROM category_tags
+                "SELECT tag FROM category_tags
                  WHERE category_id = ?1 ORDER BY ordinal",
             )
             .map_err(|error| error.to_string())?;
         let rows = statement
-            .query_map(params![category_id], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?))
-            })
+            .query_map(params![category_id], |row| row.get::<_, String>(0))
             .map_err(|error| error.to_string())?;
         for row in rows {
-            let (tag, legacy_import_id) = row.map_err(|error| error.to_string())?;
+            let tag = row.map_err(|error| error.to_string())?;
             if seen.insert(tag.clone()) {
-                merged.push((tag, legacy_import_id));
+                merged.push(tag);
             }
         }
     }
@@ -827,7 +825,7 @@ fn replace_merged_tags(
     transaction: &Transaction<'_>,
     source_category_id: i64,
     target_category_id: i64,
-    tags: &[(String, Option<i64>)],
+    tags: &[String],
 ) -> Result<(), String> {
     transaction
         .execute(
@@ -835,16 +833,15 @@ fn replace_merged_tags(
             params![source_category_id, target_category_id],
         )
         .map_err(|error| error.to_string())?;
-    for (ordinal, (tag, legacy_import_id)) in tags.iter().enumerate() {
+    for (ordinal, tag) in tags.iter().enumerate() {
         transaction
             .execute(
-                "INSERT INTO category_tags(category_id, ordinal, tag, legacy_import_id)
-                 VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO category_tags(category_id, ordinal, tag)
+                 VALUES (?1, ?2, ?3)",
                 params![
                     target_category_id,
                     i64::try_from(ordinal).map_err(|_| "too many merged tags".to_string())?,
                     tag,
-                    legacy_import_id,
                 ],
             )
             .map_err(|error| error.to_string())?;
@@ -1212,8 +1209,8 @@ mod tests {
             .execute(
                 "INSERT INTO sand_state (
                     singleton, formation_id, quantum_seconds, grid_width, grid_height,
-                    payload_json, updated_at_utc, legacy_import_id
-                 ) VALUES (1, 'default', 1, 2, 2, ?1, '2026-08-03T18:00:00Z', NULL)",
+                    payload_json, updated_at_utc
+                 ) VALUES (1, 'default', 1, 2, 2, ?1, '2026-08-03T18:00:00Z')",
                 params![serde_json::to_string(&sand).unwrap()],
             )
             .unwrap();
@@ -1251,9 +1248,9 @@ mod tests {
             .execute(
                 "INSERT INTO sand_snapshots (
                     formation_id, snapshot_kind, operational_day, quantum_seconds,
-                    payload_json, captured_at_utc, legacy_import_id
+                    payload_json, captured_at_utc
                  ) VALUES ('default', 'daily-contribution', '2026-08-03', 1, ?1,
-                           '2026-08-03T18:00:00Z', NULL)",
+                           '2026-08-03T18:00:00Z')",
                 params![serde_json::to_string(&contribution).unwrap()],
             )
             .unwrap();
@@ -1264,9 +1261,9 @@ mod tests {
             .execute(
                 "INSERT INTO runtime_checkpoint (
                     singleton, status, detached_at_utc, simulation_time_utc,
-                    active_session_stable_id, payload_json, legacy_import_id
+                    active_session_stable_id, payload_json
                  ) VALUES (1, ?1, '2026-08-03T18:00:00Z', '2026-08-03T18:00:00Z',
-                           'active-source', ?2, NULL)",
+                           'active-source', ?2)",
                 params![checkpoint_status, checkpoint],
             )
             .unwrap();

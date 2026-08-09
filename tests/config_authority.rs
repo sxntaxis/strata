@@ -62,12 +62,6 @@ impl TestProfile {
     fn assert_no_authority_write(&self) {
         assert!(!self.database_path().exists());
         assert!(!self.state_home.join("strata/active_session.json").exists());
-        assert!(
-            !self
-                .state_home
-                .join("strata/storage_authority.json")
-                .exists()
-        );
     }
 
     fn active_project(&self) -> Option<String> {
@@ -204,10 +198,4 @@ fn removed_sunrise_mode_is_migrated_visibly_to_fixed_policy() {
     assert!(migrated.contains("\"day_start_minute\": 45"));
     assert!(profile.database_path().exists());
     assert_eq!(profile.active_project(), None);
-    assert!(
-        !profile
-            .state_home
-            .join("strata/storage_authority.json")
-            .exists()
-    );
 }

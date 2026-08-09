@@ -99,17 +99,8 @@ fn fresh_profile_creates_only_sqlite_runtime_authority() {
     assert!(!profile.root.join("data/categories.csv").exists());
     assert!(!profile.root.join("data/time_log.csv").exists());
     assert!(!profile.root.join("state/active_session.json").exists());
-    assert!(!profile.root.join("state/storage_authority.json").exists());
 
     let connection = Connection::open(profile.database_path()).unwrap();
-    let authority: String = connection
-        .query_row(
-            "SELECT value FROM database_metadata WHERE key = 'storage_authority'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(authority, "sqlite");
     let profile_id: String = connection
         .query_row(
             "SELECT value FROM database_metadata WHERE key = 'profile_id'",

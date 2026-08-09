@@ -12,7 +12,6 @@ mod domain;
 mod keybindings;
 mod profile;
 mod runtime_receipts;
-#[allow(clippy::manual_checked_ops)]
 mod sand;
 #[allow(dead_code)]
 mod sqlite;

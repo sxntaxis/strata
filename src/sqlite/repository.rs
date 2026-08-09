@@ -581,8 +581,7 @@ impl SqliteRepository {
                 detached_at_utc = excluded.detached_at_utc,
                 simulation_time_utc = excluded.simulation_time_utc,
                 active_session_stable_id = excluded.active_session_stable_id,
-                payload_json = excluded.payload_json,
-                legacy_import_id = NULL",
+                payload_json = excluded.payload_json",
             params![
                 checkpoint.status.as_str(),
                 checkpoint.detached_at_utc,
@@ -675,8 +674,7 @@ impl SqliteRepository {
                 grid_width = excluded.grid_width,
                 grid_height = excluded.grid_height,
                 payload_json = excluded.payload_json,
-                updated_at_utc = excluded.updated_at_utc,
-                legacy_import_id = NULL",
+                updated_at_utc = excluded.updated_at_utc",
             params![
                 state.formation_id,
                 state.quantum_seconds,
