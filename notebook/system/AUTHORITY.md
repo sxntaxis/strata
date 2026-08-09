@@ -13,7 +13,7 @@ A lower layer may reveal that a higher layer is stale, but it does not silently 
 
 ## Persistence authority
 
-After explicit activation, SQLite is the sole live authority. CSV/JSON bundles, legacy sources, reports, exports, snapshots, and emergency custody files are not alternative live ledgers.
+SQLite is the sole runtime authority from profile startup. CSV/JSON bundles, reports, exports, snapshots, and emergency custody files are not alternative live ledgers.
 
 ## Product authority
 

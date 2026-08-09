@@ -170,19 +170,6 @@ pub(super) struct PersistenceRecoveryState {
     pub exit_without_saving_armed: bool,
 }
 
-fn load_legacy_recovery_authority(
-    categories_path: &Path,
-    sessions_path: &Path,
-) -> Result<(storage::LoadedCategories, storage::LoadedSessions), String> {
-    let categories = storage::try_load_categories_from_csv(categories_path)
-        .map_err(|error| error.to_string())?;
-    let mut session_categories = categories.categories.clone();
-    session_categories.extend(categories.archived_categories.iter().cloned());
-    let sessions = storage::try_load_sessions_from_csv(sessions_path, &session_categories)
-        .map_err(|error| error.to_string())?;
-    Ok((categories, sessions))
-}
-
 fn emergency_categories(
     active_categories: impl IntoIterator<Item = crate::domain::Category>,
     archived_categories: &[crate::domain::Category],
@@ -363,145 +350,91 @@ impl App {
         let operational_day = operational_day_date.format("%Y-%m-%d").to_string();
         let daily_contribution = self.daily_contribution_from_time_log(operational_day_date);
 
-        if let Some(database_path) = self.sqlite_database_path.clone() {
-            self.archived_categories = sqlite::sync_tui_categories(
-                &database_path,
-                &categories,
-                self.time_tracker.active_category_id(),
-                self.session.active_session_stable_id.as_deref(),
-            )?;
-            let category_ids = categories
-                .iter()
-                .map(|category| category.id)
-                .collect::<Vec<_>>();
-            sqlite::sync_tui_category_tags(&database_path, &self.category_tags, &category_ids)?;
-            sqlite::sync_tui_sessions(&database_path, &self.time_tracker.sessions)?;
-            sqlite::save_tui_sand_state(&database_path, &self.sand_engine.snapshot_state())?;
-            if let Some(snapshot) = daily_contribution.as_ref() {
-                sqlite::save_tui_daily_snapshot(&database_path, &operational_day, snapshot)?;
-            } else {
-                sqlite::delete_tui_daily_snapshot(&database_path, &operational_day)?;
-            }
+        let database_path = self
+            .sqlite_database_path
+            .clone()
+            .ok_or_else(|| "SQLite authority is unavailable".to_string())?;
+
+        self.archived_categories = sqlite::sync_tui_categories(
+            &database_path,
+            &categories,
+            self.time_tracker.active_category_id(),
+            self.session.active_session_stable_id.as_deref(),
+        )?;
+        let category_ids = categories
+            .iter()
+            .map(|category| category.id)
+            .collect::<Vec<_>>();
+        sqlite::sync_tui_category_tags(&database_path, &self.category_tags, &category_ids)?;
+        sqlite::sync_tui_sessions(&database_path, &self.time_tracker.sessions)?;
+        sqlite::save_tui_sand_state(&database_path, &self.sand_engine.snapshot_state())?;
+        if let Some(snapshot) = daily_contribution.as_ref() {
+            sqlite::save_tui_daily_snapshot(&database_path, &operational_day, snapshot)?;
         } else {
-            storage::save_category_catalog_to_csv(
-                &storage::get_categories_path(),
-                &categories,
-                &self.archived_categories,
-            )?;
-            storage::save_category_tags(&storage::get_category_tags_path(), &self.category_tags)?;
-            let mut session_categories = categories.clone();
-            session_categories.extend(self.archived_categories.iter().cloned());
-            storage::save_sessions_to_csv(
-                &storage::get_time_log_path(),
-                &self.time_tracker.sessions,
-                &session_categories,
-            )
-            .map_err(|error| error.to_string())?;
-            storage::save_sand_state(
-                &storage::get_sand_state_path(),
-                &self.sand_engine.snapshot_state(),
-            )?;
-            let contribution_path =
-                storage::get_sand_contribution_path_for_day(operational_day_date);
-            if let Some(snapshot) = daily_contribution.as_ref() {
-                storage::write_json_atomic(&contribution_path, snapshot)?;
-            } else {
-                storage::delete_file_if_exists(&contribution_path)?;
-            }
+            sqlite::delete_tui_daily_snapshot(&database_path, &operational_day)?;
         }
         Ok(())
     }
 
     pub(super) fn try_reload_authority(&mut self) -> Result<(), String> {
-        if let Some(database_path) = self.sqlite_database_path.clone() {
-            let state = sqlite::load_tui_state(&database_path)?;
-            self.time_tracker.apply_loaded_state(
-                state.loaded_categories.categories,
-                state.loaded_categories.next_category_id,
-                state.loaded_sessions.sessions,
-                state.loaded_sessions.next_session_id,
-            );
-            self.category_tags = state.category_tags;
-            self.archived_categories = state.archived_categories;
+        let database_path = self
+            .sqlite_database_path
+            .clone()
+            .ok_or_else(|| "SQLite authority is unavailable".to_string())?;
 
-            if let Some(active) = state.active_session {
-                if !self
-                    .time_tracker
-                    .set_active_category_by_id(active.category_id)
-                {
-                    return Err(format!(
-                        "SQLite active session references unavailable category {}",
-                        active.category_id.0
-                    ));
-                }
-                self.time_tracker.set_active_description(active.description);
-                self.session.active_session_stable_id = Some(active.stable_id);
-                self.begin_active_session_at(active.started_at_utc, false)?;
-            } else {
-                let _ = self
-                    .time_tracker
-                    .set_active_category_by_id(DRIFT_CATEGORY_ID);
-                self.begin_active_session_now();
-                let category_id = self.time_tracker.active_category_id();
-                let description = self.time_tracker.active_description().to_string();
-                let started_at = self
-                    .session
-                    .active_session_started_at_utc
-                    .unwrap_or_else(Utc::now);
-                let stable_id = sqlite::ensure_tui_active_session(
-                    &database_path,
-                    category_id,
-                    &description,
-                    started_at,
-                )?;
-                self.session.active_session_stable_id = Some(stable_id);
-            }
+        let state = sqlite::load_tui_state(&database_path)?;
+        self.time_tracker.apply_loaded_state(
+            state.loaded_categories.categories,
+            state.loaded_categories.next_category_id,
+            state.loaded_sessions.sessions,
+            state.loaded_sessions.next_session_id,
+        );
+        self.category_tags = state.category_tags;
+        self.archived_categories = state.archived_categories;
 
-            if let Some(state) = sqlite::load_tui_sand_state(&database_path)? {
-                let valid_category_ids = self
-                    .time_tracker
-                    .categories_for_storage()
-                    .into_iter()
-                    .chain(self.archived_categories.iter().cloned())
-                    .map(|category| category.id)
-                    .collect();
-                self.sand_engine
-                    .restore_state(&state, &valid_category_ids)?;
+        if let Some(active) = state.active_session {
+            if !self
+                .time_tracker
+                .set_active_category_by_id(active.category_id)
+            {
+                return Err(format!(
+                    "SQLite active session references unavailable category {}",
+                    active.category_id.0
+                ));
             }
+            self.time_tracker.set_active_description(active.description);
+            self.session.active_session_stable_id = Some(active.stable_id);
+            self.begin_active_session_at(active.started_at_utc, false)?;
         } else {
-            let lifecycle_paths =
-                crate::legacy_category_lifecycle::LegacyCategoryLifecyclePaths::runtime();
-            crate::legacy_category_lifecycle::replay_prepared(&lifecycle_paths)?;
-            let ledger = crate::legacy_category_lifecycle::load_ledger(&lifecycle_paths)?;
-            let (mut categories, sessions) = load_legacy_recovery_authority(
-                &storage::get_categories_path(),
-                &storage::get_time_log_path(),
+            let _ = self
+                .time_tracker
+                .set_active_category_by_id(DRIFT_CATEGORY_ID);
+            self.begin_active_session_now();
+            let category_id = self.time_tracker.active_category_id();
+            let description = self.time_tracker.active_description().to_string();
+            let started_at = self
+                .session
+                .active_session_started_at_utc
+                .unwrap_or_else(Utc::now);
+            let stable_id = sqlite::ensure_tui_active_session(
+                &database_path,
+                category_id,
+                &description,
+                started_at,
             )?;
-            categories.next_category_id = crate::legacy_category_lifecycle::next_category_id(
-                categories.next_category_id,
-                &ledger,
-            )?;
-            let archived_categories = categories.archived_categories;
-            self.time_tracker.apply_loaded_state(
-                categories.categories,
-                categories.next_category_id,
-                sessions.sessions,
-                sessions.next_session_id,
-            );
-            self.archived_categories = archived_categories;
-            self.category_tags =
-                storage::try_load_category_tags(&storage::get_category_tags_path())?;
-            if let Some(state) = storage::try_load_sand_state(&storage::get_sand_state_path())? {
-                let valid_category_ids = self
-                    .time_tracker
-                    .categories_for_storage()
-                    .into_iter()
-                    .chain(self.archived_categories.iter().cloned())
-                    .map(|category| category.id)
-                    .collect();
-                self.sand_engine
-                    .restore_state(&state, &valid_category_ids)?;
-            }
+            self.session.active_session_stable_id = Some(stable_id);
+        }
+
+        if let Some(state) = sqlite::load_tui_sand_state(&database_path)? {
+            let valid_category_ids = self
+                .time_tracker
+                .categories_for_storage()
+                .into_iter()
+                .chain(self.archived_categories.iter().cloned())
+                .map(|category| category.id)
+                .collect();
+            self.sand_engine
+                .restore_state(&state, &valid_category_ids)?;
         }
         self.sync_drift_idle_state();
         if self.category_lifecycle_overlay.is_some() {
@@ -518,11 +451,7 @@ impl App {
                 "recovery catch-up is not durably committed; checkpoint retained".to_string(),
             );
         }
-        let has_active = if self.sqlite_database_path.is_some() {
-            self.session.active_session_stable_id.is_some()
-        } else {
-            self.session.active_session_started_at_utc.is_some()
-        };
+        let has_active = self.session.active_session_stable_id.is_some();
         if has_active {
             self.prepare_active_finish_for_exit();
             if let Some(recovery) = self.persistence_recovery.as_ref() {
@@ -534,11 +463,11 @@ impl App {
         if let Some(recovery) = self.persistence_recovery.as_ref() {
             return Err(recovery.failure.summary());
         }
-        if let Some(database_path) = self.sqlite_database_path.clone() {
-            sqlite::clear_tui_checkpoint(&database_path)?;
-        } else {
-            storage::delete_file_if_exists(&storage::get_detached_runtime_path())?;
-        }
+        let database_path = self
+            .sqlite_database_path
+            .clone()
+            .ok_or_else(|| "SQLite authority is unavailable".to_string())?;
+        sqlite::clear_tui_checkpoint(&database_path)?;
         Ok(())
     }
 
@@ -709,7 +638,7 @@ impl App {
                         .authority_path
                         .as_ref()
                         .map(|path| path.display().to_string())
-                        .unwrap_or_else(|| "legacy file authority".to_string()),
+                        .unwrap_or_else(|| "SQLite database".to_string()),
                 ),
             ]),
             Line::from(""),
@@ -906,17 +835,6 @@ struct EmergencyActiveSession {
 mod tests {
     use super::*;
 
-    fn unique_path(label: &str, extension: &str) -> PathBuf {
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::SystemTime::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        std::env::temp_dir().join(format!(
-            "strata-{label}-{}-{stamp}.{extension}",
-            std::process::id()
-        ))
-    }
-
     fn recovery_category(id: u64, name: &str, description: &str) -> crate::domain::Category {
         crate::domain::Category {
             id: crate::domain::CategoryId::new(id),
@@ -929,48 +847,6 @@ mod tests {
             description: description.to_string(),
             karma_effect: if id == 0 { 0 } else { 1 },
         }
-    }
-
-    #[test]
-    fn legacy_recovery_reload_accepts_archived_session_references() {
-        let categories_path = unique_path("recovery-archived-categories", "csv");
-        let sessions_path = unique_path("recovery-archived-sessions", "csv");
-        let active = vec![recovery_category(0, "idle", "")];
-        let archived = vec![recovery_category(7, "Archived work", "historical")];
-        storage::save_category_catalog_to_csv(&categories_path, &active, &archived).unwrap();
-        let session = crate::domain::Session {
-            id: 1,
-            date: "2026-08-02".to_string(),
-            category_id: crate::domain::CategoryId::new(7),
-            project: String::new(),
-            description: "completed".to_string(),
-            start_time: "10:00:00".to_string(),
-            end_time: "11:00:00".to_string(),
-            elapsed_seconds: 3600,
-            started_at_utc: Some(
-                chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 8, 2, 16, 0, 0).unwrap(),
-            ),
-            ended_at_utc: Some(
-                chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 8, 2, 17, 0, 0).unwrap(),
-            ),
-            operational_day_policy: Some(crate::domain::OperationalDayPolicy {
-                utc_offset_seconds: -21600,
-                start_minutes: 360,
-            }),
-        };
-        let mut catalog = active.clone();
-        catalog.extend(archived.iter().cloned());
-        storage::save_sessions_to_csv(&sessions_path, &[session], &catalog).unwrap();
-
-        let (loaded_categories, loaded_sessions) =
-            load_legacy_recovery_authority(&categories_path, &sessions_path).unwrap();
-        assert_eq!(loaded_categories.archived_categories.len(), 1);
-        assert_eq!(loaded_categories.archived_categories[0].id.0, 7);
-        assert_eq!(loaded_sessions.sessions.len(), 1);
-        assert_eq!(loaded_sessions.sessions[0].category_id.0, 7);
-
-        fs::remove_file(categories_path).ok();
-        fs::remove_file(sessions_path).ok();
     }
 
     #[test]

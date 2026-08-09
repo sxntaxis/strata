@@ -15,9 +15,9 @@ use crate::{
 };
 
 use super::{
-    NewActiveSession, SqliteRepository, authority,
+    NewActiveSession, SqliteRepository,
     repository::{CheckpointStatus, NewCategoryRecord, SandStateRecord},
-    runtime_coordination, tui_runtime,
+    runtime, runtime_coordination, tui_runtime,
 };
 
 fn database_path(name: &str) -> PathBuf {
@@ -36,9 +36,6 @@ fn remove_database(path: &Path) {
 
 fn seed(path: &Path) {
     let mut repository = SqliteRepository::open(path).unwrap();
-    repository
-        .transition_storage_authority("sqlite-candidate", "sqlite-cli", "2026-08-01T12:00:00Z")
-        .unwrap();
     repository
         .create_category(&NewCategoryRecord {
             name: "Work",
@@ -581,7 +578,7 @@ fn real_sqlite_busy_full_constraint_and_corruption_fail_without_false_success() 
             category(1, "Work", &"x".repeat(2 * 1024 * 1024), 0, 1),
             category(2, "Rest", "original-rest", 1, -1),
         ];
-        let error = authority::with_test_page_limit(|| {
+        let error = runtime::with_test_page_limit(|| {
             tui_runtime::sync_categories(path, &categories, CategoryId::new(0), None)
         })
         .unwrap_err();

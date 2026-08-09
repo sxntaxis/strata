@@ -3,7 +3,7 @@ use ratatui::style::Color;
 use crate::{
     constants::{CATEGORY_SETTINGS, COLORS},
     domain::{CategoryId, DRIFT_CATEGORY_ID},
-    sqlite, storage,
+    sqlite,
 };
 
 use super::{App, PersistenceOperation, RecoveryAction};
@@ -11,66 +11,63 @@ use chrono::NaiveDate;
 
 impl App {
     pub(super) fn persist_categories(&mut self) {
-        let categories = self.time_tracker.categories_for_storage();
-        if let Some(database_path) = self.sqlite_database_path.clone() {
-            let result = sqlite::sync_tui_categories(
-                &database_path,
-                &categories,
-                self.time_tracker.active_category_id(),
-                self.session.active_session_stable_id.as_deref(),
-            );
-            if let Some(archived) = self.record_storage_result_for(
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            self.record_storage_result_for::<()>(
                 PersistenceOperation::CategorySync,
-                RecoveryAction::FlushCurrentState,
-                result,
-            ) {
-                self.archived_categories = archived;
-            }
-        } else {
-            let path = storage::get_categories_path();
-            if let Err(error) =
-                storage::save_category_catalog_to_csv(&path, &categories, &self.archived_categories)
-            {
-                self.record_storage_result::<()>(Err(error));
-            }
+                RecoveryAction::ReloadAuthority,
+                Err("SQLite authority is unavailable".to_string()),
+            );
+            return;
+        };
+        let categories = self.time_tracker.categories_for_storage();
+        let result = sqlite::sync_tui_categories(
+            &database_path,
+            &categories,
+            self.time_tracker.active_category_id(),
+            self.session.active_session_stable_id.as_deref(),
+        );
+        if let Some(archived) = self.record_storage_result_for(
+            PersistenceOperation::CategorySync,
+            RecoveryAction::FlushCurrentState,
+            result,
+        ) {
+            self.archived_categories = archived;
         }
     }
 
     pub(super) fn persist_sessions(&mut self) {
-        if let Some(database_path) = self.sqlite_database_path.clone() {
-            let result = sqlite::sync_tui_sessions(&database_path, &self.time_tracker.sessions);
-            self.record_storage_result_for(
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            self.record_storage_result_for::<()>(
                 PersistenceOperation::SessionSync,
-                RecoveryAction::FlushCurrentState,
-                result,
+                RecoveryAction::ReloadAuthority,
+                Err("SQLite authority is unavailable".to_string()),
             );
-        } else {
-            let mut categories = self.time_tracker.categories_for_storage();
-            categories.extend(self.archived_categories.iter().cloned());
-            let path = storage::get_time_log_path();
-            if let Err(error) =
-                storage::save_sessions_to_csv(&path, &self.time_tracker.sessions, &categories)
-            {
-                self.record_storage_result::<()>(Err(error));
-            }
-        }
+            return;
+        };
+        let result = sqlite::sync_tui_sessions(&database_path, &self.time_tracker.sessions);
+        self.record_storage_result_for(
+            PersistenceOperation::SessionSync,
+            RecoveryAction::FlushCurrentState,
+            result,
+        );
     }
 
     pub(super) fn persist_sand_state(&mut self) {
-        let state = self.sand_engine.snapshot_state();
-        if let Some(database_path) = self.sqlite_database_path.clone() {
-            let result = sqlite::save_tui_sand_state(&database_path, &state);
-            self.record_storage_result_for(
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            self.record_storage_result_for::<()>(
                 PersistenceOperation::SandStateSave,
-                RecoveryAction::FlushCurrentState,
-                result,
+                RecoveryAction::ReloadAuthority,
+                Err("SQLite authority is unavailable".to_string()),
             );
-        } else {
-            let path = storage::get_sand_state_path();
-            if let Err(error) = storage::save_sand_state(&path, &state) {
-                self.record_storage_result::<()>(Err(error));
-            }
-        }
+            return;
+        };
+        let state = self.sand_engine.snapshot_state();
+        let result = sqlite::save_tui_sand_state(&database_path, &state);
+        self.record_storage_result_for(
+            PersistenceOperation::SandStateSave,
+            RecoveryAction::FlushCurrentState,
+            result,
+        );
     }
 
     pub(super) fn persist_daily_sand_snapshot(&mut self) {
@@ -78,58 +75,52 @@ impl App {
     }
 
     pub(super) fn persist_category_tags(&mut self) {
-        if let Some(database_path) = self.sqlite_database_path.clone() {
-            let category_ids = self
-                .time_tracker
-                .categories_for_storage()
-                .into_iter()
-                .map(|category| category.id)
-                .collect::<Vec<_>>();
-            let result =
-                sqlite::sync_tui_category_tags(&database_path, &self.category_tags, &category_ids);
-            self.record_storage_result_for(
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            self.record_storage_result_for::<()>(
                 PersistenceOperation::CategoryTagsSync,
-                RecoveryAction::FlushCurrentState,
-                result,
+                RecoveryAction::ReloadAuthority,
+                Err("SQLite authority is unavailable".to_string()),
             );
-        } else {
-            let path = storage::get_category_tags_path();
-            if let Err(error) = storage::save_category_tags(&path, &self.category_tags) {
-                self.record_storage_result::<()>(Err(error));
-            }
-        }
+            return;
+        };
+        let category_ids = self
+            .time_tracker
+            .categories_for_storage()
+            .into_iter()
+            .map(|category| category.id)
+            .collect::<Vec<_>>();
+        let result =
+            sqlite::sync_tui_category_tags(&database_path, &self.category_tags, &category_ids);
+        self.record_storage_result_for(
+            PersistenceOperation::CategoryTagsSync,
+            RecoveryAction::FlushCurrentState,
+            result,
+        );
     }
 
     pub(super) fn restore_sand_state(&mut self) {
-        let state = if let Some(database_path) = self.sqlite_database_path.clone() {
-            match sqlite::load_tui_sand_state(&database_path) {
-                Ok(value) => value,
-                Err(error) => {
-                    self.record_storage_result_for::<()>(
-                        PersistenceOperation::StateReload,
-                        RecoveryAction::ReloadAuthority,
-                        Err(error),
-                    );
-                    return;
-                }
-            }
-        } else {
-            match storage::try_load_sand_state(&storage::get_sand_state_path()) {
-                Ok(value) => value,
-                Err(error) => {
-                    self.record_storage_result_for::<()>(
-                        PersistenceOperation::StateReload,
-                        RecoveryAction::ReloadAuthority,
-                        Err(error),
-                    );
-                    return;
-                }
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::StateReload,
+                RecoveryAction::ReloadAuthority,
+                Err("SQLite authority is unavailable".to_string()),
+            );
+            return;
+        };
+        let state = match sqlite::load_tui_sand_state(&database_path) {
+            Ok(value) => value,
+            Err(error) => {
+                self.record_storage_result_for::<()>(
+                    PersistenceOperation::StateReload,
+                    RecoveryAction::ReloadAuthority,
+                    Err(error),
+                );
+                return;
             }
         };
         let Some(state) = state else {
             return;
         };
-
         let valid_category_ids = self
             .time_tracker
             .categories_for_storage()
@@ -150,34 +141,24 @@ impl App {
         &mut self,
         day: NaiveDate,
     ) -> Option<crate::sand::SedimentSnapshot> {
-        if let Some(database_path) = self.sqlite_database_path.clone() {
-            let day = day.format("%Y-%m-%d").to_string();
-            match sqlite::load_tui_daily_snapshot(&database_path, &day) {
-                Ok(value) => value,
-                Err(error) => {
-                    self.record_storage_result_for::<()>(
-                        PersistenceOperation::StateReload,
-                        RecoveryAction::ReloadAuthority,
-                        Err(error),
-                    );
-                    None
-                }
-            }
-        } else {
-            let path = storage::get_sand_contribution_path_for_day(day);
-            if !storage::file_exists(&path) {
-                return None;
-            }
-            match storage::read_json::<crate::sand::SedimentSnapshot>(&path) {
-                Ok(snapshot) => Some(snapshot),
-                Err(error) => {
-                    self.record_storage_result_for::<()>(
-                        PersistenceOperation::StateReload,
-                        RecoveryAction::ReloadAuthority,
-                        Err(error),
-                    );
-                    None
-                }
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::StateReload,
+                RecoveryAction::ReloadAuthority,
+                Err("SQLite authority is unavailable".to_string()),
+            );
+            return None;
+        };
+        let day = day.format("%Y-%m-%d").to_string();
+        match sqlite::load_tui_daily_snapshot(&database_path, &day) {
+            Ok(value) => value,
+            Err(error) => {
+                self.record_storage_result_for::<()>(
+                    PersistenceOperation::StateReload,
+                    RecoveryAction::ReloadAuthority,
+                    Err(error),
+                );
+                None
             }
         }
     }
@@ -187,45 +168,39 @@ impl App {
         day: NaiveDate,
         snapshot: &crate::sand::SedimentSnapshot,
     ) {
-        if let Some(database_path) = self.sqlite_database_path.clone() {
-            let day = day.format("%Y-%m-%d").to_string();
-            let result = sqlite::save_tui_daily_snapshot(&database_path, &day, snapshot);
-            self.record_storage_result_for(
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            self.record_storage_result_for::<()>(
                 PersistenceOperation::DailySnapshotSave,
-                RecoveryAction::FlushCurrentState,
-                result,
+                RecoveryAction::ReloadAuthority,
+                Err("SQLite authority is unavailable".to_string()),
             );
-        } else {
-            let path = storage::get_sand_contribution_path_for_day(day);
-            if let Err(error) = storage::write_json_atomic(&path, snapshot) {
-                self.record_storage_result_for::<()>(
-                    PersistenceOperation::DailySnapshotSave,
-                    RecoveryAction::FlushCurrentState,
-                    Err(error),
-                );
-            }
-        }
+            return;
+        };
+        let day = day.format("%Y-%m-%d").to_string();
+        let result = sqlite::save_tui_daily_snapshot(&database_path, &day, snapshot);
+        self.record_storage_result_for(
+            PersistenceOperation::DailySnapshotSave,
+            RecoveryAction::FlushCurrentState,
+            result,
+        );
     }
 
     pub(super) fn delete_daily_sediment_snapshot(&mut self, day: NaiveDate) {
-        if let Some(database_path) = self.sqlite_database_path.clone() {
-            let day = day.format("%Y-%m-%d").to_string();
-            let result = sqlite::delete_tui_daily_snapshot(&database_path, &day);
-            self.record_storage_result_for(
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            self.record_storage_result_for::<()>(
                 PersistenceOperation::DailySnapshotDelete,
-                RecoveryAction::FlushCurrentState,
-                result,
+                RecoveryAction::ReloadAuthority,
+                Err("SQLite authority is unavailable".to_string()),
             );
-        } else {
-            let path = storage::get_sand_contribution_path_for_day(day);
-            if let Err(error) = storage::delete_file_if_exists(&path) {
-                self.record_storage_result_for::<()>(
-                    PersistenceOperation::DailySnapshotDelete,
-                    RecoveryAction::FlushCurrentState,
-                    Err(error),
-                );
-            }
-        }
+            return;
+        };
+        let day = day.format("%Y-%m-%d").to_string();
+        let result = sqlite::delete_tui_daily_snapshot(&database_path, &day);
+        self.record_storage_result_for(
+            PersistenceOperation::DailySnapshotDelete,
+            RecoveryAction::FlushCurrentState,
+            result,
+        );
     }
 
     pub(super) fn sync_modal_description_from_selection(&mut self) {

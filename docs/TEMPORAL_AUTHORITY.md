@@ -107,7 +107,7 @@ TEMPORAL-001 and TEMPORAL-002 cover:
 - fixed-offset behavior across seasonal dates and travel/configuration changes;
 - cross-boundary conservation, exact-boundary behavior, and overlap-based repository ranges;
 - deterministic bundle round-trip and SQLite schema upgrade;
-- strict old/new legacy CSV compatibility without fabricated provenance;
-- visible migration and UI removal of the false sunrise mode;
+- strict persisted chronology validation without fabricated provenance;
+- visible removal of the false sunrise mode;
 - zero finish and repeated zero switch receipts without completed work rows;
 - existing SQLite authority, lifecycle, recovery, configuration, and TUI process gates.

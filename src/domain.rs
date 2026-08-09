@@ -681,6 +681,7 @@ impl TimeTracker {
         self.current_session_start.map(|start| start.elapsed())
     }
 
+    #[cfg(test)]
     pub fn end_session_with_elapsed_at_local<Tz>(
         &mut self,
         elapsed: usize,
@@ -691,22 +692,21 @@ impl TimeTracker {
         Tz::Offset: std::fmt::Display,
     {
         self.current_session_start?;
-        let cat_id = self.active_category_id;
-        let active_description = self.active_description.clone();
-
+        let category_id = self.active_category_id;
+        let description = self.active_description.clone();
         if elapsed > 0 {
-            self.record_session_at(cat_id, &active_description, elapsed, end_local);
+            self.record_session_at(category_id, &description, elapsed, end_local);
         }
-
         self.active_description.clear();
         self.current_session_start = None;
         Some(elapsed)
     }
 
+    #[cfg(test)]
     pub fn record_session_at<Tz>(
         &mut self,
-        cat_id: CategoryId,
-        cat_description: &str,
+        category_id: CategoryId,
+        description: &str,
         elapsed: usize,
         end_local: DateTime<Tz>,
     ) where
@@ -718,18 +718,17 @@ impl TimeTracker {
         }
         let end_utc = end_local.with_timezone(&Utc);
         let start_utc = end_utc - ChronoDuration::seconds(elapsed as i64);
-        let start_time = end_local.clone() - ChronoDuration::seconds(elapsed as i64);
-        let today = operational_day_key_for_utc(end_utc)
+        let start_local = end_local.clone() - ChronoDuration::seconds(elapsed as i64);
+        let operational_day = operational_day_key_for_utc(end_utc)
             .format("%Y-%m-%d")
             .to_string();
-
         self.sessions.push(Session {
             id: self.session_id_counter,
-            date: today,
-            category_id: cat_id,
+            date: operational_day,
+            category_id,
             project: String::new(),
-            description: cat_description.to_string(),
-            start_time: start_time.format("%H:%M:%S").to_string(),
+            description: description.to_string(),
+            start_time: start_local.format("%H:%M:%S").to_string(),
             end_time: end_local.format("%H:%M:%S").to_string(),
             elapsed_seconds: elapsed,
             started_at_utc: Some(start_utc),

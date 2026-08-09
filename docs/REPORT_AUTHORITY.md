@@ -79,7 +79,7 @@ REPORT-001 covers:
 
 - inclusive custom ranges and reversed/incomplete-range refusal;
 - provisional active inclusion and committed-only exclusion;
-- legacy and SQLite authority paths;
+- profile-bound SQLite authority paths;
 - deterministic report and export tie-breakers;
 - JSON schema version 2 and project propagation;
 - authoritative UTC ICS, escaping, folding, stable UIDs, idle omission, and provisional marking;

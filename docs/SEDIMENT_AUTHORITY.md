@@ -85,7 +85,7 @@ Accepted kinds are:
 - `DailyContribution` — mass attributed to exactly one operational day;
 - `DerivedPreview` — deterministic ledger reconstruction for viewing only.
 
-These kinds are not interchangeable. Historical bare daily payloads are cumulative legacy evidence, not daily contributions.
+These kinds are not interchangeable. Historical bare daily payloads are cumulative artifacts, not daily contributions.
 
 ## Immutable historical viewing
 
@@ -129,13 +129,13 @@ Daily contribution reconciliation occurs at autosave, full-state flush, checkpoi
 
 ## Legacy evidence disposition
 
-SQLite schema version 6 adds the distinct `daily-contribution` snapshot kind. Migration from version 5 recreates the constrained table without altering existing rows, IDs, formation identities, timestamps, or `legacy_import_id` links.
+The current SQLite schema includes the distinct `daily-contribution` snapshot kind alongside the other constrained sediment records.
 
 Historical SQLite rows with `snapshot_kind = 'daily'` remain untouched evidence. New authority reads, writes, replaces, and deletes only `daily-contribution` rows.
 
 Legacy-file authority writes `YYYY-MM-DD.contribution.json`. Historical `YYYY-MM-DD.json` files remain untouched evidence and are never read as authoritative daily contributions.
 
-This is an archive-in-place disposition: legacy cumulative artifacts are preserved, named by their old format, and excluded from the new authority path. No silent reinterpretation or destructive migration occurs.
+This is an archive-in-place disposition: cumulative artifacts are preserved and excluded from the daily-contribution path. No silent reinterpretation occurs.
 
 ## Certification
 
@@ -153,7 +153,7 @@ The final D2 implementation and multi-day recovery correction passed:
 - 2 temporal-authority tests;
 - doc tests.
 
-Focused proofs cover compressed billion-grain mass, immutable rendering, revision reuse and stale fallback, mass conservation beyond physical capacity, SQLite schema 5→6 migration with legacy-row retention, distinct file custody paths, typed SQLite round-trip, fault rollback, cross-day session deletion reconciliation, and multi-day recovery reconciliation.
+Focused proofs cover compressed billion-grain mass, immutable rendering, revision reuse and stale fallback, mass conservation beyond physical capacity, typed SQLite round-trip, fault rollback, cross-day session deletion reconciliation, and multi-day recovery reconciliation.
 
 ## Remaining non-authority
 

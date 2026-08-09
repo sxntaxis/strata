@@ -56,7 +56,7 @@ The current term `Karma` remains under terminology review. `Balance`, `polarity`
 
 ## Persistence and custody
 
-After explicit migration and activation, one SQLite database is the live authority shared by CLI and TUI. Deterministic CSV remains a public interchange format. Legacy CSV/JSON sources are preserved migration evidence until the user explicitly archives and, separately, removes them through the verified custody workflow.
+Each selected profile owns one `data/strata.sqlite3` database shared directly by CLI and TUI. The database is bound to the profile UUID. Deterministic CSV remains a public interchange format, not another runtime authority. SQLite doctor, backup, restore, recovery, checkpoints, and receipts operate on that database directly.
 
 Authority must fail closed. Strata must not silently redirect work to defaults, fall back from a damaged SQLite authority to stale files, or claim a mutation succeeded before it is durable.
 

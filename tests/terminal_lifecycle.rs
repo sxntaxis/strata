@@ -1,5 +1,6 @@
 #![cfg(target_os = "linux")]
 
+use rusqlite::Connection;
 use std::{
     fs,
     io::Write,
@@ -32,11 +33,6 @@ impl TerminalProfile {
         fs::create_dir_all(data_home.join("strata")).unwrap();
         fs::create_dir_all(&state_home).unwrap();
         fs::create_dir_all(&config_home).unwrap();
-        fs::write(
-            data_home.join("strata/categories.csv"),
-            "id,name,description,color_index,karma_effect\n1,Work,Focused work,0,1\n",
-        )
-        .unwrap();
         Self {
             root,
             data_home,
@@ -60,6 +56,7 @@ impl TerminalProfile {
             .env("XDG_DATA_HOME", &self.data_home)
             .env("XDG_STATE_HOME", &self.state_home)
             .env("XDG_CONFIG_HOME", &self.config_home)
+            .env_remove("STRATA_PROFILE")
             .env_remove("STRATA_DATA_DIR")
             .env("STRATA_TEST_TERMINAL_RESTORE_MARKER", &marker)
             .stdin(Stdio::piped())
@@ -87,8 +84,21 @@ impl TerminalProfile {
         output
     }
 
-    fn checkpoint_path(&self) -> PathBuf {
-        self.state_home.join("strata/detached_runtime.json")
+    fn database_path(&self) -> PathBuf {
+        self.data_home.join("strata/strata.sqlite3")
+    }
+
+    fn checkpoint_exists(&self) -> bool {
+        if !self.database_path().exists() {
+            return false;
+        }
+        let connection = Connection::open(self.database_path()).expect("open profile database");
+        let count: i64 = connection
+            .query_row("SELECT count(*) FROM runtime_checkpoint", [], |row| {
+                row.get(0)
+            })
+            .expect("query runtime checkpoint custody");
+        count > 0
     }
 }
 
@@ -143,7 +153,7 @@ fn normal_quit_and_detach_restore_terminal_once() {
         combined_output(&detach_output)
     );
     assert_terminal_restored(&detach_output);
-    assert!(detach.checkpoint_path().exists());
+    assert!(detach.checkpoint_exists());
 }
 
 #[test]
@@ -156,7 +166,7 @@ fn draw_poll_and_read_failures_restore_terminal_and_checkpoint() {
         let combined = combined_output(&output);
         assert!(combined.contains(&format!("injected TUI {stage} failure")));
         assert!(combined.contains("emergency checkpoint: committed"));
-        assert!(profile.checkpoint_path().exists());
+        assert!(profile.checkpoint_exists());
     }
 }
 

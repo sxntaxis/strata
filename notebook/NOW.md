@@ -3,30 +3,35 @@ id: NOW-001
 kind: status
 state: active
 created: 2026-08-01
-updated: 2026-08-04
+updated: 2026-08-09
 authority: working
-summary: Every known GitHub issue is implemented and evidence-backed; active-draft ownership and complete profile isolation close the post-SQLite reconciliation program.
-next: Maintain the certified baseline and open future work only through a new explicit issue or architecture unit.
+summary: ARCH-001 is complete: SQLite is the sole runtime persistence authority and the transitional file authority is retired.
+next: Maintain the certified SQLite-only baseline; begin only a newly justified product issue or bounded work unit.
 ---
 
 # NOW — Strata
 
 ## Current phase
 
-The post-SQLite issue reconciliation program is complete. No open GitHub issues remain at certification time.
+ARCH-001 has been completed. The post-SQLite issue reconciliation program is complete, and the current runtime is SQLite-only.
 
 The certified system includes:
 
-- fail-closed SQLite/legacy authority and explicit activation;
+- fail-closed profile-bound SQLite runtime persistence with one current schema;
 - monotonic/UTC/fixed-offset time and exact operational-day allocation;
 - canonical project, category, session, active-generation, and report identity;
 - conserved sediment, bounded recovery, immutable historical artifacts, and revision-matched daily contributions;
-- receipt-governed switch, finish, clear-all, and category lifecycle replay;
+- receipt-governed switch, finish, clear-all, and category lifecycle transactions;
 - active/archived category integrity, reviewed merge/deletion, and permanent retired-ID custody;
 - explicit report editing, truthful keymap/palette/atlas routing, and exactly-once terminal restoration;
 - session-owned active description drafts separated from durable category metadata and reusable tags;
-- one process-bound profile UUID owning complete data, state, configuration, recovery, and SQLite authority paths;
+- one process-bound profile UUID owning complete data, state, configuration, recovery, and SQLite paths;
 - real process proofs for lifecycle confirmation, profile isolation, copied-artifact refusal, persistence failure, and PTY restoration.
+
+The transitional CSV/JSON runtime, authority selection, activation ceremony, and historical schema
+upgrade chain are retired. Portable bundle export/import and SQLite doctor, backup, and restore remain
+product functionality. Runtime recovery, checkpoints, receipts, categories, sessions, and sediment are
+SQLite-owned.
 
 ## Completed post-migration units
 
@@ -47,14 +52,16 @@ The certified system includes:
 ## Verified final baseline
 
 - formatting and strict Clippy pass;
-- 248 library tests;
-- 9 CLI lifecycle tests;
-- 6 configuration-authority tests;
-- 2 profile-authority process tests;
-- 1 report-help test;
-- 15 SQLite/TUI process tests;
-- 2 temporal-authority tests;
-- 3 terminal-lifecycle PTY tests.
+- `cargo test --all-features` passes with 194 library tests plus the integration, process, and PTY suites;
+- fresh-profile direct-SQLite smoke proof passes;
+- CLI help exposes no retired migration or activation commands;
+- GitHub Actions run 31340435742 passes on ARCH-001 head `6f7f7df7808e4e919a92a206eb71559b896378a0`.
+
+## Certification evidence
+
+- current schema initializes fresh databases transactionally at `user_version = 1` and rejects other development versions;
+- strict storage-authority residue search is empty outside the authoritative decision record;
+- formatting, strict Clippy, tests, fresh-profile smoke proof, help output, and diff hygiene were run for ARCH-001.
 
 ## Known non-blocking questions
 

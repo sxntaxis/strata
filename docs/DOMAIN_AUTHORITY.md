@@ -24,7 +24,7 @@ The CLI currently requires a non-empty positional project. TUI-created general i
 
 ## Explicit classification
 
-`strata start` requires `--category <CATEGORY>`. Omission fails before active state is created under either legacy or SQLite authority.
+`strata start` requires `--category <CATEGORY>`. Omission fails before active state is created in SQLite.
 
 Accepted category selectors include a case-insensitive category name, a category ID, and the explicit baseline name `idle`. Historical `none` and `drift` spellings remain compatibility aliases for category ID `0`; user-facing output and documentation use `idle`.
 
@@ -52,17 +52,9 @@ Idle is the continuous-ledger baseline category.
 
 ## Persistence and compatibility
 
-SQLite already stores project independently on active and completed sessions. DOMAIN-001 extends that identity through the shared domain model, TUI synchronization, emergency custody export, legacy stop/reload, JSON export, and ICS export.
-
-Legacy `time_log.csv` supports three generations:
-
-1. 8 columns — original chronology without project or absolute temporal provenance;
-2. 12 columns — temporal provenance without project;
-3. 13 columns — project plus temporal provenance.
-
-Old rows load with an empty project. New rows persist the supplied project exactly. Entirely absent temporal provenance is handled through the existing explicit legacy reconstruction policy; partial provenance fails closed.
-
-No SQLite schema migration is required because project columns were already authoritative. Deterministic SQLite bundles already include project identity.
+SQLite stores project independently on active and completed sessions. DOMAIN-001 extends that identity
+through the shared domain model, TUI synchronization, emergency custody export, JSON export, and ICS
+export. New rows persist the supplied project exactly; deterministic SQLite bundles include project identity.
 
 ## Boundaries
 
@@ -81,12 +73,11 @@ Those features must build on, not reinterpret, the persisted project/category ax
 
 DOMAIN-001 covers:
 
-- legacy start → stop → reload project preservation;
+- SQLite start → stop → reload project preservation;
 - SQLite active and completed project preservation;
 - TUI load/synchronization without project loss;
 - JSON and ICS project propagation;
-- omitted-category rejection before mutation under both authorities;
+- omitted-category rejection before mutation;
 - explicit idle and explicit work classification;
-- 8-, 12-, and 13-column CSV compatibility;
-- strict migration import of project-bearing rows;
+- portable bundle import of project-bearing rows;
 - all existing persistence, temporal, recovery, CLI, and TUI gates.

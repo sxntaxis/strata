@@ -46,8 +46,8 @@ Idle remains part of continuous sediment history but is omitted from ordinary ac
 ## Architecture
 
 - `src/domain.rs`: business rules for categories, sessions, operational days, and reports.
-- `src/sqlite.rs` and `src/sqlite/*`: SQLite schema, repository operations, migration, authority activation, maintenance, runtime coordination, legacy-evidence custody, and TUI adapters.
-- `src/storage.rs`: XDG paths, legacy CSV/JSON compatibility needed before migration, and atomic file helpers.
+- `src/sqlite.rs` and `src/sqlite/*`: the current SQLite schema, repository operations, maintenance, runtime coordination, and TUI adapters.
+- `src/storage.rs`: profile paths and atomic helpers for current configuration/state publication.
 - `src/app.rs` and `src/app/*`: TUI orchestration, rendering, event handling, and persistence-recovery controls.
 - `src/cli.rs`: command parsing and non-TUI output.
 - `src/sand/*`: sediment simulation and rendering primitives.
@@ -55,9 +55,9 @@ Idle remains part of continuous sediment history but is omitted from ordinary ac
 Boundary rules:
 
 - Domain code does not perform file or database I/O.
-- SQLite owns authoritative transactional persistence after activation.
+- SQLite owns all authoritative transactional runtime persistence.
 - UI and CLI call repository/runtime adapters rather than issuing ad hoc SQL.
-- Legacy CSV/JSON is never dual-written after SQLite activation.
+- Portable CSV bundles are interchange, never runtime authority.
 
 ## Data locations
 
@@ -69,11 +69,11 @@ Strata uses XDG paths:
 
 You can override the data directory with `STRATA_DATA_DIR=/your/path`.
 
-The normal SQLite database is stored under the Strata data directory. Migration reports, authority metadata, immutable source backups, removal ledgers, recovery exports, and runtime state use the corresponding data/state roots. Repo-local runtime artifacts are intentionally ignored by Git.
+The normal SQLite database is stored at `data/strata.sqlite3` under the selected profile. Recovery exports and runtime state use the corresponding profile state root. Repo-local runtime artifacts are intentionally ignored by Git.
 
 ## Configuration authority
 
-Strata loads and validates `~/.config/strata/keymap.json` once before choosing the CLI or TUI and before resolving a writable data authority. Malformed JSON, unknown keys or actions, invalid operational-day settings, unsupported UTC offsets, and invalid configured legacy paths stop startup with a non-zero error that identifies the file and invalid value.
+Strata loads and validates `~/.config/strata/keymap.json` once before choosing the CLI or TUI and before opening the profile database. Malformed JSON, unknown keys or actions, invalid operational-day settings, and unsupported UTC offsets stop startup with a non-zero error that identifies the file and invalid value.
 
 Strata does not silently replace a broken configuration with defaults. To deliberately ignore the file for one invocation, use the global override:
 
@@ -124,7 +124,7 @@ strata report --today --completed-only
 strata export --format json --completed-only
 ```
 
-JSON export schema version 2 includes stable event UIDs, authoritative UTC endpoints, and a `provisional` flag. ICS export uses those UTC endpoints and stable UIDs, emits CRLF-delimited RFC 5545 text with escaping and line folding, marks provisional events with `X-STRATA-PROVISIONAL:TRUE`, and excludes idle events. A legacy session without authoritative absolute chronology fails closed for ICS rather than inventing timestamps.
+JSON export schema version 2 includes stable event UIDs, authoritative UTC endpoints, and a `provisional` flag. ICS export uses those UTC endpoints and stable UIDs, emits CRLF-delimited RFC 5545 text with escaping and line folding, marks provisional events with `X-STRATA-PROVISIONAL:TRUE`, and excludes idle events. A session without authoritative absolute chronology fails closed for ICS rather than inventing timestamps.
 
 Week reports follow the configured first day of week. The current week is week-to-date; prior week offsets in the TUI are complete calendar weeks. Month reports use calendar months: the current month is month-to-date and prior offsets are complete prior calendar months.
 
@@ -132,40 +132,10 @@ The detailed contract is recorded in [`docs/REPORT_AUTHORITY.md`](docs/REPORT_AU
 
 ## Persistence authority
 
-Strata has two explicit authority phases:
-
-1. **Legacy authority** — existing CSV/JSON files remain live until migration and activation are completed.
-2. **SQLite authority** — after explicit activation, both CLI and TUI use one SQLite database. Legacy files become preserved migration evidence and are not dual-written.
-
-Strata does not automatically migrate during startup, replace a damaged database with an empty one, or fall back from SQLite to stale legacy files.
-
-### Migration sequence
-
-Validate the legacy state without writing artifacts:
-
-```bash
-strata migrate-sqlite --dry-run
-```
-
-Publish a verified SQLite candidate, immutable source backup, migration report, and authority marker:
-
-```bash
-strata migrate-sqlite
-```
-
-Activate the verified candidate explicitly:
-
-```bash
-strata activate-sqlite --confirm
-```
-
-Active or detached recovery state requires explicit migration opt-in:
-
-```bash
-strata migrate-sqlite --include-active-recovery
-```
-
-Use `--json` on migration and activation commands for machine-readable reports.
+Every selected profile opens or creates `data/strata.sqlite3` directly. The database is bound to the
+profile UUID and a mismatched database fails closed. CLI and TUI share this database; there is no
+activation ceremony, migration step, fallback, or second runtime authority. A non-current development
+schema is rejected rather than upgraded.
 
 ## Portable CSV interchange
 
@@ -195,7 +165,7 @@ Import validates manifest fingerprints, file sizes, schemas, identities, referen
 
 The general `strata export --format ...` command remains for JSON and ICS session exports; full-fidelity CSV interchange uses `sqlite-export` and `sqlite-import`.
 
-Completed sessions preserve project identity independently from category identity. JSON includes the persisted project and ICS uses it in the event summary. Under legacy authority, new `time_log.csv` rows use the project-bearing 13-column schema; the prior 8-column and 12-column schemas remain readable and importable with an empty project rather than an invented value.
+Completed sessions preserve project identity independently from category identity. JSON includes the persisted project and ICS uses it in the event summary.
 
 ## Database maintenance
 
@@ -218,52 +188,6 @@ strata sqlite-restore --backup ./strata-backup.sqlite3 --replace
 ```
 
 Maintenance operations use explicit locking and refuse stale temporary artifacts or active SQLite sidecars where publication would be unsafe. Add `--json` for machine-readable reports.
-
-## Legacy migration evidence
-
-Migration preserves an immutable fingerprinted backup and leaves the original CSV/JSON files untouched. After activation, those originals are evidence rather than live authority.
-
-Inspect the verified evidence set:
-
-```bash
-strata sqlite-legacy-inventory
-```
-
-Inventory requires an active, healthy SQLite authority. It reconciles:
-
-- the authority marker and activation provenance;
-- SQLite migration metadata and the verified source manifest stored in the database;
-- the immutable migration backup and `source_paths.json`;
-- every live source path, byte count, and content fingerprint.
-
-Changed, missing, symlinked, redirected, or unprovenanced sources fail closed.
-
-Archive verified evidence before considering removal:
-
-```bash
-strata sqlite-legacy-archive --out ./strata-legacy-evidence --confirm
-```
-
-The archive is built from the immutable migration backup, not from potentially changed live files. Publication uses a fingerprint-owned staging directory, verifies every archived byte, and is idempotent. A complete interrupted publication is finished on retry; an owned partial stage is safely rebuilt. Foreign staging directories are never removed automatically.
-
-Original source removal is a separate irreversible command:
-
-```bash
-strata sqlite-legacy-remove \
-  --archive ./strata-legacy-evidence \
-  --confirm-fingerprint <MIGRATION_FINGERPRINT>
-```
-
-Removal requires all of the following:
-
-- active SQLite authority matching the original verified migration;
-- a fully verified archive;
-- the exact migration fingerprint printed by inventory/archive;
-- unchanged original source bytes.
-
-A durable removal ledger makes interrupted multi-file deletion retryable. Strata removes only the exact paths recorded by the verified SQLite source manifest; unrelated files in the same directories are never selected. The immutable migration backup, archive, SQLite database, authority marker, and removal ledger remain available afterward.
-
-All three evidence commands support `--authority-marker <PATH>` and `--json`.
 
 ## Persistence failure recovery
 
@@ -307,7 +231,7 @@ Notes:
 - Setting a key to `null` unbinds that key.
 - `unbind_actions` disables specific actions by name.
 - Setting `keymap_inherit: false` starts from an empty keymap.
-- `time_log_path` configures the legacy CSV source before SQLite activation and is migration provenance afterward.
+- `time_log_path` is not a runtime persistence setting; profile-local SQLite is selected automatically.
 - `day_start_mode` accepts only `fixed`. Existing `sunrise` values are migrated visibly to `fixed`; Strata never implemented solar sunrise calculation.
 - `first_day_of_week` accepts `monday` through `sunday`.
 - `toggle_command_palette` is the action name for rebinding palette open/close.
@@ -317,7 +241,7 @@ Karma interval notes:
 - `month` uses calendar months: current month-to-date, then complete prior calendar months.
 - Day, week, and month totals allocate canonical sessions by exact overlap with their persisted operational-day boundary policy.
 - A zero-whole-second finish or switch is a transition event, not a completed work row.
-- Daily sediment snapshots are authoritative SQLite records after activation.
+- Daily sediment snapshots are authoritative SQLite records.
 - If a historical snapshot is missing, Strata reconstructs an approximation from that day's completed sessions.
 
 Detached mode notes:
@@ -326,10 +250,6 @@ Detached mode notes:
 - Under SQLite authority, checkpoint claim, catch-up sediment publication, daily snapshot publication, and checkpoint completion are transactionally coordinated.
 - A failed recovery commit leaves the checkpoint reclaimable on the next launch.
 - During catch-up, mutating main-view actions are queued and replayed when simulation time reaches them.
-
-## SQLite migration closure
-
-The full acceptance reconciliation is recorded in [`docs/SQLITE_MIGRATION_CLOSURE_AUDIT.md`](docs/SQLITE_MIGRATION_CLOSURE_AUDIT.md). SQLITE-012 completes all nine acceptance criteria from issue #8 without automatic migration, legacy dual writes, or emergency-JSON import scope.
 
 ## Quality gates
 

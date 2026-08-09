@@ -8,17 +8,17 @@ Certification: complete Rust suite plus two Linux profile-process proofs
 
 ## Purpose
 
-A Strata profile is the complete authority boundary for one internally consistent dataset and its runtime custody. It prevents categories or sessions from one dataset from being combined with active state, recovery evidence, sediment, tags, configuration, or SQLite activation state from another.
+A Strata profile is the complete authority boundary for one internally consistent dataset. It prevents categories or sessions from one dataset from being combined with active state, recovery evidence, sediment, tags, configuration, or the SQLite database from another.
 
 ## Selection
 
-Profile selection happens once, before configuration and storage authority resolution.
+Profile selection happens once, before configuration and database opening.
 
 Precedence:
 
 1. explicit global `--profile <directory>`;
 2. `STRATA_PROFILE`;
-3. legacy `STRATA_DATA_DIR`, interpreted as a whole-profile-root alias;
+3. `STRATA_DATA_DIR`, interpreted as a whole-profile-root alias;
 4. the platform XDG profile.
 
 Conflicting `STRATA_PROFILE` and `STRATA_DATA_DIR` values fail before authority opens. Once initialized, the profile cannot change inside the process.
@@ -36,29 +36,28 @@ An explicit profile root owns:
 
 The schema-1 manifest contains a stable UUID. Publication is atomic. Malformed, unsupported, or non-UUID manifests fail closed.
 
-All legacy and SQLite paths derive from the selected profile:
+All runtime and interchange paths derive from the selected profile:
 
-- categories, sessions, and interchange sources;
+- categories, sessions, and portable interchange sources;
 - active-session state;
 - detached checkpoints and transition receipts;
 - canonical sediment, history, and daily contributions;
 - category tags and lifecycle ledgers;
 - recovery exports;
 - keymap/configuration;
-- SQLite database, migration artifacts, and authority marker.
+- SQLite database.
 
 ## XDG profile
 
-Without an explicit root, Strata uses one XDG profile across platform data, state, and configuration directories. The stable manifest is stored under the XDG data directory. Existing unbound legacy artifacts remain readable only in this compatibility profile; explicit rooted profiles require identity-bearing active and checkpoint artifacts.
+Without an explicit root, Strata uses one XDG profile across platform data, state, and configuration directories. The stable manifest is stored under the XDG data directory. The manifest and profile-local SQLite database are the runtime identity authorities.
 
 ## Artifact identity
 
 The selected profile UUID is written to or projected through:
 
-- legacy active-session files;
 - detached runtime checkpoints;
 - structured recovery statements and emergency exports;
-- SQLite migration/activation authority markers.
+- the profile-local SQLite database.
 
 A mismatched UUID is never rewritten or treated as current evidence. Rooted profiles also reject missing identity where ambiguity would permit cross-profile adoption.
 
@@ -82,8 +81,8 @@ Profile switching is process-bound close/open behavior.
 - invalid manifest schema or UUID fails before storage resolution;
 - copied active-session evidence from another profile blocks stop/report use;
 - copied detached checkpoint evidence from another profile enters visible fail-closed recovery rather than being applied;
-- mismatched SQLite authority markers are invalid authority;
-- obsolete `time_log_path` configuration fails with explicit `--profile` migration guidance.
+- mismatched SQLite profile identity is invalid;
+- obsolete `time_log_path` configuration fails with explicit `--profile` guidance.
 
 ## Certified proofs
 
@@ -94,4 +93,4 @@ Profile switching is process-bound close/open behavior.
 - a detached checkpoint copied from profile A is refused under profile B in a real PTY process;
 - obsolete partial path configuration is rejected by unit and process tests;
 - profile UUID generation and manifest shape are validated;
-- all existing persistence, migration, recovery, lifecycle, interaction, temporal, reporting, and terminal suites remain green.
+- all existing persistence, recovery, lifecycle, interaction, temporal, reporting, and terminal suites remain green.

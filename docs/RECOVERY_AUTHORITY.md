@@ -109,13 +109,13 @@ Whole-second semantics are explicit:
 - subsecond monotonic remainder means the completed row starts at `switch UTC - whole elapsed seconds`, which may differ subsecond-wise from the original wall start;
 - UTC endpoints, elapsed duration, civil labels, operational-day policy, and operational-day key must all agree.
 
-Legacy session parsing rejects reserved ID `0`, malformed or duplicate IDs, malformed elapsed values, unknown categories, and conflicting receipt history rather than skipping or coercing them.
+SQLite session loading rejects reserved ID `0`, malformed or duplicate IDs, malformed elapsed values, unknown categories, and conflicting receipt history rather than skipping or coercing them.
 
 Kill-point tests certify convergence from receipt-only, receipt-plus-session, and receipt-plus-session-plus-catalog states. A catalog failure after session publication leaves the receipt durable for retry.
 
-## Legacy finish transition receipts
+## Finish transition receipts
 
-Normal legacy finish is also a prepared multi-file transition.
+Normal finish is a prepared SQLite transaction.
 
 Before mutating the active session, Strata publishes the prior-generation checkpoint with a deterministic finish receipt binding:
 
@@ -130,7 +130,7 @@ Startup recognizes a finish receipt before ordinary active recovery. It validate
 
 Kill-point tests certify receipt-only, receipt-plus-session, receipt-plus-session-plus-catalog, and receipt-plus-session-plus-catalog-plus-sand states. A later publication failure retains the receipt. Retry also reconciles all affected days before receipt deletion, including multi-day sessions.
 
-Normal legacy finish now persists the cleared active description. Legacy recovery flush and reload preserve active and archived category catalogs, archived session references, and archived sediment identities. Emergency recovery JSON schema 3 includes every category with an explicit `archived` flag and carries the structured recovery statement when one exists.
+Normal finish persists the cleared active description. SQLite recovery flush and reload preserve active and archived category catalogs, archived session references, and archived sediment identities. Emergency recovery JSON schema 3 includes every category with an explicit `archived` flag and carries the structured recovery statement when one exists.
 
 ## Clear-all and provisional-idle reset receipts
 
@@ -145,7 +145,7 @@ Normal legacy finish now persists the cleared active description. Legacy recover
 
 SQLite applies active-generation replacement when required, empty sediment, every explicit daily-contribution replacement or deletion, and the resulting checkpoint receipt in one immediate transaction. Existing completed history is neither inserted nor deleted. Fault injection at `before-write`, `active`, `sand`, `daily`, `checkpoint`, and `commit` proves complete rollback.
 
-Legacy-file authority publishes the prepared resulting checkpoint and receipt before later effects. Prepared publication failure restores prior tracker, session, and sediment memory. Startup validates the receipt before ordinary detached recovery, restores the checkpoint's canonical grid and exact resulting active interval in memory, republishes empty sediment, reconciles every explicit operational day idempotently, and clears the receipt only after convergence. Repeated replay cannot duplicate elapsed time or restore pre-clear sediment.
+SQLite publishes the prepared resulting checkpoint and receipt before later effects. Prepared publication failure restores prior tracker, session, and sediment memory. Startup validates the receipt before ordinary detached recovery, restores the checkpoint's canonical grid and exact resulting active interval in memory, republishes empty sediment, reconciles every explicit operational day idempotently, and clears the receipt only after convergence. Repeated replay cannot duplicate elapsed time or restore pre-clear sediment.
 
 Receipt identity includes canonical elapsed and the affected-day list. Changing either invalidates replay identity. A receipt whose sand payload is non-empty, whose active classification changes, whose elapsed value diverges from its UTC interval beyond the accepted live-clock tolerance, or whose days are malformed, duplicated, or unsorted fails closed.
 
@@ -192,7 +192,7 @@ Every successful checkpoint recovery now creates one structured acknowledgment s
 
 The statement exposes:
 
-- active stable identity under SQLite, or explicit legacy-file generation wording;
+- active stable identity under SQLite;
 - active category, description, and original active-session UTC start;
 - checkpoint capture UTC;
 - checkpoint simulation UTC, the last sediment instant represented directly by the durable payload;
@@ -222,7 +222,7 @@ Issue #10 is complete. Its original acceptance obligations are now covered by:
 
 - bounded, topology-preserving reconstruction without unbounded physics replay;
 - active/checkpoint identity and transaction coherence;
-- prepared legacy switch, finish, and clear-all receipts with idempotent kill-point replay;
+- prepared SQLite switch, finish, and clear-all receipts with idempotent kill-point replay;
 - non-destructive clear-all custody;
 - atomic initial SQLite active generation and first checkpoint;
 - exact outgoing-category sediment settlement at transition boundaries;
@@ -247,7 +247,7 @@ RECONCILIATION-001B1, RECONCILIATION-001B2A, RECONCILIATION-001B2B, RECONCILIATI
 - 2 temporal-authority tests;
 - 3 terminal-lifecycle PTY process tests.
 
-Focused proofs cover transactional SQLite checkpoint retirement, protected recovery evidence, startup identity quarantine, immediate semantic-edge refresh, prepared legacy switch and finish rollback, exact/idempotent session reconciliation, strict receipt payload validation, subsecond whole-second boundaries, all persisted switch and finish kill points, clear-all receipt identity over canonical elapsed and affected days, exact active-state staging before legacy daily reconstruction, cross-day idle authority, non-idle identity preservation, stale now-empty daily deletion, all six SQLite clear-all transaction kill points, atomic initial active/checkpoint publication, four bootstrap rollback boundaries, pre-existing checkpoint preservation, real TUI failure/retry, exact outgoing-category boundary attribution, post-clear non-reappearance, billion-second bounded settlement, uninitialized-canvas mass preservation, monotonic recovery-statement chronology, exact versus reconstructed classification, persisted cutoff reuse after failed commit and delayed retry, acknowledgment input custody, archived-authority reload, and schema-3 emergency export parity.
+Focused proofs cover transactional SQLite checkpoint retirement, protected recovery evidence, startup identity quarantine, immediate semantic-edge refresh, prepared SQLite switch and finish rollback, exact/idempotent session reconciliation, strict receipt payload validation, subsecond whole-second boundaries, all persisted switch and finish kill points, clear-all receipt identity over canonical elapsed and affected days, exact active-state staging before daily reconstruction, cross-day idle authority, non-idle identity preservation, stale now-empty daily deletion, all six SQLite clear-all transaction kill points, atomic initial active/checkpoint publication, four bootstrap rollback boundaries, pre-existing checkpoint preservation, real TUI failure/retry, exact outgoing-category boundary attribution, post-clear non-reappearance, billion-second bounded settlement, uninitialized-canvas mass preservation, monotonic recovery-statement chronology, exact versus reconstructed classification, persisted cutoff reuse after failed commit and delayed retry, acknowledgment input custody, archived-authority reload, and schema-3 emergency export parity.
 
 ## Unsupported future extension
 
