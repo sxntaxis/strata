@@ -269,10 +269,32 @@ impl App {
                 else {
                     return Err(format!("Layer '{layer}' not found"));
                 };
-                self.queue_or_apply_mutation(QueuedMutation::SwitchLayer {
-                    category_id: category.id,
-                    description: tag.unwrap_or_default(),
-                });
+                let description = tag.unwrap_or_default();
+                if self.time_tracker.active_category_id() == category.id {
+                    if !description.is_empty() {
+                        let database_path = self
+                            .sqlite_database_path
+                            .clone()
+                            .ok_or_else(|| "SQLite authority is unavailable".to_string())?;
+                        let stable_id = self
+                            .session
+                            .active_session_stable_id
+                            .clone()
+                            .ok_or_else(|| "active session has no stable identity".to_string())?;
+                        sqlite::update_tui_active_description(
+                            &database_path,
+                            &stable_id,
+                            &description,
+                        )?;
+                        self.time_tracker.set_active_description(description);
+                        self.refresh_active_runtime_checkpoint();
+                    }
+                } else {
+                    self.queue_or_apply_mutation(QueuedMutation::SwitchLayer {
+                        category_id: category.id,
+                        description,
+                    });
+                }
                 Ok(format!(
                     "Starting layer '{}'",
                     self.display_layer_name(&category.name)
