@@ -236,6 +236,46 @@ fn recovery_target_for_claim(
     persisted_target_utc.unwrap_or(claim_time_utc)
 }
 
+fn initial_tui_stable_id_matches_start(
+    active_stable_id: Option<&str>,
+    started_at_utc: DateTime<Utc>,
+) -> bool {
+    let Some(stable_id) = active_stable_id else {
+        return false;
+    };
+    let Some(rest) = stable_id.strip_prefix("tui-") else {
+        return false;
+    };
+    let Some((timestamp, process_id)) = rest.rsplit_once('-') else {
+        return false;
+    };
+    if process_id.parse::<u32>().is_err() {
+        return false;
+    }
+    DateTime::parse_from_rfc3339(timestamp)
+        .map(|value| value.with_timezone(&Utc) == started_at_utc)
+        .unwrap_or(false)
+}
+
+fn repair_initial_checkpoint_simulation_boundary(
+    checkpoint: &mut DetachedRuntimeCheckpoint,
+    active_stable_id: Option<&str>,
+) -> bool {
+    let Some(started_at_utc) = checkpoint.active_session_started_at_utc else {
+        return false;
+    };
+    if started_at_utc <= checkpoint.simulation_time_utc
+        || started_at_utc > checkpoint.detached_at_utc
+        || checkpoint.active_category_id != DRIFT_CATEGORY_ID.0
+        || !initial_tui_stable_id_matches_start(active_stable_id, started_at_utc)
+    {
+        return false;
+    }
+
+    checkpoint.simulation_time_utc = started_at_utc;
+    true
+}
+
 fn build_recovery_statement(
     checkpoint: &DetachedRuntimeCheckpoint,
     active_stable_id: Option<String>,
@@ -1020,6 +1060,9 @@ impl App {
         let now = Utc::now();
         self.time_tracker.start_session();
         self.session.active_session_started_at_utc = Some(now);
+        if now > self.simulation.simulation_time_utc {
+            self.simulation.simulation_time_utc = now;
+        }
     }
 
     fn begin_active_session_at(
@@ -2029,6 +2072,11 @@ impl App {
             return false;
         }
 
+        repair_initial_checkpoint_simulation_boundary(
+            &mut checkpoint,
+            self.session.active_session_stable_id.as_deref(),
+        );
+
         let now_utc = Utc::now();
         let target_utc = recovery_target_for_claim(checkpoint.recovery_target_utc, now_utc);
         if target_utc > now_utc {
@@ -2396,6 +2444,7 @@ mod recovery_statement_tests {
     use super::{
         DetachedRuntimeCheckpoint, PostTargetClass, RecoveredIntervalClass,
         build_recovery_statement, recovery_target_for_claim,
+        repair_initial_checkpoint_simulation_boundary,
     };
     use crate::sand::SandState;
 
@@ -2470,6 +2519,43 @@ mod recovery_statement_tests {
         assert_eq!(
             recovery_target_for_claim(None, timestamp(30)),
             timestamp(30)
+        );
+    }
+
+    #[test]
+    fn initial_tui_checkpoint_repairs_bootstrap_start_after_simulation_boundary() {
+        let simulation = timestamp(0);
+        let started = simulation + chrono::Duration::milliseconds(8);
+        let mut checkpoint = checkpoint(0, 1);
+        checkpoint.active_category_id = crate::domain::DRIFT_CATEGORY_ID.0;
+        checkpoint.active_description.clear();
+        checkpoint.active_session_started_at_utc = Some(started);
+        let stable_id = format!(
+            "tui-{}-42",
+            started.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
+        );
+
+        assert!(repair_initial_checkpoint_simulation_boundary(
+            &mut checkpoint,
+            Some(&stable_id)
+        ));
+        assert_eq!(checkpoint.simulation_time_utc, started);
+        assert!(build_recovery_statement(&checkpoint, Some(stable_id), timestamp(2)).is_ok());
+    }
+
+    #[test]
+    fn non_initial_checkpoint_start_after_simulation_still_fails_closed() {
+        let mut checkpoint = checkpoint(0, 1);
+        checkpoint.active_session_started_at_utc = Some(timestamp(1));
+
+        assert!(!repair_initial_checkpoint_simulation_boundary(
+            &mut checkpoint,
+            Some("tui-active:switch")
+        ));
+        assert!(
+            build_recovery_statement(&checkpoint, None, timestamp(2))
+                .unwrap_err()
+                .contains("starts after durable simulation time")
         );
     }
 
