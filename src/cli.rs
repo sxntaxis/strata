@@ -52,20 +52,13 @@ pub enum Cli {
     #[command(about = "Show the active runtime status")]
     Status,
 
-    #[command(about = "Start a new tracking session")]
+    #[command(about = "Start or switch to a tracking layer")]
     Start {
-        #[arg(help = "Project name")]
-        project: String,
+        #[arg(help = "Layer name or ID; use 'idle' explicitly for baseline time")]
+        layer: String,
 
-        #[arg(long, help = "Session description")]
+        #[arg(long, help = "Session description/tag")]
         desc: Option<String>,
-
-        #[arg(
-            long,
-            short,
-            help = "Required category name or ID; use 'idle' explicitly for baseline time"
-        )]
-        category: String,
     },
 
     #[command(about = "Stop the current tracking session")]
@@ -221,7 +214,6 @@ pub struct SessionExport {
     pub date: String,
     pub category_id: u64,
     pub category_name: String,
-    pub project: Option<String>,
     pub description: String,
     pub start_time: String,
     pub end_time: String,
@@ -247,37 +239,27 @@ pub struct DataExport {
     pub sessions: Vec<SessionExport>,
 }
 
-pub fn start_session(
-    project: String,
-    description: Option<String>,
-    category_name: String,
-) -> Result<(), String> {
-    if project.trim().is_empty() {
-        return Err("Project name cannot be empty".to_string());
-    }
-    if category_name.trim().is_empty() {
-        return Err("Category is required; use --category idle for baseline time".to_string());
+pub fn start_session(layer: String, description: Option<String>) -> Result<(), String> {
+    if layer.trim().is_empty() {
+        return Err("Layer name cannot be empty".to_string());
     }
     #[cfg(unix)]
     if let Some(response) = crate::ipc::send(&CommandIntent::Start {
-        layer: category_name.clone(),
+        layer: layer.clone(),
         tag: description.clone(),
     })? {
         println!("{response}");
         return Ok(());
     }
     let database_path = sqlite::resolve_runtime_database()?;
-    let started = sqlite::start_cli_session(&database_path, project, description, category_name)?;
-    println!(
-        "Started session for project '{}' in category '{}'",
-        started.project, started.category_name
-    );
+    let started = sqlite::start_cli_session(&database_path, description, layer)?;
+    println!("Started layer '{}'", started.category_name);
     Ok(())
 }
 
 pub fn stop_session(accept_clock_jump: bool) -> Result<usize, String> {
     #[cfg(unix)]
-    if let Some(response) = crate::ipc::send(&CommandIntent::Stop)? {
+    if let Some(response) = crate::ipc::send(&CommandIntent::Stop { layer: None, tag: None })? {
         println!("{response}");
         return Ok(0);
     }
@@ -291,7 +273,6 @@ pub fn stop_session(accept_clock_jump: bool) -> Result<usize, String> {
         elapsed % 60
     );
     io::stdout().flush().map_err(|error| error.to_string())?;
-    sqlite::acknowledge_cli_stop(&database_path, &stopped.operation_id)?;
     Ok(elapsed)
 }
 
@@ -303,10 +284,19 @@ pub fn status() -> Result<(), String> {
     }
     let snapshot = sqlite::read_cli_snapshot(&sqlite::resolve_runtime_database()?)?;
     if let Some(active) = snapshot.active_session {
-        println!(
-            "Status: active layer '{}' since {}",
-            active.category_name, active.started_at_utc
-        );
+        if active.category_id == 0 {
+            println!("Status: idle since {}", active.started_at_utc);
+        } else if active.description.trim().is_empty() {
+            println!(
+                "Status: active layer '{}' since {}",
+                active.category_name, active.started_at_utc
+            );
+        } else {
+            println!(
+                "Status: active layer '{}' tag '{}' since {}",
+                active.category_name, active.description, active.started_at_utc
+            );
+        }
     } else {
         println!("Status: no active session");
     }
@@ -339,7 +329,6 @@ fn report_sqlite(
     if !completed_only
         && let Some(active) = snapshot.active_session.as_ref()
         && let Some(provisional) = provisional_session(
-            &active.project,
             active.category_id,
             &active.description,
             active.started_at_utc,
@@ -406,7 +395,6 @@ fn print_report(
 }
 
 fn provisional_session(
-    project: &str,
     category_id: u64,
     description: &str,
     started_at_utc: DateTime<Utc>,
@@ -435,7 +423,6 @@ fn provisional_session(
             .format("%Y-%m-%d")
             .to_string(),
         category_id: CategoryId::new(category_id),
-        project: project.to_string(),
         description: description.to_string(),
         start_time: start_civil.format("%H:%M:%S").to_string(),
         end_time: end_civil.format("%H:%M:%S").to_string(),
@@ -473,7 +460,6 @@ fn export_data_sqlite(
             date: session.date.clone(),
             category_id: session.category_id,
             category_name: session.category_name.clone(),
-            project: (!session.project.is_empty()).then(|| session.project.clone()),
             description: session.description.clone(),
             start_time: session.start_time.clone(),
             end_time: session.end_time.clone(),
@@ -485,7 +471,6 @@ fn export_data_sqlite(
     if !completed_only
         && let Some(active) = snapshot.active_session.as_ref()
         && let Some(session) = provisional_session(
-            &active.project,
             active.category_id,
             &active.description,
             active.started_at_utc,
@@ -521,7 +506,7 @@ fn export_data_sqlite(
     sort_exports(&mut categories, &mut sessions);
     write_export(
         DataExport {
-            schema_version: 2,
+            schema_version: 3,
             exported_at: snapshot_at,
             categories,
             sessions,
@@ -544,7 +529,6 @@ fn session_export_from_domain(
         date: session.date,
         category_id: session.category_id.0,
         category_name,
-        project: (!session.project.is_empty()).then_some(session.project),
         description: session.description,
         start_time: session.start_time,
         end_time: session.end_time,
@@ -615,10 +599,7 @@ fn render_ics(export: &DataExport) -> Result<String, String> {
                 session.uid
             )
         })?;
-        let summary = match session.project.as_deref() {
-            Some(project) => format!("{project} - {}", session.category_name),
-            None => session.category_name.clone(),
-        };
+        let summary = session.category_name.clone();
         lines.push("BEGIN:VEVENT".to_string());
         lines.push(format!("UID:{}", escape_ics_text(&session.uid)));
         lines.push(format!(
@@ -854,12 +835,8 @@ pub fn run_command(cli: Cli) {
                 std::process::exit(1);
             }
         }
-        Cli::Start {
-            project,
-            desc,
-            category,
-        } => {
-            if let Err(e) = start_session(project, desc, category) {
+        Cli::Start { layer, desc } => {
+            if let Err(e) = start_session(layer, desc) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
@@ -969,7 +946,7 @@ mod report_export_tests {
 
     fn sample_export() -> DataExport {
         DataExport {
-            schema_version: 2,
+            schema_version: 3,
             exported_at: DateTime::parse_from_rfc3339("2026-08-02T03:00:00Z")
                 .unwrap()
                 .with_timezone(&Utc),
@@ -981,7 +958,6 @@ mod report_export_tests {
                 date: "2026-08-01".to_string(),
                 category_id: 1,
                 category_name: "Work, Deep; Focus".to_string(),
-                project: None,
                 description: "line one\\line two\nthird line with a long Unicode description café música 日本語 that must fold safely without splitting UTF-8".to_string(),
                 start_time: "20:30:00".to_string(),
                 end_time: "21:30:00".to_string(),

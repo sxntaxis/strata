@@ -115,14 +115,7 @@ fn fresh_profile_creates_only_sqlite_runtime_authority() {
 fn start_stop_report_and_export_use_one_database() {
     let profile = TestProfile::new("round-trip");
     profile.insert_work_category();
-    let start = profile.run(&[
-        "start",
-        "study-session",
-        "--category",
-        "Work",
-        "--desc",
-        "Read chapter 4",
-    ]);
+    let start = profile.run(&["start", "Work", "--desc", "Read chapter 4"]);
     assert!(start.status.success(), "start failed: {}", stderr(&start));
     profile.backdate_active(2);
 
@@ -134,10 +127,10 @@ fn start_stop_report_and_export_use_one_database() {
         .query_row("SELECT count(*) FROM sessions", [], |row| row.get(0))
         .unwrap();
     assert_eq!(completed, 1);
-    let active: i64 = connection
-        .query_row("SELECT count(*) FROM active_session", [], |row| row.get(0))
+    let active_category_id: i64 = connection
+        .query_row("SELECT category_id FROM active_session", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(active, 0);
+    assert_eq!(active_category_id, 0);
 
     let report = profile.run(&["report", "--today"]);
     assert!(
@@ -154,38 +147,57 @@ fn start_stop_report_and_export_use_one_database() {
         stderr(&export)
     );
     let value: serde_json::Value = serde_json::from_slice(&export.stdout).unwrap();
-    assert_eq!(value["sessions"][0]["project"], "study-session");
+    assert!(value["sessions"][0]
+        .as_object()
+        .expect("session export should be an object")
+        .get("project")
+        .is_none());
 }
 
 #[test]
-fn duplicate_start_and_stop_fail_without_replacing_authority() {
-    let profile = TestProfile::new("duplicates");
+fn repeated_start_updates_live_layer_and_stop_returns_to_idle() {
+    let profile = TestProfile::new("continuous-ledger");
     profile.insert_work_category();
-    let first = profile.run(&["start", "first", "--category", "Work"]);
+
+    let first = profile.run(&["start", "Work", "--desc", "first"]);
     assert!(
         first.status.success(),
         "first start failed: {}",
         stderr(&first)
     );
-    let second = profile.run(&["start", "second", "--category", "Work"]);
-    assert!(!second.status.success());
+    let second = profile.run(&["start", "Work", "--desc", "second"]);
+    assert!(
+        second.status.success(),
+        "second start failed: {}",
+        stderr(&second)
+    );
 
     let connection = Connection::open(profile.database_path()).unwrap();
-    let project: String = connection
-        .query_row("SELECT project FROM active_session", [], |row| row.get(0))
+    let (category_id, description): (i64, String) = connection
+        .query_row(
+            "SELECT category_id, description FROM active_session",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
         .unwrap();
-    assert_eq!(project, "first");
+    assert_eq!(category_id, 1);
+    assert_eq!(description, "second");
     drop(connection);
 
     profile.backdate_active(2);
     assert!(profile.run(&["stop"]).status.success());
     let repeated = profile.run(&["stop"]);
     assert!(!repeated.status.success());
+
     let connection = Connection::open(profile.database_path()).unwrap();
     let completed: i64 = connection
         .query_row("SELECT count(*) FROM sessions", [], |row| row.get(0))
         .unwrap();
     assert_eq!(completed, 1);
+    let idle_category_id: i64 = connection
+        .query_row("SELECT category_id FROM active_session", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(idle_category_id, 0);
 }
 
 #[test]

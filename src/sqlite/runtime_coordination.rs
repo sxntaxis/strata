@@ -912,17 +912,16 @@ fn retire_checkpoint_for_active_transition(
 fn query_active(connection: &Connection) -> Result<Option<ActiveSessionRecord>, rusqlite::Error> {
     connection
         .query_row(
-            "SELECT stable_id, project, category_id, description, started_at_utc, recovery_kind
+            "SELECT stable_id, category_id, description, started_at_utc, recovery_kind
              FROM active_session WHERE singleton = 1",
             [],
             |row| {
                 Ok(ActiveSessionRecord {
                     stable_id: row.get(0)?,
-                    project: row.get(1)?,
-                    category_id: row.get(2)?,
-                    description: row.get(3)?,
-                    started_at_utc: row.get(4)?,
-                    recovery_kind: row.get(5)?,
+                    category_id: row.get(1)?,
+                    description: row.get(2)?,
+                    started_at_utc: row.get(3)?,
+                    recovery_kind: row.get(4)?,
                 })
             },
         )
@@ -935,12 +934,11 @@ fn insert_active(
 ) -> Result<(), rusqlite::Error> {
     transaction.execute(
         "INSERT INTO active_session (
-            singleton, stable_id, project, category_id, description,
+            singleton, stable_id, category_id, description,
             started_at_utc, recovery_kind
-         ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)",
+         ) VALUES (1, ?1, ?2, ?3, ?4, ?5)",
         params![
             active.stable_id,
-            active.project,
             active.category_id,
             active.description,
             active.started_at_utc,
@@ -957,14 +955,13 @@ fn insert_completed(
 ) -> Result<i64, rusqlite::Error> {
     transaction.execute(
         "INSERT INTO sessions (
-            stable_id, project, category_id, description, started_at_utc,
+            stable_id, category_id, description, started_at_utc,
             ended_at_utc, operational_day, elapsed_seconds,
             boundary_utc_offset_seconds, boundary_start_minutes,
             source
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             active.stable_id,
-            active.project,
             active.category_id,
             active.description,
             active.started_at_utc,
@@ -1103,7 +1100,6 @@ mod tests {
             &mut repository,
             &NewActiveSession {
                 stable_id,
-                project: "Project",
                 category_id: 1,
                 description: "",
                 started_at_utc: "2026-08-01T10:00:00Z",
@@ -1138,7 +1134,6 @@ mod tests {
             .unwrap();
         let active = NewActiveSession {
             stable_id: "initial-active",
-            project: "",
             category_id: 1,
             description: "Focused",
             started_at_utc: "2026-08-03T18:00:00Z",
@@ -1194,7 +1189,6 @@ mod tests {
                 .unwrap();
             let active = NewActiveSession {
                 stable_id: "initial-active",
-                project: "",
                 category_id: 1,
                 description: "Focused",
                 started_at_utc: "2026-08-03T18:00:00Z",
@@ -1293,7 +1287,6 @@ mod tests {
             &completion("tui-runtime"),
             &NewActiveSession {
                 stable_id: "active-b",
-                project: "",
                 category_id: 1,
                 description: "",
                 started_at_utc: "2026-08-01T11:00:00Z",
@@ -1374,7 +1367,6 @@ mod tests {
             &completion("tui-runtime"),
             &NewActiveSession {
                 stable_id: "active-b",
-                project: "",
                 category_id: 1,
                 description: "next",
                 started_at_utc: "2026-08-01T11:00:00Z",
@@ -1398,7 +1390,6 @@ mod tests {
             "reset:b:c",
             &NewActiveSession {
                 stable_id: "active-c",
-                project: "",
                 category_id: 1,
                 description: "reset",
                 started_at_utc: "2026-08-01T12:00:00Z",
@@ -1460,7 +1451,6 @@ mod tests {
             &completion("tui-runtime"),
             &NewActiveSession {
                 stable_id: "active-b",
-                project: "",
                 category_id: 1,
                 description: "",
                 started_at_utc: "2026-08-01T11:00:00Z",
@@ -1759,7 +1749,6 @@ mod tests {
                 &completion,
                 &NewActiveSession {
                     stable_id: next,
-                    project: "",
                     category_id: 1,
                     description: "",
                     started_at_utc: "2026-08-01T10:00:00Z",

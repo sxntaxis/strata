@@ -31,9 +31,9 @@ Terminal-cell dimensions and Braille-dot dimensions are distinct units:
 - `grid_width_dots` and `grid_height_dots` are canonical logical-canvas dimensions;
 - one terminal cell projects `dot_width × dot_height` logical dots.
 
-The persisted logical grid owns coordinates, neighborhoods, category composition, and topology. Terminal resize changes viewport state only. Shrink crops presentation without deleting hidden grains; expansion pads without stretching or relocating grains. Projection is horizontally centered and bottom-aligned.
+The persisted logical grid owns coordinates, neighborhoods, category composition, and topology. Shrinking the terminal changes viewport state only and crops presentation without deleting hidden grains. Growing beyond the logical canvas expands it monotonically: old cells are copied around the horizontal center and bottom baseline, new cells begin empty, and the canvas is never shrunk again merely because the viewport shrinks.
 
-Resize never invokes gravity, ingress placement, repacking, overflow insertion, or another canonical mutation. Repeated resize oscillation with no elapsed time is exactly idempotent at the `SandState` level.
+Canvas growth never runs gravity or repacks existing grains. Pending logical mass may occupy newly available capacity through the normal pending-grain placement path. Once a maximum extent has been reached, shrink/grow oscillation within that extent is idempotent at the `SandState` level.
 
 ## SandState persistence
 

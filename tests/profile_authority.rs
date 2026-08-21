@@ -80,14 +80,14 @@ fn rooted_profiles_isolate_database_state() {
     assert_ne!(a_json["profile_id"], b_json["profile_id"]);
     assert_eq!(a_json["root"], a.to_string_lossy().as_ref());
 
-    let started = run(&a, &["start", "A project", "--category", "Work"]);
+    let started = run(&a, &["start", "Work"]);
     assert!(started.status.success(), "{}", stderr(&started));
     assert_eq!(row_count(&a, "active_session"), 1);
     assert_eq!(row_count(&b, "active_session"), 0);
 
     let wrong_stop = run(&b, &["stop"]);
     assert!(!wrong_stop.status.success());
-    assert!(stderr(&wrong_stop).contains("No active session"));
+    assert!(stderr(&wrong_stop).contains("No active"));
 
     let started_at = (Utc::now() - ChronoDuration::seconds(2)).to_rfc3339();
     Connection::open(database_path(&a))

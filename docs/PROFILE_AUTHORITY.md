@@ -18,10 +18,9 @@ Precedence:
 
 1. explicit global `--profile <directory>`;
 2. `STRATA_PROFILE`;
-3. `STRATA_DATA_DIR`, interpreted as a whole-profile-root alias;
-4. the platform XDG profile.
+3. the platform XDG profile.
 
-Conflicting `STRATA_PROFILE` and `STRATA_DATA_DIR` values fail before authority opens. Once initialized, the profile cannot change inside the process.
+`STRATA_DATA_DIR` is not a selector in the current runtime. Once initialized, the profile cannot change inside the process.
 
 ## Rooted profile layout
 
@@ -42,7 +41,7 @@ All runtime and interchange paths derive from the selected profile:
 - active-session state;
 - detached checkpoints and transition receipts;
 - canonical sediment, history, and daily contributions;
-- category tags and lifecycle ledgers;
+- category tags;
 - recovery exports;
 - keymap/configuration;
 - SQLite database.
@@ -77,9 +76,9 @@ Profile switching is process-bound close/open behavior.
 ## Failure policy
 
 - a profile root that is not a directory fails before configuration load;
-- conflicting environment selectors fail before mutation;
+- invalid explicit/environment profile selectors fail before mutation;
 - invalid manifest schema or UUID fails before storage resolution;
-- copied active-session evidence from another profile blocks stop/report use;
+- copied profile-bound runtime evidence from another profile is refused;
 - copied detached checkpoint evidence from another profile enters visible fail-closed recovery rather than being applied;
 - mismatched SQLite profile identity is invalid;
 - obsolete `time_log_path` configuration fails with explicit `--profile` guidance.
@@ -88,9 +87,9 @@ Profile switching is process-bound close/open behavior.
 
 - two explicit roots receive different persistent UUIDs and separate data/state/config trees;
 - an active session started under profile A is absent from profile B;
-- profile B cannot stop profile A's copied active-session file;
+- profile B cannot control profile A through the profile-scoped live-control socket;
 - profile A's completed ledger is never written under profile B;
 - a detached checkpoint copied from profile A is refused under profile B in a real PTY process;
 - obsolete partial path configuration is rejected by unit and process tests;
 - profile UUID generation and manifest shape are validated;
-- all existing persistence, recovery, lifecycle, interaction, temporal, reporting, and terminal suites remain green.
+- all existing persistence, recovery, interaction, temporal, reporting, and terminal suites remain green.

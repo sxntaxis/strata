@@ -60,7 +60,6 @@ fn start_active(path: &Path, stable_id: &str, category_id: i64) {
         &mut repository,
         &NewActiveSession {
             stable_id,
-            project: "",
             category_id,
             description: "",
             started_at_utc: "2026-08-01T12:00:00Z",
@@ -76,9 +75,9 @@ fn insert_session(path: &Path, id: i64, category_id: i64, description: &str) {
         .connection
         .execute(
             "INSERT INTO sessions (
-                id, stable_id, project, category_id, description, started_at_utc,
+                id, stable_id, category_id, description, started_at_utc,
                 ended_at_utc, operational_day, elapsed_seconds, source
-             ) VALUES (?1, ?2, '', ?3, ?4, '2026-08-01T12:00:00Z',
+             ) VALUES (?1, ?2, ?3, ?4, '2026-08-01T12:00:00Z',
                 '2026-08-01T13:00:00Z', '2026-08-01', 3600, 'tui-runtime')",
             params![id, format!("session-{id}"), category_id, description],
         )
@@ -295,7 +294,6 @@ fn every_authoritative_persistence_family_rolls_back_or_remains_recoverable() {
             id: 7,
             date: "2026-08-01".to_string(),
             category_id: CategoryId::new(1),
-            project: String::new(),
             description: "new".to_string(),
             start_time: "12:00:00".to_string(),
             end_time: "13:00:00".to_string(),

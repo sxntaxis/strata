@@ -45,10 +45,6 @@ impl App {
                     ListItem::new(Line::from(vec![
                         Span::raw(dot).fg(text_color),
                         Span::raw(layer_name).fg(text_color),
-                        Span::styled(
-                            format!(" · metadata: {}", cat.description),
-                            Style::default().fg(text_color),
-                        ),
                         description_text,
                     ]))
                     .style(Style::default().fg(text_color).bg(cat.color))
@@ -97,7 +93,11 @@ impl App {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .title(Line::from(Span::styled(
-                        "Strata",
+                        if self.modal_editing_category_metadata {
+                            "Strata · layer metadata"
+                        } else {
+                            "Strata"
+                        },
                         Style::default().fg(Color::White),
                     )))
                     .title_alignment(ratatui::layout::Alignment::Center)

@@ -1,72 +1,62 @@
-# Strata project authority
+# Strata product authority
 
 Status: accepted product direction
-Last reviewed: 2026-08-02
+Last reviewed: 2026-08-20
 
 ## Purpose
 
 Strata is a general-purpose continuous temporal ledger and active timer expressed through a falling-sand terminal interface.
 
-It may be used for study, habits, projects, work, leisure, creative practice, or other user-defined activities. It is not defined primarily as a freelance or billing tracker.
+It may be used for study, habits, projects, work, leisure, creative practice, or other user-defined activities. It is not defined primarily as a freelance, billing, or project-management tracker.
 
 ## Governing concept
 
 Time does not stop when the user is not actively classifying it. Strata continuously represents elapsed time as falling sediment.
 
-- **Idle** is the accepted name for the baseline state of continuous time.
-- Selecting a layer gives passing time an active identity, color, and balance direction.
-- Active use functions as a timer without suspending the continuous-ledger model.
-- Idle time remains part of the sedimentary history while being omitted from ordinary active-time accounting.
-
-The user-facing runtime term is **idle**. Historical `drift` and `none` inputs and internal identifiers may remain as compatibility vocabulary, but they do not define the product concept.
+- **Idle** is the baseline state of continuous time.
+- Selecting a **layer** gives passing time an active identity, color, and balance direction.
+- `stop` returns to idle; it does not create a hole in chronology.
+- Idle remains part of sedimentary history while being omitted from ordinary active-time accounting.
 
 ## Session identity
 
-Project and category are independent axes of chronological truth.
+The current product has one reportable classification axis: category/layer. Session description/tag captures the immediate text attached to that interval.
 
-- **Project** identifies the subject, client, effort, or context of a session. It is persisted exactly when supplied and may be empty for general TUI-created intervals.
-- **Category/layer** identifies the kind of activity, color, and balance direction. CLI starts require an explicit category.
-- Neither axis substitutes for the other. A project must not be encoded as a category merely to survive persistence, and an omitted category must not be inferred as idle.
-- Idle is category ID `0`, selected deliberately, represented in sediment, and excluded from ordinary active-time totals.
+There is no independent canonical `project` axis. The old prerelease positional CLI parameter named `project` functioned as a layer fallback, while the TUI never had a project workflow. The later independent field was therefore retired instead of being promoted into the UX merely to justify its schema presence.
 
-The CLI positional project remains required by the current command surface. Project management, project CRUD, and project-filtered report UI are separate future product questions; preserving project identity does not imply those features already exist.
+Future grouping or context above layers is an open product question and requires its own workflow evidence.
 
 ## Historical truth
 
 Strata preserves two related forms of history:
 
-1. **Chronological truth** — exact intervals, timestamps, durations, layers, notes, project identity, and reportable totals.
+1. **Chronological truth** — exact intervals, timestamps, durations, layers, notes, and reportable totals.
 2. **Sedimentary truth** — the accountable visual formation produced by those intervals: mass, color composition, topology, contours, neighborhoods, and broad chronology.
 
-The chronological ledger is more precise. The sediment is a visualization, but it is not disposable decoration. Losing or arbitrarily rewriting it damages the user's experienced historical artifact.
-
-The current visual quantum is one grain per elapsed second. A configurable temporal quantum is a future candidate, not current behavior.
+The chronological ledger is more precise. Sediment is a visualization, but not disposable decoration.
 
 ## Artistic and functional unity
 
-Strata is both a tool and an artwork. The falling sediment, color mixing, accumulation, idle presence, and physical behavior are product meaning rather than a cosmetic layer around a conventional timer.
+The falling sediment, color mixing, accumulation, idle presence, and physical behavior are product meaning rather than a cosmetic wrapper around a conventional timer.
 
-Braille characters encode several physical dot positions with one foreground color. Mixed colors at cell seams are therefore an intentional composition of subcell material and are compatible with the behavior of mixed sand.
+The logical sand canvas may expand when a terminal grows but does not shrink merely because the viewport shrinks. This keeps the artwork responsive without making terminal dimensions destructive persistence authority.
 
 ## Balance
 
-Layers may carry a user-defined positive, negative, or neutral directional value. This supports balance rather than prescribing morality. Work/leisure is one interpretation, not the only one.
+Layers may carry a positive, negative, or neutral directional value. The current term `Karma` remains under terminology review; no rename is accepted here.
 
-The current term `Karma` remains under terminology review. `Balance`, `polarity`, and `valence` are candidate vocabulary; no rename is accepted here.
+## Persistence and live control
 
-## Persistence and custody
+Each selected profile owns one `data/strata.sqlite3` database shared by CLI and TUI. SQLite is the sole live persistence authority.
 
-Each selected profile owns one `data/strata.sqlite3` database shared directly by CLI and TUI. The database is bound to the profile UUID. Deterministic CSV remains a public interchange format, not another runtime authority. SQLite doctor, backup, restore, recovery, checkpoints, and receipts operate on that database directly.
+When a TUI is running, mutating CLI commands are delivered through a profile-scoped Unix socket so the TUI executes them through the same in-memory and SQLite transition path. The socket is ephemeral transport/discovery, not persistence authority. Without a live TUI, the CLI uses the same SQLite domain semantics headlessly.
 
-Authority must fail closed. Strata must not silently redirect work to defaults, fall back from a damaged SQLite authority to stale files, or claim a mutation succeeded before it is durable.
+Portable CSV remains interchange only. Doctor, backup, restore, recovery, checkpoints, and transition receipts operate on SQLite directly.
 
 ## Open product questions
 
-The following remain unresolved and must not be guessed into implementation:
-
-- the intended macro- and micro-chronological meaning of vertical sediment position;
-- whether layers remain flat or gain optional context or relationships;
-- the durable artistic meaning of clearing, hiding, compacting, or beginning a new formation;
-- final user-facing semantics for crash uncertainty and inferred elapsed time beyond the transactional recovery mechanism already implemented;
-- the final name and presentation of the balance system;
-- whether and how configurable temporal quantum applies to existing formations.
+- final vertical chronology semantics beyond the accepted bottom-aligned viewport projection;
+- whether layers remain flat or gain optional context/relationships;
+- durable artistic semantics for clearing, hiding, compacting, or beginning a new formation;
+- final naming/presentation of the balance system;
+- configurable temporal quantum for existing formations.

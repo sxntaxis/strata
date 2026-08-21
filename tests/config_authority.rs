@@ -64,11 +64,11 @@ impl TestProfile {
         assert!(!self.state_home.join("strata/active_session.json").exists());
     }
 
-    fn active_project(&self) -> Option<String> {
+    fn active_category_id(&self) -> Option<i64> {
         Connection::open(self.database_path())
             .expect("open profile database")
             .query_row(
-                "SELECT project FROM active_session WHERE singleton = 1",
+                "SELECT category_id FROM active_session WHERE singleton = 1",
                 [],
                 |row| row.get(0),
             )
@@ -104,7 +104,7 @@ fn malformed_json_blocks_mutation_before_authority_open() {
     let profile = TestProfile::new("malformed");
     fs::write(profile.config_path(), "{ broken").expect("write malformed config");
 
-    let output = profile.run(&["start", "unsafe", "--category", "idle"]);
+    let output = profile.run(&["start", "idle"]);
     assert_config_failure(&profile, &output, "Failed parsing keymap JSON");
 }
 
@@ -127,7 +127,7 @@ fn invalid_timezone_blocks_mutation_before_default_database_creation() {
     fs::write(profile.config_path(), r#"{"utc_offset_seconds":86400}"#)
         .expect("write invalid timezone config");
 
-    let output = profile.run(&["start", "unsafe", "--category", "idle"]);
+    let output = profile.run(&["start", "idle"]);
     assert_config_failure(&profile, &output, "Invalid utc_offset_seconds");
 }
 
@@ -140,7 +140,7 @@ fn time_log_path_hot_redirect_is_rejected() {
     )
     .expect("write obsolete partial-path config");
 
-    let output = profile.run(&["start", "unsafe", "--category", "idle"]);
+    let output = profile.run(&["start", "idle"]);
     assert_config_failure(&profile, &output, "time_log_path");
     assert!(stderr(&output).contains("--profile"));
 }
@@ -150,19 +150,10 @@ fn ignore_config_is_an_explicit_deliberate_default_override() {
     let profile = TestProfile::new("override");
     fs::write(profile.config_path(), "{ broken").expect("write malformed config");
 
-    let output = profile.run(&[
-        "--ignore-config",
-        "start",
-        "deliberate-default",
-        "--category",
-        "idle",
-    ]);
+    let output = profile.run(&["--ignore-config", "start", "idle"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert!(profile.database_path().exists());
-    assert_eq!(
-        profile.active_project().as_deref(),
-        Some("deliberate-default")
-    );
+    assert_eq!(profile.active_category_id(), Some(0));
     assert!(
         !profile
             .state_home
@@ -197,5 +188,5 @@ fn removed_sunrise_mode_is_migrated_visibly_to_fixed_policy() {
     assert!(migrated.contains("\"day_start_hour\": 5"));
     assert!(migrated.contains("\"day_start_minute\": 45"));
     assert!(profile.database_path().exists());
-    assert_eq!(profile.active_project(), None);
+    assert_eq!(profile.active_category_id(), None);
 }

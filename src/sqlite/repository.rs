@@ -51,7 +51,6 @@ pub(crate) struct NewCategoryRecord<'a> {
 pub(crate) struct SessionRecord {
     pub id: i64,
     pub stable_id: String,
-    pub project: String,
     pub category_id: i64,
     pub description: String,
     pub started_at_utc: String,
@@ -66,7 +65,6 @@ pub(crate) struct SessionRecord {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NewSessionRecord<'a> {
     pub stable_id: &'a str,
-    pub project: &'a str,
     pub category_id: i64,
     pub description: &'a str,
     pub started_at_utc: &'a str,
@@ -81,7 +79,6 @@ pub(crate) struct NewSessionRecord<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActiveSessionRecord {
     pub stable_id: String,
-    pub project: String,
     pub category_id: i64,
     pub description: String,
     pub started_at_utc: String,
@@ -203,19 +200,6 @@ pub(crate) struct NewSandSnapshotRecord<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CategoryLifecycleReceiptRecord {
-    pub operation_id: String,
-    pub operation_kind: String,
-    pub source_category_id: i64,
-    pub target_category_id: Option<i64>,
-    pub source_metadata_json: String,
-    pub target_metadata_json: Option<String>,
-    pub preview_revision: String,
-    pub reference_counts_json: String,
-    pub applied_at_utc: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RepositorySnapshot {
     pub categories: Vec<CategoryRecord>,
     pub category_tags: BTreeMap<i64, Vec<String>>,
@@ -224,7 +208,6 @@ pub(crate) struct RepositorySnapshot {
     pub checkpoint: Option<CheckpointRecord>,
     pub sand_state: Option<SandStateRecord>,
     pub sand_snapshots: Vec<SandSnapshotRecord>,
-    pub category_lifecycle_receipts: Vec<CategoryLifecycleReceiptRecord>,
 }
 
 impl SqliteRepository {
@@ -244,15 +227,7 @@ impl SqliteRepository {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let maximum_identity: i64 = transaction.query_row(
-            "SELECT COALESCE(MAX(identity), 0)
-             FROM (
-                 SELECT id AS identity FROM categories
-                 UNION ALL
-                 SELECT source_category_id AS identity FROM category_lifecycle_receipts
-                 UNION ALL
-                 SELECT target_category_id AS identity FROM category_lifecycle_receipts
-                 WHERE target_category_id IS NOT NULL
-             )",
+            "SELECT COALESCE(MAX(id), 0) FROM categories",
             [],
             |row| row.get(0),
         )?;
@@ -441,20 +416,18 @@ impl SqliteRepository {
         let changed = transaction.execute(
             "UPDATE sessions
              SET stable_id = ?1,
-                 project = ?2,
-                 category_id = ?3,
-                 description = ?4,
-                 started_at_utc = ?5,
-                 ended_at_utc = ?6,
-                 operational_day = ?7,
-                 elapsed_seconds = ?8,
-                 boundary_utc_offset_seconds = ?9,
-                 boundary_start_minutes = ?10,
-                 source = ?11
-             WHERE id = ?12",
+                 category_id = ?2,
+                 description = ?3,
+                 started_at_utc = ?4,
+                 ended_at_utc = ?5,
+                 operational_day = ?6,
+                 elapsed_seconds = ?7,
+                 boundary_utc_offset_seconds = ?8,
+                 boundary_start_minutes = ?9,
+                 source = ?10
+             WHERE id = ?11",
             params![
                 session.stable_id,
-                session.project,
                 session.category_id,
                 session.description,
                 session.started_at_utc,
@@ -510,7 +483,6 @@ impl SqliteRepository {
         transaction.execute(
             "INSERT INTO sessions (
                 stable_id,
-                project,
                 category_id,
                 description,
                 started_at_utc,
@@ -520,10 +492,9 @@ impl SqliteRepository {
                 boundary_utc_offset_seconds,
                 boundary_start_minutes,
                 source
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 active.stable_id,
-                active.project,
                 active.category_id,
                 active.description,
                 active.started_at_utc,
@@ -739,37 +710,10 @@ impl SqliteRepository {
             checkpoint: query_checkpoint(&transaction)?,
             sand_state: query_sand_state(&transaction)?,
             sand_snapshots: query_sand_snapshots(&transaction)?,
-            category_lifecycle_receipts: query_category_lifecycle_receipts(&transaction)?,
         };
         transaction.commit()?;
         Ok(snapshot)
     }
-}
-
-fn query_category_lifecycle_receipts(
-    connection: &Connection,
-) -> Result<Vec<CategoryLifecycleReceiptRecord>, RepositoryError> {
-    let mut statement = connection.prepare(
-        "SELECT operation_id, operation_kind, source_category_id, target_category_id,
-                source_metadata_json, target_metadata_json, preview_revision,
-                reference_counts_json, applied_at_utc
-         FROM category_lifecycle_receipts
-         ORDER BY applied_at_utc, operation_id",
-    )?;
-    let rows = statement.query_map([], |row| {
-        Ok(CategoryLifecycleReceiptRecord {
-            operation_id: row.get(0)?,
-            operation_kind: row.get(1)?,
-            source_category_id: row.get(2)?,
-            target_category_id: row.get(3)?,
-            source_metadata_json: row.get(4)?,
-            target_metadata_json: row.get(5)?,
-            preview_revision: row.get(6)?,
-            reference_counts_json: row.get(7)?,
-            applied_at_utc: row.get(8)?,
-        })
-    })?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
 fn validate_category(category: &NewCategoryRecord<'_>) -> Result<(), RepositoryError> {
@@ -909,7 +853,6 @@ fn insert_session_record(
     connection.execute(
         "INSERT INTO sessions (
             stable_id,
-            project,
             category_id,
             description,
             started_at_utc,
@@ -919,10 +862,9 @@ fn insert_session_record(
             boundary_utc_offset_seconds,
             boundary_start_minutes,
             source
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             session.stable_id,
-            session.project,
             session.category_id,
             session.description,
             session.started_at_utc,
@@ -945,15 +887,13 @@ fn insert_active_session(
         "INSERT INTO active_session (
             singleton,
             stable_id,
-            project,
             category_id,
             description,
             started_at_utc,
             recovery_kind
-         ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)",
+         ) VALUES (1, ?1, ?2, ?3, ?4, ?5)",
         params![
             active.stable_id,
-            active.project,
             active.category_id,
             active.description,
             active.started_at_utc,
@@ -1000,7 +940,7 @@ fn query_category_tags(
 
 fn query_all_sessions(connection: &Connection) -> Result<Vec<SessionRecord>, RepositoryError> {
     let mut statement = connection.prepare(
-        "SELECT id, stable_id, project, category_id, description,
+        "SELECT id, stable_id, category_id, description,
                 started_at_utc, ended_at_utc, operational_day,
                 elapsed_seconds, boundary_utc_offset_seconds,
                 boundary_start_minutes, source
@@ -1063,18 +1003,17 @@ fn query_active_session(
 ) -> Result<Option<ActiveSessionRecord>, RepositoryError> {
     Ok(connection
         .query_row(
-            "SELECT stable_id, project, category_id, description,
+            "SELECT stable_id, category_id, description,
                     started_at_utc, recovery_kind
              FROM active_session WHERE singleton = 1",
             [],
             |row| {
                 Ok(ActiveSessionRecord {
                     stable_id: row.get(0)?,
-                    project: row.get(1)?,
-                    category_id: row.get(2)?,
-                    description: row.get(3)?,
-                    started_at_utc: row.get(4)?,
-                    recovery_kind: row.get(5)?,
+                    category_id: row.get(1)?,
+                    description: row.get(2)?,
+                    started_at_utc: row.get(3)?,
+                    recovery_kind: row.get(4)?,
                 })
             },
         )
@@ -1185,16 +1124,15 @@ fn map_session(row: &Row<'_>) -> rusqlite::Result<SessionRecord> {
     Ok(SessionRecord {
         id: row.get(0)?,
         stable_id: row.get(1)?,
-        project: row.get(2)?,
-        category_id: row.get(3)?,
-        description: row.get(4)?,
-        started_at_utc: row.get(5)?,
-        ended_at_utc: row.get(6)?,
-        operational_day: row.get(7)?,
-        elapsed_seconds: row.get(8)?,
-        boundary_utc_offset_seconds: row.get(9)?,
-        boundary_start_minutes: row.get(10)?,
-        source: row.get(11)?,
+        category_id: row.get(2)?,
+        description: row.get(3)?,
+        started_at_utc: row.get(4)?,
+        ended_at_utc: row.get(5)?,
+        operational_day: row.get(6)?,
+        elapsed_seconds: row.get(7)?,
+        boundary_utc_offset_seconds: row.get(8)?,
+        boundary_start_minutes: row.get(9)?,
+        source: row.get(10)?,
     })
 }
 
@@ -1214,7 +1152,6 @@ mod tests {
     fn session<'a>(stable_id: &'a str, category_id: i64, day: &'a str) -> NewSessionRecord<'a> {
         NewSessionRecord {
             stable_id,
-            project: "Study",
             category_id,
             description: "Read",
             started_at_utc: "2026-08-01T16:00:00Z",
@@ -1230,7 +1167,6 @@ mod tests {
     fn active<'a>(stable_id: &'a str, category_id: i64) -> NewActiveSession<'a> {
         NewActiveSession {
             stable_id,
-            project: "Study",
             category_id,
             description: "Continue",
             started_at_utc: "2026-08-01T17:00:00Z",

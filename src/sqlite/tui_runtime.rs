@@ -76,8 +76,6 @@ pub(crate) fn load_state(database_path: &Path) -> Result<SqliteTuiState, String>
         }
     }
     active_categories.sort_by_key(|category| category_sort_order(database_path, category.id.0));
-    max_category_id =
-        max_category_id.max(super::category_identity_high_watermark_at(database_path)?);
 
     let mut sessions = Vec::with_capacity(session_rows.len());
     let mut max_session_id = 0usize;
@@ -121,7 +119,6 @@ pub(crate) fn load_state(database_path: &Path) -> Result<SqliteTuiState, String>
             id,
             date: row.operational_day,
             category_id: CategoryId::new(category_id),
-            project: row.project,
             description: row.description,
             start_time: local_clock(&row.started_at_utc, operational_day_policy)?,
             end_time: local_clock(&row.ended_at_utc, operational_day_policy)?,
@@ -190,7 +187,6 @@ pub(crate) fn ensure_active_session(
         &mut repository,
         &NewActiveSession {
             stable_id: &stable_id,
-            project: "",
             category_id: as_i64(category_id.0, "category ID")?,
             description,
             started_at_utc: &started,
@@ -235,7 +231,6 @@ pub(crate) fn start_active_session_with_checkpoint<T: Serialize>(
         &mut repository,
         &NewActiveSession {
             stable_id: active_stable_id,
-            project: "",
             category_id: as_i64(category_id.0, "category ID")?,
             description,
             started_at_utc: &started,
@@ -277,7 +272,6 @@ pub(crate) fn switch_active_session(
         },
         &NewActiveSession {
             stable_id: next_stable_id,
-            project: "",
             category_id: as_i64(next_category_id.0, "category ID")?,
             description: next_description,
             started_at_utc: &switched,
@@ -334,7 +328,6 @@ pub(crate) fn reset_active_session(
         operation_id,
         &NewActiveSession {
             stable_id: next_stable_id,
-            project: &active.project,
             category_id: active.category_id,
             description: &active.description,
             started_at_utc: &started,
@@ -574,7 +567,7 @@ pub(crate) fn sync_sessions(database_path: &Path, sessions: &[Session]) -> Resul
         .map_err(|error| error.to_string())?;
     let mut statement = transaction
         .prepare(
-            "SELECT id, project, category_id, operational_day, elapsed_seconds FROM sessions ORDER BY id",
+            "SELECT id, category_id, operational_day, elapsed_seconds FROM sessions ORDER BY id",
         )
         .map_err(|error| error.to_string())?;
     let stored = statement
@@ -582,10 +575,9 @@ pub(crate) fn sync_sessions(database_path: &Path, sessions: &[Session]) -> Resul
             Ok((
                 row.get::<_, i64>(0)?,
                 (
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
                 ),
             ))
         })
@@ -603,10 +595,9 @@ pub(crate) fn sync_sessions(database_path: &Path, sessions: &[Session]) -> Resul
         })?;
         let category_id = as_i64(session.category_id.0, "category ID")?;
         let elapsed = as_i64(session.elapsed_seconds as u64, "elapsed seconds")?;
-        if expected.0 != session.project
-            || expected.1 != category_id
-            || expected.2 != session.date
-            || expected.3 != elapsed
+        if expected.0 != category_id
+            || expected.1 != session.date
+            || expected.2 != elapsed
         {
             return Err(format!(
                 "TUI session {id} identity or chronology diverged from SQLite authority"
@@ -825,16 +816,16 @@ pub(crate) fn clear_all_state<T: Serialize>(
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|error| error.to_string())?;
 
-    let active: Option<(String, String, i64, String)> = transaction
+    let active: Option<(String, i64, String)> = transaction
         .query_row(
-            "SELECT stable_id, project, category_id, description
+            "SELECT stable_id, category_id, description
              FROM active_session WHERE singleton = 1",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()
         .map_err(|error| error.to_string())?;
-    let Some((actual_stable_id, _, _, _)) = active else {
+    let Some((actual_stable_id, _, _)) = active else {
         return Err("there is no active TUI session to clear".to_string());
     };
     if actual_stable_id != expected_active_stable_id {
@@ -1437,7 +1428,7 @@ mod tests {
     }
 
     #[test]
-    fn session_sync_preserves_project_and_chronology() {
+    fn session_sync_preserves_chronology_and_concurrent_rows() {
         let path = repository_file("sessions");
         let mut repository = SqliteRepository::open(&path).unwrap();
         repository
@@ -1452,9 +1443,9 @@ mod tests {
             .connection
             .execute(
                 "INSERT INTO sessions (
-                    id, stable_id, project, category_id, description, started_at_utc,
+                    id, stable_id, category_id, description, started_at_utc,
                     ended_at_utc, operational_day, elapsed_seconds, source
-                 ) VALUES (7, 'stable', 'preserved-project', 1, 'old',
+                 ) VALUES (7, 'stable', 1, 'old',
                     '2026-08-01T12:00:00Z', '2026-08-01T13:00:00Z',
                     '2026-08-01', 3600, 'cli-runtime')",
                 [],
@@ -1463,32 +1454,27 @@ mod tests {
         drop(repository);
 
         let mut state = load_state(&path).unwrap();
-        assert_eq!(
-            state.loaded_sessions.sessions[0].project,
-            "preserved-project"
-        );
         state.loaded_sessions.sessions[0].description = "edited".to_string();
         sync_sessions(&path, &state.loaded_sessions.sessions).unwrap();
         let repository = open_cli_repository(&path).unwrap();
-        let row: (String, String, String) = repository
+        let row: (String, String) = repository
             .connection
             .query_row(
-                "SELECT project, description, started_at_utc FROM sessions WHERE id = 7",
+                "SELECT description, started_at_utc FROM sessions WHERE id = 7",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(row.0, "preserved-project");
-        assert_eq!(row.1, "edited");
-        assert_eq!(row.2, "2026-08-01T12:00:00Z");
+        assert_eq!(row.0, "edited");
+        assert_eq!(row.1, "2026-08-01T12:00:00Z");
 
         repository
             .connection
             .execute(
                 "INSERT INTO sessions (
-                    id, stable_id, project, category_id, description, started_at_utc,
+                    id, stable_id, category_id, description, started_at_utc,
                     ended_at_utc, operational_day, elapsed_seconds, source
-                 ) VALUES (8, 'concurrent', 'external-project', 1, 'external',
+                 ) VALUES (8, 'concurrent', 1, 'external',
                     '2026-08-01T14:00:00Z', '2026-08-01T15:00:00Z',
                     '2026-08-01', 3600, 'cli-runtime')",
                 [],
@@ -1498,23 +1484,20 @@ mod tests {
         sync_sessions(&path, &state.loaded_sessions.sessions).unwrap();
         update_session_description(&path, 7, "explicit-edit").unwrap();
         let repository = open_cli_repository(&path).unwrap();
-        let preserved: (String, String, String, String) = repository
+        let preserved: (String, String, String) = repository
             .connection
             .query_row(
-                "SELECT project, description, started_at_utc, source FROM sessions WHERE id = 7",
+                "SELECT description, started_at_utc, source FROM sessions WHERE id = 7",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(preserved.0, "preserved-project");
-        assert_eq!(preserved.1, "explicit-edit");
-        assert_eq!(preserved.2, "2026-08-01T12:00:00Z");
-        assert_eq!(preserved.3, "cli-runtime");
+        assert_eq!(preserved.0, "explicit-edit");
+        assert_eq!(preserved.1, "2026-08-01T12:00:00Z");
+        assert_eq!(preserved.2, "cli-runtime");
         let concurrent_count: i64 = repository
             .connection
-            .query_row("SELECT count(*) FROM sessions WHERE id = 8", [], |row| {
-                row.get(0)
-            })
+            .query_row("SELECT count(*) FROM sessions WHERE id = 8", [], |row| row.get(0))
             .unwrap();
         assert_eq!(concurrent_count, 1);
         drop(repository);
@@ -1524,10 +1507,7 @@ mod tests {
             .connection
             .query_row("SELECT count(*) FROM sessions", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(
-            remaining, 1,
-            "explicit deletion must not remove concurrent rows"
-        );
+        assert_eq!(remaining, 1, "explicit deletion must not remove concurrent rows");
         std::fs::remove_file(path).ok();
     }
 
@@ -1538,8 +1518,7 @@ mod tests {
         repository
             .start_session(&NewActiveSession {
                 stable_id: "checkpoint-active",
-                project: "",
-                category_id: 0,
+                    category_id: 0,
                 description: "",
                 started_at_utc: "2026-08-01T12:00:00Z",
                 recovery_kind: "live",
@@ -1665,8 +1644,7 @@ mod checkpoint_identity_tests {
             &mut repository,
             &NewActiveSession {
                 stable_id: "active-a",
-                project: "",
-                category_id: 1,
+                    category_id: 1,
                 description: "",
                 started_at_utc: "2026-08-01T10:00:00Z",
                 recovery_kind: "live",
@@ -1758,9 +1736,9 @@ mod clear_all_transaction_tests {
             .connection
             .execute(
                 "INSERT INTO sessions (
-                    stable_id, project, category_id, description, started_at_utc,
+                    stable_id, category_id, description, started_at_utc,
                     ended_at_utc, operational_day, elapsed_seconds, source
-                 ) VALUES ('completed-idle', '', 0, '', '2026-08-01T10:00:00Z',
+                 ) VALUES ('completed-idle', 0, '', '2026-08-01T10:00:00Z',
                     '2026-08-01T11:00:00Z', '2026-08-01', 3600, 'test')",
                 [],
             )
@@ -1769,8 +1747,7 @@ mod clear_all_transaction_tests {
             &mut repository,
             &NewActiveSession {
                 stable_id: "idle-a",
-                project: "",
-                category_id: 0,
+                    category_id: 0,
                 description: "",
                 started_at_utc: "2026-08-01T11:00:00Z",
                 recovery_kind: "live",
@@ -1931,9 +1908,9 @@ mod clear_all_additional_transaction_tests {
             .connection
             .execute(
                 "INSERT INTO sessions (
-                    stable_id, project, category_id, description, started_at_utc,
+                    stable_id, category_id, description, started_at_utc,
                     ended_at_utc, operational_day, elapsed_seconds, source
-                 ) VALUES ('completed-idle', '', 0, '', '2026-08-01T10:00:00Z',
+                 ) VALUES ('completed-idle', 0, '', '2026-08-01T10:00:00Z',
                     '2026-08-01T11:00:00Z', '2026-08-01', 3600, 'test')",
                 [],
             )
@@ -1942,8 +1919,7 @@ mod clear_all_additional_transaction_tests {
             &mut repository,
             &NewActiveSession {
                 stable_id: "active-a",
-                project: "",
-                category_id: 0,
+                    category_id: 0,
                 description: "",
                 started_at_utc: "2026-08-01T11:00:00Z",
                 recovery_kind: "live",

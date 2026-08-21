@@ -19,14 +19,14 @@ The certified system includes:
 
 - fail-closed profile-bound SQLite runtime persistence with one current schema;
 - monotonic/UTC/fixed-offset time and exact operational-day allocation;
-- canonical project, category, session, active-generation, and report identity;
+- canonical category/layer, session, active-generation, and report identity;
 - conserved sediment, bounded recovery, immutable historical artifacts, and revision-matched daily contributions;
-- receipt-governed switch, finish, clear-all, and category lifecycle transactions;
-- active/archived category integrity, reviewed merge/deletion, and permanent retired-ID custody;
+- receipt-governed switch/finish/reset transitions plus atomic receipt-free clear-all;
+- active/archived category integrity with stable archive/restore identity;
 - explicit report editing, truthful keymap/palette/atlas routing, and exactly-once terminal restoration;
 - session-owned active description drafts separated from durable category metadata and reusable tags;
 - one process-bound profile UUID owning complete data, state, configuration, recovery, and SQLite paths;
-- real process proofs for lifecycle confirmation, profile isolation, copied-artifact refusal, persistence failure, and PTY restoration.
+- real process proofs for profile isolation, copied-artifact refusal, persistence failure, live control, and PTY restoration.
 
 The transitional CSV/JSON runtime, authority selection, activation ceremony, and historical schema
 upgrade chain are retired. Portable bundle export/import and SQLite doctor, backup, and restore remain

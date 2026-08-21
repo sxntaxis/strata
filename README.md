@@ -20,28 +20,17 @@ Run CLI commands with arguments:
 cargo run -- report --today
 ```
 
-### CLI session identity
+### CLI tracking
 
-A CLI session has two independent identity axes:
-
-- **project** — the subject, client, effort, or context supplied as the positional argument;
-- **category/layer** — the activity classification supplied with `--category`.
-
-The category is required. Strata never interprets an omitted category as idle work:
+Strata classifies elapsed time by **layer/category**. A layer owns the activity identity, color, and balance direction. Start or switch directly by layer name or ID:
 
 ```bash
-strata start client-a --category Work --desc "Implementation"
+strata start Work --desc "Implementation"
 strata stop
 strata report --today
 ```
 
-Use the baseline state deliberately when that is the intended classification:
-
-```bash
-strata start break --category idle
-```
-
-Idle remains part of continuous sediment history but is omitted from ordinary active-time totals. Historical `none` and `drift` inputs remain compatibility aliases; new UI and documentation use `idle`.
+`stop` returns the continuous ledger to **idle** rather than creating unclassified time. Idle is category ID `0`: it remains part of sediment history while being excluded from ordinary active-time totals.
 
 ## Architecture
 
@@ -67,7 +56,7 @@ Strata uses XDG paths:
 - State: `~/.local/state/strata/`
 - Config: `~/.config/strata/`
 
-You can override the data directory with `STRATA_DATA_DIR=/your/path`.
+Select a complete profile with `--profile /path/to/profile` or `STRATA_PROFILE=/path/to/profile`. Profile selection owns data, state, and configuration together; partial data-path redirection is rejected.
 
 The normal SQLite database is stored at `data/strata.sqlite3` under the selected profile. Recovery exports and runtime state use the corresponding profile state root. Repo-local runtime artifacts are intentionally ignored by Git.
 
@@ -79,11 +68,11 @@ Strata does not silently replace a broken configuration with defaults. To delibe
 
 ```bash
 strata --ignore-config report --today
-strata --ignore-config start project-a --category Work
+strata --ignore-config start Work
 strata --ignore-config
 ```
 
-The override uses built-in settings intentionally; normal XDG and `STRATA_DATA_DIR` environment selection still applies. During a running TUI session, a failed configuration reload keeps the last valid settings and displays the error instead of applying a partial configuration.
+The override uses built-in settings intentionally; normal XDG or complete-profile selection still applies. During a running TUI session, a failed configuration reload keeps the last valid settings and displays the error instead of applying a partial configuration.
 
 
 ## Time authority
@@ -124,7 +113,7 @@ strata report --today --completed-only
 strata export --format json --completed-only
 ```
 
-JSON export schema version 2 includes stable event UIDs, authoritative UTC endpoints, and a `provisional` flag. ICS export uses those UTC endpoints and stable UIDs, emits CRLF-delimited RFC 5545 text with escaping and line folding, marks provisional events with `X-STRATA-PROVISIONAL:TRUE`, and excludes idle events. A session without authoritative absolute chronology fails closed for ICS rather than inventing timestamps.
+JSON export schema version 3 includes stable event UIDs, authoritative UTC endpoints, category identity, and a `provisional` flag. ICS export uses those UTC endpoints and stable UIDs, emits CRLF-delimited RFC 5545 text with escaping and line folding, marks provisional events with `X-STRATA-PROVISIONAL:TRUE`, and excludes idle events. A session without authoritative absolute chronology fails closed for ICS rather than inventing timestamps.
 
 Week reports follow the configured first day of week. The current week is week-to-date; prior week offsets in the TUI are complete calendar weeks. Month reports use calendar months: the current month is month-to-date and prior offsets are complete prior calendar months.
 
@@ -164,8 +153,6 @@ strata sqlite-import --bundle ./strata-bundle --database ./restored.sqlite3
 Import validates manifest fingerprints, file sizes, schemas, identities, references, totals, and repository-snapshot parity. Existing targets are not overwritten. Use `--json` for a machine-readable validation or import report.
 
 The general `strata export --format ...` command remains for JSON and ICS session exports; full-fidelity CSV interchange uses `sqlite-export` and `sqlite-import`.
-
-Completed sessions preserve project identity independently from category identity. JSON includes the persisted project and ICS uses it in the event summary.
 
 ## Database maintenance
 
@@ -211,7 +198,6 @@ Example:
 ```json
 {
   "keymap_inherit": true,
-  "time_log_path": "/home/user/.local/share/strata/time_log.csv",
   "day_start_mode": "fixed",
   "day_start_hour": 6,
   "day_start_minute": 0,
@@ -231,7 +217,6 @@ Notes:
 - Setting a key to `null` unbinds that key.
 - `unbind_actions` disables specific actions by name.
 - Setting `keymap_inherit: false` starts from an empty keymap.
-- `time_log_path` is not a runtime persistence setting; profile-local SQLite is selected automatically.
 - `day_start_mode` accepts only `fixed`. Existing `sunrise` values are migrated visibly to `fixed`; Strata never implemented solar sunrise calculation.
 - `first_day_of_week` accepts `monday` through `sunday`.
 - `toggle_command_palette` is the action name for rebinding palette open/close.

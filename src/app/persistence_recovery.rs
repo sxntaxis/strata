@@ -36,7 +36,6 @@ pub(super) enum PersistenceOperation {
     ActiveDescription,
     CategorySync,
     CategoryArchive,
-    CategoryLifecycle,
     CategoryTagsSync,
     SessionSync,
     SessionEdit,
@@ -61,7 +60,6 @@ impl fmt::Display for PersistenceOperation {
             Self::ActiveDescription => "active-session description",
             Self::CategorySync => "category synchronization",
             Self::CategoryArchive => "category archive",
-            Self::CategoryLifecycle => "category lifecycle",
             Self::CategoryTagsSync => "category-tag synchronization",
             Self::SessionSync => "session synchronization",
             Self::SessionEdit => "session edit",
@@ -437,11 +435,6 @@ impl App {
                 .restore_state(&state, &valid_category_ids)?;
         }
         self.sync_drift_idle_state();
-        if self.category_lifecycle_overlay.is_some() {
-            self.category_lifecycle_overlay = None;
-            self.ui_mode = super::UiMode::Main;
-            self.selected_index = 0;
-        }
         Ok(())
     }
 
@@ -541,7 +534,6 @@ impl App {
                 id: session.id,
                 date: session.date.clone(),
                 category_id: session.category_id.0,
-                project: session.project.clone(),
                 description: session.description.clone(),
                 start_time: session.start_time.clone(),
                 end_time: session.end_time.clone(),
@@ -816,7 +808,6 @@ struct EmergencySession {
     id: usize,
     date: String,
     category_id: u64,
-    project: String,
     description: String,
     start_time: String,
     end_time: String,

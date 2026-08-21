@@ -84,6 +84,35 @@ impl TerminalProfile {
         output
     }
 
+    fn cli(&self, args: &[&str]) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_strata"))
+            .args(args)
+            .env("XDG_DATA_HOME", &self.data_home)
+            .env("XDG_STATE_HOME", &self.state_home)
+            .env("XDG_CONFIG_HOME", &self.config_home)
+            .env_remove("STRATA_PROFILE")
+            .env_remove("STRATA_DATA_DIR")
+            .output()
+            .expect("Strata CLI should run")
+    }
+
+    fn seed_work_category(&self) {
+        let initialized = self.cli(&["report", "--today"]);
+        assert!(initialized.status.success(), "{}", combined_output(&initialized));
+        Connection::open(self.database_path())
+            .unwrap()
+            .execute(
+                "INSERT INTO categories(id, name, description, color_index, balance_effect, sort_order)
+                 VALUES (1, 'Work', '', 0, 1, 1)",
+                [],
+            )
+            .unwrap();
+    }
+
+    fn control_socket_path(&self) -> PathBuf {
+        self.state_home.join("strata/runtime.sock")
+    }
+
     fn database_path(&self) -> PathBuf {
         self.data_home.join("strata/strata.sqlite3")
     }
@@ -134,6 +163,16 @@ fn assert_terminal_restored(output: &Output) {
     assert_eq!(marker(output, "BEFORE"), marker(output, "AFTER"));
 }
 
+fn wait_for_path(path: &Path) {
+    for _ in 0..60 {
+        if path.exists() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    panic!("timed out waiting for {}", path.display());
+}
+
 #[test]
 fn normal_quit_and_detach_restore_terminal_once() {
     let quit = TerminalProfile::new("quit");
@@ -168,6 +207,61 @@ fn draw_poll_and_read_failures_restore_terminal_and_checkpoint() {
         assert!(combined.contains("emergency checkpoint: committed"));
         assert!(profile.checkpoint_exists());
     }
+}
+
+#[test]
+fn live_cli_control_is_profile_scoped_and_preserves_continuous_idle() {
+    let profile = TerminalProfile::new("live-control");
+    profile.seed_work_category();
+
+    let binary = shell_quote(Path::new(env!("CARGO_BIN_EXE_strata")));
+    let mut tui = Command::new("script")
+        .args(["-qefc", &binary, "/dev/null"])
+        .env("XDG_DATA_HOME", &profile.data_home)
+        .env("XDG_STATE_HOME", &profile.state_home)
+        .env("XDG_CONFIG_HOME", &profile.config_home)
+        .env_remove("STRATA_PROFILE")
+        .env_remove("STRATA_DATA_DIR")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("live TUI should start");
+
+    wait_for_path(&profile.control_socket_path());
+
+    let start = profile.cli(&["start", "Work", "--desc", "focus"]);
+    assert!(start.status.success(), "{}", combined_output(&start));
+    let connection = Connection::open(profile.database_path()).unwrap();
+    let active: (i64, String) = connection
+        .query_row(
+            "SELECT category_id, description FROM active_session",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(active, (1, "focus".to_string()));
+    drop(connection);
+
+    let other = TerminalProfile::new("live-control-other-profile");
+    let cross_profile = other.cli(&["stop"]);
+    assert!(!cross_profile.status.success());
+    assert!(combined_output(&cross_profile).contains("No active"));
+
+    let stop = profile.cli(&["stop"]);
+    assert!(stop.status.success(), "{}", combined_output(&stop));
+    let idle_category: i64 = Connection::open(profile.database_path())
+        .unwrap()
+        .query_row("SELECT category_id FROM active_session", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(idle_category, 0);
+
+    if let Some(mut stdin) = tui.stdin.take() {
+        stdin.write_all(b"q").ok();
+        stdin.flush().ok();
+    }
+    let status = tui.wait().expect("live TUI should exit");
+    assert!(status.success());
 }
 
 #[test]

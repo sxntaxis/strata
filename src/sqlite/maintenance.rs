@@ -16,16 +16,14 @@ use thiserror::Error;
 
 use super::{
     CURRENT_SCHEMA_VERSION, SqliteRepository,
-    category_lifecycle::{CategoryIdentitySnapshot, CategoryReferenceCounts},
     repository::{
-        ActiveSessionRecord, CategoryLifecycleReceiptRecord, CategoryRecord, CheckpointRecord,
-        CheckpointStatus, RepositorySnapshot, SandSnapshotRecord, SandStateRecord, SessionRecord,
-        SnapshotKind,
+        ActiveSessionRecord, CategoryRecord, CheckpointRecord, CheckpointStatus,
+        RepositorySnapshot, SandSnapshotRecord, SandStateRecord, SessionRecord, SnapshotKind,
     },
 };
 
 const MAINTENANCE_REPORT_SCHEMA_VERSION: u8 = 1;
-const PORTABLE_BUNDLE_SCHEMA_VERSION: u8 = 3;
+const PORTABLE_BUNDLE_SCHEMA_VERSION: u8 = 4;
 const MANIFEST_FILENAME: &str = "manifest.json";
 const CATEGORIES_FILENAME: &str = "categories.csv";
 const CATEGORY_TAGS_FILENAME: &str = "category_tags.csv";
@@ -34,8 +32,7 @@ const ACTIVE_SESSION_FILENAME: &str = "active_session.csv";
 const CHECKPOINT_FILENAME: &str = "runtime_checkpoint.csv";
 const SAND_STATE_FILENAME: &str = "sand_state.csv";
 const SAND_SNAPSHOTS_FILENAME: &str = "sand_snapshots.csv";
-const CATEGORY_LIFECYCLE_RECEIPTS_FILENAME: &str = "category_lifecycle_receipts.csv";
-const BUNDLE_FILES: [&str; 8] = [
+const BUNDLE_FILES: [&str; 7] = [
     CATEGORIES_FILENAME,
     CATEGORY_TAGS_FILENAME,
     SESSIONS_FILENAME,
@@ -43,7 +40,6 @@ const BUNDLE_FILES: [&str; 8] = [
     CHECKPOINT_FILENAME,
     SAND_STATE_FILENAME,
     SAND_SNAPSHOTS_FILENAME,
-    CATEGORY_LIFECYCLE_RECEIPTS_FILENAME,
 ];
 
 #[derive(Debug, Clone)]
@@ -93,7 +89,6 @@ pub(crate) struct SnapshotCounts {
     pub checkpoints: usize,
     pub sand_states: usize,
     pub sand_snapshots: usize,
-    pub category_lifecycle_receipts: usize,
     pub total_elapsed_seconds: i64,
 }
 
@@ -115,7 +110,6 @@ impl SnapshotCounts {
             checkpoints: usize::from(snapshot.checkpoint.is_some()),
             sand_states: usize::from(snapshot.sand_state.is_some()),
             sand_snapshots: snapshot.sand_snapshots.len(),
-            category_lifecycle_receipts: snapshot.category_lifecycle_receipts.len(),
             total_elapsed_seconds,
         })
     }
@@ -704,7 +698,6 @@ fn doctor_at(database_path: &Path) -> Result<SqliteMaintenanceReport, Maintenanc
 
     let required_tables = [
         "database_metadata",
-        "projects",
         "categories",
         "sessions",
         "active_session",
@@ -712,7 +705,6 @@ fn doctor_at(database_path: &Path) -> Result<SqliteMaintenanceReport, Maintenanc
         "sand_state",
         "sand_snapshots",
         "category_tags",
-        "category_lifecycle_receipts",
     ];
     let existing_tables = sqlite_tables(&connection)?;
     let missing_tables: Vec<_> = required_tables
@@ -730,20 +722,7 @@ fn doctor_at(database_path: &Path) -> Result<SqliteMaintenanceReport, Maintenanc
         },
     ));
 
-    let lifecycle_issues = if existing_tables.contains("category_lifecycle_receipts") {
-        database_category_lifecycle_issues(&connection)?
-    } else {
-        vec!["category_lifecycle_receipts table missing".to_string()]
-    };
-    checks.push(check(
-        "category-lifecycle-integrity",
-        lifecycle_issues.is_empty(),
-        if lifecycle_issues.is_empty() {
-            "all lifecycle receipts and retired identities are coherent".to_string()
-        } else {
-            lifecycle_issues.join("; ")
-        },
-    ));
+
 
     let healthy = checks.iter().all(|item| item.passed);
     let counts = if healthy {
@@ -810,10 +789,6 @@ fn serialize_snapshot(
     files.insert(
         SAND_SNAPSHOTS_FILENAME,
         serialize_sand_snapshots(&snapshot.sand_snapshots)?,
-    );
-    files.insert(
-        CATEGORY_LIFECYCLE_RECEIPTS_FILENAME,
-        serialize_category_lifecycle_receipts(&snapshot.category_lifecycle_receipts)?,
     );
     Ok(files)
 }
@@ -891,7 +866,6 @@ fn serialize_sessions(sessions: &[SessionRecord]) -> Result<Vec<u8>, Maintenance
         [
             "id",
             "stable_id",
-            "project",
             "category_id",
             "description",
             "started_at_utc",
@@ -910,7 +884,6 @@ fn serialize_sessions(sessions: &[SessionRecord]) -> Result<Vec<u8>, Maintenance
             [
                 session.id.to_string(),
                 session.stable_id.clone(),
-                session.project.clone(),
                 session.category_id.to_string(),
                 session.description.clone(),
                 session.started_at_utc.clone(),
@@ -941,7 +914,6 @@ fn serialize_active_session(
         ACTIVE_SESSION_FILENAME,
         [
             "stable_id",
-            "project",
             "category_id",
             "description",
             "started_at_utc",
@@ -954,7 +926,6 @@ fn serialize_active_session(
             ACTIVE_SESSION_FILENAME,
             [
                 active.stable_id.clone(),
-                active.project.clone(),
                 active.category_id.to_string(),
                 active.description.clone(),
                 active.started_at_utc.clone(),
@@ -1061,48 +1032,6 @@ fn serialize_sand_snapshots(snapshots: &[SandSnapshotRecord]) -> Result<Vec<u8>,
         )?;
     }
     finish_writer(writer, SAND_SNAPSHOTS_FILENAME)
-}
-
-fn serialize_category_lifecycle_receipts(
-    receipts: &[CategoryLifecycleReceiptRecord],
-) -> Result<Vec<u8>, MaintenanceError> {
-    let mut writer = csv_writer().from_writer(Vec::new());
-    write_record(
-        &mut writer,
-        CATEGORY_LIFECYCLE_RECEIPTS_FILENAME,
-        [
-            "operation_id",
-            "operation_kind",
-            "source_category_id",
-            "target_category_id",
-            "source_metadata_json",
-            "target_metadata_json",
-            "preview_revision",
-            "reference_counts_json",
-            "applied_at_utc",
-        ],
-    )?;
-    for receipt in receipts {
-        write_record(
-            &mut writer,
-            CATEGORY_LIFECYCLE_RECEIPTS_FILENAME,
-            [
-                receipt.operation_id.clone(),
-                receipt.operation_kind.clone(),
-                receipt.source_category_id.to_string(),
-                receipt
-                    .target_category_id
-                    .map(|value| value.to_string())
-                    .unwrap_or_default(),
-                receipt.source_metadata_json.clone(),
-                receipt.target_metadata_json.clone().unwrap_or_default(),
-                receipt.preview_revision.clone(),
-                receipt.reference_counts_json.clone(),
-                receipt.applied_at_utc.clone(),
-            ],
-        )?;
-    }
-    finish_writer(writer, CATEGORY_LIFECYCLE_RECEIPTS_FILENAME)
 }
 
 fn write_record<I, T>(
@@ -1229,10 +1158,6 @@ fn parse_snapshot(
         checkpoint: parse_checkpoint(required_file(files, CHECKPOINT_FILENAME)?)?,
         sand_state: parse_sand_state(required_file(files, SAND_STATE_FILENAME)?)?,
         sand_snapshots: parse_sand_snapshots(required_file(files, SAND_SNAPSHOTS_FILENAME)?)?,
-        category_lifecycle_receipts: parse_category_lifecycle_receipts(required_file(
-            files,
-            CATEGORY_LIFECYCLE_RECEIPTS_FILENAME,
-        )?)?,
     })
 }
 
@@ -1342,7 +1267,6 @@ fn parse_sessions(bytes: &[u8]) -> Result<Vec<SessionRecord>, MaintenanceError> 
         &[
             "id",
             "stable_id",
-            "project",
             "category_id",
             "description",
             "started_at_utc",
@@ -1359,31 +1283,19 @@ fn parse_sessions(bytes: &[u8]) -> Result<Vec<SessionRecord>, MaintenanceError> 
         sessions.push(SessionRecord {
             id: parse_i64(SESSIONS_FILENAME, index, field(record, 0)?, "id")?,
             stable_id: field(record, 1)?.to_string(),
-            project: field(record, 2)?.to_string(),
-            category_id: parse_i64(SESSIONS_FILENAME, index, field(record, 3)?, "category_id")?,
-            description: field(record, 4)?.to_string(),
-            started_at_utc: field(record, 5)?.to_string(),
-            ended_at_utc: field(record, 6)?.to_string(),
-            operational_day: field(record, 7)?.to_string(),
-            elapsed_seconds: parse_i64(
-                SESSIONS_FILENAME,
-                index,
-                field(record, 8)?,
-                "elapsed_seconds",
-            )?,
+            category_id: parse_i64(SESSIONS_FILENAME, index, field(record, 2)?, "category_id")?,
+            description: field(record, 3)?.to_string(),
+            started_at_utc: field(record, 4)?.to_string(),
+            ended_at_utc: field(record, 5)?.to_string(),
+            operational_day: field(record, 6)?.to_string(),
+            elapsed_seconds: parse_i64(SESSIONS_FILENAME, index, field(record, 7)?, "elapsed_seconds")?,
             boundary_utc_offset_seconds: optional_i64(
-                SESSIONS_FILENAME,
-                index,
-                field(record, 9)?,
-                "boundary_utc_offset_seconds",
+                SESSIONS_FILENAME, index, field(record, 8)?, "boundary_utc_offset_seconds",
             )?,
             boundary_start_minutes: optional_i64(
-                SESSIONS_FILENAME,
-                index,
-                field(record, 10)?,
-                "boundary_start_minutes",
+                SESSIONS_FILENAME, index, field(record, 9)?, "boundary_start_minutes",
             )?,
-            source: field(record, 11)?.to_string(),
+            source: field(record, 10)?.to_string(),
         });
     }
     Ok(sessions)
@@ -1393,14 +1305,7 @@ fn parse_active_session(bytes: &[u8]) -> Result<Option<ActiveSessionRecord>, Mai
     let records = csv_records(
         ACTIVE_SESSION_FILENAME,
         bytes,
-        &[
-            "stable_id",
-            "project",
-            "category_id",
-            "description",
-            "started_at_utc",
-            "recovery_kind",
-        ],
+        &["stable_id", "category_id", "description", "started_at_utc", "recovery_kind"],
     )?;
     if records.len() > 1 {
         return Err(MaintenanceError::InvalidBundle(format!(
@@ -1412,16 +1317,10 @@ fn parse_active_session(bytes: &[u8]) -> Result<Option<ActiveSessionRecord>, Mai
         .map(|record| {
             Ok(ActiveSessionRecord {
                 stable_id: field(record, 0)?.to_string(),
-                project: field(record, 1)?.to_string(),
-                category_id: parse_i64(
-                    ACTIVE_SESSION_FILENAME,
-                    0,
-                    field(record, 2)?,
-                    "category_id",
-                )?,
-                description: field(record, 3)?.to_string(),
-                started_at_utc: field(record, 4)?.to_string(),
-                recovery_kind: field(record, 5)?.to_string(),
+                category_id: parse_i64(ACTIVE_SESSION_FILENAME, 0, field(record, 1)?, "category_id")?,
+                description: field(record, 2)?.to_string(),
+                started_at_utc: field(record, 3)?.to_string(),
+                recovery_kind: field(record, 4)?.to_string(),
             })
         })
         .transpose()
@@ -1530,188 +1429,6 @@ fn parse_sand_snapshots(bytes: &[u8]) -> Result<Vec<SandSnapshotRecord>, Mainten
     Ok(snapshots)
 }
 
-fn parse_category_lifecycle_receipts(
-    bytes: &[u8],
-) -> Result<Vec<CategoryLifecycleReceiptRecord>, MaintenanceError> {
-    let records = csv_records(
-        CATEGORY_LIFECYCLE_RECEIPTS_FILENAME,
-        bytes,
-        &[
-            "operation_id",
-            "operation_kind",
-            "source_category_id",
-            "target_category_id",
-            "source_metadata_json",
-            "target_metadata_json",
-            "preview_revision",
-            "reference_counts_json",
-            "applied_at_utc",
-        ],
-    )?;
-    let mut receipts = Vec::with_capacity(records.len());
-    for (index, record) in records.iter().enumerate() {
-        receipts.push(CategoryLifecycleReceiptRecord {
-            operation_id: field(record, 0)?.to_string(),
-            operation_kind: field(record, 1)?.to_string(),
-            source_category_id: parse_i64(
-                CATEGORY_LIFECYCLE_RECEIPTS_FILENAME,
-                index,
-                field(record, 2)?,
-                "source_category_id",
-            )?,
-            target_category_id: optional_i64(
-                CATEGORY_LIFECYCLE_RECEIPTS_FILENAME,
-                index,
-                field(record, 3)?,
-                "target_category_id",
-            )?,
-            source_metadata_json: field(record, 4)?.to_string(),
-            target_metadata_json: optional_string(field(record, 5)?),
-            preview_revision: field(record, 6)?.to_string(),
-            reference_counts_json: field(record, 7)?.to_string(),
-            applied_at_utc: field(record, 8)?.to_string(),
-        });
-    }
-    Ok(receipts)
-}
-
-fn validate_category_lifecycle_receipt(
-    receipt: &CategoryLifecycleReceiptRecord,
-) -> Result<(), MaintenanceError> {
-    require_text(&receipt.operation_id, "category lifecycle operation id")?;
-    require_text(
-        &receipt.preview_revision,
-        "category lifecycle preview revision",
-    )?;
-    require_text(
-        &receipt.applied_at_utc,
-        "category lifecycle application timestamp",
-    )?;
-    DateTime::parse_from_rfc3339(&receipt.applied_at_utc).map_err(|error| {
-        MaintenanceError::InvalidBundle(format!(
-            "category lifecycle application timestamp is invalid: {error}"
-        ))
-    })?;
-    if receipt.source_category_id <= 0 {
-        return Err(MaintenanceError::InvalidBundle(
-            "category lifecycle receipt source must be a positive identity".to_string(),
-        ));
-    }
-    let source: CategoryIdentitySnapshot = serde_json::from_str(&receipt.source_metadata_json)
-        .map_err(|error| {
-            MaintenanceError::InvalidBundle(format!(
-                "category lifecycle source metadata is invalid: {error}"
-            ))
-        })?;
-    if source.id != receipt.source_category_id {
-        return Err(MaintenanceError::InvalidBundle(
-            "category lifecycle source metadata identity does not match its receipt".to_string(),
-        ));
-    }
-    let _counts: CategoryReferenceCounts = serde_json::from_str(&receipt.reference_counts_json)
-        .map_err(|error| {
-            MaintenanceError::InvalidBundle(format!(
-                "category lifecycle reference counts are invalid: {error}"
-            ))
-        })?;
-    match receipt.operation_kind.as_str() {
-        "merge" => {
-            let target_id = receipt.target_category_id.ok_or_else(|| {
-                MaintenanceError::InvalidBundle(
-                    "merge receipt has no target category identity".to_string(),
-                )
-            })?;
-            if target_id <= 0 || target_id == receipt.source_category_id {
-                return Err(MaintenanceError::InvalidBundle(
-                    "merge receipt has an invalid target category identity".to_string(),
-                ));
-            }
-            let target_json = receipt.target_metadata_json.as_deref().ok_or_else(|| {
-                MaintenanceError::InvalidBundle("merge receipt has no target metadata".to_string())
-            })?;
-            let target: CategoryIdentitySnapshot =
-                serde_json::from_str(target_json).map_err(|error| {
-                    MaintenanceError::InvalidBundle(format!(
-                        "category lifecycle target metadata is invalid: {error}"
-                    ))
-                })?;
-            if target.id != target_id {
-                return Err(MaintenanceError::InvalidBundle(
-                    "category lifecycle target metadata identity does not match its receipt"
-                        .to_string(),
-                ));
-            }
-        }
-        "delete" => {
-            if receipt.target_category_id.is_some() || receipt.target_metadata_json.is_some() {
-                return Err(MaintenanceError::InvalidBundle(
-                    "delete receipt unexpectedly names a target category".to_string(),
-                ));
-            }
-        }
-        other => {
-            return Err(MaintenanceError::InvalidBundle(format!(
-                "unknown category lifecycle operation kind {other}"
-            )));
-        }
-    }
-    Ok(())
-}
-
-fn database_category_lifecycle_issues(
-    connection: &Connection,
-) -> Result<Vec<String>, MaintenanceError> {
-    let mut statement = connection.prepare(
-        "SELECT operation_id, operation_kind, source_category_id, target_category_id,
-                source_metadata_json, target_metadata_json, preview_revision,
-                reference_counts_json, applied_at_utc
-         FROM category_lifecycle_receipts
-         ORDER BY applied_at_utc, operation_id",
-    )?;
-    let rows = statement.query_map([], |row| {
-        Ok(CategoryLifecycleReceiptRecord {
-            operation_id: row.get(0)?,
-            operation_kind: row.get(1)?,
-            source_category_id: row.get(2)?,
-            target_category_id: row.get(3)?,
-            source_metadata_json: row.get(4)?,
-            target_metadata_json: row.get(5)?,
-            preview_revision: row.get(6)?,
-            reference_counts_json: row.get(7)?,
-            applied_at_utc: row.get(8)?,
-        })
-    })?;
-    let mut issues = Vec::new();
-    let mut operation_ids = BTreeSet::new();
-    for row in rows {
-        let receipt = row?;
-        if !operation_ids.insert(receipt.operation_id.clone()) {
-            issues.push(format!(
-                "duplicate lifecycle operation id {}",
-                receipt.operation_id
-            ));
-        }
-        if let Err(error) = validate_category_lifecycle_receipt(&receipt) {
-            issues.push(error.to_string());
-        }
-    }
-    let mut collision_statement = connection.prepare(
-        "SELECT categories.id
-         FROM categories
-         JOIN category_lifecycle_receipts
-           ON category_lifecycle_receipts.source_category_id = categories.id
-         ORDER BY categories.id",
-    )?;
-    let collisions = collision_statement.query_map([], |row| row.get::<_, i64>(0))?;
-    for collision in collisions {
-        issues.push(format!(
-            "retired category identity {} is present in the active catalog",
-            collision?
-        ));
-    }
-    Ok(issues)
-}
-
 fn validate_snapshot_references(snapshot: &RepositorySnapshot) -> Result<(), MaintenanceError> {
     if snapshot.categories.is_empty() {
         return Err(MaintenanceError::InvalidBundle(
@@ -1720,30 +1437,12 @@ fn validate_snapshot_references(snapshot: &RepositorySnapshot) -> Result<(), Mai
     }
 
     let mut category_ids = BTreeSet::new();
-    let mut retired_category_ids = BTreeSet::new();
-    let mut lifecycle_operation_ids = BTreeSet::new();
-    for receipt in &snapshot.category_lifecycle_receipts {
-        validate_category_lifecycle_receipt(receipt)?;
-        if !lifecycle_operation_ids.insert(receipt.operation_id.as_str()) {
-            return Err(MaintenanceError::InvalidBundle(format!(
-                "duplicate category lifecycle operation id {}",
-                receipt.operation_id
-            )));
-        }
-        retired_category_ids.insert(receipt.source_category_id);
-    }
 
     let mut active_names = BTreeSet::new();
     for category in &snapshot.categories {
         if !category_ids.insert(category.id) {
             return Err(MaintenanceError::InvalidBundle(format!(
                 "duplicate category id {}",
-                category.id
-            )));
-        }
-        if retired_category_ids.contains(&category.id) {
-            return Err(MaintenanceError::InvalidBundle(format!(
-                "category id {} was retired by a lifecycle receipt and cannot be active",
                 category.id
             )));
         }
@@ -1970,14 +1669,13 @@ fn import_snapshot(
     for session in &snapshot.sessions {
         transaction.execute(
             "INSERT INTO sessions(
-                id, stable_id, project, category_id, description, started_at_utc,
+                id, stable_id, category_id, description, started_at_utc,
                 ended_at_utc, operational_day, elapsed_seconds,
                 boundary_utc_offset_seconds, boundary_start_minutes, source
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 session.id,
                 session.stable_id,
-                session.project,
                 session.category_id,
                 session.description,
                 session.started_at_utc,
@@ -1994,12 +1692,11 @@ fn import_snapshot(
     if let Some(active) = &snapshot.active_session {
         transaction.execute(
             "INSERT INTO active_session(
-                singleton, stable_id, project, category_id, description,
+                singleton, stable_id, category_id, description,
                 started_at_utc, recovery_kind
-             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)",
+             ) VALUES (1, ?1, ?2, ?3, ?4, ?5)",
             params![
                 active.stable_id,
-                active.project,
                 active.category_id,
                 active.description,
                 active.started_at_utc,
@@ -2055,27 +1752,6 @@ fn import_snapshot(
                 item.quantum_seconds,
                 item.payload_json,
                 item.captured_at_utc,
-            ],
-        )?;
-    }
-
-    for receipt in &snapshot.category_lifecycle_receipts {
-        transaction.execute(
-            "INSERT INTO category_lifecycle_receipts(
-                operation_id, operation_kind, source_category_id, target_category_id,
-                source_metadata_json, target_metadata_json, preview_revision,
-                reference_counts_json, applied_at_utc
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![
-                receipt.operation_id,
-                receipt.operation_kind,
-                receipt.source_category_id,
-                receipt.target_category_id,
-                receipt.source_metadata_json,
-                receipt.target_metadata_json,
-                receipt.preview_revision,
-                receipt.reference_counts_json,
-                receipt.applied_at_utc,
             ],
         )?;
     }
@@ -2424,7 +2100,6 @@ mod tests {
     use super::*;
     use crate::sqlite::{
         NewActiveSession,
-        category_lifecycle::{CategoryLifecycleRequest, apply, preview},
         repository::{NewCategoryRecord, NewSandSnapshotRecord, NewSessionRecord},
     };
 
@@ -2450,32 +2125,12 @@ mod tests {
                 balance_effect: 1,
             })
             .unwrap();
-        let disposable_id = repository
-            .create_category(&NewCategoryRecord {
-                name: "Disposable",
-                description: "retired before export",
-                color_index: 3,
-                balance_effect: 0,
-            })
-            .unwrap();
-        let lifecycle_preview = preview(&repository, disposable_id, None).unwrap();
-        apply(
-            &mut repository,
-            CategoryLifecycleRequest {
-                source_category_id: disposable_id,
-                target_category_id: None,
-                expected_revision: &lifecycle_preview.revision,
-                applied_at_utc: "2026-08-01T14:00:00Z",
-            },
-        )
-        .unwrap();
         repository
             .replace_category_tags(study_id, &["reading".to_string(), "focus".to_string()])
             .unwrap();
         repository
             .insert_session(&NewSessionRecord {
                 stable_id: "session-7",
-                project: "Notebook",
                 category_id: study_id,
                 description: "Read chapter",
                 started_at_utc: "2026-08-01T15:00:00Z",
@@ -2490,7 +2145,6 @@ mod tests {
         repository
             .start_session(&NewActiveSession {
                 stable_id: "active-8",
-                project: "Strata",
                 category_id: study_id,
                 description: "Repository work",
                 started_at_utc: "2026-08-01T16:00:00Z",
@@ -2563,7 +2217,6 @@ mod tests {
         .unwrap();
 
         assert_eq!(collect_files(&bundle_a), collect_files(&bundle_b));
-        assert!(bundle_a.join(CATEGORY_LIFECYCLE_RECEIPTS_FILENAME).exists());
 
         import_bundle(BundleImportOptions {
             bundle_directory: bundle_a.clone(),
@@ -2584,8 +2237,8 @@ mod tests {
             })
             .unwrap();
         assert_eq!(
-            post_import_id, 3,
-            "portable round-trip must preserve retired category identity"
+            post_import_id, 2,
+            "portable round-trip must preserve category identity allocation"
         );
 
         let _ = fs::remove_dir_all(root);
@@ -2618,48 +2271,6 @@ mod tests {
         assert!(
             error.to_string().contains("byte count") || error.to_string().contains("fingerprint")
         );
-
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn doctor_rejects_tampered_lifecycle_receipts_and_retired_identity_reuse() {
-        let root = unique_root("lifecycle_doctor");
-        fs::create_dir_all(&root).unwrap();
-        let database = root.join("lifecycle.sqlite3");
-        fixture_database(&database);
-        assert!(doctor_at(&database).unwrap().is_healthy());
-
-        let connection = Connection::open(&database).unwrap();
-        connection
-            .execute(
-                "UPDATE category_lifecycle_receipts
-                 SET source_metadata_json = '{}'
-                 WHERE source_category_id = 2",
-                [],
-            )
-            .unwrap();
-        connection
-            .execute(
-                "INSERT INTO categories(
-                    id, name, description, color_index, balance_effect, archived_at_utc,
-                    sort_order
-                 ) VALUES (2, 'Reused', '', 1, 0, NULL, 99)",
-                [],
-            )
-            .unwrap();
-        drop(connection);
-
-        let report = doctor_at(&database).unwrap();
-        assert!(!report.is_healthy());
-        let lifecycle = report
-            .checks
-            .iter()
-            .find(|check| check.name == "category-lifecycle-integrity")
-            .unwrap();
-        assert!(!lifecycle.passed);
-        assert!(lifecycle.detail.contains("source metadata"));
-        assert!(lifecycle.detail.contains("retired category identity 2"));
 
         let _ = fs::remove_dir_all(root);
     }

@@ -65,7 +65,6 @@ pub(crate) enum Action {
     Cancel,
 
     DeleteCategory,
-    CategoryLifecycle,
     EditCategoryDescription,
     IncreaseKarma,
     DecreaseKarma,
@@ -80,7 +79,7 @@ pub(crate) enum Action {
 }
 
 impl Action {
-    const ALL: [Action; 30] = [
+    const ALL: [Action; 29] = [
         Action::Quit,
         Action::ToggleCommandPalette,
         Action::OpenCategoryModal,
@@ -101,7 +100,6 @@ impl Action {
         Action::Confirm,
         Action::Cancel,
         Action::DeleteCategory,
-        Action::CategoryLifecycle,
         Action::EditCategoryDescription,
         Action::IncreaseKarma,
         Action::DecreaseKarma,
@@ -141,7 +139,6 @@ impl Action {
             Action::Cancel => "cancel",
 
             Action::DeleteCategory => "delete_layer",
-            Action::CategoryLifecycle => "category_lifecycle",
             Action::EditCategoryDescription => "edit_layer_metadata",
             Action::IncreaseKarma => "boost_layer_karma",
             Action::DecreaseKarma => "drain_layer_karma",
@@ -182,9 +179,6 @@ impl Action {
             "cancel" => Some(Self::Cancel),
 
             "delete_layer" | "delete_category" => Some(Self::DeleteCategory),
-            "category_lifecycle" | "merge_or_delete_layer" | "permanent_layer_lifecycle" => {
-                Some(Self::CategoryLifecycle)
-            }
             "edit_layer_metadata" | "edit_category_description" => {
                 Some(Self::EditCategoryDescription)
             }
@@ -226,8 +220,7 @@ impl Action {
             Action::Confirm => "Confirm / open",
             Action::Cancel => "Cancel / close",
 
-            Action::DeleteCategory => "Archive selected layer",
-            Action::CategoryLifecycle => "Merge or permanently delete selected layer",
+            Action::DeleteCategory => "Archive selected layer / delete selected report session",
             Action::EditCategoryDescription => "Toggle durable layer-metadata editing",
             Action::IncreaseKarma => "Set selected layer karma to +1",
             Action::DecreaseKarma => "Set selected layer karma to -1",
@@ -266,7 +259,6 @@ impl Action {
             | Action::Cancel => ActionCategory::Navigation,
 
             Action::DeleteCategory
-            | Action::CategoryLifecycle
             | Action::EditCategoryDescription
             | Action::IncreaseKarma
             | Action::DecreaseKarma
@@ -802,7 +794,7 @@ fn default_true() -> bool {
     true
 }
 
-const DEFAULT_BINDINGS: [(&str, Action); 32] = [
+const DEFAULT_BINDINGS: [(&str, Action); 31] = [
     ("q", Action::Quit),
     ("ctrl-p", Action::ToggleCommandPalette),
     ("enter", Action::Confirm),
@@ -822,7 +814,6 @@ const DEFAULT_BINDINGS: [(&str, Action); 32] = [
     ("shift-left", Action::ShiftLeft),
     ("shift-right", Action::ShiftRight),
     ("x", Action::DeleteCategory),
-    ("shift-x", Action::CategoryLifecycle),
     ("shift-e", Action::EditCategoryDescription),
     ("+", Action::IncreaseKarma),
     ("=", Action::IncreaseKarma),
@@ -1329,19 +1320,15 @@ mod tests {
     }
 
     #[test]
-    fn default_archive_and_lifecycle_actions_are_distinct() {
+    fn default_x_action_is_the_contextual_remove_action() {
         let keymap = default_keymap();
         assert_eq!(
             keymap.action_for_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
             Some(Action::DeleteCategory)
         );
         assert_eq!(
-            keymap.action_for_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::SHIFT)),
-            Some(Action::CategoryLifecycle)
-        );
-        assert_eq!(
             Action::DeleteCategory.description(),
-            "Archive selected layer"
+            "Archive selected layer / delete selected report session"
         );
     }
 

@@ -96,6 +96,30 @@ impl SandEngine {
     pub fn resize(&mut self, width: u16, height: u16) {
         self.cell_width = width;
         self.cell_height = height;
+        self.expand_logical_canvas_to_viewport();
+    }
+
+    fn expand_logical_canvas_to_viewport(&mut self) {
+        let viewport_width = self.cell_width as usize * SAND_ENGINE.dot_width;
+        let viewport_height = self.cell_height as usize * SAND_ENGINE.dot_height;
+        let target_width = self.grid_width_dots.max(viewport_width);
+        let target_height = self.grid_height_dots.max(viewport_height);
+        if target_width == self.grid_width_dots && target_height == self.grid_height_dots {
+            return;
+        }
+
+        let horizontal_offset = target_width.saturating_sub(self.grid_width_dots) / 2;
+        let vertical_offset = target_height.saturating_sub(self.grid_height_dots);
+        let mut expanded = vec![vec![None; target_width]; target_height];
+        for (y, row) in self.grid.iter().enumerate() {
+            for (x, cell) in row.iter().enumerate() {
+                expanded[y + vertical_offset][x + horizontal_offset] = *cell;
+            }
+        }
+        self.grid = expanded;
+        self.grid_width_dots = target_width;
+        self.grid_height_dots = target_height;
+        self.flush_pending_grains();
     }
 
     fn capacity(&self) -> usize {
@@ -596,6 +620,7 @@ impl SandEngine {
         } else {
             state.rng_state
         };
+        self.expand_logical_canvas_to_viewport();
         Ok(())
     }
 
@@ -631,83 +656,84 @@ mod tests {
 
     use crate::{domain::CategoryId, sand::SandEngine};
 
+    fn category_mass(engine: &SandEngine, category_id: CategoryId) -> usize {
+        let placed = engine
+            .grid
+            .iter()
+            .flat_map(|row| row.iter())
+            .filter(|cell| **cell == Some(category_id))
+            .count();
+        let pending = engine
+            .pending_runs
+            .iter()
+            .filter(|run| run.category_id == category_id)
+            .map(|run| run.count)
+            .sum::<usize>();
+        placed + pending
+    }
+
     #[test]
-    fn viewport_resize_preserves_exact_logical_state() {
+    fn resize_expands_logical_canvas_monotonically_and_conserves_mass() {
         let mut engine = SandEngine::new(12, 8);
         engine.clear();
         engine.grid[0][0] = Some(CategoryId::new(1));
-        engine.grid[10][12] = Some(CategoryId::new(2));
-        engine.grid[31][23] = Some(CategoryId::new(1));
+        engine.grid[31][23] = Some(CategoryId::new(2));
         SandEngine::append_pending_run(&mut engine.pending_runs, CategoryId::new(2), 1).unwrap();
-        engine.grain_count = 4;
-        engine.frame_count = 17;
-        engine.sweep_left_to_right = false;
-        engine.rng_state = 0xCAFE_BABE;
-        let before = engine.snapshot_state();
-
-        engine.resize(3, 2);
-        assert_eq!(engine.snapshot_state(), before);
+        engine.grain_count = 3;
+        let mass_1 = category_mass(&engine, CategoryId::new(1));
+        let mass_2 = category_mass(&engine, CategoryId::new(2));
 
         engine.resize(30, 20);
-        assert_eq!(engine.snapshot_state(), before);
+        let expanded_width = engine.grid_width_dots;
+        let expanded_height = engine.grid_height_dots;
+        assert_eq!(expanded_width, 30 * crate::constants::SAND_ENGINE.dot_width);
+        assert_eq!(expanded_height, 20 * crate::constants::SAND_ENGINE.dot_height);
+        assert_eq!(category_mass(&engine, CategoryId::new(1)), mass_1);
+        assert_eq!(category_mass(&engine, CategoryId::new(2)), mass_2);
+        assert_eq!(engine.grain_count, 3);
+
+        let after_growth = engine.snapshot_state();
+        engine.resize(3, 2);
+        engine.resize(30, 20);
+        assert_eq!(engine.grid_width_dots, expanded_width);
+        assert_eq!(engine.grid_height_dots, expanded_height);
+        assert_eq!(engine.snapshot_state(), after_growth);
     }
 
     #[test]
-    fn oscillating_viewport_resizes_are_logically_idempotent() {
-        let mut engine = SandEngine::new(10, 6);
-        engine.clear();
-        for (x, y, category_id) in [(0, 0, 1), (7, 8, 2), (19, 23, 1)] {
-            engine.grid[y][x] = Some(CategoryId::new(category_id));
-        }
-        engine.grain_count = 3;
-        let baseline = engine.snapshot_state();
-
-        for (width, height) in [(2, 1), (40, 20), (5, 3), (10, 6), (1, 1)] {
-            engine.resize(width, height);
-            assert_eq!(engine.snapshot_state(), baseline);
-        }
-    }
-
-    #[test]
-    fn hidden_grains_reappear_when_viewport_expands() {
+    fn growth_preserves_horizontal_center_and_bottom_baseline() {
         let mut engine = SandEngine::new(4, 2);
         engine.clear();
-        engine.grid[0][0] = Some(CategoryId::new(0));
-        engine.grain_count = 1;
+        let old_width = engine.grid_width_dots;
+        let old_height = engine.grid_height_dots;
+        engine.grid[old_height - 1][0] = Some(CategoryId::new(1));
+        engine.grid[old_height - 1][old_width - 1] = Some(CategoryId::new(2));
+        engine.grain_count = 2;
 
-        engine.resize(2, 1);
-        let cropped = engine.render(&[]);
-        assert!(
-            cropped
-                .iter()
-                .flat_map(|line| line.spans.iter())
-                .all(|span| { span.content.as_ref() == "⠀" })
-        );
-
-        engine.resize(4, 2);
-        let expanded = engine.render(&[]);
-        assert!(
-            expanded
-                .iter()
-                .flat_map(|line| line.spans.iter())
-                .any(|span| { span.content.as_ref() != "⠀" })
+        engine.resize(8, 4);
+        let x_offset = (engine.grid_width_dots - old_width) / 2;
+        let y_offset = engine.grid_height_dots - old_height;
+        assert_eq!(engine.grid[y_offset + old_height - 1][x_offset], Some(CategoryId::new(1)));
+        assert_eq!(
+            engine.grid[y_offset + old_height - 1][x_offset + old_width - 1],
+            Some(CategoryId::new(2))
         );
     }
 
     #[test]
-    fn viewport_render_size_is_independent_of_logical_canvas_size() {
+    fn viewport_render_size_tracks_terminal_while_canvas_keeps_maximum_extent() {
         let mut engine = SandEngine::new(4, 2);
         engine.resize(9, 5);
         let expanded = engine.render(&[]);
         assert_eq!(expanded.len(), 5);
         assert!(expanded.iter().all(|line| line.spans.len() == 9));
+        let logical = (engine.grid_width_dots, engine.grid_height_dots);
 
         engine.resize(1, 1);
         let shrunk = engine.render(&[]);
         assert_eq!(shrunk.len(), 1);
         assert_eq!(shrunk[0].spans.len(), 1);
-        assert_eq!(engine.grid_width_dots, 8);
-        assert_eq!(engine.grid_height_dots, 8);
+        assert_eq!((engine.grid_width_dots, engine.grid_height_dots), logical);
     }
 
     #[test]
@@ -769,11 +795,13 @@ mod tests {
         let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1), CategoryId::new(2)]);
         restored.restore_state(&state, &valid).unwrap();
 
-        assert_eq!(restored.snapshot_state(), state);
         assert_eq!(restored.cell_width, 40);
         assert_eq!(restored.cell_height, 40);
-        assert_eq!(restored.grid_width_dots, state.grid_width);
-        assert_eq!(restored.grid_height_dots, state.grid_height);
+        assert_eq!(restored.grid_width_dots, 40 * crate::constants::SAND_ENGINE.dot_width);
+        assert_eq!(restored.grid_height_dots, 40 * crate::constants::SAND_ENGINE.dot_height);
+        assert_eq!(restored.grain_count, 2);
+        assert_eq!(category_mass(&restored, CategoryId::new(1)), 1);
+        assert_eq!(category_mass(&restored, CategoryId::new(2)), 1);
     }
 
     #[test]

@@ -1,15 +1,15 @@
 use crate::{
-    command::CommandIntent,
+    command::{self, CommandIntent},
     constants::COLORS,
-    domain::{CategoryId, DRIFT_CATEGORY_ID, ReportPeriod},
+    domain::{Category, CategoryId, DRIFT_CATEGORY_ID, ReportPeriod, is_drift_category_id},
     keybindings::{Action, InputContext},
     sqlite,
 };
-use chrono::Utc;
+use chrono::{Duration as ChronoDuration, Local, NaiveDate, Utc};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use super::{
-    App, PaletteCommand, PersistenceOperation, QueuedMutation, RecoveryAction, SessionClockMode,
+    App, PaletteCommand, PersistenceOperation, QueuedMutation, RecoveryAction,
     ui_helpers,
 };
 
@@ -21,6 +21,21 @@ enum ReportEditKeyIntent {
     Cancel,
     EmergencyQuit,
     Ignore,
+}
+
+fn direct_command_or_fuzzy_fallback(
+    query: &str,
+    has_fuzzy_result: bool,
+) -> Result<Option<CommandIntent>, String> {
+    let typed = query.trim();
+    if typed.is_empty() {
+        return Ok(None);
+    }
+    match crate::command::parse(typed) {
+        Ok(command) => Ok(Some(command)),
+        Err(_) if has_fuzzy_result => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 fn resolve_report_edit_key(
@@ -71,9 +86,6 @@ impl App {
             return true;
         }
 
-        if self.category_lifecycle_overlay.is_some() {
-            return self.handle_category_lifecycle_key(key);
-        }
 
         if self.report_log_edit.is_some() {
             return self.handle_report_log_edit_key(key);
@@ -162,27 +174,33 @@ impl App {
         self.clamp_command_palette_selection(entries.len());
 
         match key.code {
-            KeyCode::Esc => {
-                self.close_command_palette();
-            }
+            KeyCode::Esc => self.close_command_palette(),
             KeyCode::Enter => {
-                let typed = self.command_palette_query.trim().to_string();
-                if !typed.is_empty() {
-                    match crate::command::parse(&typed) {
-                        Ok(command) => match self.execute_command(command) {
+                match direct_command_or_fuzzy_fallback(
+                    &self.command_palette_query,
+                    !entries.is_empty(),
+                ) {
+                    Ok(Some(command)) => {
+                        let keep_open = command.keeps_palette_open();
+                        match self.execute_command(command) {
+                            Ok(message) if keep_open => {
+                                self.command_palette_feedback = Some(message);
+                                self.render_needed = true;
+                            }
                             Ok(_) => self.close_command_palette(),
                             Err(error) => {
                                 self.command_palette_feedback = Some(format!("Error: {error}"));
                                 self.render_needed = true;
                             }
-                        },
-                        Err(error) if entries.is_empty() => {
-                            self.command_palette_feedback = Some(format!("Error: {error}"));
-                            self.render_needed = true;
                         }
-                        Err(_) => self.close_command_palette(),
+                        return false;
                     }
-                    return false;
+                    Ok(None) => {}
+                    Err(error) => {
+                        self.command_palette_feedback = Some(format!("Error: {error}"));
+                        self.render_needed = true;
+                        return false;
+                    }
                 }
                 if let Some(entry) = entries.get(self.command_palette_selected_index) {
                     return self.execute_palette_command(entry.command);
@@ -242,117 +260,80 @@ impl App {
         false
     }
 
+    fn resolve_layer_case_insensitive(&self, layer: &str) -> Option<Category> {
+        let trimmed = layer.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        let categories = self.time_tracker.categories_ordered();
+        if let Ok(id) = trimmed.parse::<u64>()
+            && let Some(found) = categories.iter().find(|category| category.id.0 == id)
+        {
+            return Some(found.clone());
+        }
+        categories
+            .into_iter()
+            .find(|category| category.name.eq_ignore_ascii_case(trimmed))
+    }
+
+    fn layer_suggestions(&self, layer: &str) -> Vec<String> {
+        let needle = layer.trim().to_ascii_lowercase();
+        if needle.is_empty() {
+            return Vec::new();
+        }
+        self.time_tracker
+            .categories_ordered()
+            .into_iter()
+            .map(|category| category.name)
+            .filter(|name| name.to_ascii_lowercase().contains(&needle))
+            .take(3)
+            .collect()
+    }
+
+    fn canonicalize_tag_for_layer(&self, layer_id: CategoryId, tag: &str) -> String {
+        let trimmed = tag.trim();
+        if trimmed.is_empty() {
+            return String::new();
+        }
+        self.category_tags
+            .tags_by_category
+            .get(&layer_id.0)
+            .and_then(|tags| {
+                tags.iter()
+                    .find(|existing| existing.eq_ignore_ascii_case(trimmed))
+            })
+            .cloned()
+            .unwrap_or_else(|| trimmed.to_string())
+    }
+
+    fn remember_tag_for_layer(&mut self, layer_id: CategoryId, tag: &str) {
+        let trimmed = tag.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        let tags = self
+            .category_tags
+            .tags_by_category
+            .entry(layer_id.0)
+            .or_default();
+        tags.retain(|existing| !existing.eq_ignore_ascii_case(trimmed));
+        tags.insert(0, trimmed.to_string());
+        tags.truncate(crate::constants::CATEGORY_SETTINGS.max_tags_per_category);
+        self.persist_category_tags();
+    }
+
     pub(super) fn execute_command(&mut self, command: CommandIntent) -> Result<String, String> {
         match command {
-            CommandIntent::Status => {
-                let category = self
-                    .time_tracker
-                    .category_by_id(self.time_tracker.active_category_id())
-                    .map(|category| self.display_layer_name(&category.name))
-                    .unwrap_or_else(|| "idle".to_string());
-                let elapsed = self
-                    .time_tracker
-                    .current_session_start
-                    .map(|start| start.elapsed().as_secs())
-                    .unwrap_or(0);
-                Ok(format!("Status: {category} ({elapsed}s)"))
-            }
-            CommandIntent::Start { layer, tag } => {
-                let Some(category) =
-                    self.time_tracker
-                        .categories_ordered()
-                        .into_iter()
-                        .find(|category| {
-                            category.name.eq_ignore_ascii_case(&layer)
-                                || category.id.0.to_string() == layer
-                        })
-                else {
-                    return Err(format!("Layer '{layer}' not found"));
-                };
-                let description = tag.unwrap_or_default();
-                if self.time_tracker.active_category_id() == category.id {
-                    if !description.is_empty() {
-                        let database_path = self
-                            .sqlite_database_path
-                            .clone()
-                            .ok_or_else(|| "SQLite authority is unavailable".to_string())?;
-                        let stable_id = self
-                            .session
-                            .active_session_stable_id
-                            .clone()
-                            .ok_or_else(|| "active session has no stable identity".to_string())?;
-                        sqlite::update_tui_active_description(
-                            &database_path,
-                            &stable_id,
-                            &description,
-                        )?;
-                        self.time_tracker.set_active_description(description);
-                        self.refresh_active_runtime_checkpoint();
-                    }
-                } else {
-                    self.queue_or_apply_mutation(QueuedMutation::SwitchLayer {
-                        category_id: category.id,
-                        description,
-                    });
-                }
-                Ok(format!(
-                    "Starting layer '{}'",
-                    self.display_layer_name(&category.name)
-                ))
-            }
-            CommandIntent::Stop => self
-                .end_active_session_at(Utc::now(), SessionClockMode::LiveMonotonic)
-                .map(|elapsed| format!("Stopped session ({elapsed}s)"))
-                .ok_or_else(|| "No active session to stop".to_string()),
-            CommandIntent::Karma { period } => {
-                let selected = match period
-                    .as_deref()
-                    .unwrap_or("today")
-                    .to_ascii_lowercase()
-                    .as_str()
-                {
-                    "today" | "day" => ReportPeriod::Today,
-                    "week" | "w" => ReportPeriod::Week,
-                    "month" | "m" => ReportPeriod::Month,
-                    value => return Err(format!("Unknown karma period '{value}'")),
-                };
-                self.open_report_modal();
-                self.set_report_period(selected);
-                let label = match selected {
-                    ReportPeriod::Today => "today",
-                    ReportPeriod::Week => "week",
-                    ReportPeriod::Month => "month",
-                };
-                Ok(format!("Showing {label} report"))
-            }
-            CommandIntent::DeleteLastSession { layer } => {
-                let Some(category) =
-                    self.time_tracker
-                        .categories_ordered()
-                        .into_iter()
-                        .find(|category| {
-                            category.name.eq_ignore_ascii_case(&layer)
-                                || category.id.0.to_string() == layer
-                        })
-                else {
-                    return Err(format!("Layer '{layer}' not found"));
-                };
-                let session_id = self
-                    .report_logs_for_category(category.id)
-                    .into_iter()
-                    .rev()
-                    .find_map(|entry| entry.session_id)
-                    .ok_or_else(|| format!("No sessions found for layer '{layer}'"))?;
-                let database_path = self
-                    .sqlite_database_path
-                    .clone()
-                    .ok_or_else(|| "SQLite authority is unavailable".to_string())?;
-                sqlite::delete_tui_session(&database_path, session_id)?;
-                self.reload_sqlite_sessions();
-                Ok(format!(
-                    "Deleted last session for layer '{}'",
-                    self.display_layer_name(&category.name)
-                ))
+            CommandIntent::Status => self.command_status(),
+            CommandIntent::Start { layer, tag } => self.command_start(layer, tag),
+            CommandIntent::Stop { layer, tag } => self.command_stop(layer, tag),
+            CommandIntent::Karma {
+                selector,
+                layer,
+                tag,
+            } => self.command_karma(selector, layer, tag),
+            CommandIntent::DeleteLastSession { layer, tag } => {
+                self.command_delete_last_session(layer, tag)
             }
             CommandIntent::DataDir => Ok(format!(
                 "Data dir: {}",
@@ -363,13 +344,303 @@ impl App {
                 crate::profile::config_dir().display()
             )),
             CommandIntent::Timer { duration_seconds } => {
-                Ok(format!("Timer set for {duration_seconds}s"))
+                let end = Local::now()
+                    + ChronoDuration::seconds(i64::try_from(duration_seconds).unwrap_or(i64::MAX));
+                Ok(format!(
+                    "Timer {} (ends {})",
+                    command::format_hms(duration_seconds as usize),
+                    end.format("%Y-%m-%d %H:%M:%S")
+                ))
             }
             #[cfg(debug_assertions)]
             CommandIntent::TestingCheatsHalfFull => {
                 Err("testingcheats is not available in the SQLite runtime".to_string())
             }
         }
+    }
+
+    fn command_status(&self) -> Result<String, String> {
+        let active_id = self.time_tracker.active_category_id();
+        let category_name = self
+            .time_tracker
+            .category_by_id(active_id)
+            .map(|category| self.display_layer_name(&category.name))
+            .unwrap_or_else(|| "Idle".to_string());
+        let elapsed = self
+            .time_tracker
+            .current_session_start
+            .map(|start| start.elapsed().as_secs() as usize)
+            .unwrap_or(0);
+        if is_drift_category_id(active_id) {
+            return Ok(format!("Status: idle for {}", command::format_hms(elapsed)));
+        }
+        let description = self.time_tracker.active_description().trim();
+        let started = self
+            .session
+            .active_session_started_at_utc
+            .map(|started| {
+                started
+                    .with_timezone(&Local)
+                    .format("%Y-%m-%d %H:%M:%S")
+                    .to_string()
+            })
+            .unwrap_or_else(|| "unknown".to_string());
+        if description.is_empty() {
+            Ok(format!(
+                "Status: active layer '{}' since {} (elapsed {})",
+                category_name,
+                started,
+                command::format_hms(elapsed)
+            ))
+        } else {
+            Ok(format!(
+                "Status: active layer '{}' tag '{}' since {} (elapsed {})",
+                category_name,
+                description,
+                started,
+                command::format_hms(elapsed)
+            ))
+        }
+    }
+
+    fn command_start(&mut self, layer: String, tag: Option<String>) -> Result<String, String> {
+        let Some(category) = self.resolve_layer_case_insensitive(&layer) else {
+            let suggestions = self.layer_suggestions(&layer);
+            return if suggestions.is_empty() {
+                Err(format!("Layer '{layer}' not found"))
+            } else {
+                Err(format!(
+                    "Layer '{layer}' not found. Did you mean: {}",
+                    suggestions.join(", ")
+                ))
+            };
+        };
+        let canonical_tag = tag
+            .as_deref()
+            .map(|value| self.canonicalize_tag_for_layer(category.id, value))
+            .filter(|value| !value.is_empty());
+        if let Some(value) = canonical_tag.as_deref() {
+            self.remember_tag_for_layer(category.id, value);
+        }
+        let description = canonical_tag.clone().unwrap_or_default();
+        if self.time_tracker.active_category_id() == category.id {
+            if !description.is_empty() {
+                let database_path = self
+                    .sqlite_database_path
+                    .clone()
+                    .ok_or_else(|| "SQLite authority is unavailable".to_string())?;
+                let stable_id = self
+                    .session
+                    .active_session_stable_id
+                    .clone()
+                    .ok_or_else(|| "active session has no stable identity".to_string())?;
+                sqlite::update_tui_active_description(&database_path, &stable_id, &description)?;
+                self.time_tracker.set_active_description(description.clone());
+                self.refresh_active_runtime_checkpoint();
+            }
+        } else {
+            self.queue_or_apply_mutation(QueuedMutation::SwitchLayer {
+                category_id: category.id,
+                description,
+            });
+        }
+        let display_name = self.display_layer_name(&category.name);
+        Ok(match canonical_tag {
+            Some(tag) => format!("Started layer '{display_name}' with tag '{tag}'"),
+            None => format!("Started layer '{display_name}'"),
+        })
+    }
+
+    fn command_stop(
+        &mut self,
+        layer_filter: Option<String>,
+        tag_filter: Option<String>,
+    ) -> Result<String, String> {
+        let active_id = self.time_tracker.active_category_id();
+        if is_drift_category_id(active_id) {
+            return Err("No active layer session to stop (already idle)".to_string());
+        }
+        if let Some(layer) = layer_filter {
+            let Some(expected) = self.resolve_layer_case_insensitive(&layer) else {
+                return Err(format!("Layer '{layer}' not found"));
+            };
+            if expected.id != active_id {
+                let active_name = self
+                    .time_tracker
+                    .category_by_id(active_id)
+                    .map(|category| self.display_layer_name(&category.name))
+                    .unwrap_or_else(|| "Idle".to_string());
+                return Err(format!(
+                    "Active layer is '{}' (not '{}')",
+                    active_name,
+                    self.display_layer_name(&expected.name)
+                ));
+            }
+        }
+        if let Some(tag) = tag_filter {
+            let active_tag = self.time_tracker.active_description();
+            if !active_tag.eq_ignore_ascii_case(tag.trim()) {
+                return Err(format!(
+                    "Active tag is '{}' (not '{}')",
+                    active_tag,
+                    tag.trim()
+                ));
+            }
+        }
+        let active_name = self
+            .time_tracker
+            .category_by_id(active_id)
+            .map(|category| self.display_layer_name(&category.name))
+            .unwrap_or_else(|| "Idle".to_string());
+        self.queue_or_apply_mutation(QueuedMutation::SwitchLayer {
+            category_id: DRIFT_CATEGORY_ID,
+            description: String::new(),
+        });
+        Ok(format!("Stopped layer '{active_name}'"))
+    }
+
+    fn command_karma(
+        &self,
+        selector: command::KarmaSelector,
+        layer_filter: Option<String>,
+        tag_filter: Option<String>,
+    ) -> Result<String, String> {
+        let window = command::resolve_karma_window(
+            &selector,
+            crate::domain::operational_day_key_now(),
+            self.runtime_settings.first_day_of_week,
+        )?;
+        let categories = self.time_tracker.categories_ordered();
+        let layer = if let Some(layer) = layer_filter {
+            Some(
+                self.resolve_layer_case_insensitive(&layer)
+                    .ok_or_else(|| format!("Layer '{layer}' not found"))?,
+            )
+        } else {
+            None
+        };
+        let layer_id = layer.as_ref().map(|category| category.id);
+        let canonical_tag = tag_filter
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| {
+                layer
+                    .as_ref()
+                    .map(|category| self.canonicalize_tag_for_layer(category.id, value))
+                    .unwrap_or_else(|| value.to_string())
+            });
+        let mut total_elapsed = 0usize;
+        let mut total_karma = 0isize;
+        for session in &self.time_tracker.sessions {
+            let Ok(day) = NaiveDate::parse_from_str(&session.date, "%Y-%m-%d") else {
+                continue;
+            };
+            if day < window.start || day > window.end {
+                continue;
+            }
+            if layer_id.is_some_and(|expected| session.category_id != expected) {
+                continue;
+            }
+            if canonical_tag
+                .as_ref()
+                .is_some_and(|tag| !session.description.eq_ignore_ascii_case(tag))
+            {
+                continue;
+            }
+            let effect = categories
+                .iter()
+                .find(|category| category.id == session.category_id)
+                .map(|category| {
+                    if is_drift_category_id(category.id) {
+                        0
+                    } else {
+                        category.karma_effect
+                    }
+                })
+                .unwrap_or(0);
+            total_elapsed = total_elapsed.saturating_add(session.elapsed_seconds);
+            total_karma = total_karma.saturating_add(
+                (session.elapsed_seconds as isize).saturating_mul(effect as isize),
+            );
+        }
+        if let Some(start) = self.time_tracker.current_session_start {
+            let active_id = self.time_tracker.active_category_id();
+            let live_day = crate::domain::operational_day_key_now();
+            let layer_matches = layer_id.is_none_or(|expected| expected == active_id);
+            let tag_matches = canonical_tag
+                .as_ref()
+                .is_none_or(|tag| self.time_tracker.active_description().eq_ignore_ascii_case(tag));
+            if live_day >= window.start && live_day <= window.end && layer_matches && tag_matches {
+                let elapsed = start.elapsed().as_secs() as usize;
+                let effect = categories
+                    .iter()
+                    .find(|category| category.id == active_id)
+                    .map(|category| {
+                        if is_drift_category_id(category.id) {
+                            0
+                        } else {
+                            category.karma_effect
+                        }
+                    })
+                    .unwrap_or(0);
+                total_elapsed = total_elapsed.saturating_add(elapsed);
+                total_karma = total_karma
+                    .saturating_add((elapsed as isize).saturating_mul(effect as isize));
+            }
+        }
+        let mut scope = String::new();
+        if let Some(category) = layer {
+            scope.push_str(&format!(" layer '{}'", self.display_layer_name(&category.name)));
+        }
+        if let Some(tag) = canonical_tag {
+            scope.push_str(&format!(" tag '{tag}'"));
+        }
+        Ok(format!(
+            "Karma {}{}: {} (elapsed {})",
+            window.label,
+            scope,
+            command::format_signed_hms(total_karma),
+            command::format_hms(total_elapsed)
+        ))
+    }
+
+    fn command_delete_last_session(
+        &mut self,
+        layer: String,
+        tag: Option<String>,
+    ) -> Result<String, String> {
+        let category = self
+            .resolve_layer_case_insensitive(&layer)
+            .ok_or_else(|| format!("Layer '{layer}' not found"))?;
+        let canonical_tag = tag
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| self.canonicalize_tag_for_layer(category.id, value));
+        let session_id = self
+            .time_tracker
+            .sessions
+            .iter()
+            .filter(|session| session.category_id == category.id)
+            .filter(|session| {
+                canonical_tag
+                    .as_ref()
+                    .is_none_or(|tag| session.description.eq_ignore_ascii_case(tag))
+            })
+            .max_by_key(|session| session.id)
+            .map(|session| session.id)
+            .ok_or_else(|| "No matching session found".to_string())?;
+        let database_path = self
+            .sqlite_database_path
+            .clone()
+            .ok_or_else(|| "SQLite authority is unavailable".to_string())?;
+        sqlite::delete_tui_session(&database_path, session_id)?;
+        self.reload_sqlite_sessions();
+        Ok(format!(
+            "Deleted last session for layer '{}'",
+            self.display_layer_name(&category.name)
+        ))
     }
 
     fn execute_palette_command(&mut self, command: PaletteCommand) -> bool {
@@ -709,11 +980,6 @@ impl App {
                     self.delete_category();
                 }
             }
-            Action::CategoryLifecycle => {
-                if !self.is_on_insert_space() && self.selected_index > 0 {
-                    self.open_category_lifecycle_for_selected();
-                }
-            }
             Action::IncreaseKarma => {
                 if !self.is_on_insert_space()
                     && self.selected_index > 0
@@ -883,10 +1149,6 @@ impl App {
                 self.open_modal();
                 false
             }
-            Action::CategoryLifecycle => {
-                self.open_category_lifecycle_for_active();
-                false
-            }
             Action::Confirm => false,
             Action::SwitchToNone => {
                 self.queue_or_apply_mutation(QueuedMutation::SwitchLayer {
@@ -938,7 +1200,9 @@ impl App {
 
 #[cfg(test)]
 mod report_edit_tests {
-    use super::{ReportEditKeyIntent, resolve_report_edit_key};
+    use super::{
+        ReportEditKeyIntent, direct_command_or_fuzzy_fallback, resolve_report_edit_key,
+    };
     use crate::keybindings::default_keymap;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -1006,4 +1270,20 @@ mod report_edit_tests {
             ReportEditKeyIntent::Ignore
         );
     }
+    #[test]
+    fn fuzzy_palette_query_falls_back_when_it_is_not_a_direct_command() {
+        assert_eq!(
+            direct_command_or_fuzzy_fallback("report", true).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn valid_direct_command_wins_over_fuzzy_results() {
+        let resolved = direct_command_or_fuzzy_fallback("status", true)
+            .unwrap()
+            .expect("status should resolve as a direct command");
+        assert_eq!(resolved, crate::command::CommandIntent::Status);
+    }
+
 }

@@ -56,7 +56,7 @@ impl TestProfile {
     }
 
     fn seed_active_start(&self, started_at: chrono::DateTime<Utc>) {
-        let started = self.run(&["start", "clock-test", "--category", "Work"]);
+        let started = self.run(&["start", "Work"]);
         assert!(started.status.success(), "{}", stderr(&started));
         Connection::open(self.database_path())
             .unwrap()
@@ -125,6 +125,11 @@ fn large_wall_interval_requires_explicit_clock_jump_acceptance() {
 
     let accepted = profile.run(&["stop", "--accept-clock-jump"]);
     assert!(accepted.status.success(), "{}", stderr(&accepted));
-    assert_eq!(profile.row_count("active_session"), 0);
+    assert_eq!(profile.row_count("active_session"), 1);
     assert_eq!(profile.row_count("sessions"), 1);
+    let active_category: i64 = Connection::open(profile.database_path())
+        .unwrap()
+        .query_row("SELECT category_id FROM active_session", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(active_category, 0);
 }

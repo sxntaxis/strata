@@ -4,7 +4,6 @@ use std::io;
 
 #[allow(clippy::unnecessary_sort_by, clippy::while_let_loop)]
 mod app;
-mod category_lifecycle;
 mod cli;
 mod command;
 mod constants;
@@ -14,7 +13,6 @@ mod domain;
 mod ipc;
 mod keybindings;
 mod profile;
-mod runtime_receipts;
 mod sand;
 #[allow(dead_code)]
 mod sqlite;

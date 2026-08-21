@@ -1,7 +1,7 @@
 #![cfg(unix)]
 
 use std::{
-    io::{BufRead, BufReader, BufWriter, Write},
+    io::{BufRead, BufReader, BufWriter, Read, Write},
     os::unix::net::{UnixListener, UnixStream},
     path::PathBuf,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -10,6 +10,8 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::{command::CommandIntent, profile};
+
+const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Request {
@@ -112,7 +114,11 @@ pub(crate) fn send(command: &CommandIntent) -> Result<Option<String>, String> {
         id: request_id(),
         command: command.clone(),
     };
+    let expected_response_id = request.id;
     let payload = serde_json::to_string(&request).map_err(|error| error.to_string())?;
+    if payload.len() + 1 > MAX_MESSAGE_BYTES {
+        return Err(format!("control request exceeds {MAX_MESSAGE_BYTES} bytes"));
+    }
     let mut writer = BufWriter::new(&mut stream);
     writer
         .write_all(payload.as_bytes())
@@ -121,6 +127,12 @@ pub(crate) fn send(command: &CommandIntent) -> Result<Option<String>, String> {
     writer.flush().map_err(|error| error.to_string())?;
     drop(writer);
     let response = read_response(&stream)?;
+    if response.id != expected_response_id {
+        return Err(format!(
+            "control response ID mismatch: expected {expected_response_id}, received {}",
+            response.id
+        ));
+    }
     if response.ok {
         Ok(Some(response.message))
     } else {
@@ -158,28 +170,68 @@ where
     }
 }
 
-fn read_request(stream: &UnixStream) -> Result<Request, String> {
+fn read_json_line<T>(stream: &UnixStream) -> Result<T, String>
+where
+    T: for<'de> Deserialize<'de>,
+{
     let mut line = String::new();
-    BufReader::new(stream)
+    let mut reader = BufReader::new(stream).take((MAX_MESSAGE_BYTES + 1) as u64);
+    reader
         .read_line(&mut line)
         .map_err(|error| error.to_string())?;
-    serde_json::from_str(line.trim()).map_err(|error| error.to_string())
+    if line.len() > MAX_MESSAGE_BYTES {
+        return Err(format!("control message exceeds {MAX_MESSAGE_BYTES} bytes"));
+    }
+    if !line.ends_with('\n') {
+        return Err("control message is not newline-terminated".to_string());
+    }
+    serde_json::from_str(line.trim_end()).map_err(|error| error.to_string())
+}
+
+fn read_request(stream: &UnixStream) -> Result<Request, String> {
+    read_json_line(stream)
 }
 
 fn read_response(stream: &UnixStream) -> Result<Response, String> {
-    let mut line = String::new();
-    BufReader::new(stream)
-        .read_line(&mut line)
-        .map_err(|error| error.to_string())?;
-    serde_json::from_str(line.trim()).map_err(|error| error.to_string())
+    read_json_line(stream)
 }
 
 fn write_response(stream: &mut UnixStream, response: &Response) -> Result<(), String> {
     let payload = serde_json::to_string(response).map_err(|error| error.to_string())?;
+    if payload.len() + 1 > MAX_MESSAGE_BYTES {
+        return Err(format!("control response exceeds {MAX_MESSAGE_BYTES} bytes"));
+    }
     let mut writer = BufWriter::new(stream);
     writer
         .write_all(payload.as_bytes())
         .map_err(|error| error.to_string())?;
     writer.write_all(b"\n").map_err(|error| error.to_string())?;
     writer.flush().map_err(|error| error.to_string())
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn response_round_trip_preserves_request_id() {
+        let (left, mut right) = UnixStream::pair().unwrap();
+        let response = Response {
+            id: 42,
+            ok: true,
+            message: "ok".to_string(),
+        };
+        write_response(&mut right, &response).unwrap();
+        assert_eq!(read_response(&left).unwrap().id, 42);
+    }
+
+    #[test]
+    fn oversized_control_message_is_rejected() {
+        let (left, mut right) = UnixStream::pair().unwrap();
+        right.write_all(&vec![b'a'; MAX_MESSAGE_BYTES + 1]).unwrap();
+        right.write_all(b"\n").unwrap();
+        let error = read_request(&left).unwrap_err();
+        assert!(error.contains("exceeds"));
+    }
 }

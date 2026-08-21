@@ -1,83 +1,54 @@
 # Domain authority
 
 Status: accepted and certified
-Implemented by: DOMAIN-001
-Issues: #2, #12
-Last reviewed: 2026-08-02
+Last reviewed: 2026-08-20
 
 ## Purpose
 
-Strata must preserve what a session is about without confusing that identity with how the activity is classified. Project identity, category identity, and idle time therefore have separate contracts.
+Strata is a continuous temporal ledger whose reportable activity classification is the layer/category. The canonical model must preserve session identity and chronology without inventing a second product axis that the TUI does not expose.
 
-## Independent identity axes
+## Canonical session
 
-A canonical session contains:
+A completed session contains:
 
-- a stable session identity;
-- an optional project string;
+- one stable session identity;
 - one category/layer identity;
-- description, chronology, duration, source, and operational-day provenance.
+- the session description/tag;
+- authoritative UTC start and end;
+- elapsed duration;
+- source and operational-day boundary provenance.
 
-The project string answers “for what context or effort?” The category answers “what kind of activity?” They are not aliases and neither may be silently derived from the other.
+There is no independent canonical `project` field. Earlier prerelease CLI syntax used a positional value named `project` as a fallback layer name; it was not a separate user-facing model and is not preserved in the current schema.
 
-The CLI currently requires a non-empty positional project. TUI-created general intervals may carry an empty project. Empty means no project was supplied; Strata does not invent a placeholder in canonical history.
+## Layer classification
 
-## Explicit classification
-
-`strata start` requires `--category <CATEGORY>`. Omission fails before active state is created in SQLite.
-
-Accepted category selectors include a case-insensitive category name, a category ID, and the explicit baseline name `idle`. Historical `none` and `drift` spellings remain compatibility aliases for category ID `0`; user-facing output and documentation use `idle`.
-
-A normal work session therefore uses an explicit reportable category:
+`strata start <LAYER>` resolves a case-insensitive layer name or numeric category ID. `idle` is the explicit continuous-ledger baseline and canonical category ID `0`.
 
 ```bash
-strata start client-a --category Work
+strata start Work --desc "deep focus"
+strata stop
 ```
 
-A deliberate baseline interval uses:
-
-```bash
-strata start break --category idle
-```
+`stop` transitions the ledger back to idle. It does not create unclassified wall time.
 
 ## Idle contract
 
-Idle is the continuous-ledger baseline category.
+Idle:
 
-- it is represented in sediment;
-- it is neutral in balance calculations;
-- it is excluded from ordinary active-time totals and ICS work events;
-- it is selected explicitly by CLI users rather than inferred from missing classification;
-- internal `drift`-named functions, fault identifiers, or keybinding aliases are compatibility mechanics, not user-facing doctrine.
+- remains represented in the active runtime and sediment;
+- is neutral in balance calculations;
+- is excluded from ordinary active-time totals and ICS work events;
+- owns category ID `0`;
+- is never inferred from a missing or unknown category reference.
 
-## Persistence and compatibility
+Internal historical `drift` naming may remain where changing it would add no product value, but current user-facing doctrine is `idle`.
 
-SQLite stores project independently on active and completed sessions. DOMAIN-001 extends that identity
-through the shared domain model, TUI synchronization, emergency custody export, JSON export, and ICS
-export. New rows persist the supplied project exactly; deterministic SQLite bundles include project identity.
+## Persistence
 
-## Boundaries
+SQLite stores category identity directly on active and completed sessions. TUI, headless CLI, and live CLI-to-TUI control use the same category/session semantics. Portable bundles and JSON/ICS projections carry category identity without a separate project field.
 
-DOMAIN-001 does not add:
+A copied database bound to another profile, an unknown category reference, malformed chronology, or unsupported schema fails closed rather than being coerced into idle or another category.
 
-- project CRUD or a project registry workflow;
-- project selection in the TUI;
-- project-grouped or project-filtered reports;
-- custom report ranges;
-- export-format redesign;
-- sediment topology changes.
+## Product boundary
 
-Those features must build on, not reinterpret, the persisted project/category axes.
-
-## Certification
-
-DOMAIN-001 covers:
-
-- SQLite start → stop → reload project preservation;
-- SQLite active and completed project preservation;
-- TUI load/synchronization without project loss;
-- JSON and ICS project propagation;
-- omitted-category rejection before mutation;
-- explicit idle and explicit work classification;
-- portable bundle import of project-bearing rows;
-- all existing persistence, temporal, recovery, CLI, and TUI gates.
+Strata may be used *for projects*, study, habits, work, leisure, or any other activity. That does not make “project” a canonical storage dimension. If future product requirements need grouping above/beside layers, that must be designed from an actual workflow rather than inferred from the retired prerelease field.

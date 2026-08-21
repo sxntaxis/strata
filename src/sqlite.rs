@@ -3,7 +3,6 @@ use std::{path::Path, time::Duration};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use thiserror::Error;
 
-mod category_lifecycle;
 mod cli_runtime;
 #[cfg(test)]
 mod fault_certification;
@@ -13,16 +12,8 @@ mod runtime;
 mod runtime_coordination;
 mod tui_runtime;
 
-#[allow(unused_imports)]
-pub(crate) use category_lifecycle::{
-    CategoryLifecyclePreview, CategoryLifecycleReceipt, CategoryLifecycleRequest,
-    CategoryReferenceCounts, apply as apply_category_lifecycle,
-    apply_at as apply_category_lifecycle_at,
-    identity_high_watermark_at as category_identity_high_watermark_at,
-    preview as preview_category_lifecycle, preview_at as preview_category_lifecycle_at,
-};
 pub(crate) use cli_runtime::{
-    acknowledge_stop as acknowledge_cli_stop, read_snapshot as read_cli_snapshot,
+    read_snapshot as read_cli_snapshot,
     start_session as start_cli_session, stop_session as stop_cli_session,
 };
 pub(crate) use maintenance::{
@@ -111,20 +102,9 @@ INSERT INTO categories (
     id, name, description, color_index, balance_effect, archived_at_utc, sort_order
 ) VALUES (0, 'idle', '', 0, 0, NULL, 0);
 
-CREATE TABLE projects (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL COLLATE NOCASE,
-    archived_at_utc TEXT
-) STRICT;
-
-CREATE UNIQUE INDEX projects_active_name_unique
-    ON projects(name)
-    WHERE archived_at_utc IS NULL;
-
 CREATE TABLE sessions (
     id INTEGER PRIMARY KEY,
     stable_id TEXT NOT NULL UNIQUE,
-    project TEXT NOT NULL DEFAULT '',
     category_id INTEGER NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     started_at_utc TEXT NOT NULL,
@@ -166,7 +146,6 @@ END;
 CREATE TABLE active_session (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
     stable_id TEXT NOT NULL UNIQUE,
-    project TEXT NOT NULL DEFAULT '',
     category_id INTEGER NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     started_at_utc TEXT NOT NULL,
@@ -245,30 +224,6 @@ CREATE INDEX runtime_transitions_unacknowledged_index
 CREATE INDEX runtime_transitions_expected_active_index
     ON runtime_transitions(expected_active_stable_id, applied_at_utc);
 
-CREATE TABLE category_lifecycle_receipts (
-    operation_id TEXT PRIMARY KEY,
-    operation_kind TEXT NOT NULL CHECK (operation_kind IN ('merge', 'delete')),
-    source_category_id INTEGER NOT NULL,
-    target_category_id INTEGER,
-    source_metadata_json TEXT NOT NULL,
-    target_metadata_json TEXT,
-    preview_revision TEXT NOT NULL,
-    reference_counts_json TEXT NOT NULL,
-    applied_at_utc TEXT NOT NULL,
-    CHECK (
-        (operation_kind = 'merge' AND target_category_id IS NOT NULL)
-        OR (operation_kind = 'delete' AND target_category_id IS NULL)
-    ),
-    CHECK (target_category_id IS NULL OR target_category_id != source_category_id)
-) STRICT;
-
-CREATE UNIQUE INDEX category_lifecycle_receipts_preview_unique
-    ON category_lifecycle_receipts(
-        source_category_id,
-        COALESCE(target_category_id, -1),
-        preview_revision
-    );
-
 PRAGMA user_version = 1;
 "#;
 
@@ -287,7 +242,6 @@ pub(crate) enum SqliteStoreError {
 #[derive(Debug)]
 pub(crate) struct NewActiveSession<'a> {
     pub stable_id: &'a str,
-    pub project: &'a str,
     pub category_id: i64,
     pub description: &'a str,
     pub started_at_utc: &'a str,
@@ -377,15 +331,13 @@ impl SqliteRepository {
             "INSERT INTO active_session (
                 singleton,
                 stable_id,
-                project,
                 category_id,
                 description,
                 started_at_utc,
                 recovery_kind
-             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)",
+             ) VALUES (1, ?1, ?2, ?3, ?4, ?5)",
             params![
                 active.stable_id,
-                active.project,
                 active.category_id,
                 active.description,
                 active.started_at_utc,
@@ -409,17 +361,16 @@ impl SqliteRepository {
 
         let active = transaction
             .query_row(
-                "SELECT stable_id, project, category_id, description, started_at_utc
+                "SELECT stable_id, category_id, description, started_at_utc
                  FROM active_session
                  WHERE singleton = 1",
                 [],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
                     ))
                 },
             )
@@ -429,7 +380,6 @@ impl SqliteRepository {
         transaction.execute(
             "INSERT INTO sessions (
                 stable_id,
-                project,
                 category_id,
                 description,
                 started_at_utc,
@@ -439,13 +389,12 @@ impl SqliteRepository {
                 boundary_utc_offset_seconds,
                 boundary_start_minutes,
                 source
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 active.0,
                 active.1,
                 active.2,
                 active.3,
-                active.4,
                 completion.ended_at_utc,
                 completion.operational_day,
                 completion.elapsed_seconds,
@@ -483,7 +432,6 @@ mod tests {
     fn active(stable_id: &str, category_id: i64) -> NewActiveSession<'_> {
         NewActiveSession {
             stable_id,
-            project: "Study",
             category_id,
             description: "Read chapter 4",
             started_at_utc: "2026-08-01T10:00:00Z",
@@ -540,10 +488,8 @@ mod tests {
             [
                 "active_session",
                 "categories",
-                "category_lifecycle_receipts",
                 "category_tags",
                 "database_metadata",
-                "projects",
                 "runtime_checkpoint",
                 "runtime_transitions",
                 "sand_snapshots",
@@ -558,7 +504,6 @@ mod tests {
                 vec![
                     "id",
                     "stable_id",
-                    "project",
                     "category_id",
                     "description",
                     "started_at_utc",
@@ -575,7 +520,6 @@ mod tests {
                 vec![
                     "singleton",
                     "stable_id",
-                    "project",
                     "category_id",
                     "description",
                     "started_at_utc",
@@ -705,7 +649,6 @@ mod tests {
             .execute(
                 "INSERT INTO sessions (
                     stable_id,
-                    project,
                     category_id,
                     description,
                     started_at_utc,
@@ -715,7 +658,6 @@ mod tests {
                     source
                  ) VALUES (
                     'session-1',
-                    'fixture',
                     1,
                     '',
                     '2026-08-01T09:00:00Z',
