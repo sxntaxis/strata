@@ -135,8 +135,18 @@ pub(crate) fn allocate_operational_day_slices(
     if recorded_ended_at_utc < started_at_utc {
         return Err("session end precedes its start".to_string());
     }
+    if recorded_ended_at_utc < ended_at_utc {
+        return Err("session end precedes its recorded elapsed duration".to_string());
+    }
 
+    // `elapsed_seconds` is one canonical whole-second duration for the session.  Splitting
+    // each wall-clock overlap independently with `num_seconds()` loses a second whenever
+    // a sub-second session start crosses an exact operational-day boundary: each side is
+    // floored separately even though the unsplit duration is conserved.  Allocate from
+    // cumulative whole seconds since the canonical start instead, so every boundary only
+    // partitions an already-conserved integer duration.
     let mut cursor = started_at_utc;
+    let mut allocated = 0usize;
     let mut slices = Vec::new();
     while cursor < ended_at_utc {
         let operational_day = operational_day_from_policy(cursor, policy)?;
@@ -145,20 +155,33 @@ pub(crate) fn allocate_operational_day_slices(
             .ok_or_else(|| "operational-day range exceeds chrono's supported dates".to_string())?;
         let next_boundary = boundary_start_utc(next_day, policy)?;
         let slice_end = ended_at_utc.min(next_boundary);
-        let seconds = (slice_end - cursor).num_seconds();
-        if seconds <= 0 {
+        if slice_end <= cursor {
             return Err("operational-day allocation did not advance".to_string());
         }
-        slices.push(OperationalDaySlice {
-            operational_day,
-            started_at_utc: cursor,
-            ended_at_utc: slice_end,
-            elapsed_seconds: usize::try_from(seconds)
-                .map_err(|_| "slice duration exceeds this platform's range".to_string())?,
-        });
+
+        let cumulative = if slice_end == ended_at_utc {
+            elapsed_seconds
+        } else {
+            usize::try_from((slice_end - started_at_utc).num_seconds())
+                .map_err(|_| "slice duration exceeds this platform's range".to_string())?
+        };
+        if cumulative < allocated || cumulative > elapsed_seconds {
+            return Err(
+                "operational-day allocation produced an invalid cumulative duration".to_string(),
+            );
+        }
+        let seconds = cumulative - allocated;
+        if seconds > 0 {
+            slices.push(OperationalDaySlice {
+                operational_day,
+                started_at_utc: cursor,
+                ended_at_utc: slice_end,
+                elapsed_seconds: seconds,
+            });
+        }
+        allocated = cumulative;
         cursor = slice_end;
     }
-    let allocated: usize = slices.iter().map(|slice| slice.elapsed_seconds).sum();
     if allocated != elapsed_seconds {
         return Err(format!(
             "operational-day allocation conserved {allocated} of {elapsed_seconds} seconds"
@@ -359,6 +382,52 @@ mod tests {
         assert_eq!(slices[0].elapsed_seconds, 1800);
         assert_eq!(slices[1].operational_day.to_string(), "2026-08-01");
         assert_eq!(slices[1].elapsed_seconds, 1800);
+    }
+
+    #[test]
+    fn fractional_cross_boundary_allocation_conserves_whole_seconds() {
+        let policy = OperationalDayPolicy {
+            utc_offset_seconds: -21600,
+            start_minutes: 360,
+        };
+        let start = Utc
+            .with_ymd_and_hms(2026, 8, 21, 7, 14, 55)
+            .single()
+            .unwrap()
+            + ChronoDuration::nanoseconds(773_810_532);
+        let elapsed_seconds = 32_937;
+        let end = start + ChronoDuration::seconds(elapsed_seconds as i64);
+
+        let slices =
+            allocate_operational_day_slices(start, end, elapsed_seconds, policy).unwrap();
+
+        assert_eq!(slices.len(), 2);
+        assert_eq!(
+            slices.iter().map(|slice| slice.elapsed_seconds).sum::<usize>(),
+            elapsed_seconds
+        );
+        assert_eq!(slices[0].operational_day.to_string(), "2026-08-20");
+        assert_eq!(slices[1].operational_day.to_string(), "2026-08-21");
+    }
+
+    #[test]
+    fn subsecond_pre_boundary_fragment_does_not_create_zero_second_slice() {
+        let policy = OperationalDayPolicy {
+            utc_offset_seconds: -21600,
+            start_minutes: 360,
+        };
+        let boundary = Utc
+            .with_ymd_and_hms(2026, 8, 21, 12, 0, 0)
+            .single()
+            .unwrap();
+        let start = boundary - ChronoDuration::milliseconds(250);
+        let end = start + ChronoDuration::seconds(1);
+
+        let slices = allocate_operational_day_slices(start, end, 1, policy).unwrap();
+
+        assert_eq!(slices.len(), 1);
+        assert_eq!(slices[0].operational_day.to_string(), "2026-08-21");
+        assert_eq!(slices[0].elapsed_seconds, 1);
     }
 
     #[test]

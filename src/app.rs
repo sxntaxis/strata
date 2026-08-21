@@ -2696,3 +2696,40 @@ mod category_catalog_tests {
         assert!(ids.contains(&7));
     }
 }
+
+#[cfg(test)]
+mod clear_all_temporal_tests {
+    use super::clear_all_affected_days_for_interval;
+    use crate::domain::OperationalDayPolicy;
+    use chrono::{Duration as ChronoDuration, TimeZone, Utc};
+
+    #[test]
+    fn idle_clear_all_conserves_fractional_cross_boundary_interval() {
+        let policy = OperationalDayPolicy {
+            utc_offset_seconds: -21600,
+            start_minutes: 360,
+        };
+        let start = Utc
+            .with_ymd_and_hms(2026, 8, 21, 7, 14, 55)
+            .single()
+            .unwrap()
+            + ChronoDuration::nanoseconds(773_810_532);
+        let elapsed_seconds = 32_937;
+        let end = start + ChronoDuration::seconds(elapsed_seconds as i64);
+        let operation_day = chrono::NaiveDate::from_ymd_opt(2026, 8, 21).unwrap();
+
+        let days = clear_all_affected_days_for_interval(
+            operation_day,
+            true,
+            start,
+            end,
+            elapsed_seconds,
+            policy,
+        )
+        .unwrap();
+
+        assert_eq!(days.len(), 2);
+        assert!(days.contains(&chrono::NaiveDate::from_ymd_opt(2026, 8, 20).unwrap()));
+        assert!(days.contains(&operation_day));
+    }
+}
