@@ -1931,8 +1931,7 @@ impl App {
     }
 
     fn refresh_active_runtime_checkpoint(&mut self) {
-        if self.session.active_session_started_at_utc.is_some()
-            && !self.has_persistence_recovery()
+        if self.session.active_session_started_at_utc.is_some() && !self.has_persistence_recovery()
         {
             self.persist_runtime_checkpoint();
         }

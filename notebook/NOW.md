@@ -20,9 +20,9 @@ could persist `active_session_started_at_utc` slightly after `simulation_time_ut
 `f94a919675357c0d4d41f58168c5a95b05a188ca` aligns new bootstrap boundaries and narrowly repairs only the
 original Idle `tui-<start>-<pid>` checkpoint shape. Non-bootstrap inversions remain fail-closed.
 
-A second real-profile defect was then reproduced conceptually from owner evidence: detaching while accelerated catch-up still had a queued mutation caused detached checkpoint publication to fail with `runtime checkpoint cannot be written while mutations are pending`. The owner also set a product constraint that catching up to current time should take no more than eight seconds. The current working hotfix removes the live queued-mutation dependency: long backlog uses bounded sediment settlement, mutations during catch-up settle directly to their exact UTC boundary, detach settles before checkpoint publication, and autosave defers while catch-up remains active. This work is not yet native-certified at this checkpoint.
+A second real-profile defect was then reproduced conceptually from owner evidence: detaching while accelerated catch-up still had a queued mutation caused detached checkpoint publication to fail with `runtime checkpoint cannot be written while mutations are pending`. The owner also set a product constraint that catching up to current time should take no more than eight seconds. The certified hotfix removes the live queued-mutation dependency: long backlog uses bounded sediment settlement, mutations during catch-up settle directly to their exact UTC boundary, detach settles before checkpoint publication, and autosave defers while catch-up remains active. Native PTY proof resumed a 15-second stopped TUI and detached in 1.118 seconds with empty pending-mutation evidence; restart completed in 27 milliseconds.
 
-A third real-profile defect was triggered by `C` while Idle: operational-day allocation rejected `32936 of 32937 seconds`. The canonical session duration was correct; the allocator independently floored each wall-clock slice around an exact operational-day boundary. With a sub-second session start, those two floors can lose one whole second. The current working hotfix allocates cumulative whole seconds from the session start and includes the observed 32,937-second cross-boundary clear-all shape as regression evidence. This change is also awaiting native certification with the bounded-catchup work.
+A third real-profile defect was triggered by `C` while Idle: operational-day allocation rejected `32936 of 32937 seconds`. The canonical session duration was correct; the allocator independently floored each wall-clock slice around an exact operational-day boundary. With a sub-second session start, those two floors can lose one whole second. The certified allocator now allocates cumulative whole seconds from the session start and includes the observed 32,937-second cross-boundary clear-all shape as regression evidence. The copied real profile cleared through the normal TUI path without persistence recovery, persisted empty sediment and `pending_mutations: []`, detached, and restarted successfully.
 
 The certified system includes:
 
@@ -67,19 +67,21 @@ test suite, build, help smoke, diff hygiene, and the long-profile dangling-symli
 
 ## Verified final baseline
 
-- final native HEAD is `f94a919675357c0d4d41f58168c5a95b05a188ca`;
-- formatting, strict Clippy, full tests, build, help smoke, and diff hygiene pass;
+- final native HEAD is `965735d46a07e498db921df01904068b99288857`;
+- formatting, strict Clippy, 190 unit tests, 21 integration/process tests, build, help smoke, and diff hygiene pass;
 - fresh-profile direct-SQLite and profile-isolation proofs pass;
 - short-path active-socket refusal and long-path live-control proofs pass;
 - dangling long-path publication cleanup passes across a real TUI restart;
 - copied real-profile recovery completes with coherent checkpoint timestamps and subsequent restart succeeds;
 - the non-bootstrap `tui-active:*` inversion remains rejected with the existing recovery error.
+- 48-minute and 24-hour bounded checkpoint recovery each complete in 26 milliseconds;
+- historical checkpoints containing queued mutation evidence remain fail-closed with the stable-identity error.
 
 ## Certification evidence
 
 - current schema initializes fresh databases transactionally at `user_version = 1` and rejects other development versions;
 - strict storage-authority residue search is empty outside the authoritative decision record;
-- formatting, strict Clippy, tests, fresh-profile smoke proof, help output, diff hygiene, final long-path IPC runtime certification, and copied-profile bootstrap recovery certification were run for the reconciled baseline.
+- formatting, strict Clippy, tests, fresh-profile smoke proof, help output, diff hygiene, final long-path IPC runtime certification, copied-profile bootstrap recovery certification, bounded catch-up PTY proof, and copied-profile clear-all proof were run for the bounded-catch-up head.
 
 ## Known non-blocking questions
 
@@ -89,4 +91,4 @@ These are not open implementation defects. They require new evidence and an expl
 
 ## Next
 
-Native-certify the bounded-catchup/detach hotfix against the close-during-catch-up failure shape and a long-backlog performance proof. If green, promote that certified head as the next baseline.
+Promote the bounded-catch-up and clear-all conservation head as the next baseline; future work must preserve bounded settlement, exact boundary allocation, and fail-closed queued-evidence handling.

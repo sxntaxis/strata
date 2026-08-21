@@ -9,7 +9,7 @@ use chrono::{Duration as ChronoDuration, Local, NaiveDate};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use super::{
-    App, PaletteCommand, PersistenceOperation, RuntimeMutation, RecoveryAction, ui_helpers,
+    App, PaletteCommand, PersistenceOperation, RecoveryAction, RuntimeMutation, ui_helpers,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

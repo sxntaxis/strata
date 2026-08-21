@@ -398,12 +398,14 @@ mod tests {
         let elapsed_seconds = 32_937;
         let end = start + ChronoDuration::seconds(elapsed_seconds as i64);
 
-        let slices =
-            allocate_operational_day_slices(start, end, elapsed_seconds, policy).unwrap();
+        let slices = allocate_operational_day_slices(start, end, elapsed_seconds, policy).unwrap();
 
         assert_eq!(slices.len(), 2);
         assert_eq!(
-            slices.iter().map(|slice| slice.elapsed_seconds).sum::<usize>(),
+            slices
+                .iter()
+                .map(|slice| slice.elapsed_seconds)
+                .sum::<usize>(),
             elapsed_seconds
         );
         assert_eq!(slices[0].operational_day.to_string(), "2026-08-20");
