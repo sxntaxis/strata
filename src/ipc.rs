@@ -3,7 +3,7 @@
 use std::{
     io::{BufRead, BufReader, BufWriter, Read, Write},
     os::unix::net::{UnixListener, UnixStream},
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::{command::CommandIntent, profile};
 
 const MAX_MESSAGE_BYTES: usize = 64 * 1024;
+const UNIX_SOCKET_PATH_LIMIT: usize = 100;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Request {
@@ -29,28 +30,29 @@ struct Response {
 pub(crate) struct CommandServer {
     listener: UnixListener,
     socket_path: PathBuf,
+    bound_path: PathBuf,
 }
 
 impl CommandServer {
     pub(crate) fn bind() -> Result<Self, String> {
         let socket_path = socket_path();
-        if socket_path.exists() {
-            match UnixStream::connect(&socket_path) {
-                Ok(_) => {
-                    return Err("another Strata runtime is already active for this profile".into());
-                }
-                Err(_) => std::fs::remove_file(&socket_path)
-                    .map_err(|error| format!("cannot remove stale control socket: {error}"))?,
-            }
-        }
-        let listener = UnixListener::bind(&socket_path)
+        let bound_path = bind_path(&socket_path);
+        remove_stale_socket(&socket_path, &bound_path)?;
+        let listener = UnixListener::bind(&bound_path)
             .map_err(|error| format!("cannot bind profile control socket: {error}"))?;
         listener
             .set_nonblocking(true)
             .map_err(|error| format!("cannot configure profile control socket: {error}"))?;
+        if bound_path != socket_path {
+            std::os::unix::fs::symlink(&bound_path, &socket_path).map_err(|error| {
+                let _ = std::fs::remove_file(&bound_path);
+                format!("cannot publish profile control socket: {error}")
+            })?;
+        }
         Ok(Self {
             listener,
             socket_path,
+            bound_path,
         })
     }
 
@@ -84,11 +86,14 @@ impl CommandServer {
 impl Drop for CommandServer {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.socket_path);
+        if self.bound_path != self.socket_path {
+            let _ = std::fs::remove_file(&self.bound_path);
+        }
     }
 }
 
 pub(crate) fn send(command: &CommandIntent) -> Result<Option<String>, String> {
-    let path = socket_path();
+    let path = bind_path(&socket_path());
     let mut stream = match UnixStream::connect(path) {
         Ok(stream) => stream,
         Err(error)
@@ -142,6 +147,29 @@ pub(crate) fn send(command: &CommandIntent) -> Result<Option<String>, String> {
 
 fn socket_path() -> PathBuf {
     profile::state_dir().join("runtime.sock")
+}
+
+fn bind_path(socket_path: &Path) -> PathBuf {
+    if socket_path.as_os_str().len() < UNIX_SOCKET_PATH_LIMIT {
+        return socket_path.to_path_buf();
+    }
+    std::env::temp_dir().join(format!("strata-runtime-{}.sock", profile::profile_id()))
+}
+
+fn remove_stale_socket(socket_path: &Path, bound_path: &Path) -> Result<(), String> {
+    for path in [socket_path, bound_path] {
+        if !path.exists() {
+            continue;
+        }
+        match UnixStream::connect(path) {
+            Ok(_) => {
+                return Err("another Strata runtime is already active for this profile".into());
+            }
+            Err(_) => std::fs::remove_file(path)
+                .map_err(|error| format!("cannot remove stale control socket: {error}"))?,
+        }
+    }
+    Ok(())
 }
 
 fn request_id() -> u128 {
