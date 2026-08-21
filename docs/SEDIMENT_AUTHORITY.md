@@ -63,7 +63,8 @@ Missed physics frames are counted but never replayed. Recovery never installs a 
 
 SQLite publishes recovered canonical sediment, active-session continuity, the current typed daily contribution, and checkpoint state atomically. Committed evidence remains reclaimable until a fresh pending checkpoint replaces it. After successful recovery, every operational day touched by canonical session slices is reconciled.
 
-Legacy-file authority persists a fixed recovery target and committed marker so retry deterministically overwrites from the preserved base instead of adding duplicate mass.
+Recovery checkpoints, targets, and committed markers are SQLite-owned. Portable exports contain projections and
+are not runtime recovery authority.
 
 Normal shutdown may retire pending or committed evidence. Recovering or quarantined evidence remains protected. Runtime checkpoints are refused while mutations are queued; old mutation-bearing checkpoints fail closed because no stable cross-authority mutation receipt exists.
 
@@ -127,13 +128,13 @@ Daily contribution reconciliation occurs at autosave, full-state flush, checkpoi
 - Future category, chronology, or duration mutation must reconcile every before/after affected operational day.
 - Recovery completion reconciles all days represented by completed and active canonical slices, including multi-day detached intervals.
 
-## Legacy evidence disposition
+## Historical evidence disposition
 
 The current SQLite schema includes the distinct `daily-contribution` snapshot kind alongside the other constrained sediment records.
 
 Historical SQLite rows with `snapshot_kind = 'daily'` remain untouched evidence. New authority reads, writes, replaces, and deletes only `daily-contribution` rows.
 
-Legacy-file authority writes `YYYY-MM-DD.contribution.json`. Historical `YYYY-MM-DD.json` files remain untouched evidence and are never read as authoritative daily contributions.
+Portable exports are not runtime authority. Historical artifacts remain untouched evidence and are never read as authoritative daily contributions.
 
 This is an archive-in-place disposition: cumulative artifacts are preserved and excluded from the daily-contribution path. No silent reinterpretation occurs.
 

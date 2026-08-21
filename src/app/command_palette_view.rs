@@ -22,6 +22,20 @@ impl App {
         let accent = Color::Cyan;
         let rect = self.command_palette_rect(terminal_size);
 
+        let footer = if let Some(feedback) = self.command_palette_feedback.as_ref() {
+            Line::from(Span::styled(
+                feedback.clone(),
+                Style::default().fg(Color::LightRed),
+            ))
+            .alignment(Alignment::Right)
+        } else {
+            Line::from(Span::styled(
+                "Enter run · Esc close · ↑↓ move",
+                Style::default().fg(Color::DarkGray),
+            ))
+            .alignment(Alignment::Right)
+        };
+
         let frame_block = Block::default()
             .title(
                 Line::from(Span::styled(
@@ -32,13 +46,7 @@ impl App {
                 ))
                 .alignment(Alignment::Center),
             )
-            .title_bottom(
-                Line::from(Span::styled(
-                    "Enter run · Esc close · ↑↓ move",
-                    Style::default().fg(Color::DarkGray),
-                ))
-                .alignment(Alignment::Right),
-            )
+            .title_bottom(footer)
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(accent));

@@ -8,6 +8,7 @@ use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    command::CommandIntent,
     constants::COLORS,
     domain::{
         CategoryId, OperationalDayPolicy, ReportPeriod, Session, build_period_report,
@@ -47,6 +48,9 @@ pub enum Cli {
         #[arg(long, help = "Print the profile description as JSON")]
         json: bool,
     },
+
+    #[command(about = "Show the active runtime status")]
+    Status,
 
     #[command(about = "Start a new tracking session")]
     Start {
@@ -254,6 +258,14 @@ pub fn start_session(
     if category_name.trim().is_empty() {
         return Err("Category is required; use --category idle for baseline time".to_string());
     }
+    #[cfg(unix)]
+    if let Some(response) = crate::ipc::send(&CommandIntent::Start {
+        layer: category_name.clone(),
+        tag: description.clone(),
+    })? {
+        println!("{response}");
+        return Ok(());
+    }
     let database_path = sqlite::resolve_runtime_database()?;
     let started = sqlite::start_cli_session(&database_path, project, description, category_name)?;
     println!(
@@ -264,6 +276,11 @@ pub fn start_session(
 }
 
 pub fn stop_session(accept_clock_jump: bool) -> Result<usize, String> {
+    #[cfg(unix)]
+    if let Some(response) = crate::ipc::send(&CommandIntent::Stop)? {
+        println!("{response}");
+        return Ok(0);
+    }
     let database_path = sqlite::resolve_runtime_database()?;
     let stopped = sqlite::stop_cli_session(&database_path, accept_clock_jump)?;
     let elapsed = stopped.elapsed_seconds;
@@ -276,6 +293,24 @@ pub fn stop_session(accept_clock_jump: bool) -> Result<usize, String> {
     io::stdout().flush().map_err(|error| error.to_string())?;
     sqlite::acknowledge_cli_stop(&database_path, &stopped.operation_id)?;
     Ok(elapsed)
+}
+
+pub fn status() -> Result<(), String> {
+    #[cfg(unix)]
+    if let Some(response) = crate::ipc::send(&CommandIntent::Status)? {
+        println!("{response}");
+        return Ok(());
+    }
+    let snapshot = sqlite::read_cli_snapshot(&sqlite::resolve_runtime_database()?)?;
+    if let Some(active) = snapshot.active_session {
+        println!(
+            "Status: active layer '{}' since {}",
+            active.category_name, active.started_at_utc
+        );
+    } else {
+        println!("Status: no active session");
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -809,6 +844,12 @@ pub fn run_command(cli: Cli) {
     match cli {
         Cli::Profile { json } => {
             if let Err(error) = show_profile(json) {
+                eprintln!("Error: {error}");
+                std::process::exit(1);
+            }
+        }
+        Cli::Status => {
+            if let Err(error) = status() {
                 eprintln!("Error: {error}");
                 std::process::exit(1);
             }

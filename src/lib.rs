@@ -6,9 +6,12 @@ use std::io;
 mod app;
 mod category_lifecycle;
 mod cli;
+mod command;
 mod constants;
 #[allow(clippy::unnecessary_sort_by)]
 mod domain;
+#[cfg(unix)]
+mod ipc;
 mod keybindings;
 mod profile;
 mod runtime_receipts;

@@ -88,9 +88,9 @@ impl App {
         .alignment(Alignment::Left);
         let interaction_bottom_title = if self.report_logs_category_id.is_some() {
             let label = if self.report_log_edit.is_some() {
-                "EDIT DESCRIPTION · Enter commit · Esc cancel"
+                "edit · Enter commit · Esc cancel"
             } else {
-                "VIEW · Enter edit · Esc back"
+                "view · Enter edit · Esc back"
             };
             Some(
                 Line::from(Span::styled(label, Style::default().fg(Color::Gray)))

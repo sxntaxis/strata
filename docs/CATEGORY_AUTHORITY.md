@@ -83,40 +83,12 @@ Each committed operation writes an immutable lifecycle receipt with source and t
 
 SQLite schema version 7 owns lifecycle receipts. Consistent repository snapshots, raw backup/restore, portable bundle schema 3, import validation, and `sqlite doctor` preserve and validate those receipts. A bundle or database that reintroduces a retired source ID fails integrity validation.
 
-## Legacy-file authority
+## Portable interchange
 
 Portable bundle category data is validated against the SQLite category catalog.
 
-### Backward compatibility
-
-The historical five-column schema remains readable:
-
-```text
-id,name,description,color_index,karma_effect
-```
-
-Every row in that schema is treated as active.
-
-New writes use:
-
-```text
-id,name,description,color_index,karma_effect,archived
-```
-
-The `archived` field is a strict boolean. Active and archived rows coexist in the same atomic catalog file.
-
-### Validation
-
-Loading fails closed for:
-
-- malformed or duplicate IDs;
-- ID 0 catalog rows;
-- empty, duplicate, or reserved idle names;
-- invalid or out-of-range color indexes;
-- invalid or out-of-range karma effects;
-- malformed archived state.
-
-Malformed catalog rows are not skipped and default values are not invented.
+Portable bundle import validates category identity against the current SQLite catalog and preserves active,
+archived, and retired identity. CSV is an interchange format only; it is never a live category authority.
 
 ## Legacy lifecycle transformation
 

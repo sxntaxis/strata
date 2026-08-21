@@ -479,6 +479,7 @@ struct App {
     keymap_error: Option<String>,
     show_command_palette: bool,
     command_palette_query: String,
+    command_palette_feedback: Option<String>,
     command_palette_selected_index: usize,
     command_palette_scroll: usize,
     show_keybindings_modal: bool,
@@ -582,6 +583,7 @@ impl App {
             keymap_error,
             show_command_palette: false,
             command_palette_query: String::new(),
+            command_palette_feedback: None,
             command_palette_selected_index: 0,
             command_palette_scroll: 0,
             show_keybindings_modal: false,
@@ -901,6 +903,7 @@ impl App {
         self.show_command_palette = !self.show_command_palette;
         if self.show_command_palette {
             self.command_palette_query.clear();
+            self.command_palette_feedback = None;
             self.command_palette_selected_index = 0;
             self.command_palette_scroll = 0;
             self.close_keybindings_modal();
@@ -911,6 +914,7 @@ impl App {
     fn close_command_palette(&mut self) {
         self.show_command_palette = false;
         self.command_palette_query.clear();
+        self.command_palette_feedback = None;
         self.command_palette_selected_index = 0;
         self.command_palette_scroll = 0;
         self.render_needed = true;
@@ -2410,6 +2414,8 @@ fn run_application_loop(
     app: &mut App,
     terminal: &mut ManagedTerminal,
 ) -> Result<Option<String>, io::Error> {
+    #[cfg(unix)]
+    let command_server = crate::ipc::CommandServer::bind().map_err(io::Error::other)?;
     let physics_rate = Duration::from_millis(TIME_SETTINGS.physics_ms);
     let tick_rate = Duration::from_millis(TIME_SETTINGS.tick_ms);
     let render_rate = Duration::from_millis(1000 / TIME_SETTINGS.target_fps);
@@ -2421,6 +2427,14 @@ fn run_application_loop(
 
     'runtime: loop {
         loop {
+            #[cfg(unix)]
+            if let Err(error) =
+                command_server.process_pending(|command| app.execute_command(command))
+            {
+                app.keymap_error = Some(format!("Remote control error: {error}"));
+                app.render_needed = true;
+            }
+
             if !app.has_persistence_recovery() {
                 let now = Instant::now();
                 let wall_delta = now.saturating_duration_since(last_simulation_update);

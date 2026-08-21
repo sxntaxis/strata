@@ -70,7 +70,8 @@ Reports instead project immutable `SessionSlice` values:
 - day, week, month, category-log, balance, and live-preview calculations consume slices rather than assigning the entire row to its end day;
 - editing or deleting a session still targets one identity.
 
-Older legacy rows without absolute chronology retain their persisted day and elapsed duration rather than receiving fabricated boundary provenance. New legacy CSV rows and deterministic SQLite bundles carry the full policy fields.
+Imported records without absolute chronology are not promoted to live SQLite authority without explicit valid
+provenance. Current SQLite session rows carry the full operational-day policy fields.
 
 ## Zero-duration transitions
 

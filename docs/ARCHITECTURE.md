@@ -74,8 +74,6 @@ Category retirement changes availability, not identity or historical meaning.
 - Active and archived categories share one stable ID space.
 - Reports, exports, session serialization, karma, sand, snapshots, daily contributions, and tags resolve both active and archived metadata.
 - SQLite persists archival state through `archived_at_utc` and restricts referenced destructive deletion.
-- Legacy `categories.csv` accepts the historical five-column active-only schema and writes a six-column active/archived catalog.
-- Legacy catalog parsing rejects malformed, duplicate, reserved, or out-of-range identity and metadata.
 - Session category references must resolve to active or archived metadata; malformed or unknown IDs fail closed with the original value preserved.
 - Explicit ID 0 remains intentional idle; unresolved references are never converted to idle.
 - Archive and restore preserve stable ID, name, description, color, karma effect, and tags.
@@ -112,7 +110,8 @@ Whole-second ledger semantics own the completed row. Subsecond monotonic remaind
 
 Normal finish uses a certified SQLite receipt protocol. It publishes prior-generation evidence before active mutation, then converges completed history, active draft, category metadata, canonical sediment, and affected daily contributions before deleting the checkpoint.
 
-Legacy recovery flush/reload validate both active and archived catalogs, retain archived sediment identity, and emergency recovery schema 3 exports explicit archival state plus the structured recovery statement when present.
+SQLite recovery validates active and archived catalogs, retains archived sediment identity, and emergency
+recovery schema 3 exports explicit archival state plus the structured recovery statement when present.
 
 Clear-all/provisional-idle reset uses a third certified receipt boundary. It preserves all committed history, binds canonical prior elapsed and every affected day, restores exact active and grid state before deriving daily contributions, and applies active/sand/daily/checkpoint effects atomically in SQLite. Six transaction kill points are certified.
 

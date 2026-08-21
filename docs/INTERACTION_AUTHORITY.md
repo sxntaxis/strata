@@ -42,7 +42,8 @@ A draft changes canonical history only after explicit commit.
 
 SQLite authority performs one fenced session-description update. Memory changes only after that transaction succeeds.
 
-Legacy-file authority edits a cloned session collection, writes it through the existing persistence boundary, and replaces in-memory state only after the write succeeds.
+SQLite is the only runtime persistence authority. Portable exports are projections and cannot be edited as a
+second live session collection.
 
 A failed persistence attempt:
 

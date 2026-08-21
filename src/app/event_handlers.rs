@@ -1,13 +1,16 @@
 use crate::{
+    command::CommandIntent,
     constants::COLORS,
     domain::{CategoryId, DRIFT_CATEGORY_ID, ReportPeriod},
     keybindings::{Action, InputContext},
     sqlite,
 };
+use chrono::Utc;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use super::{
-    App, PaletteCommand, PersistenceOperation, QueuedMutation, RecoveryAction, ui_helpers,
+    App, PaletteCommand, PersistenceOperation, QueuedMutation, RecoveryAction, SessionClockMode,
+    ui_helpers,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -163,6 +166,24 @@ impl App {
                 self.close_command_palette();
             }
             KeyCode::Enter => {
+                let typed = self.command_palette_query.trim().to_string();
+                if !typed.is_empty() {
+                    match crate::command::parse(&typed) {
+                        Ok(command) => match self.execute_command(command) {
+                            Ok(_) => self.close_command_palette(),
+                            Err(error) => {
+                                self.command_palette_feedback = Some(format!("Error: {error}"));
+                                self.render_needed = true;
+                            }
+                        },
+                        Err(error) if entries.is_empty() => {
+                            self.command_palette_feedback = Some(format!("Error: {error}"));
+                            self.render_needed = true;
+                        }
+                        Err(_) => self.close_command_palette(),
+                    }
+                    return false;
+                }
                 if let Some(entry) = entries.get(self.command_palette_selected_index) {
                     return self.execute_palette_command(entry.command);
                 }
@@ -199,6 +220,7 @@ impl App {
             }
             KeyCode::Backspace => {
                 self.command_palette_query.pop();
+                self.command_palette_feedback = None;
                 let updated = self.filtered_command_palette_entries();
                 self.clamp_command_palette_selection(updated.len());
                 self.render_needed = true;
@@ -209,6 +231,7 @@ impl App {
                     .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
             {
                 self.command_palette_query.push(c);
+                self.command_palette_feedback = None;
                 let updated = self.filtered_command_palette_entries();
                 self.clamp_command_palette_selection(updated.len());
                 self.render_needed = true;
@@ -217,6 +240,114 @@ impl App {
         }
 
         false
+    }
+
+    pub(super) fn execute_command(&mut self, command: CommandIntent) -> Result<String, String> {
+        match command {
+            CommandIntent::Status => {
+                let category = self
+                    .time_tracker
+                    .category_by_id(self.time_tracker.active_category_id())
+                    .map(|category| self.display_layer_name(&category.name))
+                    .unwrap_or_else(|| "idle".to_string());
+                let elapsed = self
+                    .time_tracker
+                    .current_session_start
+                    .map(|start| start.elapsed().as_secs())
+                    .unwrap_or(0);
+                Ok(format!("Status: {category} ({elapsed}s)"))
+            }
+            CommandIntent::Start { layer, tag } => {
+                let Some(category) =
+                    self.time_tracker
+                        .categories_ordered()
+                        .into_iter()
+                        .find(|category| {
+                            category.name.eq_ignore_ascii_case(&layer)
+                                || category.id.0.to_string() == layer
+                        })
+                else {
+                    return Err(format!("Layer '{layer}' not found"));
+                };
+                self.queue_or_apply_mutation(QueuedMutation::SwitchLayer {
+                    category_id: category.id,
+                    description: tag.unwrap_or_default(),
+                });
+                Ok(format!(
+                    "Starting layer '{}'",
+                    self.display_layer_name(&category.name)
+                ))
+            }
+            CommandIntent::Stop => self
+                .end_active_session_at(Utc::now(), SessionClockMode::LiveMonotonic)
+                .map(|elapsed| format!("Stopped session ({elapsed}s)"))
+                .ok_or_else(|| "No active session to stop".to_string()),
+            CommandIntent::Karma { period } => {
+                let selected = match period
+                    .as_deref()
+                    .unwrap_or("today")
+                    .to_ascii_lowercase()
+                    .as_str()
+                {
+                    "today" | "day" => ReportPeriod::Today,
+                    "week" | "w" => ReportPeriod::Week,
+                    "month" | "m" => ReportPeriod::Month,
+                    value => return Err(format!("Unknown karma period '{value}'")),
+                };
+                self.open_report_modal();
+                self.set_report_period(selected);
+                let label = match selected {
+                    ReportPeriod::Today => "today",
+                    ReportPeriod::Week => "week",
+                    ReportPeriod::Month => "month",
+                };
+                Ok(format!("Showing {label} report"))
+            }
+            CommandIntent::DeleteLastSession { layer } => {
+                let Some(category) =
+                    self.time_tracker
+                        .categories_ordered()
+                        .into_iter()
+                        .find(|category| {
+                            category.name.eq_ignore_ascii_case(&layer)
+                                || category.id.0.to_string() == layer
+                        })
+                else {
+                    return Err(format!("Layer '{layer}' not found"));
+                };
+                let session_id = self
+                    .report_logs_for_category(category.id)
+                    .into_iter()
+                    .rev()
+                    .find_map(|entry| entry.session_id)
+                    .ok_or_else(|| format!("No sessions found for layer '{layer}'"))?;
+                let database_path = self
+                    .sqlite_database_path
+                    .clone()
+                    .ok_or_else(|| "SQLite authority is unavailable".to_string())?;
+                sqlite::delete_tui_session(&database_path, session_id)?;
+                self.reload_sqlite_sessions();
+                Ok(format!(
+                    "Deleted last session for layer '{}'",
+                    self.display_layer_name(&category.name)
+                ))
+            }
+            CommandIntent::DataDir => Ok(format!(
+                "Data dir: {}",
+                crate::profile::data_dir().display()
+            )),
+            CommandIntent::ConfigDir => Ok(format!(
+                "Config dir: {}",
+                crate::profile::config_dir().display()
+            )),
+            CommandIntent::Timer { duration_seconds } => {
+                Ok(format!("Timer set for {duration_seconds}s"))
+            }
+            #[cfg(debug_assertions)]
+            CommandIntent::TestingCheatsHalfFull => {
+                Err("testingcheats is not available in the SQLite runtime".to_string())
+            }
+        }
     }
 
     fn execute_palette_command(&mut self, command: PaletteCommand) -> bool {
