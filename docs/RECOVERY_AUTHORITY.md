@@ -59,11 +59,15 @@ A fresh TUI bootstrap creates its first active generation and first checkpoint i
 
 ## Exact transition-edge sediment
 
-Before a switch, finish, reset/clear, or queued mutation at a known timestamp, sediment settles through that exact boundary under the outgoing category.
+Before a switch, finish, reset/clear, detach, or live mutation at a known timestamp, sediment settles through that exact boundary under the outgoing category.
 
 - mass due exactly at the boundary belongs to the outgoing interval;
 - later mass belongs to the resulting category;
 - checked arithmetic and compressed pending runs avoid replay proportional to missed seconds;
+- live backlog beyond eight seconds uses this bounded settlement instead of a long accelerated replay;
+- a mutation requested during catch-up settles to its exact UTC boundary and applies immediately rather than entering a live mutation queue;
+- detach settles to its exit boundary before publishing the detached checkpoint;
+- periodic autosave defers while catch-up is active and resumes once the runtime is coherent;
 - canonical mass/category identity is conserved;
 - an invalid sediment transition blocks the product mutation and enters recovery.
 
@@ -85,6 +89,6 @@ Draw, poll, and read failures attempt one emergency checkpoint before terminal r
 
 During visible persistence recovery, ordinary mutation remains frozen. Emergency custody export is a structured JSON evidence artifact, not a second runtime authority or supported portable import format.
 
-## Unsupported future extension
+## Unsupported historical/future extension
 
-Queued checkpoint mutations that would need replay across a crash still require a stable cross-authority identity. Unsupported queued evidence fails closed; Strata does not infer or replay intent from ambiguous state.
+Current runtime does not queue user mutations merely to wait for catch-up. A checkpoint carrying queued mutation evidence still requires a stable cross-authority identity that Strata does not implement. Such evidence fails closed; Strata does not infer or replay intent from ambiguous state.

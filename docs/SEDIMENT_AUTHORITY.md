@@ -61,12 +61,14 @@ Recovery follows:
 
 Missed physics frames are counted but never replayed. Recovery never installs a relaxed replacement topology. Work is independent of detached duration apart from validation and compact run changes.
 
+The same bounded settlement primitive is used for long live catch-up. Backlog of eight seconds or less may use the short accelerated visual path; backlog beyond eight seconds settles directly to the current UTC boundary with checked periodic arithmetic instead of replaying physics frames. A user mutation during catch-up first settles to that mutation's exact UTC timestamp and then applies immediately, so current runtime no longer needs an in-memory queued-mutation path merely to wait for visual catch-up.
+
 SQLite publishes recovered canonical sediment, active-session continuity, the current typed daily contribution, and checkpoint state atomically. Committed evidence remains reclaimable until a fresh pending checkpoint replaces it. After successful recovery, every operational day touched by canonical session slices is reconciled.
 
 Recovery checkpoints, targets, and committed markers are SQLite-owned. Portable exports contain projections and
 are not runtime recovery authority.
 
-Normal shutdown may retire pending or committed evidence. Recovering or quarantined evidence remains protected. Runtime checkpoints are refused while mutations are queued; old mutation-bearing checkpoints fail closed because no stable cross-authority mutation receipt exists.
+Normal shutdown may retire pending or committed evidence. Recovering or quarantined evidence remains protected. Current runtime does not create queued-mutation checkpoints. Old mutation-bearing checkpoints still fail closed because no stable cross-authority mutation receipt exists.
 
 ## Snapshot identity
 

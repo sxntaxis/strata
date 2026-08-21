@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-08-21
 authority: working
-summary: v0.7.7 direct interaction is reconciled onto SQLite-only authority; bootstrap recovery boundary hotfix `f94a919` is natively certified.
-next: Preserve the native-certified hotfix baseline; new work begins only from a newly justified owner-approved issue.
+summary: v0.7.7 direct interaction is reconciled onto SQLite-only authority; a bounded-catchup/detach hotfix is under native certification.
+next: Native-certify the bounded live catch-up and detach-boundary hotfix, including the real close-during-catch-up failure shape.
 ---
 
 # NOW — Strata
@@ -19,6 +19,8 @@ A post-merge bootstrap recovery defect was found on a real profile: first-genera
 could persist `active_session_started_at_utc` slightly after `simulation_time_utc`. Hotfix
 `f94a919675357c0d4d41f58168c5a95b05a188ca` aligns new bootstrap boundaries and narrowly repairs only the
 original Idle `tui-<start>-<pid>` checkpoint shape. Non-bootstrap inversions remain fail-closed.
+
+A second real-profile defect was then reproduced conceptually from owner evidence: detaching while accelerated catch-up still had a queued mutation caused detached checkpoint publication to fail with `runtime checkpoint cannot be written while mutations are pending`. The owner also set a product constraint that catching up to current time should take no more than eight seconds. The current working hotfix removes the live queued-mutation dependency: long backlog uses bounded sediment settlement, mutations during catch-up settle directly to their exact UTC boundary, detach settles before checkpoint publication, and autosave defers while catch-up remains active. This work is not yet native-certified at this checkpoint.
 
 The certified system includes:
 
@@ -85,4 +87,4 @@ These are not open implementation defects. They require new evidence and an expl
 
 ## Next
 
-Preserve the certified baseline. New work begins only from a newly justified issue, decision, or architecture unit; superseded issue premises remain in Git history rather than current authority.
+Native-certify the bounded-catchup/detach hotfix against the close-during-catch-up failure shape and a long-backlog performance proof. If green, promote that certified head as the next baseline.
