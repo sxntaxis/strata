@@ -21,9 +21,7 @@ use crate::{
     sqlite, storage,
 };
 
-use super::{
-    App, QueuedMutation, QueuedMutationEventRecord, QueuedMutationRecord, RecoveryStatement,
-};
+use super::{App, RecoveryStatement};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PersistenceOperation {
@@ -465,6 +463,7 @@ impl App {
     }
 
     fn try_detach_and_exit(&mut self) -> Result<(), String> {
+        self.prepare_detach_boundary()?;
         self.try_flush_current_state()?;
         self.persist_runtime_checkpoint();
         if let Some(recovery) = self.persistence_recovery.as_ref() {
@@ -549,25 +548,7 @@ impl App {
                 description: self.time_tracker.active_description().to_string(),
                 started_at_utc: started_at.to_rfc3339_opts(SecondsFormat::Millis, true),
             });
-        let pending_mutations = self
-            .simulation
-            .pending_mutations
-            .iter()
-            .map(|event| QueuedMutationEventRecord {
-                execute_at_utc: event.execute_at_utc,
-                mutation: match event.mutation {
-                    QueuedMutation::SwitchLayer {
-                        category_id,
-                        ref description,
-                    } => QueuedMutationRecord::SwitchLayer {
-                        category_id: category_id.0,
-                        description: description.clone(),
-                    },
-                    QueuedMutation::ClearAllSand => QueuedMutationRecord::ClearAllSand,
-                    QueuedMutation::ClearDriftSand => QueuedMutationRecord::ClearDriftSand,
-                },
-            })
-            .collect();
+        let pending_mutations = Vec::new();
         let bundle = EmergencyRecoveryBundle {
             schema_version: 3,
             created_at_utc: now.to_rfc3339_opts(SecondsFormat::Millis, true),
@@ -779,7 +760,7 @@ struct EmergencyRecoveryBundle {
     active_session: Option<EmergencyActiveSession>,
     sand_state: crate::sand::SandState,
     simulation_time_utc: String,
-    pending_mutations: Vec<QueuedMutationEventRecord>,
+    pending_mutations: Vec<serde_json::Value>,
     checkpoint_recovery_active: bool,
     recovery_statement: Option<RecoveryStatement>,
 }

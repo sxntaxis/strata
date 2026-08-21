@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet, HashSet, VecDeque},
+    collections::{BTreeSet, HashSet},
     io,
     path::PathBuf,
     time::{Duration, Instant, SystemTime},
@@ -131,36 +131,13 @@ struct ReportLogEditState {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum QueuedMutation {
+enum RuntimeMutation {
     SwitchLayer {
         category_id: CategoryId,
         description: String,
     },
     ClearAllSand,
     ClearDriftSand,
-}
-
-#[derive(Clone, Debug)]
-struct QueuedMutationEvent {
-    execute_at_utc: DateTime<Utc>,
-    mutation: QueuedMutation,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-enum QueuedMutationRecord {
-    SwitchLayer {
-        category_id: u64,
-        #[serde(default)]
-        description: String,
-    },
-    ClearAllSand,
-    ClearDriftSand,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct QueuedMutationEventRecord {
-    execute_at_utc: DateTime<Utc>,
-    mutation: QueuedMutationRecord,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -176,7 +153,7 @@ struct DetachedRuntimeCheckpoint {
     active_description: String,
     active_session_started_at_utc: Option<DateTime<Utc>>,
     sand_state: crate::sand::SandState,
-    pending_mutations: Vec<QueuedMutationEventRecord>,
+    pending_mutations: Vec<serde_json::Value>,
     #[serde(default)]
     recovery_target_utc: Option<DateTime<Utc>>,
 }
@@ -227,6 +204,10 @@ struct RecoveryStatement {
     active_description: String,
     active_session_started_at_utc: DateTime<Utc>,
     cutoff_policy: String,
+}
+
+fn should_use_bounded_catchup(backlog: Duration) -> bool {
+    backlog > Duration::from_secs(CATCHUP_SETTINGS.bounded_catchup_after_secs)
 }
 
 fn recovery_target_for_claim(
@@ -380,7 +361,6 @@ struct SimulationState {
     catchup_progress_anchor: Option<Duration>,
     catchup_gauge_hold_until: Option<Instant>,
     catchup_was_active: bool,
-    pending_mutations: VecDeque<QueuedMutationEvent>,
 }
 
 struct App {
@@ -507,7 +487,6 @@ impl App {
                 catchup_progress_anchor: None,
                 catchup_gauge_hold_until: None,
                 catchup_was_active: false,
-                pending_mutations: VecDeque::new(),
             },
             detach_requested: false,
             keymap,
@@ -1276,16 +1255,6 @@ impl App {
         self.simulation_backlog_duration_at(Utc::now())
     }
 
-    fn catchup_target_utc(&self, now_utc: DateTime<Utc>) -> DateTime<Utc> {
-        if let Some(next) = self.simulation.pending_mutations.front()
-            && next.execute_at_utc > now_utc
-        {
-            next.execute_at_utc
-        } else {
-            now_utc
-        }
-    }
-
     fn current_catchup_multiplier(&self, backlog: Duration) -> u32 {
         if backlog.is_zero() {
             return 1;
@@ -1300,7 +1269,6 @@ impl App {
 
     fn is_catching_up(&self) -> bool {
         self.simulation_backlog_duration() > self.catchup_visibility_threshold()
-            || !self.simulation.pending_mutations.is_empty()
     }
 
     fn clear_all_effect(
@@ -1497,65 +1465,48 @@ impl App {
     }
 
     fn settle_transition_boundary(&mut self, boundary_utc: DateTime<Utc>) -> Result<(), String> {
-        loop {
-            let Some(next) = self.simulation.pending_mutations.front().cloned() else {
-                break;
-            };
-            if next.execute_at_utc > boundary_utc {
-                break;
-            }
-            self.settle_simulation_segment_to(next.execute_at_utc)?;
-            self.simulation.pending_mutations.pop_front();
-            self.apply_mutation_at(
-                next.mutation,
-                next.execute_at_utc,
-                SessionClockMode::HistoricalWall,
-            );
-            if let Some(recovery) = self.persistence_recovery.as_ref() {
-                return Err(recovery.failure.summary());
-            }
-        }
         self.settle_simulation_segment_to(boundary_utc)
     }
 
-    fn queue_or_apply_mutation(&mut self, mutation: QueuedMutation) {
+    fn apply_runtime_mutation(&mut self, mutation: RuntimeMutation) {
         let scheduled_at_utc = Utc::now();
-        if self.is_catching_up() || !self.simulation.pending_mutations.is_empty() {
-            self.simulation
-                .pending_mutations
-                .push_back(QueuedMutationEvent {
-                    execute_at_utc: scheduled_at_utc,
-                    mutation,
-                });
-        } else if let Err(error) = self.settle_transition_boundary(scheduled_at_utc) {
-            self.record_storage_result_for::<()>(
-                PersistenceOperation::SandStateSave,
-                RecoveryAction::ReloadAuthority,
-                Err(error),
-            );
+        let clock_mode = if self.is_catching_up() {
+            SessionClockMode::HistoricalWall
         } else {
-            self.apply_mutation_at(mutation, scheduled_at_utc, SessionClockMode::LiveMonotonic);
+            SessionClockMode::LiveMonotonic
+        };
+
+        if let Err(error) = self.settle_transition_boundary(scheduled_at_utc) {
+            if !self.has_persistence_recovery() {
+                self.record_storage_result_for::<()>(
+                    PersistenceOperation::SandStateSave,
+                    RecoveryAction::ReloadAuthority,
+                    Err(error),
+                );
+            }
+        } else {
+            self.apply_mutation_at(mutation, scheduled_at_utc, clock_mode);
         }
         self.render_needed = true;
     }
 
     fn apply_mutation_at(
         &mut self,
-        mutation: QueuedMutation,
+        mutation: RuntimeMutation,
         scheduled_at_utc: DateTime<Utc>,
         clock_mode: SessionClockMode,
     ) {
         match mutation {
-            QueuedMutation::SwitchLayer {
+            RuntimeMutation::SwitchLayer {
                 category_id,
                 description,
             } => {
                 self.apply_switch_layer_at(category_id, description, scheduled_at_utc, clock_mode);
             }
-            QueuedMutation::ClearAllSand => {
+            RuntimeMutation::ClearAllSand => {
                 self.apply_clear_all_at(scheduled_at_utc, clock_mode);
             }
-            QueuedMutation::ClearDriftSand => {
+            RuntimeMutation::ClearDriftSand => {
                 self.sand_engine.clear_category(DRIFT_CATEGORY_ID);
                 self.persist_sand_state();
                 self.persist_daily_sand_snapshot();
@@ -1586,10 +1537,23 @@ impl App {
             .catchup_cadence_accumulator
             .saturating_add(wall_delta);
 
-        let target_utc = self.catchup_target_utc(Utc::now());
+        let target_utc = Utc::now();
         let backlog = self.simulation_backlog_duration_at(target_utc);
 
-        if backlog.is_zero() {
+        if should_use_bounded_catchup(backlog) {
+            if let Err(error) = self.settle_transition_boundary(target_utc) {
+                if !self.has_persistence_recovery() {
+                    self.record_storage_result_for::<()>(
+                        PersistenceOperation::SandStateSave,
+                        RecoveryAction::ReloadAuthority,
+                        Err(error),
+                    );
+                }
+            } else {
+                self.simulation.catchup_cadence_accumulator = Duration::ZERO;
+                self.render_needed = true;
+            }
+        } else if backlog.is_zero() {
             self.advance_simulation_by(Duration::ZERO, tick_rate, physics_rate);
             self.simulation.catchup_cadence_accumulator =
                 self.simulation.catchup_cadence_accumulator.min(cadence);
@@ -1600,7 +1564,7 @@ impl App {
                     .catchup_cadence_accumulator
                     .saturating_sub(cadence);
 
-                let step_target_utc = self.catchup_target_utc(Utc::now());
+                let step_target_utc = Utc::now();
                 let step_backlog = self.simulation_backlog_duration_at(step_target_utc);
                 if step_backlog.is_zero() {
                     self.advance_simulation_by(Duration::ZERO, tick_rate, physics_rate);
@@ -1778,32 +1742,6 @@ impl App {
         let target_time = self.simulation.simulation_time_utc
             + ChronoDuration::from_std(delta).unwrap_or(ChronoDuration::zero());
 
-        loop {
-            let Some(next) = self.simulation.pending_mutations.front().cloned() else {
-                break;
-            };
-
-            if next.execute_at_utc > target_time {
-                break;
-            }
-
-            let mut pre_delta = Duration::ZERO;
-            if next.execute_at_utc > self.simulation.simulation_time_utc {
-                pre_delta = (next.execute_at_utc - self.simulation.simulation_time_utc)
-                    .to_std()
-                    .unwrap_or(Duration::ZERO);
-            }
-
-            self.process_simulation_delta(pre_delta, tick_rate, physics_rate);
-            self.simulation.simulation_time_utc = next.execute_at_utc;
-            self.simulation.pending_mutations.pop_front();
-            self.apply_mutation_at(
-                next.mutation,
-                next.execute_at_utc,
-                SessionClockMode::HistoricalWall,
-            );
-        }
-
         if delta.is_zero() {
             return;
         }
@@ -1876,11 +1814,10 @@ impl App {
     }
 
     fn catchup_progress_ratio(&mut self) -> Option<f64> {
-        let target_utc = self.catchup_target_utc(Utc::now());
+        let target_utc = Utc::now();
         let backlog = self.simulation_backlog_duration_at(target_utc);
 
         if backlog <= self.catchup_visibility_threshold()
-            && self.simulation.pending_mutations.is_empty()
             && let Some(until) = self.simulation.catchup_gauge_hold_until
         {
             if Instant::now() < until {
@@ -1889,9 +1826,7 @@ impl App {
             self.simulation.catchup_gauge_hold_until = None;
         }
 
-        if backlog <= self.catchup_visibility_threshold()
-            && self.simulation.pending_mutations.is_empty()
-        {
+        if backlog <= self.catchup_visibility_threshold() {
             if self.simulation.catchup_progress_anchor.is_some() {
                 self.simulation.catchup_progress_anchor = None;
                 return Some(1.0);
@@ -1924,16 +1859,14 @@ impl App {
         Some(ratio.clamp(0.0, 1.0))
     }
 
+    fn prepare_detach_boundary(&mut self) -> Result<(), String> {
+        self.settle_transition_boundary(Utc::now())
+    }
+
     fn build_runtime_checkpoint(&self) -> Result<DetachedRuntimeCheckpoint, String> {
         if self.checkpoint_recovery_active {
             return Err("checkpoint recovery is still active".to_string());
         }
-        if !self.simulation.pending_mutations.is_empty() {
-            return Err(
-                "runtime checkpoint cannot be written while mutations are pending".to_string(),
-            );
-        }
-
         let active_category_id = self.time_tracker.active_category_id();
         let active_description = self.time_tracker.active_description().to_string();
         let spawn_accumulator_nanos =
@@ -1998,7 +1931,8 @@ impl App {
     }
 
     fn refresh_active_runtime_checkpoint(&mut self) {
-        if self.session.active_session_started_at_utc.is_some() && !self.has_persistence_recovery()
+        if self.session.active_session_started_at_utc.is_some()
+            && !self.has_persistence_recovery()
         {
             self.persist_runtime_checkpoint();
         }
@@ -2220,7 +2154,6 @@ impl App {
         self.simulation.simulation_time_utc = target_utc;
         self.simulation.spawn_accumulator = recovered.spawn_remainder;
         self.simulation.physics_accumulator = recovered.physics_remainder;
-        self.simulation.pending_mutations.clear();
         self.simulation.catchup_cadence_accumulator = Duration::ZERO;
         self.simulation.catchup_visual_engine = None;
         self.simulation.catchup_progress_anchor = None;
@@ -2320,7 +2253,7 @@ fn run_application_loop(
                 last_simulation_update = now;
                 app.advance_runtime(wall_delta, tick_rate, physics_rate);
 
-                if last_save.elapsed() >= save_rate {
+                if last_save.elapsed() >= save_rate && !app.is_catching_up() {
                     app.persist_sessions();
                     if !app.has_persistence_recovery() {
                         app.persist_sand_state();
@@ -2370,7 +2303,18 @@ fn run_application_loop(
         }
 
         if app.detach_requested {
-            app.persist_sessions();
+            if let Err(error) = app.prepare_detach_boundary()
+                && !app.has_persistence_recovery()
+            {
+                app.record_storage_result_for::<()>(
+                    PersistenceOperation::CheckpointSave,
+                    RecoveryAction::DetachAndExit,
+                    Err(error),
+                );
+            }
+            if !app.has_persistence_recovery() {
+                app.persist_sessions();
+            }
             if !app.has_persistence_recovery() {
                 app.persist_sand_state();
             }
@@ -2439,12 +2383,14 @@ pub fn run_ui(loaded: keybindings::LoadedKeybindings) -> Result<(), io::Error> {
 
 #[cfg(test)]
 mod recovery_statement_tests {
+    use std::time::Duration;
+
     use chrono::{TimeZone, Utc};
 
     use super::{
         DetachedRuntimeCheckpoint, PostTargetClass, RecoveredIntervalClass,
         build_recovery_statement, recovery_target_for_claim,
-        repair_initial_checkpoint_simulation_boundary,
+        repair_initial_checkpoint_simulation_boundary, should_use_bounded_catchup,
     };
     use crate::sand::SandState;
 
@@ -2507,6 +2453,13 @@ mod recovery_statement_tests {
             reconstructed.recovered_interval_class,
             RecoveredIntervalClass::Reconstructed
         );
+    }
+
+    #[test]
+    fn long_live_backlog_uses_bounded_settlement_after_eight_seconds() {
+        assert!(!should_use_bounded_catchup(Duration::from_secs(8)));
+        assert!(should_use_bounded_catchup(Duration::from_secs(9)));
+        assert!(should_use_bounded_catchup(Duration::from_secs(60 * 60)));
     }
 
     #[test]

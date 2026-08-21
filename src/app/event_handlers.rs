@@ -9,7 +9,7 @@ use chrono::{Duration as ChronoDuration, Local, NaiveDate};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use super::{
-    App, PaletteCommand, PersistenceOperation, QueuedMutation, RecoveryAction, ui_helpers,
+    App, PaletteCommand, PersistenceOperation, RuntimeMutation, RecoveryAction, ui_helpers,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -438,7 +438,7 @@ impl App {
                 self.refresh_active_runtime_checkpoint();
             }
         } else {
-            self.queue_or_apply_mutation(QueuedMutation::SwitchLayer {
+            self.apply_runtime_mutation(RuntimeMutation::SwitchLayer {
                 category_id: category.id,
                 description,
             });
@@ -491,7 +491,7 @@ impl App {
             .category_by_id(active_id)
             .map(|category| self.display_layer_name(&category.name))
             .unwrap_or_else(|| "Idle".to_string());
-        self.queue_or_apply_mutation(QueuedMutation::SwitchLayer {
+        self.apply_runtime_mutation(RuntimeMutation::SwitchLayer {
             category_id: DRIFT_CATEGORY_ID,
             description: String::new(),
         });
@@ -672,7 +672,7 @@ impl App {
     }
 
     fn switch_to_layer_from_palette(&mut self, category_id: CategoryId) {
-        self.queue_or_apply_mutation(QueuedMutation::SwitchLayer {
+        self.apply_runtime_mutation(RuntimeMutation::SwitchLayer {
             category_id,
             description: String::new(),
         });
@@ -966,7 +966,7 @@ impl App {
                             }
                             self.refresh_active_runtime_checkpoint();
                         } else {
-                            self.queue_or_apply_mutation(QueuedMutation::SwitchLayer {
+                            self.apply_runtime_mutation(RuntimeMutation::SwitchLayer {
                                 category_id,
                                 description: self.modal_description.clone(),
                             });
@@ -1137,11 +1137,11 @@ impl App {
         match action {
             Action::Quit => true,
             Action::ClearAllSand => {
-                self.queue_or_apply_mutation(QueuedMutation::ClearAllSand);
+                self.apply_runtime_mutation(RuntimeMutation::ClearAllSand);
                 false
             }
             Action::ClearNoneSand => {
-                self.queue_or_apply_mutation(QueuedMutation::ClearDriftSand);
+                self.apply_runtime_mutation(RuntimeMutation::ClearDriftSand);
                 false
             }
             Action::OpenReportModal => {
@@ -1154,7 +1154,7 @@ impl App {
             }
             Action::Confirm => false,
             Action::SwitchToNone => {
-                self.queue_or_apply_mutation(QueuedMutation::SwitchLayer {
+                self.apply_runtime_mutation(RuntimeMutation::SwitchLayer {
                     category_id: DRIFT_CATEGORY_ID,
                     description: String::new(),
                 });

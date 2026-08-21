@@ -51,6 +51,7 @@ pub const FACE_SETTINGS: FaceSettings = FaceSettings {
 pub const CATCHUP_SETTINGS: CatchupSettings = CatchupSettings {
     cadence_ms: 120,
     accelerated_multiplier: 24,
+    bounded_catchup_after_secs: 8,
     visual_refresh_ms: 120,
     gauge_hold_ms: 300,
     repose_threshold: 2,
@@ -140,6 +141,7 @@ pub struct FaceSettings {
 pub struct CatchupSettings {
     pub cadence_ms: u64,
     pub accelerated_multiplier: u32,
+    pub bounded_catchup_after_secs: u64,
     pub visual_refresh_ms: u64,
     pub gauge_hold_ms: u64,
     pub repose_threshold: usize,
