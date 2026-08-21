@@ -595,10 +595,7 @@ pub(crate) fn sync_sessions(database_path: &Path, sessions: &[Session]) -> Resul
         })?;
         let category_id = as_i64(session.category_id.0, "category ID")?;
         let elapsed = as_i64(session.elapsed_seconds as u64, "elapsed seconds")?;
-        if expected.0 != category_id
-            || expected.1 != session.date
-            || expected.2 != elapsed
-        {
+        if expected.0 != category_id || expected.1 != session.date || expected.2 != elapsed {
             return Err(format!(
                 "TUI session {id} identity or chronology diverged from SQLite authority"
             ));
@@ -1497,7 +1494,9 @@ mod tests {
         assert_eq!(preserved.2, "cli-runtime");
         let concurrent_count: i64 = repository
             .connection
-            .query_row("SELECT count(*) FROM sessions WHERE id = 8", [], |row| row.get(0))
+            .query_row("SELECT count(*) FROM sessions WHERE id = 8", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(concurrent_count, 1);
         drop(repository);
@@ -1507,7 +1506,10 @@ mod tests {
             .connection
             .query_row("SELECT count(*) FROM sessions", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(remaining, 1, "explicit deletion must not remove concurrent rows");
+        assert_eq!(
+            remaining, 1,
+            "explicit deletion must not remove concurrent rows"
+        );
         std::fs::remove_file(path).ok();
     }
 
@@ -1518,7 +1520,7 @@ mod tests {
         repository
             .start_session(&NewActiveSession {
                 stable_id: "checkpoint-active",
-                    category_id: 0,
+                category_id: 0,
                 description: "",
                 started_at_utc: "2026-08-01T12:00:00Z",
                 recovery_kind: "live",
@@ -1644,7 +1646,7 @@ mod checkpoint_identity_tests {
             &mut repository,
             &NewActiveSession {
                 stable_id: "active-a",
-                    category_id: 1,
+                category_id: 1,
                 description: "",
                 started_at_utc: "2026-08-01T10:00:00Z",
                 recovery_kind: "live",
@@ -1747,7 +1749,7 @@ mod clear_all_transaction_tests {
             &mut repository,
             &NewActiveSession {
                 stable_id: "idle-a",
-                    category_id: 0,
+                category_id: 0,
                 description: "",
                 started_at_utc: "2026-08-01T11:00:00Z",
                 recovery_kind: "live",
@@ -1919,7 +1921,7 @@ mod clear_all_additional_transaction_tests {
             &mut repository,
             &NewActiveSession {
                 stable_id: "active-a",
-                    category_id: 0,
+                category_id: 0,
                 description: "",
                 started_at_utc: "2026-08-01T11:00:00Z",
                 recovery_kind: "live",

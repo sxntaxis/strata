@@ -13,8 +13,8 @@ mod runtime_coordination;
 mod tui_runtime;
 
 pub(crate) use cli_runtime::{
-    read_snapshot as read_cli_snapshot,
-    start_session as start_cli_session, stop_session as stop_cli_session,
+    read_snapshot as read_cli_snapshot, start_session as start_cli_session,
+    stop_session as stop_cli_session,
 };
 pub(crate) use maintenance::{
     BackupOptions, BundleExportOptions, BundleImportOptions, DoctorOptions, RestoreOptions,

@@ -119,7 +119,6 @@ impl SandEngine {
         self.grid = expanded;
         self.grid_width_dots = target_width;
         self.grid_height_dots = target_height;
-        self.flush_pending_grains();
     }
 
     fn capacity(&self) -> usize {
@@ -687,7 +686,10 @@ mod tests {
         let expanded_width = engine.grid_width_dots;
         let expanded_height = engine.grid_height_dots;
         assert_eq!(expanded_width, 30 * crate::constants::SAND_ENGINE.dot_width);
-        assert_eq!(expanded_height, 20 * crate::constants::SAND_ENGINE.dot_height);
+        assert_eq!(
+            expanded_height,
+            20 * crate::constants::SAND_ENGINE.dot_height
+        );
         assert_eq!(category_mass(&engine, CategoryId::new(1)), mass_1);
         assert_eq!(category_mass(&engine, CategoryId::new(2)), mass_2);
         assert_eq!(engine.grain_count, 3);
@@ -713,7 +715,10 @@ mod tests {
         engine.resize(8, 4);
         let x_offset = (engine.grid_width_dots - old_width) / 2;
         let y_offset = engine.grid_height_dots - old_height;
-        assert_eq!(engine.grid[y_offset + old_height - 1][x_offset], Some(CategoryId::new(1)));
+        assert_eq!(
+            engine.grid[y_offset + old_height - 1][x_offset],
+            Some(CategoryId::new(1))
+        );
         assert_eq!(
             engine.grid[y_offset + old_height - 1][x_offset + old_width - 1],
             Some(CategoryId::new(2))
@@ -797,8 +802,14 @@ mod tests {
 
         assert_eq!(restored.cell_width, 40);
         assert_eq!(restored.cell_height, 40);
-        assert_eq!(restored.grid_width_dots, 40 * crate::constants::SAND_ENGINE.dot_width);
-        assert_eq!(restored.grid_height_dots, 40 * crate::constants::SAND_ENGINE.dot_height);
+        assert_eq!(
+            restored.grid_width_dots,
+            40 * crate::constants::SAND_ENGINE.dot_width
+        );
+        assert_eq!(
+            restored.grid_height_dots,
+            40 * crate::constants::SAND_ENGINE.dot_height
+        );
         assert_eq!(restored.grain_count, 2);
         assert_eq!(category_mass(&restored, CategoryId::new(1)), 1);
         assert_eq!(category_mass(&restored, CategoryId::new(2)), 1);

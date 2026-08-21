@@ -104,7 +104,10 @@ pub(crate) fn start_session(
     let now = Utc::now();
     let started_at_utc = now.to_rfc3339_opts(SecondsFormat::Millis, true);
 
-    if let Some(active) = repository.active_session().map_err(|error| error.to_string())? {
+    if let Some(active) = repository
+        .active_session()
+        .map_err(|error| error.to_string())?
+    {
         if active.category_id == category.id {
             if !description.is_empty() {
                 repository

@@ -1315,7 +1315,8 @@ impl App {
 
         let idle_reset = is_drift_category_id(self.time_tracker.active_category_id());
         self.sand_engine.clear();
-        if idle_reset && let Err(error) = self.begin_transition_session(applied_at_utc, clock_mode) {
+        if idle_reset && let Err(error) = self.begin_transition_session(applied_at_utc, clock_mode)
+        {
             rollback(self);
             self.record_storage_result_for::<()>(
                 PersistenceOperation::ActiveReset,
@@ -2626,8 +2627,6 @@ mod transition_edge_tests {
         assert_eq!(settled.state.pending_runs[0].count, 1_000_000_000);
     }
 }
-
-
 
 #[cfg(test)]
 mod category_catalog_tests {

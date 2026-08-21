@@ -128,7 +128,9 @@ fn start_stop_report_and_export_use_one_database() {
         .unwrap();
     assert_eq!(completed, 1);
     let active_category_id: i64 = connection
-        .query_row("SELECT category_id FROM active_session", [], |row| row.get(0))
+        .query_row("SELECT category_id FROM active_session", [], |row| {
+            row.get(0)
+        })
         .unwrap();
     assert_eq!(active_category_id, 0);
 
@@ -147,11 +149,13 @@ fn start_stop_report_and_export_use_one_database() {
         stderr(&export)
     );
     let value: serde_json::Value = serde_json::from_slice(&export.stdout).unwrap();
-    assert!(value["sessions"][0]
-        .as_object()
-        .expect("session export should be an object")
-        .get("project")
-        .is_none());
+    assert!(
+        value["sessions"][0]
+            .as_object()
+            .expect("session export should be an object")
+            .get("project")
+            .is_none()
+    );
 }
 
 #[test]
@@ -195,7 +199,9 @@ fn repeated_start_updates_live_layer_and_stop_returns_to_idle() {
         .unwrap();
     assert_eq!(completed, 1);
     let idle_category_id: i64 = connection
-        .query_row("SELECT category_id FROM active_session", [], |row| row.get(0))
+        .query_row("SELECT category_id FROM active_session", [], |row| {
+            row.get(0)
+        })
         .unwrap();
     assert_eq!(idle_category_id, 0);
 }

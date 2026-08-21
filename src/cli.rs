@@ -259,7 +259,10 @@ pub fn start_session(layer: String, description: Option<String>) -> Result<(), S
 
 pub fn stop_session(accept_clock_jump: bool) -> Result<usize, String> {
     #[cfg(unix)]
-    if let Some(response) = crate::ipc::send(&CommandIntent::Stop { layer: None, tag: None })? {
+    if let Some(response) = crate::ipc::send(&CommandIntent::Stop {
+        layer: None,
+        tag: None,
+    })? {
         println!("{response}");
         return Ok(0);
     }

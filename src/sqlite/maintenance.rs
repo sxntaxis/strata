@@ -8,7 +8,6 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use chrono::DateTime;
 use csv::{ReaderBuilder, StringRecord, Terminator, WriterBuilder};
 use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
@@ -722,8 +721,6 @@ fn doctor_at(database_path: &Path) -> Result<SqliteMaintenanceReport, Maintenanc
         },
     ));
 
-
-
     let healthy = checks.iter().all(|item| item.passed);
     let counts = if healthy {
         Some(SnapshotCounts::from_snapshot(&read_repository_snapshot(
@@ -1288,12 +1285,23 @@ fn parse_sessions(bytes: &[u8]) -> Result<Vec<SessionRecord>, MaintenanceError> 
             started_at_utc: field(record, 4)?.to_string(),
             ended_at_utc: field(record, 5)?.to_string(),
             operational_day: field(record, 6)?.to_string(),
-            elapsed_seconds: parse_i64(SESSIONS_FILENAME, index, field(record, 7)?, "elapsed_seconds")?,
+            elapsed_seconds: parse_i64(
+                SESSIONS_FILENAME,
+                index,
+                field(record, 7)?,
+                "elapsed_seconds",
+            )?,
             boundary_utc_offset_seconds: optional_i64(
-                SESSIONS_FILENAME, index, field(record, 8)?, "boundary_utc_offset_seconds",
+                SESSIONS_FILENAME,
+                index,
+                field(record, 8)?,
+                "boundary_utc_offset_seconds",
             )?,
             boundary_start_minutes: optional_i64(
-                SESSIONS_FILENAME, index, field(record, 9)?, "boundary_start_minutes",
+                SESSIONS_FILENAME,
+                index,
+                field(record, 9)?,
+                "boundary_start_minutes",
             )?,
             source: field(record, 10)?.to_string(),
         });
@@ -1305,7 +1313,13 @@ fn parse_active_session(bytes: &[u8]) -> Result<Option<ActiveSessionRecord>, Mai
     let records = csv_records(
         ACTIVE_SESSION_FILENAME,
         bytes,
-        &["stable_id", "category_id", "description", "started_at_utc", "recovery_kind"],
+        &[
+            "stable_id",
+            "category_id",
+            "description",
+            "started_at_utc",
+            "recovery_kind",
+        ],
     )?;
     if records.len() > 1 {
         return Err(MaintenanceError::InvalidBundle(format!(
@@ -1317,7 +1331,12 @@ fn parse_active_session(bytes: &[u8]) -> Result<Option<ActiveSessionRecord>, Mai
         .map(|record| {
             Ok(ActiveSessionRecord {
                 stable_id: field(record, 0)?.to_string(),
-                category_id: parse_i64(ACTIVE_SESSION_FILENAME, 0, field(record, 1)?, "category_id")?,
+                category_id: parse_i64(
+                    ACTIVE_SESSION_FILENAME,
+                    0,
+                    field(record, 1)?,
+                    "category_id",
+                )?,
                 description: field(record, 2)?.to_string(),
                 started_at_utc: field(record, 3)?.to_string(),
                 recovery_kind: field(record, 4)?.to_string(),

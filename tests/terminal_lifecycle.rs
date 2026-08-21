@@ -98,7 +98,11 @@ impl TerminalProfile {
 
     fn seed_work_category(&self) {
         let initialized = self.cli(&["report", "--today"]);
-        assert!(initialized.status.success(), "{}", combined_output(&initialized));
+        assert!(
+            initialized.status.success(),
+            "{}",
+            combined_output(&initialized)
+        );
         Connection::open(self.database_path())
             .unwrap()
             .execute(
@@ -252,7 +256,9 @@ fn live_cli_control_is_profile_scoped_and_preserves_continuous_idle() {
     assert!(stop.status.success(), "{}", combined_output(&stop));
     let idle_category: i64 = Connection::open(profile.database_path())
         .unwrap()
-        .query_row("SELECT category_id FROM active_session", [], |row| row.get(0))
+        .query_row("SELECT category_id FROM active_session", [], |row| {
+            row.get(0)
+        })
         .unwrap();
     assert_eq!(idle_category, 0);
 

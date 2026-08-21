@@ -5,12 +5,11 @@ use crate::{
     keybindings::{Action, InputContext},
     sqlite,
 };
-use chrono::{Duration as ChronoDuration, Local, NaiveDate, Utc};
+use chrono::{Duration as ChronoDuration, Local, NaiveDate};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use super::{
-    App, PaletteCommand, PersistenceOperation, QueuedMutation, RecoveryAction,
-    ui_helpers,
+    App, PaletteCommand, PersistenceOperation, QueuedMutation, RecoveryAction, ui_helpers,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -85,7 +84,6 @@ impl App {
         if self.keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
             return true;
         }
-
 
         if self.report_log_edit.is_some() {
             return self.handle_report_log_edit_key(key);
@@ -435,7 +433,8 @@ impl App {
                     .clone()
                     .ok_or_else(|| "active session has no stable identity".to_string())?;
                 sqlite::update_tui_active_description(&database_path, &stable_id, &description)?;
-                self.time_tracker.set_active_description(description.clone());
+                self.time_tracker
+                    .set_active_description(description.clone());
                 self.refresh_active_runtime_checkpoint();
             }
         } else {
@@ -560,17 +559,18 @@ impl App {
                 })
                 .unwrap_or(0);
             total_elapsed = total_elapsed.saturating_add(session.elapsed_seconds);
-            total_karma = total_karma.saturating_add(
-                (session.elapsed_seconds as isize).saturating_mul(effect as isize),
-            );
+            total_karma = total_karma
+                .saturating_add((session.elapsed_seconds as isize).saturating_mul(effect as isize));
         }
         if let Some(start) = self.time_tracker.current_session_start {
             let active_id = self.time_tracker.active_category_id();
             let live_day = crate::domain::operational_day_key_now();
             let layer_matches = layer_id.is_none_or(|expected| expected == active_id);
-            let tag_matches = canonical_tag
-                .as_ref()
-                .is_none_or(|tag| self.time_tracker.active_description().eq_ignore_ascii_case(tag));
+            let tag_matches = canonical_tag.as_ref().is_none_or(|tag| {
+                self.time_tracker
+                    .active_description()
+                    .eq_ignore_ascii_case(tag)
+            });
             if live_day >= window.start && live_day <= window.end && layer_matches && tag_matches {
                 let elapsed = start.elapsed().as_secs() as usize;
                 let effect = categories
@@ -585,13 +585,16 @@ impl App {
                     })
                     .unwrap_or(0);
                 total_elapsed = total_elapsed.saturating_add(elapsed);
-                total_karma = total_karma
-                    .saturating_add((elapsed as isize).saturating_mul(effect as isize));
+                total_karma =
+                    total_karma.saturating_add((elapsed as isize).saturating_mul(effect as isize));
             }
         }
         let mut scope = String::new();
         if let Some(category) = layer {
-            scope.push_str(&format!(" layer '{}'", self.display_layer_name(&category.name)));
+            scope.push_str(&format!(
+                " layer '{}'",
+                self.display_layer_name(&category.name)
+            ));
         }
         if let Some(tag) = canonical_tag {
             scope.push_str(&format!(" tag '{tag}'"));
@@ -1200,9 +1203,7 @@ impl App {
 
 #[cfg(test)]
 mod report_edit_tests {
-    use super::{
-        ReportEditKeyIntent, direct_command_or_fuzzy_fallback, resolve_report_edit_key,
-    };
+    use super::{ReportEditKeyIntent, direct_command_or_fuzzy_fallback, resolve_report_edit_key};
     use crate::keybindings::default_keymap;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -1285,5 +1286,4 @@ mod report_edit_tests {
             .expect("status should resolve as a direct command");
         assert_eq!(resolved, crate::command::CommandIntent::Status);
     }
-
 }

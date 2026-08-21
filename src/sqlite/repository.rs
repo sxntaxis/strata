@@ -226,11 +226,10 @@ impl SqliteRepository {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let maximum_identity: i64 = transaction.query_row(
-            "SELECT COALESCE(MAX(id), 0) FROM categories",
-            [],
-            |row| row.get(0),
-        )?;
+        let maximum_identity: i64 =
+            transaction.query_row("SELECT COALESCE(MAX(id), 0) FROM categories", [], |row| {
+                row.get(0)
+            })?;
         let id = maximum_identity.checked_add(1).ok_or_else(|| {
             RepositoryError::InvalidInput("category identity space is exhausted".to_string())
         })?;

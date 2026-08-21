@@ -124,7 +124,9 @@ fn recover_sediment(
     let mut state = if base_state.grid_width == 0 && base_state.grid_height == 0 {
         migrate_uninitialized_state(base_state)?
     } else {
-        let mut engine = SandEngine::new(1, 1);
+        // Recovery must restore canonical coordinates without projecting them into a
+        // display viewport. The live renderer expands to its terminal separately.
+        let mut engine = SandEngine::new(0, 0);
         engine.restore_state(base_state, valid_category_ids)?;
         engine.snapshot_state()
     };

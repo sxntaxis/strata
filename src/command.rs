@@ -36,7 +36,11 @@ impl CommandIntent {
     pub(crate) fn keeps_palette_open(&self) -> bool {
         matches!(
             self,
-            Self::Status | Self::Karma { .. } | Self::DataDir | Self::ConfigDir | Self::Timer { .. }
+            Self::Status
+                | Self::Karma { .. }
+                | Self::DataDir
+                | Self::ConfigDir
+                | Self::Timer { .. }
         )
     }
 }
@@ -175,7 +179,12 @@ fn parse_karma(args: &[String]) -> Result<CommandIntent, String> {
 }
 
 fn parse_delete_last_session(args: &[String]) -> Result<CommandIntent, String> {
-    if args.len() < 2 || args.len() > 3 || !args.last().is_some_and(|v| v.eq_ignore_ascii_case("lastsession")) {
+    if args.len() < 2
+        || args.len() > 3
+        || !args
+            .last()
+            .is_some_and(|v| v.eq_ignore_ascii_case("lastsession"))
+    {
         return Err("Usage: x <layer> [tag] lastsession".to_string());
     }
     Ok(CommandIntent::DeleteLastSession {
@@ -250,7 +259,9 @@ pub(crate) fn resolve_karma_window(
         KarmaSelector::Weekday(target) => {
             let today_index = today.weekday().num_days_from_monday() as i64;
             let target_index = target.num_days_from_monday() as i64;
-            Ok(single_day(today - ChronoDuration::days((7 + today_index - target_index) % 7)))
+            Ok(single_day(
+                today - ChronoDuration::days((7 + today_index - target_index) % 7),
+            ))
         }
         KarmaSelector::CurrentWeek => {
             let start = start_of_week(today, first_day_of_week);
@@ -263,7 +274,10 @@ pub(crate) fn resolve_karma_window(
         KarmaSelector::CurrentMonth => Ok(window(today.with_day(1).unwrap_or(today), today)),
         KarmaSelector::LastMonth => {
             let previous_end = today.with_day(1).unwrap_or(today) - ChronoDuration::days(1);
-            Ok(window(previous_end.with_day(1).unwrap_or(previous_end), previous_end))
+            Ok(window(
+                previous_end.with_day(1).unwrap_or(previous_end),
+                previous_end,
+            ))
         }
         KarmaSelector::IsoWeek(week) => {
             let start = NaiveDate::from_isoywd_opt(today.year(), *week, Weekday::Mon)
@@ -276,8 +290,9 @@ pub(crate) fn resolve_karma_window(
                 .ok_or_else(|| format!("Invalid date selector '{}{}'", month_name(*month), day))?;
             if resolved > today {
                 year -= 1;
-                resolved = NaiveDate::from_ymd_opt(year, *month, *day)
-                    .ok_or_else(|| format!("Invalid date selector '{}{}'", month_name(*month), day))?;
+                resolved = NaiveDate::from_ymd_opt(year, *month, *day).ok_or_else(|| {
+                    format!("Invalid date selector '{}{}'", month_name(*month), day)
+                })?;
             }
             Ok(single_day(resolved))
         }
@@ -413,7 +428,11 @@ fn parse_duration(tokens: &[String]) -> Result<u64, String> {
             unit => return Err(format!("Unsupported duration unit '{unit}'")),
         };
         total = total
-            .checked_add(value.checked_mul(multiplier).ok_or("Duration is too large")?)
+            .checked_add(
+                value
+                    .checked_mul(multiplier)
+                    .ok_or("Duration is too large")?,
+            )
             .ok_or("Duration is too large")?;
     }
     if total == 0 {

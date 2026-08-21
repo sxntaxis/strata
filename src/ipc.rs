@@ -199,7 +199,9 @@ fn read_response(stream: &UnixStream) -> Result<Response, String> {
 fn write_response(stream: &mut UnixStream, response: &Response) -> Result<(), String> {
     let payload = serde_json::to_string(response).map_err(|error| error.to_string())?;
     if payload.len() + 1 > MAX_MESSAGE_BYTES {
-        return Err(format!("control response exceeds {MAX_MESSAGE_BYTES} bytes"));
+        return Err(format!(
+            "control response exceeds {MAX_MESSAGE_BYTES} bytes"
+        ));
     }
     let mut writer = BufWriter::new(stream);
     writer
@@ -208,7 +210,6 @@ fn write_response(stream: &mut UnixStream, response: &Response) -> Result<(), St
     writer.write_all(b"\n").map_err(|error| error.to_string())?;
     writer.flush().map_err(|error| error.to_string())
 }
-
 
 #[cfg(test)]
 mod tests {

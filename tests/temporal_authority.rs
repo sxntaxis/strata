@@ -129,7 +129,9 @@ fn large_wall_interval_requires_explicit_clock_jump_acceptance() {
     assert_eq!(profile.row_count("sessions"), 1);
     let active_category: i64 = Connection::open(profile.database_path())
         .unwrap()
-        .query_row("SELECT category_id FROM active_session", [], |row| row.get(0))
+        .query_row("SELECT category_id FROM active_session", [], |row| {
+            row.get(0)
+        })
         .unwrap();
     assert_eq!(active_category, 0);
 }
