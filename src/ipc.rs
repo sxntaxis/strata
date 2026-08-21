@@ -158,8 +158,15 @@ fn bind_path(socket_path: &Path) -> PathBuf {
 
 fn remove_stale_socket(socket_path: &Path, bound_path: &Path) -> Result<(), String> {
     for path in [socket_path, bound_path] {
-        if !path.exists() {
-            continue;
+        match std::fs::symlink_metadata(path) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(format!(
+                    "cannot inspect profile control socket {}: {error}",
+                    path.display()
+                ));
+            }
         }
         match UnixStream::connect(path) {
             Ok(_) => {
@@ -262,5 +269,24 @@ mod tests {
         right.write_all(b"\n").unwrap();
         let error = read_request(&left).unwrap_err();
         assert!(error.contains("exceeds"));
+    }
+
+    #[test]
+    fn stale_dangling_publication_symlink_is_removed() {
+        let root = std::env::temp_dir().join(format!(
+            "strata-ipc-dangling-{}-{}",
+            std::process::id(),
+            request_id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let socket_path = root.join("runtime.sock");
+        let bound_path = root.join("missing-runtime.sock");
+        std::os::unix::fs::symlink(&bound_path, &socket_path).unwrap();
+
+        assert!(std::fs::symlink_metadata(&socket_path).is_ok());
+        remove_stale_socket(&socket_path, &bound_path).unwrap();
+        assert!(std::fs::symlink_metadata(&socket_path).is_err());
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
