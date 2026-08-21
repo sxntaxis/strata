@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-08-21
 authority: working
-summary: v0.7.7 direct interaction is reconciled onto SQLite-only authority and has passed final native validation, including profile-scoped live CLI control and long-path IPC recovery.
-next: Preserve the native-certified final baseline; no merge blocker remains and new work begins only from a newly justified owner-approved issue.
+summary: v0.7.7 direct interaction is reconciled onto SQLite-only authority; bootstrap recovery boundary hotfix `f94a919` is natively certified.
+next: Preserve the native-certified hotfix baseline; new work begins only from a newly justified owner-approved issue.
 ---
 
 # NOW — Strata
@@ -14,6 +14,11 @@ next: Preserve the native-certified final baseline; no merge blocker remains and
 ## Current phase
 
 ARCH-001 has been completed. The post-SQLite issue reconciliation program is complete, and the current runtime is SQLite-only. The v0.7.7 direct interaction model is reconciled onto that authority.
+
+A post-merge bootstrap recovery defect was found on a real profile: first-generation checkpoint creation
+could persist `active_session_started_at_utc` slightly after `simulation_time_utc`. Hotfix
+`f94a919675357c0d4d41f58168c5a95b05a188ca` aligns new bootstrap boundaries and narrowly repairs only the
+original Idle `tui-<start>-<pid>` checkpoint shape. Non-bootstrap inversions remain fail-closed.
 
 The certified system includes:
 
@@ -58,17 +63,19 @@ test suite, build, help smoke, diff hygiene, and the long-profile dangling-symli
 
 ## Verified final baseline
 
-- final native HEAD is `950c98b4f4196aa1bc932618850a83d110a57351`;
+- final native HEAD is `f94a919675357c0d4d41f58168c5a95b05a188ca`;
 - formatting, strict Clippy, full tests, build, help smoke, and diff hygiene pass;
 - fresh-profile direct-SQLite and profile-isolation proofs pass;
 - short-path active-socket refusal and long-path live-control proofs pass;
-- dangling long-path publication cleanup passes across a real TUI restart.
+- dangling long-path publication cleanup passes across a real TUI restart;
+- copied real-profile recovery completes with coherent checkpoint timestamps and subsequent restart succeeds;
+- the non-bootstrap `tui-active:*` inversion remains rejected with the existing recovery error.
 
 ## Certification evidence
 
 - current schema initializes fresh databases transactionally at `user_version = 1` and rejects other development versions;
 - strict storage-authority residue search is empty outside the authoritative decision record;
-- formatting, strict Clippy, tests, fresh-profile smoke proof, help output, diff hygiene, and final long-path IPC runtime certification were run for the reconciled baseline.
+- formatting, strict Clippy, tests, fresh-profile smoke proof, help output, diff hygiene, final long-path IPC runtime certification, and copied-profile bootstrap recovery certification were run for the reconciled baseline.
 
 ## Known non-blocking questions
 
