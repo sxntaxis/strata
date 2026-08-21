@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-08-21
 authority: working
-summary: v0.7.7 direct interaction is reconciled onto SQLite-only authority; a bounded-catchup/detach hotfix is under native certification.
-next: Native-certify the bounded live catch-up and detach-boundary hotfix, including the real close-during-catch-up failure shape.
+summary: v0.7.7 direct interaction is reconciled onto SQLite-only authority; bounded catch-up/detach and fractional operational-day allocation fixes are under native certification.
+next: Native-certify bounded catch-up/detach plus fractional cross-boundary clear-all conservation against the real failure shapes.
 ---
 
 # NOW — Strata
@@ -21,6 +21,8 @@ could persist `active_session_started_at_utc` slightly after `simulation_time_ut
 original Idle `tui-<start>-<pid>` checkpoint shape. Non-bootstrap inversions remain fail-closed.
 
 A second real-profile defect was then reproduced conceptually from owner evidence: detaching while accelerated catch-up still had a queued mutation caused detached checkpoint publication to fail with `runtime checkpoint cannot be written while mutations are pending`. The owner also set a product constraint that catching up to current time should take no more than eight seconds. The current working hotfix removes the live queued-mutation dependency: long backlog uses bounded sediment settlement, mutations during catch-up settle directly to their exact UTC boundary, detach settles before checkpoint publication, and autosave defers while catch-up remains active. This work is not yet native-certified at this checkpoint.
+
+A third real-profile defect was triggered by `C` while Idle: operational-day allocation rejected `32936 of 32937 seconds`. The canonical session duration was correct; the allocator independently floored each wall-clock slice around an exact operational-day boundary. With a sub-second session start, those two floors can lose one whole second. The current working hotfix allocates cumulative whole seconds from the session start and includes the observed 32,937-second cross-boundary clear-all shape as regression evidence. This change is also awaiting native certification with the bounded-catchup work.
 
 The certified system includes:
 

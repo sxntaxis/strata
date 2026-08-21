@@ -64,7 +64,8 @@ A logical session remains one canonical ledger identity. Crossing a boundary doe
 
 Reports instead project immutable `SessionSlice` values:
 
-- each slice is the exact overlap between the canonical UTC interval and one operational-day window;
+- each slice follows the canonical UTC interval and one operational-day window;
+- whole-second allocation is computed cumulatively from the canonical session start, so sub-second timestamps crossing an exact day boundary cannot lose a second through independent flooring;
 - slice seconds sum exactly to the canonical session's elapsed whole seconds;
 - an endpoint exactly on a boundary creates no empty next-day slice;
 - day, week, month, category-log, balance, and live-preview calculations consume slices rather than assigning the entire row to its end day;
