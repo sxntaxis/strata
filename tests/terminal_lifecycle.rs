@@ -213,10 +213,7 @@ fn sediment_mass_for_category(payload: &serde_json::Value, category_id: u64) -> 
         .into_iter()
         .flatten()
         .filter(|grain| {
-            grain
-                .get("category_id")
-                .and_then(serde_json::Value::as_u64)
-                == Some(category_id)
+            grain.get("category_id").and_then(serde_json::Value::as_u64) == Some(category_id)
         })
         .count();
     let pending_runs = payload
@@ -225,9 +222,7 @@ fn sediment_mass_for_category(payload: &serde_json::Value, category_id: u64) -> 
         .into_iter()
         .flatten()
         .filter(|run| {
-            run.get("category_id")
-                .and_then(serde_json::Value::as_u64)
-                == Some(category_id)
+            run.get("category_id").and_then(serde_json::Value::as_u64) == Some(category_id)
         })
         .map(|run| {
             run.get("count")
@@ -364,8 +359,14 @@ fn shift_c_clears_only_idle_sediment_and_preserves_sqlite_extent() {
     let (before_width, before_height, before_payload) = persisted_sand_state(&profile);
     let work_before = sediment_mass_for_category(&before_payload, 1);
     let idle_before = sediment_mass_for_category(&before_payload, 0);
-    assert!(work_before >= 2, "expected Work sediment, got {work_before}");
-    assert!(idle_before >= 2, "expected Idle sediment, got {idle_before}");
+    assert!(
+        work_before >= 2,
+        "expected Work sediment, got {work_before}"
+    );
+    assert!(
+        idle_before >= 2,
+        "expected Idle sediment, got {idle_before}"
+    );
 
     let mut tui = spawn_live_tui(&profile);
     wait_for_path(&profile.control_socket_path());
@@ -399,7 +400,10 @@ fn shift_c_clears_only_idle_sediment_and_preserves_sqlite_extent() {
 
     let mut reopened = spawn_live_tui(&profile);
     wait_for_path(&profile.control_socket_path());
-    let mut reopened_stdin = reopened.stdin.take().expect("reopened TUI stdin should exist");
+    let mut reopened_stdin = reopened
+        .stdin
+        .take()
+        .expect("reopened TUI stdin should exist");
     reopened_stdin
         .write_all(b"q")
         .expect("reopened quit should reach TUI");
@@ -408,7 +412,10 @@ fn shift_c_clears_only_idle_sediment_and_preserves_sqlite_extent() {
     assert!(status.success());
 
     let (restart_width, restart_height, restart_payload) = persisted_sand_state(&profile);
-    assert_eq!((restart_width, restart_height), (before_width, before_height));
+    assert_eq!(
+        (restart_width, restart_height),
+        (before_width, before_height)
+    );
     assert_eq!(sediment_mass_for_category(&restart_payload, 1), work_before);
 }
 
