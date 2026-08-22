@@ -97,49 +97,13 @@ impl App {
         };
 
         let border_color = self.get_active_color();
-        let mut block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(border_color));
-        if !category_name.is_empty() || !description.is_empty() {
-            block = block.title(
-                Line::from(vec![
-                    Span::styled(
-                        &category_name,
-                        Style::default()
-                            .fg(Color::White)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    if description.is_empty() {
-                        Span::raw("")
-                    } else {
-                        Span::styled(
-                            format!(" {}", description),
-                            Style::default()
-                                .fg(Color::White)
-                                .add_modifier(Modifier::ITALIC),
-                        )
-                    },
-                ])
-                .alignment(Alignment::Left),
-            );
-        }
-        block = block.title(
-            Line::from(Span::styled(
-                session_timer.as_str(),
-                Style::default().fg(Color::White),
-            ))
-            .alignment(Alignment::Center),
+        let block = frame_block(
+            category_name,
+            description,
+            session_timer,
+            effective_time_str,
+            border_color,
         );
-        if let Some(effective_time_str) = effective_time_str.as_deref() {
-            block = block.title(
-                Line::from(Span::styled(
-                    effective_time_str,
-                    Style::default().fg(Color::White),
-                ))
-                .alignment(Alignment::Right),
-            );
-        }
 
         let paragraph = Paragraph::new(sand).block(block);
         f.render_widget(paragraph, size);
@@ -188,5 +152,117 @@ impl App {
         if self.has_persistence_recovery() {
             self.render_persistence_recovery(f, size);
         }
+    }
+}
+
+fn frame_block(
+    category_name: String,
+    description: String,
+    session_timer: String,
+    effective_time: Option<String>,
+    border_color: Color,
+) -> Block<'static> {
+    let mut block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(border_color));
+    if !category_name.is_empty() || !description.is_empty() {
+        block = block.title(
+            Line::from(vec![
+                Span::styled(
+                    category_name,
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                if description.is_empty() {
+                    Span::raw("")
+                } else {
+                    Span::styled(
+                        format!(" {}", description),
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::ITALIC),
+                    )
+                },
+            ])
+            .alignment(Alignment::Left),
+        );
+    }
+    block = block.title(
+        Line::from(Span::styled(
+            session_timer,
+            Style::default().fg(Color::White),
+        ))
+        .alignment(Alignment::Center),
+    );
+    if let Some(effective_time) = effective_time {
+        block = block.title(
+            Line::from(Span::styled(
+                effective_time,
+                Style::default().fg(Color::White),
+            ))
+            .alignment(Alignment::Right),
+        );
+    }
+    block
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::{
+        buffer::Buffer,
+        layout::Rect,
+        style::Color,
+        widgets::{Widget, block::Block},
+    };
+
+    use super::frame_block;
+
+    fn rendered_text(block: Block<'static>) -> String {
+        let area = Rect::new(0, 0, 60, 3);
+        let mut buffer = Buffer::empty(area);
+        block.render(area, &mut buffer);
+        let mut text = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                text.push_str(buffer.get(x, y).symbol());
+            }
+        }
+        text
+    }
+
+    #[test]
+    fn frame_titles_match_idle_active_and_effective_time_contract() {
+        let idle = rendered_text(frame_block(
+            String::new(),
+            String::new(),
+            "12:34:56".to_string(),
+            None,
+            Color::White,
+        ));
+        assert!(idle.contains("12:34:56"));
+        assert!(!idle.contains("00:00:00"));
+        assert!(!idle.contains("o_o"));
+
+        let active = rendered_text(frame_block(
+            "Work".to_string(),
+            "focus".to_string(),
+            "00:00:07".to_string(),
+            Some("00:00:03".to_string()),
+            Color::White,
+        ));
+        assert!(active.contains("Work focus"));
+        assert!(active.contains("00:00:07"));
+        assert!(active.contains("00:00:03"));
+
+        let negative = rendered_text(frame_block(
+            "Work".to_string(),
+            String::new(),
+            "00:00:07".to_string(),
+            Some("-00:00:03".to_string()),
+            Color::White,
+        ));
+        assert!(negative.contains("-00:00:03"));
     }
 }
