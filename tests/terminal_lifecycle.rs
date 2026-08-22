@@ -177,6 +177,75 @@ fn wait_for_path(path: &Path) {
     panic!("timed out waiting for {}", path.display());
 }
 
+fn spawn_live_tui(profile: &TerminalProfile) -> std::process::Child {
+    let binary = shell_quote(Path::new(env!("CARGO_BIN_EXE_strata")));
+    Command::new("script")
+        .args(["-qefc", &binary, "/dev/null"])
+        .env("XDG_DATA_HOME", &profile.data_home)
+        .env("XDG_STATE_HOME", &profile.state_home)
+        .env("XDG_CONFIG_HOME", &profile.config_home)
+        .env_remove("STRATA_PROFILE")
+        .env_remove("STRATA_DATA_DIR")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("live TUI should start")
+}
+
+fn persisted_sand_state(profile: &TerminalProfile) -> (i64, i64, serde_json::Value) {
+    let connection = Connection::open(profile.database_path()).expect("open profile database");
+    let (grid_width, grid_height, payload_json): (i64, i64, String) = connection
+        .query_row(
+            "SELECT grid_width, grid_height, payload_json FROM sand_state WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("read persisted sand state");
+    let payload = serde_json::from_str(&payload_json).expect("sand payload should be valid JSON");
+    (grid_width, grid_height, payload)
+}
+
+fn sediment_mass_for_category(payload: &serde_json::Value, category_id: u64) -> usize {
+    let placed = payload
+        .get("grains")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|grain| {
+            grain
+                .get("category_id")
+                .and_then(serde_json::Value::as_u64)
+                == Some(category_id)
+        })
+        .count();
+    let pending_runs = payload
+        .get("pending_runs")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|run| {
+            run.get("category_id")
+                .and_then(serde_json::Value::as_u64)
+                == Some(category_id)
+        })
+        .map(|run| {
+            run.get("count")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|count| usize::try_from(count).ok())
+                .expect("pending run count should fit usize")
+        })
+        .sum::<usize>();
+    let legacy_pending = payload
+        .get("pending_grains")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|id| id.as_u64() == Some(category_id))
+        .count();
+    placed + pending_runs + legacy_pending
+}
+
 #[test]
 fn normal_quit_and_detach_restore_terminal_once() {
     let quit = TerminalProfile::new("quit");
@@ -268,6 +337,79 @@ fn live_cli_control_is_profile_scoped_and_preserves_continuous_idle() {
     }
     let status = tui.wait().expect("live TUI should exit");
     assert!(status.success());
+}
+
+#[test]
+fn shift_c_clears_only_idle_sediment_and_preserves_sqlite_extent() {
+    let profile = TerminalProfile::new("shift-c-idle-clear");
+    profile.seed_work_category();
+
+    let mut tui = spawn_live_tui(&profile);
+    wait_for_path(&profile.control_socket_path());
+
+    let start = profile.cli(&["start", "Work", "--desc", "focus"]);
+    assert!(start.status.success(), "{}", combined_output(&start));
+    thread::sleep(Duration::from_millis(2_300));
+
+    let stop = profile.cli(&["stop"]);
+    assert!(stop.status.success(), "{}", combined_output(&stop));
+    thread::sleep(Duration::from_millis(2_300));
+
+    let mut stdin = tui.stdin.take().expect("live TUI stdin should exist");
+    stdin.write_all(b"q").expect("quit should reach TUI");
+    stdin.flush().expect("quit should flush");
+    let status = tui.wait().expect("mixed-sediment TUI should exit");
+    assert!(status.success());
+
+    let (before_width, before_height, before_payload) = persisted_sand_state(&profile);
+    let work_before = sediment_mass_for_category(&before_payload, 1);
+    let idle_before = sediment_mass_for_category(&before_payload, 0);
+    assert!(work_before >= 2, "expected Work sediment, got {work_before}");
+    assert!(idle_before >= 2, "expected Idle sediment, got {idle_before}");
+
+    let mut tui = spawn_live_tui(&profile);
+    wait_for_path(&profile.control_socket_path());
+    let mut stdin = tui.stdin.take().expect("live TUI stdin should exist");
+    stdin
+        .write_all(b"C")
+        .expect("uppercase C should reach the real PTY");
+    stdin.flush().expect("uppercase C should flush");
+
+    let mut cleared = None;
+    for _ in 0..80 {
+        let state = persisted_sand_state(&profile);
+        if sediment_mass_for_category(&state.2, 0) == 0
+            && sediment_mass_for_category(&state.2, 1) == work_before
+        {
+            cleared = Some(state);
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    let (after_width, after_height, after_payload) =
+        cleared.expect("Shift-C should synchronously persist the Idle-only clear");
+    assert_eq!((after_width, after_height), (before_width, before_height));
+    assert_eq!(sediment_mass_for_category(&after_payload, 0), 0);
+    assert_eq!(sediment_mass_for_category(&after_payload, 1), work_before);
+
+    stdin.write_all(b"q").expect("quit should reach TUI");
+    stdin.flush().expect("quit should flush");
+    let status = tui.wait().expect("post-clear TUI should exit");
+    assert!(status.success());
+
+    let mut reopened = spawn_live_tui(&profile);
+    wait_for_path(&profile.control_socket_path());
+    let mut reopened_stdin = reopened.stdin.take().expect("reopened TUI stdin should exist");
+    reopened_stdin
+        .write_all(b"q")
+        .expect("reopened quit should reach TUI");
+    reopened_stdin.flush().expect("reopened quit should flush");
+    let status = reopened.wait().expect("reopened TUI should exit");
+    assert!(status.success());
+
+    let (restart_width, restart_height, restart_payload) = persisted_sand_state(&profile);
+    assert_eq!((restart_width, restart_height), (before_width, before_height));
+    assert_eq!(sediment_mass_for_category(&restart_payload, 1), work_before);
 }
 
 #[test]
