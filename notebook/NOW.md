@@ -3,10 +3,10 @@ id: NOW-001
 kind: status
 state: active
 created: 2026-08-01
-updated: 2026-08-21
+updated: 2026-08-22
 authority: working
-summary: v0.7.7 direct interaction is reconciled onto SQLite-only authority; bounded catch-up/detach and fractional operational-day allocation fixes are under native certification.
-next: Native-certify bounded catch-up/detach plus fractional cross-boundary clear-all conservation against the real failure shapes.
+summary: v0.7.7 direct interaction is reconciled onto SQLite-only authority; visible-basin sediment and frame-chrome refinement is natively certified.
+next: Preserve the certified visible-basin physics, restore, clear, and terminal-persistence invariants in future work.
 ---
 
 # NOW — Strata
@@ -23,6 +23,12 @@ original Idle `tui-<start>-<pid>` checkpoint shape. Non-bootstrap inversions rem
 A second real-profile defect was then reproduced conceptually from owner evidence: detaching while accelerated catch-up still had a queued mutation caused detached checkpoint publication to fail with `runtime checkpoint cannot be written while mutations are pending`. The owner also set a product constraint that catching up to current time should take no more than eight seconds. The certified hotfix removes the live queued-mutation dependency: long backlog uses bounded sediment settlement, mutations during catch-up settle directly to their exact UTC boundary, detach settles before checkpoint publication, and autosave defers while catch-up remains active. Native PTY proof resumed a 15-second stopped TUI and detached in 1.118 seconds with empty pending-mutation evidence; restart completed in 27 milliseconds.
 
 A third real-profile defect was triggered by `C` while Idle: operational-day allocation rejected `32936 of 32937 seconds`. The canonical session duration was correct; the allocator independently floored each wall-clock slice around an exact operational-day boundary. With a sub-second session start, those two floors can lose one whole second. The certified allocator now allocates cumulative whole seconds from the session start and includes the observed 32,937-second cross-boundary clear-all shape as regression evidence. The copied real profile cleared through the normal TUI path without persistence recovery, persisted empty sediment and `pending_mutations: []`, detached, and restarted successfully.
+
+The visible-basin refinement is natively certified: visible viewport bounds are the live physics basin;
+hidden topology freezes while cropped and reactivates on expansion; full `c` resets the empty canonical
+canvas to the current viewport; uppercase `C` preserves extent and non-Idle mass through real PTY and
+SQLite persistence; restore into a larger live viewport expands monotonically; zero-viewport recovery
+restore remains exact; the idle tamagotchi is removed; and zero effective counters are hidden.
 
 The certified system includes:
 
@@ -67,8 +73,8 @@ test suite, build, help smoke, diff hygiene, and the long-profile dangling-symli
 
 ## Verified final baseline
 
-- final native HEAD is `965735d46a07e498db921df01904068b99288857`;
-- formatting, strict Clippy, 190 unit tests, 21 integration/process tests, build, help smoke, and diff hygiene pass;
+- final native HEAD is `b9fecfa3d277d4e42dfc92aa3ee532d5832ec4f8`;
+- formatting, strict Clippy, 196 unit tests, 22 integration/process tests, build, help smoke, and diff hygiene pass;
 - fresh-profile direct-SQLite and profile-isolation proofs pass;
 - short-path active-socket refusal and long-path live-control proofs pass;
 - dangling long-path publication cleanup passes across a real TUI restart;
