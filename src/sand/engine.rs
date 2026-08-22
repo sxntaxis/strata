@@ -645,6 +645,7 @@ impl SandEngine {
         } else {
             state.rng_state
         };
+        self.expand_logical_canvas_to_viewport();
         Ok(())
     }
 
@@ -906,11 +907,34 @@ mod tests {
 
         assert_eq!(restored.cell_width, 40);
         assert_eq!(restored.cell_height, 40);
-        assert_eq!(restored.grid_width_dots, state.grid_width);
-        assert_eq!(restored.grid_height_dots, state.grid_height);
+        assert_eq!(
+            restored.grid_width_dots,
+            40 * crate::constants::SAND_ENGINE.dot_width
+        );
+        assert_eq!(
+            restored.grid_height_dots,
+            40 * crate::constants::SAND_ENGINE.dot_height
+        );
         assert_eq!(restored.grain_count, 2);
         assert_eq!(category_mass(&restored, CategoryId::new(1)), 1);
         assert_eq!(category_mass(&restored, CategoryId::new(2)), 1);
+    }
+
+    #[test]
+    fn zero_viewport_restore_preserves_persisted_canonical_extent() {
+        let mut source = SandEngine::new(7, 3);
+        source.clear();
+        source.grid[2][3] = Some(CategoryId::new(1));
+        source.grain_count = 1;
+        let state = source.snapshot_state();
+
+        let mut restored = SandEngine::new(0, 0);
+        let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
+        restored.restore_state(&state, &valid).unwrap();
+
+        assert_eq!(restored.grid_width_dots, state.grid_width);
+        assert_eq!(restored.grid_height_dots, state.grid_height);
+        assert_eq!(restored.snapshot_state(), state);
     }
 
     #[test]
