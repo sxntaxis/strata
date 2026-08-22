@@ -61,6 +61,14 @@ struct PendingRun {
     count: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ViewportBounds {
+    x_start: usize,
+    x_end: usize,
+    y_start: usize,
+    y_end: usize,
+}
+
 pub struct SandEngine {
     pub(crate) grid: Vec<Vec<Option<CategoryId>>>,
     pub cell_width: u16,
@@ -127,6 +135,26 @@ impl SandEngine {
         } else {
             self.grid.len() * self.grid[0].len()
         }
+    }
+
+    fn viewport_bounds(&self) -> Option<ViewportBounds> {
+        let grid_height = self.grid.len();
+        let grid_width = self.grid.first().map_or(0, Vec::len);
+        let visible_width =
+            grid_width.min((self.cell_width as usize).saturating_mul(SAND_ENGINE.dot_width));
+        let visible_height =
+            grid_height.min((self.cell_height as usize).saturating_mul(SAND_ENGINE.dot_height));
+        if visible_width == 0 || visible_height == 0 {
+            return None;
+        }
+        let x_start = grid_width.saturating_sub(visible_width) / 2;
+        let y_start = grid_height.saturating_sub(visible_height);
+        Some(ViewportBounds {
+            x_start,
+            x_end: x_start + visible_width,
+            y_start,
+            y_end: y_start + visible_height,
+        })
     }
 
     pub fn spawn(&mut self, category_id: CategoryId) {
@@ -205,10 +233,12 @@ impl SandEngine {
             return;
         }
 
-        let mut free_columns = self.grid[0]
-            .iter()
-            .enumerate()
-            .filter_map(|(x, cell)| cell.is_none().then_some(x))
+        let Some(bounds) = self.viewport_bounds() else {
+            return;
+        };
+        let ingress_y = bounds.y_start;
+        let mut free_columns = (bounds.x_start..bounds.x_end)
+            .filter(|x| self.grid[ingress_y][*x].is_none())
             .collect::<Vec<_>>();
 
         while !free_columns.is_empty() && !self.pending_runs.is_empty() {
@@ -219,7 +249,7 @@ impl SandEngine {
                 .front()
                 .expect("pending run exists")
                 .category_id;
-            self.grid[0][x] = Some(category_id);
+            self.grid[ingress_y][x] = Some(category_id);
 
             let exhausted = {
                 let run = self.pending_runs.front_mut().expect("pending run exists");
@@ -233,19 +263,17 @@ impl SandEngine {
     }
 
     fn apply_gravity(&mut self) {
-        let h = self.grid.len();
-        if h < 2 {
+        let Some(bounds) = self.viewport_bounds() else {
             return;
-        }
-        let w = self.grid[0].len();
-        if w == 0 {
+        };
+        if bounds.y_end.saturating_sub(bounds.y_start) < 2 {
             return;
         }
 
         let base_left_to_right = self.sweep_left_to_right;
         self.sweep_left_to_right = !self.sweep_left_to_right;
 
-        for y in (0..h - 1).rev() {
+        for y in (bounds.y_start..bounds.y_end - 1).rev() {
             let left_to_right = if y.is_multiple_of(2) {
                 base_left_to_right
             } else {
@@ -253,7 +281,7 @@ impl SandEngine {
             };
 
             if left_to_right {
-                for x in 0..w {
+                for x in bounds.x_start..bounds.x_end {
                     if let Some(cat) = self.grid[y][x] {
                         if self.grid[y + 1][x].is_none() {
                             self.grid[y + 1][x] = Some(cat);
@@ -262,8 +290,8 @@ impl SandEngine {
                             let dir: isize = if self.random_bool() { 1 } else { -1 };
                             let nx = (x as isize) + dir;
 
-                            if nx >= 0
-                                && (nx as usize) < w
+                            if nx >= bounds.x_start as isize
+                                && (nx as usize) < bounds.x_end
                                 && self.grid[y + 1][nx as usize].is_none()
                             {
                                 self.grid[y + 1][nx as usize] = Some(cat);
@@ -273,7 +301,7 @@ impl SandEngine {
                     }
                 }
             } else {
-                for x in (0..w).rev() {
+                for x in (bounds.x_start..bounds.x_end).rev() {
                     if let Some(cat) = self.grid[y][x] {
                         if self.grid[y + 1][x].is_none() {
                             self.grid[y + 1][x] = Some(cat);
@@ -282,8 +310,8 @@ impl SandEngine {
                             let dir: isize = if self.random_bool() { 1 } else { -1 };
                             let nx = (x as isize) + dir;
 
-                            if nx >= 0
-                                && (nx as usize) < w
+                            if nx >= bounds.x_start as isize
+                                && (nx as usize) < bounds.x_end
                                 && self.grid[y + 1][nx as usize].is_none()
                             {
                                 self.grid[y + 1][nx as usize] = Some(cat);
@@ -408,11 +436,9 @@ impl SandEngine {
     }
 
     pub fn clear(&mut self) {
-        for row in &mut self.grid {
-            for cell in row {
-                *cell = None;
-            }
-        }
+        self.grid_width_dots = (self.cell_width as usize).saturating_mul(SAND_ENGINE.dot_width);
+        self.grid_height_dots = (self.cell_height as usize).saturating_mul(SAND_ENGINE.dot_height);
+        self.grid = vec![vec![None; self.grid_width_dots]; self.grid_height_dots];
         self.pending_runs.clear();
         self.grain_count = 0;
     }
@@ -619,7 +645,6 @@ impl SandEngine {
         } else {
             state.rng_state
         };
-        self.expand_logical_canvas_to_viewport();
         Ok(())
     }
 
@@ -742,6 +767,85 @@ mod tests {
     }
 
     #[test]
+    fn pending_spawn_uses_only_visible_top_ingress_after_shrink() {
+        let mut engine = SandEngine::new(8, 4);
+        engine.resize(12, 6);
+        engine.resize(4, 2);
+        let bounds = engine.viewport_bounds().expect("visible viewport");
+
+        for _ in 0..bounds.x_end.saturating_sub(bounds.x_start) {
+            engine.spawn(CategoryId::new(1));
+        }
+
+        assert!(
+            engine.grid[..bounds.y_start]
+                .iter()
+                .flatten()
+                .all(Option::is_none)
+        );
+        assert!(
+            engine.grid[bounds.y_start][bounds.x_start..bounds.x_end]
+                .iter()
+                .all(|cell| *cell == Some(CategoryId::new(1)))
+        );
+    }
+
+    #[test]
+    fn visible_side_walls_block_diagonal_leakage() {
+        let mut engine = SandEngine::new(8, 4);
+        engine.resize(12, 6);
+        engine.resize(4, 2);
+        let bounds = engine.viewport_bounds().expect("visible viewport");
+        let y = bounds.y_end - 2;
+        engine.grid[y][bounds.x_start] = Some(CategoryId::new(1));
+        engine.grid[y + 1][bounds.x_start] = Some(CategoryId::new(2));
+        engine.rng_state = 2;
+        engine.apply_gravity();
+
+        assert_eq!(engine.grid[y][bounds.x_start], Some(CategoryId::new(1)));
+        assert!(
+            engine.grid[y + 1][..bounds.x_start]
+                .iter()
+                .all(Option::is_none)
+        );
+    }
+
+    #[test]
+    fn hidden_grains_freeze_and_fall_after_reexpansion() {
+        let mut engine = SandEngine::new(8, 4);
+        engine.resize(12, 6);
+        let x = 4;
+        engine.grid[5][x] = Some(CategoryId::new(1));
+        engine.grain_count = 1;
+
+        engine.resize(4, 2);
+        for _ in 0..6 {
+            engine.update();
+        }
+        assert_eq!(engine.grid[5][x], Some(CategoryId::new(1)));
+
+        engine.resize(12, 6);
+        engine.update();
+        engine.update();
+        assert_eq!(engine.grid[5][x], None);
+        assert_eq!(engine.grid[6][x], Some(CategoryId::new(1)));
+    }
+
+    #[test]
+    fn clear_resets_empty_canvas_to_current_viewport() {
+        let mut engine = SandEngine::new(4, 2);
+        engine.resize(12, 6);
+        engine.resize(3, 1);
+        engine.spawn(CategoryId::new(1));
+
+        engine.clear();
+
+        assert_eq!(engine.grid_width_dots, 6);
+        assert_eq!(engine.grid_height_dots, 4);
+        assert_eq!(engine.grain_count, 0);
+    }
+
+    #[test]
     fn test_sand_state_snapshot_restore_round_trip() {
         let mut se = SandEngine::new(20, 20);
         se.clear();
@@ -802,14 +906,8 @@ mod tests {
 
         assert_eq!(restored.cell_width, 40);
         assert_eq!(restored.cell_height, 40);
-        assert_eq!(
-            restored.grid_width_dots,
-            40 * crate::constants::SAND_ENGINE.dot_width
-        );
-        assert_eq!(
-            restored.grid_height_dots,
-            40 * crate::constants::SAND_ENGINE.dot_height
-        );
+        assert_eq!(restored.grid_width_dots, state.grid_width);
+        assert_eq!(restored.grid_height_dots, state.grid_height);
         assert_eq!(restored.grain_count, 2);
         assert_eq!(category_mass(&restored, CategoryId::new(1)), 1);
         assert_eq!(category_mass(&restored, CategoryId::new(2)), 1);
@@ -819,6 +917,9 @@ mod tests {
     fn test_clear_category_removes_only_requested_id() {
         let mut se = SandEngine::new(20, 20);
         se.clear();
+        se.resize(40, 40);
+        se.resize(5, 5);
+        let canonical_extent = (se.grid_width_dots, se.grid_height_dots);
         se.grid[1][1] = Some(CategoryId::new(0));
         se.grid[2][2] = Some(CategoryId::new(0));
         se.grid[3][3] = Some(CategoryId::new(1));
@@ -830,6 +931,7 @@ mod tests {
         assert_eq!(se.grid[2][2], None);
         assert_eq!(se.grid[3][3], Some(CategoryId::new(1)));
         assert_eq!(se.grain_count, 1);
+        assert_eq!((se.grid_width_dots, se.grid_height_dots), canonical_extent);
     }
 
     #[test]

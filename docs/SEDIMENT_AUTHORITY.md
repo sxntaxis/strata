@@ -35,6 +35,8 @@ The persisted logical grid owns coordinates, neighborhoods, category composition
 
 Canvas growth never runs gravity or repacks existing grains. Pending logical mass may occupy newly available capacity through the normal pending-grain placement path. Once a maximum extent has been reached, shrink/grow oscillation within that extent is idempotent at the `SandState` level.
 
+The current viewport is the active live-physics basin. New live grains enter at the visible top edge, gravity and diagonal movement remain within the visible rectangle, and the visible left and right edges act as temporary walls. Grains hidden by shrink remain frozen at their canonical coordinates and become active again when re-expansion makes them visible. Full clear is the one exception to monotonic canvas retention: it removes all placed and pending mass and resets the empty canonical canvas to the current viewport dimensions. Category-specific clearing, including Idle clear, preserves canonical extent.
+
 ## SandState persistence
 
 `SandState` schema version 2 stores ordered pending runs.
