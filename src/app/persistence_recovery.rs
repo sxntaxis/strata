@@ -432,7 +432,6 @@ impl App {
             self.sand_engine
                 .restore_state(&state, &valid_category_ids)?;
         }
-        self.sync_drift_idle_state();
         Ok(())
     }
 

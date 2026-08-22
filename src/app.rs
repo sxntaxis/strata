@@ -11,10 +11,7 @@ use ratatui::layout::Rect;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    constants::{
-        APP_LAYOUT_SETTINGS, BLINK_SETTINGS, CATCHUP_SETTINGS, FACE_SETTINGS,
-        RUNTIME_LOOP_SETTINGS, TIME_SETTINGS,
-    },
+    constants::{APP_LAYOUT_SETTINGS, CATCHUP_SETTINGS, RUNTIME_LOOP_SETTINGS, TIME_SETTINGS},
     domain::{
         Category, CategoryId, DRIFT_CATEGORY_DISPLAY_NAME, DRIFT_CATEGORY_ID, FirstDayOfWeek,
         OperationalDayPolicy, ReportPeriod, RuntimeSettings, TimeTracker, is_drift_category_id,
@@ -345,10 +342,8 @@ fn clear_all_affected_days_for_interval(
 
 #[derive(Clone)]
 struct SessionState {
-    blink_state: i32,
     active_session_stable_id: Option<String>,
     active_session_started_at_utc: Option<DateTime<Utc>>,
-    none_entry_time: Option<Instant>,
 }
 
 struct SimulationState {
@@ -454,10 +449,8 @@ impl App {
             time_tracker: tracker,
             sand_engine: SandEngine::new(width, height),
             session: SessionState {
-                blink_state: 0,
                 active_session_stable_id: None,
                 active_session_started_at_utc: None,
-                none_entry_time: None,
             },
             ui_mode: UiMode::Main,
             selected_index: 0,
@@ -540,12 +533,10 @@ impl App {
                 && app.sqlite_database_path.is_some()
                 && !app.has_persistence_recovery()
             {
-                app.sync_drift_idle_state();
                 initial_checkpoint_published = app.persist_initial_active_generation();
             }
         }
 
-        app.sync_drift_idle_state();
         app.commit_checkpoint_recovery_if_ready();
         if !app.has_persistence_recovery() && !initial_checkpoint_published {
             app.persist_runtime_checkpoint();
@@ -692,15 +683,6 @@ impl App {
             DRIFT_CATEGORY_DISPLAY_NAME.to_string()
         } else {
             name.to_string()
-        }
-    }
-
-    fn sync_drift_idle_state(&mut self) {
-        if is_drift_category_id(self.time_tracker.active_category_id()) {
-            self.session.blink_state = self.next_blink_interval();
-            self.session.none_entry_time = self.time_tracker.current_session_start;
-        } else {
-            self.session.none_entry_time = None;
         }
     }
 
@@ -994,47 +976,6 @@ impl App {
         }
     }
 
-    fn get_idle_face(&self) -> String {
-        let idle_seconds = self
-            .session
-            .none_entry_time
-            .map_or(0, |t| t.elapsed().as_secs() as usize);
-
-        if self.session.blink_state < 0 {
-            "(-_-)".to_string()
-        } else if self.session.blink_state > 0 {
-            "(o_o)".to_string()
-        } else {
-            let faces = FACE_SETTINGS.faces;
-            let thresholds = FACE_SETTINGS.thresholds;
-
-            let mut face = faces[0];
-            for (i, &threshold) in thresholds.iter().enumerate() {
-                if idle_seconds >= threshold {
-                    face = faces[i + 1];
-                }
-            }
-            face.to_string()
-        }
-    }
-
-    fn update_blink(&mut self) {
-        if self.session.blink_state < 0 {
-            self.session.blink_state -= 1;
-            let blink_duration = BLINK_SETTINGS.duration_min_frames
-                + (rand::random::<i32>()
-                    % (BLINK_SETTINGS.duration_max_frames - BLINK_SETTINGS.duration_min_frames));
-            if self.session.blink_state < -blink_duration {
-                self.session.blink_state = self.next_blink_interval();
-            }
-        } else if self.session.blink_state > 0 {
-            self.session.blink_state -= 1;
-            if self.session.blink_state == 0 {
-                self.session.blink_state = -1;
-            }
-        }
-    }
-
     fn begin_active_session_now(&mut self) {
         let now = Utc::now();
         self.time_tracker.start_session();
@@ -1236,7 +1177,6 @@ impl App {
             return false;
         }
         self.reload_sqlite_sessions();
-        self.sync_drift_idle_state();
         self.refresh_active_runtime_checkpoint();
         !self.has_persistence_recovery()
     }
@@ -1423,7 +1363,6 @@ impl App {
             return;
         }
         self.session.active_session_stable_id = Some(resulting_stable_id);
-        self.sync_drift_idle_state();
     }
 
     fn settle_simulation_segment_to(&mut self, target_utc: DateTime<Utc>) -> Result<(), String> {
@@ -1808,9 +1747,6 @@ impl App {
 
     fn run_physics_tick(&mut self) {
         self.sand_engine.update();
-        if is_drift_category_id(self.time_tracker.active_category_id()) && !self.is_catching_up() {
-            self.update_blink();
-        }
     }
 
     fn catchup_progress_ratio(&mut self) -> Option<f64> {
@@ -2212,12 +2148,6 @@ impl App {
         self.checkpoint_recovery_active = false;
         self.checkpoint_recovery_payload = None;
         self.reconcile_all_daily_contributions();
-    }
-
-    fn next_blink_interval(&self) -> i32 {
-        BLINK_SETTINGS.interval_min_frames
-            + (rand::random::<i32>()
-                % (BLINK_SETTINGS.interval_max_frames - BLINK_SETTINGS.interval_min_frames))
     }
 }
 

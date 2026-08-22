@@ -40,14 +40,14 @@ impl App {
 
         let active_category_id = self.time_tracker.active_category_id();
         let category_name = if is_drift_category_id(active_category_id) {
-            self.get_idle_face()
+            String::new()
         } else if let Some(idx) = active_index {
             categories
                 .get(idx)
                 .map(|category| self.display_layer_name(&category.name))
-                .unwrap_or_else(|| self.get_idle_face())
+                .unwrap_or_default()
         } else {
-            self.get_idle_face()
+            String::new()
         };
 
         let description = active_index
@@ -77,10 +77,10 @@ impl App {
             } else {
                 self.get_category_karma_adjusted_time(cat_name)
             };
-            self.format_signed_time(karma_time)
+            (karma_time != 0).then(|| self.format_signed_time(karma_time))
         } else if is_drift_category_id(active_category_id) {
             let karma_time = self.get_karma_adjusted_time();
-            self.format_signed_time(karma_time)
+            (karma_time != 0).then(|| self.format_signed_time(karma_time))
         } else if let Some(idx) = active_index {
             let cat_name = categories
                 .get(idx)
@@ -90,16 +90,19 @@ impl App {
             if let Some(start) = self.time_tracker.current_session_start {
                 total += start.elapsed().as_secs() as usize;
             }
-            self.format_time(total)
+            (total != 0).then(|| self.format_time(total))
         } else {
-            self.format_time(self.get_effective_time_today())
+            let total = self.get_effective_time_today();
+            (total != 0).then(|| self.format_time(total))
         };
 
         let border_color = self.get_active_color();
-        let block = Block::default()
+        let mut block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .title(
+            .border_style(Style::default().fg(border_color));
+        if !category_name.is_empty() || !description.is_empty() {
+            block = block.title(
                 Line::from(vec![
                     Span::styled(
                         &category_name,
@@ -119,22 +122,24 @@ impl App {
                     },
                 ])
                 .alignment(Alignment::Left),
-            )
-            .title(
+            );
+        }
+        block = block.title(
+            Line::from(Span::styled(
+                session_timer.as_str(),
+                Style::default().fg(Color::White),
+            ))
+            .alignment(Alignment::Center),
+        );
+        if let Some(effective_time_str) = effective_time_str.as_deref() {
+            block = block.title(
                 Line::from(Span::styled(
-                    session_timer.as_str(),
-                    Style::default().fg(Color::White),
-                ))
-                .alignment(Alignment::Center),
-            )
-            .title(
-                Line::from(Span::styled(
-                    effective_time_str.as_str(),
+                    effective_time_str,
                     Style::default().fg(Color::White),
                 ))
                 .alignment(Alignment::Right),
-            )
-            .border_style(Style::default().fg(border_color));
+            );
+        }
 
         let paragraph = Paragraph::new(sand).block(block);
         f.render_widget(paragraph, size);
