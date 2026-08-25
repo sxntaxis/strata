@@ -1121,6 +1121,60 @@ mod tests {
     }
 
     #[test]
+    fn legacy_long_active_identity_switches_to_bounded_generation_and_retries_idempotently() {
+        let path = database_path("legacy-long-active-identity");
+        let legacy = format!("tui-active:{}seed", "switch:tui-active:".repeat(1_000));
+        let operation_id = "rt:switch:0123456789abcdef0123456789abcdef";
+        let next_stable_id = "tui-active:0123456789abcdef0123456789abcdef";
+        seed(&path, &legacy);
+        let mut repository = SqliteRepository::open(&path).unwrap();
+        let next = NewActiveSession {
+            stable_id: next_stable_id,
+            category_id: 1,
+            description: "bounded",
+            started_at_utc: "2026-08-01T11:00:00Z",
+            recovery_kind: "live",
+        };
+
+        let applied = switch_active_session(
+            &mut repository,
+            &legacy,
+            operation_id,
+            &completion("tui-runtime"),
+            &next,
+        )
+        .unwrap();
+        assert!(!applied.already_applied);
+        assert_eq!(applied.expected_active_stable_id, legacy);
+        assert_eq!(
+            applied.resulting_active_stable_id.as_deref(),
+            Some(next_stable_id)
+        );
+        assert_eq!(
+            repository.active_session().unwrap().unwrap().stable_id,
+            next_stable_id
+        );
+
+        let retried = switch_active_session(
+            &mut repository,
+            &legacy,
+            operation_id,
+            &completion("tui-runtime"),
+            &next,
+        )
+        .unwrap();
+        assert!(retried.already_applied);
+        assert_eq!(retried.operation_id, operation_id);
+        assert_eq!(
+            retried.resulting_active_stable_id.as_deref(),
+            Some(next_stable_id)
+        );
+
+        drop(repository);
+        remove_database(&path);
+    }
+
+    #[test]
     fn initial_active_and_checkpoint_commit_as_one_generation() {
         let path = database_path("initial-generation");
         let mut repository = SqliteRepository::open(&path).unwrap();

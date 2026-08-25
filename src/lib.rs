@@ -13,6 +13,7 @@ mod domain;
 mod ipc;
 mod keybindings;
 mod profile;
+mod runtime_identity;
 mod sand;
 #[allow(dead_code)]
 mod sqlite;

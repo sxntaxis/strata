@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, SecondsFormat, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, Utc};
 use crossterm::event::{self, Event};
 use ratatui::layout::Rect;
 use serde::{Deserialize, Serialize};
@@ -18,6 +18,7 @@ use crate::{
         operational_day_key_for_utc, set_runtime_settings,
     },
     keybindings::{self, Action, ActionBindingState, KeyBinding},
+    runtime_identity::transition_identity,
     sand::{
         RecoveryTiming, SandEngine, SandState, SandStateGrain, SedimentSnapshot,
         recover_detached_sediment, settle_transition_sediment,
@@ -301,20 +302,6 @@ fn build_recovery_statement(
     })
 }
 
-fn transition_operation_id(
-    kind: &str,
-    expected_stable_id: &str,
-    at_utc: DateTime<Utc>,
-    discriminator: &str,
-) -> String {
-    format!(
-        "{}:{}:{}:{}",
-        kind,
-        expected_stable_id,
-        at_utc.to_rfc3339_opts(SecondsFormat::Nanos, true),
-        discriminator
-    )
-}
 
 fn clear_all_affected_days_for_interval(
     operation_day: NaiveDate,
@@ -1115,7 +1102,13 @@ impl App {
         let operational_day = operational_day_key_for_utc(interval.ended_at_utc)
             .format("%Y-%m-%d")
             .to_string();
-        let operation_id = format!("finish:{expected_stable_id}");
+        let operation_id = transition_identity(
+            "finish",
+            &expected_stable_id,
+            interval.ended_at_utc,
+            "completed",
+        )
+        .operation_id;
         self.record_storage_result_for(
             PersistenceOperation::ActiveFinish,
             RecoveryAction::ReloadAuthority,
@@ -1174,17 +1167,17 @@ impl App {
         let operational_day = operational_day_key_for_utc(interval.ended_at_utc)
             .format("%Y-%m-%d")
             .to_string();
-        let operation_id = transition_operation_id(
+        let identity = transition_identity(
             "switch",
             &expected_stable_id,
             interval.ended_at_utc,
             &category_id.0.to_string(),
         );
-        let next_stable_id = format!("tui-active:{operation_id}");
+        let next_stable_id = identity.tui_active_stable_id();
         let result = sqlite::switch_tui_active_session(
             &database_path,
             &expected_stable_id,
-            &operation_id,
+            &identity.operation_id,
             &next_stable_id,
             category_id,
             &next_description,
@@ -1344,15 +1337,13 @@ impl App {
             return;
         };
         let resulting_stable_id = if idle_reset {
-            format!(
-                "tui-active:{}",
-                transition_operation_id(
-                    "clear-all",
-                    &expected_stable_id,
-                    applied_at_utc,
-                    "idle-reset",
-                )
+            transition_identity(
+                "clear-all",
+                &expected_stable_id,
+                applied_at_utc,
+                "idle-reset",
             )
+            .tui_active_stable_id()
         } else {
             expected_stable_id.clone()
         };

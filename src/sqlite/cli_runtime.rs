@@ -8,6 +8,7 @@ use crate::{
         Category, CategoryId, DRIFT_CATEGORY_CONFIG_NAME, OperationalDayPolicy, Session,
         civil_time_for_utc, day_boundary_config, is_drift_name, operational_day_key_for_utc,
     },
+    runtime_identity::transition_identity,
     temporal,
 };
 
@@ -117,7 +118,13 @@ pub(crate) fn start_session(
         } else {
             let interval = checked_active_interval(&active.started_at_utc, now, false)?;
             let next_stable_id = stable_id("cli", now);
-            let operation_id = format!("switch:{}:{next_stable_id}", active.stable_id);
+            let operation_id = transition_identity(
+                "switch",
+                &active.stable_id,
+                interval.ended_at_utc,
+                &category.id.to_string(),
+            )
+            .operation_id;
             let ended_at_utc = interval
                 .ended_at_utc
                 .to_rfc3339_opts(SecondsFormat::Millis, true);
@@ -192,7 +199,8 @@ pub(crate) fn stop_session(
     let interval = checked_active_interval(&active.started_at_utc, now, accept_clock_jump)?;
     let elapsed_seconds = interval.elapsed_seconds;
     let next_stable_id = stable_id("cli-idle", now);
-    let operation_id = format!("switch:{}:{next_stable_id}", active.stable_id);
+    let operation_id =
+        transition_identity("switch", &active.stable_id, interval.ended_at_utc, "idle").operation_id;
     let ended_at_utc = interval
         .ended_at_utc
         .to_rfc3339_opts(SecondsFormat::Millis, true);
