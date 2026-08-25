@@ -275,6 +275,20 @@ impl App {
         self.modal_tag_index = None;
     }
 
+    pub(super) fn preview_active_description_from_modal(&mut self) {
+        if self.modal_editing_category_metadata
+            || self.is_on_insert_space()
+            || self.time_tracker.active_category_index() != Some(self.selected_index)
+        {
+            return;
+        }
+        if self.time_tracker.active_description() != self.modal_description {
+            self.time_tracker
+                .set_active_description(self.modal_description.clone());
+            self.modal_active_description_dirty = true;
+        }
+    }
+
     pub(super) fn toggle_category_metadata_edit(&mut self) {
         if self.is_on_insert_space() {
             return;
@@ -368,6 +382,7 @@ impl App {
 
         self.modal_tag_index = Some(next_index);
         self.modal_description = tags[next_index].clone();
+        self.preview_active_description_from_modal();
     }
 
     pub(super) fn is_on_insert_space(&self) -> bool {
@@ -403,6 +418,9 @@ impl App {
         };
 
         if let Some(added_id) = added_id {
+            if !self.persist_modal_active_description() {
+                return;
+            }
             self.persist_categories();
             self.switch_active_category_at(
                 added_id,
@@ -430,6 +448,9 @@ impl App {
                 .unwrap_or(false);
 
             if was_active {
+                if !self.persist_modal_active_description() {
+                    return;
+                }
                 self.switch_active_category_at(
                     DRIFT_CATEGORY_ID,
                     String::new(),

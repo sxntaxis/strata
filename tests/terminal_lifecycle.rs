@@ -300,6 +300,134 @@ fn live_cli_control_is_profile_scoped_and_preserves_continuous_idle() {
     quit_tui(&mut tui);
 }
 
+
+#[test]
+fn active_subtitle_updates_live_and_persists_on_escape_without_enter() {
+    let profile = TerminalProfile::new("active-subtitle-live-edit");
+    profile.seed_work_category();
+    Connection::open(profile.database_path())
+        .unwrap()
+        .execute(
+            "UPDATE categories SET description = 'Layer metadata' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+
+    let mut tui = spawn_live_tui(&profile);
+    wait_for_path(&profile.control_socket_path());
+
+    let start = profile.cli(&["start", "Work"]);
+    assert!(start.status.success(), "{}", combined_output(&start));
+    let durable_before: String = Connection::open(profile.database_path())
+        .unwrap()
+        .query_row("SELECT description FROM active_session", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(durable_before, "");
+
+    tui.write_all(b"\r").expect("Enter should open the layer pop-up");
+    thread::sleep(Duration::from_millis(50));
+    tui.write_all(b"focus")
+        .expect("typing should reach the active subtitle editor");
+
+    let mut live_status = None;
+    for _ in 0..80 {
+        let status = profile.cli(&["status"]);
+        let output = combined_output(&status);
+        if status.status.success() && output.contains("tag 'focus'") {
+            live_status = Some(output);
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    assert!(
+        live_status.is_some(),
+        "typed subtitle should become live before Enter or Esc"
+    );
+
+    let durable_while_open: String = Connection::open(profile.database_path())
+        .unwrap()
+        .query_row("SELECT description FROM active_session", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        durable_while_open, "",
+        "typing should stay live in memory until the pop-up closes"
+    );
+
+    tui.write_all(b"\x1b")
+        .expect("Esc should close and persist the active subtitle");
+    let mut persisted = false;
+    for _ in 0..80 {
+        let description: String = Connection::open(profile.database_path())
+            .unwrap()
+            .query_row("SELECT description FROM active_session", [], |row| row.get(0))
+            .unwrap();
+        if description == "focus" {
+            persisted = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    assert!(persisted, "Esc should persist the final active subtitle");
+
+    tui.write_all(b"\r").expect("Enter should reopen the layer pop-up");
+    thread::sleep(Duration::from_millis(50));
+    tui.write_all(b"\x7f\x7f\x7f\x7f\x7fdeep")
+        .expect("Backspace and typing should edit the running subtitle");
+
+    let mut edited_live = false;
+    for _ in 0..80 {
+        let status = profile.cli(&["status"]);
+        if status.status.success() && combined_output(&status).contains("tag 'deep'") {
+            edited_live = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    assert!(edited_live, "editing should replace the live subtitle immediately");
+
+    let durable_before_second_close: String = Connection::open(profile.database_path())
+        .unwrap()
+        .query_row("SELECT description FROM active_session", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(durable_before_second_close, "focus");
+
+    tui.write_all(b"\x1b")
+        .expect("Esc should persist the edited subtitle");
+    let mut edited_persisted = false;
+    for _ in 0..80 {
+        let description: String = Connection::open(profile.database_path())
+            .unwrap()
+            .query_row("SELECT description FROM active_session", [], |row| row.get(0))
+            .unwrap();
+        if description == "deep" {
+            edited_persisted = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    assert!(edited_persisted, "the subtitle present at Esc must remain durable");
+
+    tui.write_all(b"q").expect("quit should reach TUI");
+    let output = tui.wait(PTY_TIMEOUT).expect("TUI should exit");
+    assert!(output.status.success(), "{}", pty_output(&output));
+    let rendered = pty_output(&output);
+    assert!(
+        rendered.contains("deep"),
+        "top-left frame should render the active session subtitle"
+    );
+    assert!(
+        !rendered.contains("Layer metadata"),
+        "top-left frame must not substitute durable layer metadata for the session subtitle"
+    );
+
+    let mut reopened = spawn_live_tui(&profile);
+    wait_for_path(&profile.control_socket_path());
+    let status = profile.cli(&["status"]);
+    assert!(status.status.success(), "{}", combined_output(&status));
+    assert!(combined_output(&status).contains("tag 'deep'"));
+    quit_tui(&mut reopened);
+}
+
 #[test]
 fn shift_c_clears_only_idle_sediment_and_preserves_sqlite_extent() {
     let profile = TerminalProfile::new("shift-c-idle-clear");

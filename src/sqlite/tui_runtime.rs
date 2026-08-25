@@ -401,31 +401,24 @@ pub(crate) fn sync_categories(
     }
 
     if let Some(expected_active_stable_id) = expected_active_stable_id {
-        let active_description = categories
-            .iter()
-            .find(|category| category.id == active_category_id)
-            .map(|category| category.description.as_str())
-            .unwrap_or_default();
-        let changed = transaction
-            .execute(
-                "UPDATE active_session SET description = ?1
-                 WHERE singleton = 1 AND category_id = ?2 AND stable_id = ?3",
-                params![active_description, active_id, expected_active_stable_id],
+        let actual: Option<(i64, String)> = transaction
+            .query_row(
+                "SELECT category_id, stable_id FROM active_session WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
+            .optional()
             .map_err(|error| error.to_string())?;
-        if changed != 1 {
-            let actual: Option<String> = transaction
-                .query_row(
-                    "SELECT stable_id FROM active_session WHERE singleton = 1",
-                    [],
-                    |row| row.get(0),
-                )
-                .optional()
-                .map_err(|error| error.to_string())?;
+        if actual.as_ref().is_none_or(|(category_id, stable_id)| {
+            *category_id != active_id || stable_id.as_str() != expected_active_stable_id
+        }) {
             return Err(format!(
-                "active session changed concurrently; expected {}, found {}",
+                "active session changed concurrently; expected {} on category {}, found {}",
                 expected_active_stable_id,
-                actual.unwrap_or_else(|| "no active session".to_string())
+                active_id,
+                actual
+                    .map(|(category_id, stable_id)| format!("{stable_id} on category {category_id}"))
+                    .unwrap_or_else(|| "no active session".to_string())
             ));
         }
     }
@@ -1337,6 +1330,8 @@ fn as_i64(value: u64, label: &str) -> Result<i64, String> {
 mod tests {
     use std::path::PathBuf;
 
+    use chrono::TimeZone;
+
     use super::*;
     use crate::sqlite::{SqliteRepository, repository::NewCategoryRecord};
 
@@ -1470,6 +1465,51 @@ mod tests {
         assert_eq!(checkpoint.0, "quarantined");
         assert_eq!(checkpoint.1, "{}");
         drop(repository);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn category_sync_preserves_active_session_description() {
+        let path = repository_file("category-sync-active-description");
+        let mut repository = SqliteRepository::open(&path).unwrap();
+        repository
+            .create_category(&NewCategoryRecord {
+                name: "Work",
+                description: "Layer metadata",
+                color_index: 0,
+                balance_effect: 1,
+            })
+            .unwrap();
+        drop(repository);
+
+        let started_at = Utc.with_ymd_and_hms(2026, 8, 25, 18, 0, 0).unwrap();
+        let stable_id = ensure_active_session(
+            &path,
+            CategoryId::new(1),
+            "Session subtitle",
+            started_at,
+        )
+        .unwrap();
+        let mut state = load_state(&path).unwrap();
+        state.loaded_categories.categories[1].description = "Changed metadata".to_string();
+
+        sync_categories(
+            &path,
+            &state.loaded_categories.categories,
+            CategoryId::new(1),
+            Some(&stable_id),
+        )
+        .unwrap();
+
+        let reloaded = load_state(&path).unwrap();
+        assert_eq!(
+            reloaded.loaded_categories.categories[1].description,
+            "Changed metadata"
+        );
+        assert_eq!(
+            reloaded.active_session.unwrap().description,
+            "Session subtitle"
+        );
         std::fs::remove_file(path).ok();
     }
 

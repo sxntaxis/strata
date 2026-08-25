@@ -387,6 +387,7 @@ struct App {
     new_category_name: String,
     color_index: usize,
     modal_description: String,
+    modal_active_description_dirty: bool,
     modal_editing_category_metadata: bool,
     category_tags: storage::CategoryTagsState,
     modal_tag_index: Option<usize>,
@@ -478,6 +479,7 @@ impl App {
             new_category_name: String::new(),
             color_index: 0,
             modal_description: String::new(),
+            modal_active_description_dirty: false,
             modal_editing_category_metadata: false,
             category_tags,
             modal_tag_index: None,
@@ -648,11 +650,53 @@ impl App {
         self.selected_index = self.time_tracker.active_category_index().unwrap_or(0);
         self.new_category_name = String::new();
         self.color_index = 0;
+        self.modal_active_description_dirty = false;
         self.sync_modal_description_from_selection();
         self.render_needed = true;
     }
 
+    fn persist_modal_active_description(&mut self) -> bool {
+        if !self.modal_active_description_dirty {
+            return true;
+        }
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::ActiveDescription,
+                RecoveryAction::ReloadAuthority,
+                Err("SQLite authority is unavailable".to_string()),
+            );
+            return false;
+        };
+        let Some(stable_id) = self.session.active_session_stable_id.clone() else {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::ActiveDescription,
+                RecoveryAction::ReloadAuthority,
+                Err("active session has no stable identity".to_string()),
+            );
+            return false;
+        };
+        let description = self.time_tracker.active_description().to_string();
+        let result = sqlite::update_tui_active_description(&database_path, &stable_id, &description);
+        if self
+            .record_storage_result_for(
+                PersistenceOperation::ActiveDescription,
+                RecoveryAction::ReloadAuthority,
+                result,
+            )
+            .is_none()
+        {
+            return false;
+        }
+        self.modal_active_description_dirty = false;
+        self.refresh_active_runtime_checkpoint();
+        !self.has_persistence_recovery()
+    }
+
     fn close_modal(&mut self) {
+        if !self.persist_modal_active_description() {
+            self.render_needed = true;
+            return;
+        }
         self.ui_mode = UiMode::Main;
         self.modal_description = String::new();
         self.modal_editing_category_metadata = false;

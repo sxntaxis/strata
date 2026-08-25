@@ -358,6 +358,14 @@ impl App {
             self.time_tracker.active_category_id(),
             self.session.active_session_stable_id.as_deref(),
         )?;
+        if let Some(stable_id) = self.session.active_session_stable_id.as_deref() {
+            sqlite::update_tui_active_description(
+                &database_path,
+                stable_id,
+                self.time_tracker.active_description(),
+            )?;
+            self.modal_active_description_dirty = false;
+        }
         let category_ids = categories
             .iter()
             .map(|category| category.id)
@@ -389,6 +397,7 @@ impl App {
         self.category_tags = state.category_tags;
         self.archived_categories = state.archived_categories;
 
+        self.modal_active_description_dirty = false;
         if let Some(active) = state.active_session {
             if !self
                 .time_tracker

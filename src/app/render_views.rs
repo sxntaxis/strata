@@ -50,13 +50,11 @@ impl App {
             String::new()
         };
 
-        let description = active_index
-            .and_then(|idx| {
-                categories
-                    .get(idx)
-                    .map(|category| category.description.clone())
-            })
-            .unwrap_or_default();
+        let description = if is_drift_category_id(active_category_id) {
+            String::new()
+        } else {
+            self.time_tracker.active_description().to_string()
+        };
 
         let session_timer = if is_drift_category_id(active_category_id) {
             Local::now().format("%H:%M:%S").to_string()
@@ -213,7 +211,7 @@ mod tests {
     use ratatui::{
         buffer::Buffer,
         layout::Rect,
-        style::Color,
+        style::{Color, Modifier},
         widgets::{Widget, block::Block},
     };
 
@@ -228,6 +226,14 @@ mod tests {
             for x in 0..area.width {
                 text.push_str(buffer.get(x, y).symbol());
             }
+        }
+        text
+    }
+
+    fn top_row_text(buffer: &Buffer, area: Rect) -> String {
+        let mut text = String::new();
+        for x in 0..area.width {
+            text.push_str(buffer.get(x, 0).symbol());
         }
         text
     }
@@ -255,6 +261,29 @@ mod tests {
         assert!(active.contains("Work focus"));
         assert!(active.contains("00:00:07"));
         assert!(active.contains("00:00:03"));
+
+        let area = Rect::new(0, 0, 60, 3);
+        let mut styled = Buffer::empty(area);
+        frame_block(
+            "Work".to_string(),
+            "focus".to_string(),
+            "00:00:07".to_string(),
+            Some("00:00:03".to_string()),
+            Color::White,
+        )
+        .render(area, &mut styled);
+        let top = top_row_text(&styled, area);
+        let work_start = top.find("Work").expect("activity title should render");
+        let subtitle_start = top.find("focus").expect("subtitle should render");
+        for x in work_start..work_start + "Work".len() {
+            assert!(styled.get(x as u16, 0).modifier.contains(Modifier::BOLD));
+        }
+        for x in subtitle_start..subtitle_start + "focus".len() {
+            assert!(styled
+                .get(x as u16, 0)
+                .modifier
+                .contains(Modifier::ITALIC));
+        }
 
         let negative = rendered_text(frame_block(
             "Work".to_string(),

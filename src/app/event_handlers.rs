@@ -82,6 +82,9 @@ impl App {
         }
 
         if self.keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
+            if self.in_category_modal() && !self.persist_modal_active_description() {
+                return false;
+            }
             return true;
         }
 
@@ -937,40 +940,17 @@ impl App {
                         .time_tracker
                         .category_by_index(self.selected_index)
                         .map(|category| category.id);
-                    if let Some(category_id) = selected {
-                        if self.time_tracker.active_category_id() == category_id {
-                            self.time_tracker
-                                .set_active_description(self.modal_description.clone());
-                            if let Some(database_path) = self.sqlite_database_path.clone() {
-                                let Some(stable_id) = self.session.active_session_stable_id.clone()
-                                else {
-                                    self.render_needed = true;
-                                    return true;
-                                };
-                                let result = sqlite::update_tui_active_description(
-                                    &database_path,
-                                    &stable_id,
-                                    &self.modal_description,
-                                );
-                                if self
-                                    .record_storage_result_for(
-                                        PersistenceOperation::ActiveDescription,
-                                        RecoveryAction::ReloadAuthority,
-                                        result,
-                                    )
-                                    .is_none()
-                                {
-                                    self.render_needed = true;
-                                    return true;
-                                }
-                            }
-                            self.refresh_active_runtime_checkpoint();
-                        } else {
-                            self.apply_runtime_mutation(RuntimeMutation::SwitchLayer {
-                                category_id,
-                                description: self.modal_description.clone(),
-                            });
+                    if let Some(category_id) = selected
+                        && self.time_tracker.active_category_id() != category_id
+                    {
+                        if !self.persist_modal_active_description() {
+                            self.render_needed = true;
+                            return true;
                         }
+                        self.apply_runtime_mutation(RuntimeMutation::SwitchLayer {
+                            category_id,
+                            description: self.modal_description.clone(),
+                        });
                     }
                     self.close_modal();
                 }
@@ -1011,6 +991,7 @@ impl App {
                 } else if self.selected_index < self.time_tracker.category_count() {
                     self.modal_tag_index = None;
                     self.modal_description.pop();
+                    self.preview_active_description_from_modal();
                 }
             }
             _ => handled = false,
@@ -1038,6 +1019,7 @@ impl App {
             } else if self.selected_index < self.time_tracker.category_count() {
                 self.modal_tag_index = None;
                 self.modal_description.push(c);
+                self.preview_active_description_from_modal();
                 self.render_needed = true;
             }
         }
