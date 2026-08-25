@@ -127,12 +127,6 @@ impl SedimentSnapshot {
         )
     }
 
-    pub fn is_daily_contribution_for(&self, operational_day: &str) -> bool {
-        self.schema_version == Self::VERSION
-            && self.kind == SedimentSnapshotKind::DailyContribution
-            && self.operational_day.as_deref() == Some(operational_day)
-    }
-
     pub(crate) fn is_authentic_day_end_for(&self, operational_day: &str) -> bool {
         self.schema_version == Self::VERSION
             && self.kind == SedimentSnapshotKind::CumulativeCheckpoint
