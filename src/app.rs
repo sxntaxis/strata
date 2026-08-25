@@ -302,7 +302,6 @@ fn build_recovery_statement(
     })
 }
 
-
 fn clear_all_affected_days_for_interval(
     operation_day: NaiveDate,
     idle_reset: bool,

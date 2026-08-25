@@ -200,7 +200,8 @@ pub(crate) fn stop_session(
     let elapsed_seconds = interval.elapsed_seconds;
     let next_stable_id = stable_id("cli-idle", now);
     let operation_id =
-        transition_identity("switch", &active.stable_id, interval.ended_at_utc, "idle").operation_id;
+        transition_identity("switch", &active.stable_id, interval.ended_at_utc, "idle")
+            .operation_id;
     let ended_at_utc = interval
         .ended_at_utc
         .to_rfc3339_opts(SecondsFormat::Millis, true);
