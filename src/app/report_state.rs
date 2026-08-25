@@ -334,8 +334,7 @@ impl App {
         let derived = self.synthetic_snapshot_from_time_log(end_day);
 
         self.report_snapshot_end_day = Some(key.clone());
-        self.report_snapshot_artifact =
-            select_historical_visual_artifact(&key, authentic, derived);
+        self.report_snapshot_artifact = select_historical_visual_artifact(&key, authentic, derived);
         self.report_snapshot_preview_key = None;
         self.report_snapshot_preview_lines = None;
     }

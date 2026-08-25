@@ -359,10 +359,8 @@ fn stage_pending_day_end_snapshot(
     captured_at_utc: DateTime<Utc>,
     state: SandState,
 ) -> Result<(), String> {
-    let snapshot = SedimentSnapshot::day_end_checkpoint(
-        operational_day.format("%Y-%m-%d").to_string(),
-        state,
-    );
+    let snapshot =
+        SedimentSnapshot::day_end_checkpoint(operational_day.format("%Y-%m-%d").to_string(), state);
     if let Some(existing) = pending
         .iter()
         .find(|pending| pending.operational_day == operational_day)
@@ -1531,8 +1529,7 @@ impl App {
                 self.render_needed = true;
             }
         } else if backlog.is_zero() {
-            if let Err(error) =
-                self.advance_simulation_by(Duration::ZERO, tick_rate, physics_rate)
+            if let Err(error) = self.advance_simulation_by(Duration::ZERO, tick_rate, physics_rate)
             {
                 self.record_storage_result_for::<()>(
                     PersistenceOperation::DailySnapshotSave,
@@ -1573,8 +1570,7 @@ impl App {
                     break;
                 }
 
-                if let Err(error) =
-                    self.advance_simulation_by(advance_by, tick_rate, physics_rate)
+                if let Err(error) = self.advance_simulation_by(advance_by, tick_rate, physics_rate)
                 {
                     self.record_storage_result_for::<()>(
                         PersistenceOperation::DailySnapshotSave,
@@ -2797,8 +2793,8 @@ mod day_end_snapshot_tests {
         stage_pending_day_end_snapshot(&mut pending, day, boundary, state(4)).unwrap();
         assert_eq!(pending.len(), 1);
 
-        let error = stage_pending_day_end_snapshot(&mut pending, day, boundary, state(5))
-            .unwrap_err();
+        let error =
+            stage_pending_day_end_snapshot(&mut pending, day, boundary, state(5)).unwrap_err();
         assert!(error.contains("conflicting in-memory day-end snapshots"));
         assert_eq!(pending[0].snapshot.state, state(4));
     }

@@ -292,14 +292,11 @@ mod tests {
             .with_ymd_and_hms(2026, 8, 2, 11, 59, 59)
             .single()
             .unwrap();
-        let (ending_day, boundary) =
-            next_operational_day_boundary_after(before, &policy).unwrap();
+        let (ending_day, boundary) = next_operational_day_boundary_after(before, &policy).unwrap();
         assert_eq!(ending_day, NaiveDate::from_ymd_opt(2026, 8, 1).unwrap());
         assert_eq!(
             boundary,
-            Utc.with_ymd_and_hms(2026, 8, 2, 12, 0, 0)
-                .single()
-                .unwrap()
+            Utc.with_ymd_and_hms(2026, 8, 2, 12, 0, 0).single().unwrap()
         );
 
         let at_boundary = boundary;
@@ -308,9 +305,7 @@ mod tests {
         assert_eq!(new_day, NaiveDate::from_ymd_opt(2026, 8, 2).unwrap());
         assert_eq!(
             next_boundary,
-            Utc.with_ymd_and_hms(2026, 8, 3, 12, 0, 0)
-                .single()
-                .unwrap()
+            Utc.with_ymd_and_hms(2026, 8, 3, 12, 0, 0).single().unwrap()
         );
     }
 

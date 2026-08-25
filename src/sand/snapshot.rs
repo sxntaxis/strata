@@ -229,11 +229,8 @@ pub(crate) fn derived_preview_from_slices(
     if ordered.is_empty() {
         return None;
     }
-    let source_revision = ledger_source_revision(
-        operational_day,
-        &ordered,
-        Some((grid_width, grid_height)),
-    );
+    let source_revision =
+        ledger_source_revision(operational_day, &ordered, Some((grid_width, grid_height)));
     let total_seconds = ordered.iter().try_fold(0usize, |total, slice| {
         total.checked_add(slice.elapsed_seconds)
     })?;
@@ -304,7 +301,10 @@ fn ledger_source_revision(
 ) -> String {
     let mut revision_material = format!("day={operational_day}|idle=included|quantum=1|");
     if let Some((grid_width, grid_height)) = preview_grid {
-        let _ = write!(revision_material, "preview-grid={grid_width}x{grid_height}|");
+        let _ = write!(
+            revision_material,
+            "preview-grid={grid_width}x{grid_height}|"
+        );
     }
     for slice in ordered {
         let _ = write!(
@@ -480,7 +480,10 @@ mod tests {
             .iter()
             .map(|run| run.count)
             .sum::<usize>();
-        assert_eq!((snapshot.state.grid_width, snapshot.state.grid_height), (0, 0));
+        assert_eq!(
+            (snapshot.state.grid_width, snapshot.state.grid_height),
+            (0, 0)
+        );
         assert!(snapshot.state.grains.is_empty());
         assert_eq!(pending, 9);
         assert_eq!(snapshot.state.pending_runs[0].category_id, 1);
@@ -498,7 +501,10 @@ mod tests {
         assert_eq!(snapshot.state, original);
         assert_eq!(snapshot.state.grid_width, 4);
         assert_eq!(snapshot.state.grid_height, 4);
-        assert_eq!(snapshot.display_label(), "day-end checkpoint · idle included");
+        assert_eq!(
+            snapshot.display_label(),
+            "day-end checkpoint · idle included"
+        );
     }
 
     #[test]
@@ -510,7 +516,10 @@ mod tests {
         let _large = snapshot.render_immutable(8, 6, &[]);
 
         assert_eq!(snapshot, before);
-        assert_eq!((snapshot.state.grid_width, snapshot.state.grid_height), (4, 4));
+        assert_eq!(
+            (snapshot.state.grid_width, snapshot.state.grid_height),
+            (4, 4)
+        );
         assert_eq!(snapshot.state.grains[0].x, 1);
         assert_eq!(snapshot.state.grains[0].y, 3);
     }
