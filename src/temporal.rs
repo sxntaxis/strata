@@ -118,6 +118,21 @@ fn boundary_start_utc(
         .ok_or_else(|| "fixed-offset operational-day boundary is not unique".to_string())
 }
 
+pub(crate) fn next_operational_day_boundary_after(
+    timestamp: DateTime<Utc>,
+    config: &DayBoundaryConfig,
+) -> Result<(NaiveDate, DateTime<Utc>), String> {
+    let operational_day = operational_day_from_utc(timestamp, config)?;
+    let next_day = operational_day
+        .succ_opt()
+        .ok_or_else(|| "operational-day range exceeds chrono's supported dates".to_string())?;
+    let boundary = boundary_start_utc(next_day, OperationalDayPolicy::from_config(*config))?;
+    if boundary <= timestamp {
+        return Err("next operational-day boundary did not advance".to_string());
+    }
+    Ok((operational_day, boundary))
+}
+
 pub(crate) fn allocate_operational_day_slices(
     started_at_utc: DateTime<Utc>,
     recorded_ended_at_utc: DateTime<Utc>,
@@ -268,6 +283,35 @@ mod tests {
             fixed_minute: 0,
             utc_offset_seconds: offset_seconds,
         }
+    }
+
+    #[test]
+    fn next_operational_boundary_returns_the_cutoff_ending_current_day() {
+        let policy = config(-6 * 60 * 60);
+        let before = Utc
+            .with_ymd_and_hms(2026, 8, 2, 11, 59, 59)
+            .single()
+            .unwrap();
+        let (ending_day, boundary) =
+            next_operational_day_boundary_after(before, &policy).unwrap();
+        assert_eq!(ending_day, NaiveDate::from_ymd_opt(2026, 8, 1).unwrap());
+        assert_eq!(
+            boundary,
+            Utc.with_ymd_and_hms(2026, 8, 2, 12, 0, 0)
+                .single()
+                .unwrap()
+        );
+
+        let at_boundary = boundary;
+        let (new_day, next_boundary) =
+            next_operational_day_boundary_after(at_boundary, &policy).unwrap();
+        assert_eq!(new_day, NaiveDate::from_ymd_opt(2026, 8, 2).unwrap());
+        assert_eq!(
+            next_boundary,
+            Utc.with_ymd_and_hms(2026, 8, 3, 12, 0, 0)
+                .single()
+                .unwrap()
+        );
     }
 
     #[test]

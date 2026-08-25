@@ -346,6 +346,42 @@ struct SessionState {
     active_session_started_at_utc: Option<DateTime<Utc>>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PendingDayEndSnapshot {
+    operational_day: NaiveDate,
+    captured_at_utc: DateTime<Utc>,
+    snapshot: SedimentSnapshot,
+}
+
+fn stage_pending_day_end_snapshot(
+    pending: &mut Vec<PendingDayEndSnapshot>,
+    operational_day: NaiveDate,
+    captured_at_utc: DateTime<Utc>,
+    state: SandState,
+) -> Result<(), String> {
+    let snapshot = SedimentSnapshot::day_end_checkpoint(
+        operational_day.format("%Y-%m-%d").to_string(),
+        state,
+    );
+    if let Some(existing) = pending
+        .iter()
+        .find(|pending| pending.operational_day == operational_day)
+    {
+        if existing.snapshot != snapshot || existing.captured_at_utc != captured_at_utc {
+            return Err(format!(
+                "operational-day {operational_day} produced conflicting in-memory day-end snapshots"
+            ));
+        }
+        return Ok(());
+    }
+    pending.push(PendingDayEndSnapshot {
+        operational_day,
+        captured_at_utc,
+        snapshot,
+    });
+    Ok(())
+}
+
 struct SimulationState {
     simulation_time_utc: DateTime<Utc>,
     spawn_accumulator: Duration,
@@ -380,6 +416,7 @@ struct App {
     report_snapshot_artifact: Option<SedimentSnapshot>,
     report_snapshot_preview_key: Option<String>,
     report_snapshot_preview_lines: Option<Vec<ratatui::text::Line<'static>>>,
+    pending_day_end_snapshots: Vec<PendingDayEndSnapshot>,
     simulation: SimulationState,
     detach_requested: bool,
     keymap: keybindings::Keymap,
@@ -470,6 +507,7 @@ impl App {
             report_snapshot_artifact: None,
             report_snapshot_preview_key: None,
             report_snapshot_preview_lines: None,
+            pending_day_end_snapshots: Vec::new(),
             simulation: SimulationState {
                 simulation_time_utc: Utc::now(),
                 spawn_accumulator: Duration::ZERO,
@@ -1493,7 +1531,16 @@ impl App {
                 self.render_needed = true;
             }
         } else if backlog.is_zero() {
-            self.advance_simulation_by(Duration::ZERO, tick_rate, physics_rate);
+            if let Err(error) =
+                self.advance_simulation_by(Duration::ZERO, tick_rate, physics_rate)
+            {
+                self.record_storage_result_for::<()>(
+                    PersistenceOperation::DailySnapshotSave,
+                    RecoveryAction::FlushCurrentState,
+                    Err(error),
+                );
+                return;
+            }
             self.simulation.catchup_cadence_accumulator =
                 self.simulation.catchup_cadence_accumulator.min(cadence);
         } else {
@@ -1506,7 +1553,16 @@ impl App {
                 let step_target_utc = Utc::now();
                 let step_backlog = self.simulation_backlog_duration_at(step_target_utc);
                 if step_backlog.is_zero() {
-                    self.advance_simulation_by(Duration::ZERO, tick_rate, physics_rate);
+                    if let Err(error) =
+                        self.advance_simulation_by(Duration::ZERO, tick_rate, physics_rate)
+                    {
+                        self.record_storage_result_for::<()>(
+                            PersistenceOperation::DailySnapshotSave,
+                            RecoveryAction::FlushCurrentState,
+                            Err(error),
+                        );
+                        return;
+                    }
                     break;
                 }
 
@@ -1517,9 +1573,27 @@ impl App {
                     break;
                 }
 
-                self.advance_simulation_by(advance_by, tick_rate, physics_rate);
+                if let Err(error) =
+                    self.advance_simulation_by(advance_by, tick_rate, physics_rate)
+                {
+                    self.record_storage_result_for::<()>(
+                        PersistenceOperation::DailySnapshotSave,
+                        RecoveryAction::FlushCurrentState,
+                        Err(error),
+                    );
+                    return;
+                }
                 self.render_needed = true;
             }
+        }
+
+        if let Err(error) = self.persist_pending_day_end_snapshots() {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::DailySnapshotSave,
+                RecoveryAction::FlushCurrentState,
+                Err(error),
+            );
+            return;
         }
 
         let now_catching = self.is_catching_up();
@@ -1677,23 +1751,38 @@ impl App {
         delta: Duration,
         tick_rate: Duration,
         physics_rate: Duration,
-    ) {
+    ) -> Result<(), String> {
         let target_time = self.simulation.simulation_time_utc
             + ChronoDuration::from_std(delta).unwrap_or(ChronoDuration::zero());
 
         if delta.is_zero() {
-            return;
+            return Ok(());
         }
 
-        let mut remaining = Duration::ZERO;
-        if target_time > self.simulation.simulation_time_utc {
-            remaining = (target_time - self.simulation.simulation_time_utc)
+        while self.simulation.simulation_time_utc < target_time {
+            let config = crate::domain::day_boundary_config();
+            let (ending_day, next_boundary) = temporal::next_operational_day_boundary_after(
+                self.simulation.simulation_time_utc,
+                &config,
+            )?;
+            let segment_target = target_time.min(next_boundary);
+            let remaining = (segment_target - self.simulation.simulation_time_utc)
                 .to_std()
-                .unwrap_or(Duration::ZERO);
-        }
+                .map_err(|error| error.to_string())?;
 
-        self.process_simulation_delta(remaining, tick_rate, physics_rate);
-        self.simulation.simulation_time_utc = target_time;
+            self.process_simulation_delta(remaining, tick_rate, physics_rate);
+            self.simulation.simulation_time_utc = segment_target;
+
+            if segment_target == next_boundary {
+                stage_pending_day_end_snapshot(
+                    &mut self.pending_day_end_snapshots,
+                    ending_day,
+                    next_boundary,
+                    self.sand_engine.snapshot_state(),
+                )?;
+            }
+        }
+        Ok(())
     }
 
     fn process_simulation_delta(
@@ -2660,5 +2749,57 @@ mod clear_all_temporal_tests {
         assert_eq!(days.len(), 2);
         assert!(days.contains(&chrono::NaiveDate::from_ymd_opt(2026, 8, 20).unwrap()));
         assert!(days.contains(&operation_day));
+    }
+}
+
+#[cfg(test)]
+mod day_end_snapshot_tests {
+    use chrono::{NaiveDate, TimeZone, Utc};
+
+    use super::{PendingDayEndSnapshot, stage_pending_day_end_snapshot};
+    use crate::sand::{PendingGrainRun, SandState, SandStateGrain};
+
+    fn state(x: usize) -> SandState {
+        SandState {
+            version: SandState::VERSION,
+            grid_width: 9,
+            grid_height: 6,
+            grains: vec![SandStateGrain {
+                x,
+                y: 5,
+                category_id: 1,
+            }],
+            frame_count: 41,
+            sweep_left_to_right: false,
+            rng_state: 12345,
+            pending_grains: Vec::new(),
+            pending_runs: vec![PendingGrainRun {
+                category_id: 0,
+                count: 2,
+            }],
+        }
+    }
+
+    #[test]
+    fn staged_day_end_is_exact_and_first_write_wins_in_memory() {
+        let day = NaiveDate::from_ymd_opt(2026, 8, 1).unwrap();
+        let boundary = Utc.with_ymd_and_hms(2026, 8, 2, 12, 0, 0).unwrap();
+        let original = state(4);
+        let mut pending = Vec::<PendingDayEndSnapshot>::new();
+
+        stage_pending_day_end_snapshot(&mut pending, day, boundary, original.clone()).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].operational_day, day);
+        assert_eq!(pending[0].captured_at_utc, boundary);
+        assert_eq!(pending[0].snapshot.state, original);
+        assert!(pending[0].snapshot.is_authentic_day_end_for("2026-08-01"));
+
+        stage_pending_day_end_snapshot(&mut pending, day, boundary, state(4)).unwrap();
+        assert_eq!(pending.len(), 1);
+
+        let error = stage_pending_day_end_snapshot(&mut pending, day, boundary, state(5))
+            .unwrap_err();
+        assert!(error.contains("conflicting in-memory day-end snapshots"));
+        assert_eq!(pending[0].snapshot.state, state(4));
     }
 }

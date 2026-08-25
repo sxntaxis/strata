@@ -12,7 +12,7 @@ use crate::domain::{
 };
 use crate::sand::{
     DailySedimentSlice, SedimentSnapshot, daily_contribution_from_slices,
-    derived_preview_from_slices, select_daily_artifact,
+    derived_preview_from_slices, select_historical_visual_artifact,
 };
 
 use super::{App, PersistenceOperation, RecoveryAction};
@@ -330,11 +330,12 @@ impl App {
             return;
         }
 
-        let persisted = self.load_daily_sediment_snapshot(end_day);
+        let authentic = self.load_day_end_sediment_snapshot(end_day);
         let derived = self.synthetic_snapshot_from_time_log(end_day);
 
         self.report_snapshot_end_day = Some(key.clone());
-        self.report_snapshot_artifact = select_daily_artifact(&key, persisted, derived);
+        self.report_snapshot_artifact =
+            select_historical_visual_artifact(&key, authentic, derived);
         self.report_snapshot_preview_key = None;
         self.report_snapshot_preview_lines = None;
     }
@@ -345,12 +346,7 @@ impl App {
     ) -> Option<SedimentSnapshot> {
         let slices = self.daily_sediment_slices(day);
         let day_key = day.format("%Y-%m-%d").to_string();
-        daily_contribution_from_slices(
-            &day_key,
-            self.sand_engine.grid_width_dots,
-            self.sand_engine.grid_height_dots,
-            &slices,
-        )
+        daily_contribution_from_slices(&day_key, &slices)
     }
 
     fn synthetic_snapshot_from_time_log(&self, day: NaiveDate) -> Option<SedimentSnapshot> {

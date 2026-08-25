@@ -71,6 +71,17 @@ impl App {
     }
 
     pub(super) fn persist_daily_sand_snapshot(&mut self) {
+        let pending = self.persist_pending_day_end_snapshots();
+        if self
+            .record_storage_result_for(
+                PersistenceOperation::DailySnapshotSave,
+                RecoveryAction::FlushCurrentState,
+                pending,
+            )
+            .is_none()
+        {
+            return;
+        }
         self.reconcile_all_daily_contributions();
     }
 
@@ -161,6 +172,55 @@ impl App {
                 None
             }
         }
+    }
+
+    pub(super) fn load_day_end_sediment_snapshot(
+        &mut self,
+        day: NaiveDate,
+    ) -> Option<crate::sand::SedimentSnapshot> {
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::StateReload,
+                RecoveryAction::ReloadAuthority,
+                Err("SQLite authority is unavailable".to_string()),
+            );
+            return None;
+        };
+        let day = day.format("%Y-%m-%d").to_string();
+        match sqlite::load_tui_day_end_snapshot(&database_path, &day) {
+            Ok(value) => value,
+            Err(error) => {
+                self.record_storage_result_for::<()>(
+                    PersistenceOperation::StateReload,
+                    RecoveryAction::ReloadAuthority,
+                    Err(error),
+                );
+                None
+            }
+        }
+    }
+
+    pub(super) fn persist_pending_day_end_snapshots(&mut self) -> Result<(), String> {
+        let mut wrote_any = false;
+        while let Some(pending) = self.pending_day_end_snapshots.first().cloned() {
+            let database_path = self
+                .sqlite_database_path
+                .clone()
+                .ok_or_else(|| "SQLite authority is unavailable".to_string())?;
+            let day = pending.operational_day.format("%Y-%m-%d").to_string();
+            sqlite::save_tui_day_end_snapshot(
+                &database_path,
+                &day,
+                &pending.snapshot,
+                pending.captured_at_utc,
+            )?;
+            self.pending_day_end_snapshots.remove(0);
+            wrote_any = true;
+        }
+        if wrote_any {
+            self.clear_report_snapshot_cache();
+        }
+        Ok(())
     }
 
     pub(super) fn save_daily_sediment_snapshot(

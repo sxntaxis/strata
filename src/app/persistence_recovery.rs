@@ -341,6 +341,7 @@ impl App {
     }
 
     pub(super) fn try_flush_current_state(&mut self) -> Result<(), String> {
+        self.persist_pending_day_end_snapshots()?;
         let categories = self.time_tracker.categories_for_storage();
         let operational_day_date = operational_day_key_now();
         let operational_day = operational_day_date.format("%Y-%m-%d").to_string();
@@ -432,6 +433,8 @@ impl App {
             self.sand_engine
                 .restore_state(&state, &valid_category_ids)?;
         }
+        self.pending_day_end_snapshots.clear();
+        self.clear_report_snapshot_cache();
         Ok(())
     }
 

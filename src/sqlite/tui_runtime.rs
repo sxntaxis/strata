@@ -721,6 +721,110 @@ pub(crate) fn load_sand_state(database_path: &Path) -> Result<Option<SandState>,
         .transpose()
 }
 
+fn decode_day_end_snapshot(
+    operational_day: &str,
+    payload_json: &str,
+) -> Result<SedimentSnapshot, String> {
+    if let Ok(snapshot) = serde_json::from_str::<SedimentSnapshot>(payload_json) {
+        if snapshot.is_authentic_day_end_for(operational_day) {
+            return Ok(snapshot);
+        }
+        return Err(format!(
+            "day-end snapshot for {operational_day} has incompatible typed payload"
+        ));
+    }
+    let state = serde_json::from_str::<SandState>(payload_json).map_err(|error| {
+        format!("invalid day-end snapshot payload for {operational_day}: {error}")
+    })?;
+    Ok(SedimentSnapshot::legacy_daily_payload(
+        operational_day.to_string(),
+        state,
+    ))
+}
+
+pub(crate) fn save_day_end_snapshot(
+    database_path: &Path,
+    operational_day: &str,
+    snapshot: &SedimentSnapshot,
+    captured_at_utc: DateTime<Utc>,
+) -> Result<(), String> {
+    if !snapshot.is_authentic_day_end_for(operational_day) {
+        return Err(format!(
+            "refusing non-authentic day-end snapshot for {operational_day}"
+        ));
+    }
+    runtime_coordination::maybe_inject_test_fault("day-end-snapshot", "before-write")
+        .map_err(|error| error.to_string())?;
+    let mut repository = open_cli_repository(database_path)?;
+    let existing_sand = repository.sand_state().map_err(|error| error.to_string())?;
+    let formation_id = existing_sand
+        .as_ref()
+        .map(|record| record.formation_id.as_str())
+        .unwrap_or("default");
+    let quantum_seconds = existing_sand
+        .as_ref()
+        .map(|record| record.quantum_seconds)
+        .unwrap_or(1);
+    let payload_json = serde_json::to_string(snapshot).map_err(|error| error.to_string())?;
+    let transaction = repository
+        .connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let existing_payload: Option<String> = transaction
+        .query_row(
+            "SELECT payload_json FROM sand_snapshots
+             WHERE snapshot_kind = 'daily' AND operational_day = ?1
+             ORDER BY id ASC LIMIT 1",
+            params![operational_day],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    if let Some(existing_payload) = existing_payload {
+        decode_day_end_snapshot(operational_day, &existing_payload)?;
+        return Ok(());
+    }
+    transaction
+        .execute(
+            "INSERT INTO sand_snapshots (
+                formation_id, snapshot_kind, operational_day, quantum_seconds,
+                payload_json, captured_at_utc
+             ) VALUES (?1, 'daily', ?2, ?3, ?4, ?5)",
+            params![
+                formation_id,
+                operational_day,
+                quantum_seconds,
+                payload_json,
+                timestamp(captured_at_utc),
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    runtime_coordination::maybe_inject_test_fault("day-end-snapshot", "commit")
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
+}
+
+pub(crate) fn load_day_end_snapshot(
+    database_path: &Path,
+    operational_day: &str,
+) -> Result<Option<SedimentSnapshot>, String> {
+    let repository = open_cli_repository(database_path)?;
+    let payload: Option<String> = repository
+        .connection
+        .query_row(
+            "SELECT payload_json FROM sand_snapshots
+             WHERE snapshot_kind = 'daily' AND operational_day = ?1
+             ORDER BY id ASC LIMIT 1",
+            params![operational_day],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    payload
+        .map(|value| decode_day_end_snapshot(operational_day, &value))
+        .transpose()
+}
+
 pub(crate) fn save_daily_snapshot(
     database_path: &Path,
     operational_day: &str,
@@ -1772,6 +1876,89 @@ mod clear_all_transaction_tests {
             &serde_json::json!({"before": true}),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn authentic_day_end_snapshot_is_first_write_wins_and_round_trips_exact_topology() {
+        let path = database_path("day-end-snapshot");
+        let state = SandState {
+            version: SandState::VERSION,
+            grid_width: 7,
+            grid_height: 5,
+            grains: vec![crate::sand::SandStateGrain {
+                x: 3,
+                y: 4,
+                category_id: 0,
+            }],
+            frame_count: 19,
+            sweep_left_to_right: false,
+            rng_state: 77,
+            pending_grains: Vec::new(),
+            pending_runs: Vec::new(),
+        };
+        let snapshot =
+            SedimentSnapshot::day_end_checkpoint("2026-08-01".to_string(), state.clone());
+        let captured = DateTime::parse_from_rfc3339("2026-08-02T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        save_day_end_snapshot(&path, "2026-08-01", &snapshot, captured).unwrap();
+        assert_eq!(
+            load_day_end_snapshot(&path, "2026-08-01").unwrap(),
+            Some(snapshot.clone())
+        );
+        save_day_end_snapshot(&path, "2026-08-01", &snapshot, captured).unwrap();
+
+        let mut conflicting_state = state;
+        conflicting_state.grains[0].x = 4;
+        let conflicting =
+            SedimentSnapshot::day_end_checkpoint("2026-08-01".to_string(), conflicting_state);
+        save_day_end_snapshot(&path, "2026-08-01", &conflicting, captured).unwrap();
+        assert_eq!(
+            load_day_end_snapshot(&path, "2026-08-01").unwrap(),
+            Some(snapshot)
+        );
+        remove_database(&path);
+    }
+
+    #[test]
+    fn bare_daily_state_loads_as_legacy_authentic_visual_checkpoint() {
+        let path = database_path("legacy-day-end-snapshot");
+        let state = SandState {
+            version: SandState::VERSION,
+            grid_width: 3,
+            grid_height: 2,
+            grains: Vec::new(),
+            frame_count: 4,
+            sweep_left_to_right: true,
+            rng_state: 5,
+            pending_grains: Vec::new(),
+            pending_runs: Vec::new(),
+        };
+        let payload = serde_json::to_string(&state).unwrap();
+        let repository = open_cli_repository(&path).unwrap();
+        repository
+            .connection
+            .execute(
+                "INSERT INTO sand_snapshots (
+                    formation_id, snapshot_kind, operational_day, quantum_seconds,
+                    payload_json, captured_at_utc
+                 ) VALUES ('default', 'daily', '2026-08-01', 1, ?1, '2026-08-02T12:00:00Z')",
+                params![payload],
+            )
+            .unwrap();
+        drop(repository);
+
+        let loaded = load_day_end_snapshot(&path, "2026-08-01")
+            .unwrap()
+            .expect("legacy day-end state should load");
+        assert!(loaded.is_authentic_day_end_for("2026-08-01"));
+        assert_eq!(loaded.state, state);
+        assert_eq!(
+            loaded.provenance,
+            crate::sand::SedimentSnapshotProvenance::LegacyDailyRow
+        );
+        remove_database(&path);
     }
 
     #[test]
