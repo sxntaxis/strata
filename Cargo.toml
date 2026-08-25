@@ -19,6 +19,9 @@ thiserror = "1.0"
 itertools = "0.12"
 rusqlite = { version = "0.39", features = ["bundled"] }
 
+[dev-dependencies]
+libc = "0.2"
+
 [features]
 default = ["cli"]
 cli = []
