@@ -1,7 +1,7 @@
 # Recovery authority
 
 Status: accepted and certified
-Last reviewed: 2026-08-20
+Last reviewed: 2026-08-25
 
 ## Purpose
 
@@ -37,6 +37,14 @@ A transition:
 Current-generation checkpoint publication then makes the new in-memory/sediment state recoverable. Failure after the SQLite transition enters visible persistence recovery instead of pretending the full runtime boundary completed.
 
 Receipts are not generic ceremony: they remain only for transitions with this concrete retry/reconciliation boundary.
+
+Runtime transition operation IDs and TUI replacement active-generation IDs are deterministic and bounded. A
+transition derives a fixed 128-bit token from length-prefixed transition kind, predecessor stable ID, exact
+UTC timestamp, and discriminator; the predecessor is never embedded recursively in the successor. Existing
+historical or currently active oversized IDs remain valid predecessor evidence and are not rewritten in
+place. The next switch or idle-reset clear cuts that lineage to the bounded format in one transition, while
+finish removes the active generation with a bounded receipt identity. This preserves retry fencing without
+turning ordinary use into quadratic metadata growth.
 
 ## Clear-all is one SQLite transaction
 
