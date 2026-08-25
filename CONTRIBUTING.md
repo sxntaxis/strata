@@ -19,6 +19,8 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
 ```
 
+Terminal lifecycle tests create a Linux kernel PTY directly from Rust. They must not depend on distro-specific command wrappers such as util-linux `script`, external `timeout`, or shell `stty` behavior. Terminal restoration is verified against the PTY's `termios` state.
+
 ## Project Structure
 
 - `src/domain.rs`: pure business logic and report generation.
