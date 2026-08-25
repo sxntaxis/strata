@@ -829,6 +829,7 @@ dependencies = [
  "csv",
  "directories",
  "itertools 0.12.1",
+ "libc",
  "rand",
  "ratatui",
  "rusqlite",
