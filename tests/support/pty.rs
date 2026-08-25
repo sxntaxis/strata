@@ -149,12 +149,7 @@ fn open_pty() -> io::Result<(OwnedFd, OwnedFd)> {
     }
 
     // SAFETY: successful openpty returned two fresh owned file descriptors.
-    Ok(unsafe {
-        (
-            OwnedFd::from_raw_fd(master),
-            OwnedFd::from_raw_fd(slave),
-        )
-    })
+    Ok(unsafe { (OwnedFd::from_raw_fd(master), OwnedFd::from_raw_fd(slave)) })
 }
 
 fn termios_snapshot(fd: libc::c_int) -> io::Result<TermiosSnapshot> {
