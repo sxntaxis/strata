@@ -44,7 +44,7 @@ The current viewport is the active live-physics basin. New live grains enter at 
 - Version 1 `pending_grains` vectors migrate deterministically into adjacent runs.
 - Older JSON with no pending field loads as an empty reservoir.
 - Empty pending collections are omitted during serialization.
-- Canonical grid dimensions restore as persisted, independently of the opening terminal.
+- `SandState` stores canonical grid dimensions explicitly; recovery through a zero viewport restores them exactly, while an ordinary larger live viewport may monotonically expand the restored canvas.
 - Ordinary restore normalizes unavailable category identities to idle; checkpoint recovery is stricter and refuses unavailable identities.
 
 ## Bounded runtime recovery
@@ -92,36 +92,50 @@ Accepted kinds are:
 
 These kinds are not interchangeable. Historical bare daily payloads are cumulative artifacts, not daily contributions.
 
+## Authentic day-end visual memory
+
+Karma historical background is visual memory, not a synthetic chart. While the live simulation crosses an operational-day cutoff, Strata captures the exact cumulative canonical `SandState` after processing events due through that boundary. For a fixed 06:00 day start, the artifact for a day is therefore the canonical canvas photo taken at the following 06:00 cutoff.
+
+The day-end artifact is first-write-wins evidence:
+
+- it preserves exact grain coordinates, category identity, pending mass, frame/sweep/RNG metadata, and canonical grid dimensions;
+- later terminal resize, ledger reconciliation, report viewing, or category/session editing does not rewrite it;
+- each operational day may therefore own a different canonical canvas size;
+- `snapshot_kind = 'daily'` stores this cumulative visual checkpoint, while `daily-contribution` remains a separate accounting artifact.
+
+If Strata did not observe a boundary through the ordinary live simulation path—for example because it was closed, detached through the cutoff, or bounded recovery deliberately skipped historical physics—it does not fabricate an authentic photo. Karma may then show a `DerivedPreview`, explicitly marked reconstructed.
+
 ## Immutable historical viewing
 
 Historical viewing is projection-only:
 
+- Karma prefers the authentic day-end checkpoint for the selected interval end day;
 - the snapshot envelope and `SandState` remain immutable;
 - rendering restores a clone into a fresh viewport engine;
+- a smaller current viewport crops the historical canvas around horizontal center and bottom baseline;
+- a larger current viewport expands only the temporary rendering clone, leaving the stored dimensions and topology unchanged;
 - physics `update()` is never called;
 - repeated rendering at the same viewport is deterministic;
 - cache identity includes the serialized artifact and viewport;
 - the report UI exposes kind, reconstruction status, and idle policy;
 - viewing never writes or deletes persistence.
 
-If a persisted daily contribution is absent, incompatible, or stale, the report uses an in-memory `DerivedPreview`. A preview never becomes authority merely by being viewed.
+Day, week, and month Karma use the visual artifact for the selected interval's end day. The numerical report rows remain ledger-derived for the selected period. If no authentic photo exists, an in-memory `DerivedPreview` is the visual fallback and never becomes authority merely by being viewed.
 
 ## Authoritative daily contributions
 
-Persisted historical daily sediment is a typed `DailyContribution` derived from exact operational-day session slices, including the active provisional slice when applicable.
+`DailyContribution` is accounting evidence, not a historical canvas. It is derived from exact operational-day session slices, including the active provisional slice when applicable.
 
 The builder:
 
 - includes idle explicitly and deterministically;
 - orders slices by chronology and stable session identity;
-- conserves every represented second;
-- places up to canonical grid capacity and preserves overflow as compressed pending runs;
+- conserves every represented second as compressed ordered pending runs;
 - records `SessionLedger` provenance and reconstruction status;
-- calculates a source revision from day, grid dimensions, quantum, idle policy, category identity, elapsed seconds, slice endpoints, and session identity.
+- is independent of terminal and canonical-canvas dimensions;
+- calculates a source revision from day, quantum, idle policy, category identity, elapsed seconds, slice endpoints, and session identity.
 
-Description text is deliberately absent from the revision because it does not change sediment mass or chronology.
-
-A persisted artifact is trusted only when snapshot schema, kind, operational day, and source revision match the current ledger-derived artifact. Otherwise the report uses a derived preview and autosave or mutation reconciliation replaces the stale authoritative contribution.
+Description text and canvas dimensions are deliberately absent from the contribution revision because neither changes sediment mass or chronology. Consequently, resizing or clearing the visual canvas today cannot make an old accounting contribution stale. Persisted contribution reconciliation remains ledger-driven and separate from the immutable day-end visual artifact.
 
 ## Mutation and recovery reconciliation
 
@@ -134,15 +148,13 @@ Daily contribution reconciliation occurs at autosave, full-state flush, checkpoi
 
 ## Historical evidence disposition
 
-The current SQLite schema includes the distinct `daily-contribution` snapshot kind alongside the other constrained sediment records.
+The current SQLite schema already distinguishes `daily` from `daily-contribution`. `daily` is cumulative visual evidence; `daily-contribution` is ledger-derived accounting evidence. New authentic day-end captures use `daily` with a typed `CumulativeCheckpoint` envelope and are never overwritten by later reconciliation.
 
-Historical SQLite rows with `snapshot_kind = 'daily'` remain untouched evidence. New authority reads, writes, replaces, and deletes only `daily-contribution` rows.
-
-Portable exports are not runtime authority. Historical artifacts remain untouched evidence and are never read as authoritative daily contributions.
-
-This is an archive-in-place disposition: cumulative artifacts are preserved and excluded from the daily-contribution path. No silent reinterpretation occurs.
+A historical bare `daily` payload that is a valid `SandState` remains cumulative visual evidence and is wrapped as `LegacyDailyRow` when viewed. It is never reinterpreted as a daily contribution. Portable exports preserve both artifact classes but are not runtime authority.
 
 ## Certification
+
+The authentic day-end visual-memory correction described above is implemented after the last certified baseline and is awaiting native certification. The counts below describe the previously certified SEDIMENT-001 baseline.
 
 SEDIMENT-001 is certified through PRs #50–#55.
 

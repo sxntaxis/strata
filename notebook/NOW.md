@@ -3,10 +3,10 @@ id: NOW-001
 kind: status
 state: active
 created: 2026-08-01
-updated: 2026-08-22
+updated: 2026-08-25
 authority: working
-summary: v0.7.7 direct interaction is reconciled onto SQLite-only authority; visible-basin sediment and frame-chrome refinement is natively certified.
-next: Preserve the certified visible-basin physics, restore, clear, and terminal-persistence invariants in future work.
+summary: v0.7.7 direct interaction and visible-basin sediment are certified; authentic day-end Karma visual snapshots are implemented and awaiting native certification.
+next: Native-certify authentic day-end Karma snapshots, canvas-size independence, and reconstructed fallback behavior without changing the implementation semantics.
 ---
 
 # NOW — Strata
@@ -29,6 +29,13 @@ hidden topology freezes while cropped and reactivates on expansion; full `c` res
 canvas to the current viewport; uppercase `C` preserves extent and non-Idle mass through real PTY and
 SQLite persistence; restore into a larger live viewport expands monotonically; zero-viewport recovery
 restore remains exact; the idle tamagotchi is removed; and zero effective counters are hidden.
+
+Karma visual-memory correction is implemented on top of that baseline and awaits native certification. A
+live operational-day cutoff now stages the exact cumulative canonical `SandState` as a first-write-wins
+`daily` checkpoint, including its original canvas dimensions and topology. Historical Karma prefers that
+authentic photo for the selected interval end day; `DailyContribution` is now dimension-independent
+ledger mass only, and the deterministic row-major `DerivedPreview` remains fallback for cutoffs that were
+not observed by live physics. No historical photo is fabricated during bounded recovery.
 
 The certified system includes:
 
