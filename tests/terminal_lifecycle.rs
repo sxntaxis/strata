@@ -1,14 +1,19 @@
 #![cfg(target_os = "linux")]
 
+#[path = "support/pty.rs"]
+mod pty;
+
+use pty::{PtyChild, PtyOutput};
 use rusqlite::Connection;
 use std::{
     fs,
-    io::Write,
     path::{Path, PathBuf},
-    process::{Command, Output, Stdio},
+    process::{Command, Output},
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+
+const PTY_TIMEOUT: Duration = Duration::from_secs(12);
 
 struct TerminalProfile {
     root: PathBuf,
@@ -41,41 +46,42 @@ impl TerminalProfile {
         }
     }
 
-    fn run_case(&self, fault: Option<&str>, input: Option<u8>) -> Output {
-        let marker = self.root.join("restore-marker.txt");
-        let binary = shell_quote(Path::new(env!("CARGO_BIN_EXE_strata")));
-        let command_line = format!(
-            "before=$(stty -g); {binary}; status=$?; after=$(stty -g); \
-             printf '\\n__STRATA_BEFORE__=%s\\n__STRATA_AFTER__=%s\\n__STRATA_STATUS__=%s\\n' \
-             \"$before\" \"$after\" \"$status\"; exit \"$status\""
-        );
-
-        let mut command = Command::new("timeout");
+    fn strata_command(&self) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_strata"));
         command
-            .args(["12s", "script", "-qefc", &command_line, "/dev/null"])
             .env("XDG_DATA_HOME", &self.data_home)
             .env("XDG_STATE_HOME", &self.state_home)
             .env("XDG_CONFIG_HOME", &self.config_home)
             .env_remove("STRATA_PROFILE")
-            .env_remove("STRATA_DATA_DIR")
-            .env("STRATA_TEST_TERMINAL_RESTORE_MARKER", &marker)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .env_remove("STRATA_DATA_DIR");
+        command
+    }
+
+    fn spawn_tui(&self, fault: Option<&str>, marker: Option<&Path>) -> PtyChild {
+        let mut command = self.strata_command();
         if let Some(fault) = fault {
             command.env("STRATA_TEST_TUI_FAULT", fault);
         } else {
             command.env_remove("STRATA_TEST_TUI_FAULT");
         }
-
-        let mut child = command.spawn().expect("PTY process should start");
-        if let Some(input) = input {
-            let mut stdin = child.stdin.take().expect("PTY stdin should exist");
-            thread::sleep(Duration::from_millis(1_100));
-            stdin.write_all(&[input]).ok();
-            stdin.flush().ok();
+        if let Some(marker) = marker {
+            command.env("STRATA_TEST_TERMINAL_RESTORE_MARKER", marker);
+        } else {
+            command.env_remove("STRATA_TEST_TERMINAL_RESTORE_MARKER");
         }
-        let output = child.wait_with_output().expect("PTY process should finish");
+        pty::spawn(command).expect("kernel-backed PTY process should start")
+    }
+
+    fn run_case(&self, fault: Option<&str>, input: Option<u8>) -> PtyOutput {
+        let marker = self.root.join("restore-marker.txt");
+        let mut child = self.spawn_tui(fault, Some(&marker));
+        if let Some(input) = input {
+            thread::sleep(Duration::from_millis(1_100));
+            child.write_all(&[input]).ok();
+        }
+        let output = child
+            .wait(PTY_TIMEOUT)
+            .expect("PTY process should finish before timeout");
         let marker_lines = fs::read_to_string(&marker)
             .unwrap_or_default()
             .lines()
@@ -85,13 +91,8 @@ impl TerminalProfile {
     }
 
     fn cli(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_strata"))
+        self.strata_command()
             .args(args)
-            .env("XDG_DATA_HOME", &self.data_home)
-            .env("XDG_STATE_HOME", &self.state_home)
-            .env("XDG_CONFIG_HOME", &self.config_home)
-            .env_remove("STRATA_PROFILE")
-            .env_remove("STRATA_DATA_DIR")
             .output()
             .expect("Strata CLI should run")
     }
@@ -141,11 +142,6 @@ impl Drop for TerminalProfile {
     }
 }
 
-fn shell_quote(path: &Path) -> String {
-    let raw = path.to_string_lossy();
-    format!("'{}'", raw.replace('\'', "'\\''"))
-}
-
 fn combined_output(output: &Output) -> String {
     format!(
         "{}\n{}",
@@ -154,17 +150,15 @@ fn combined_output(output: &Output) -> String {
     )
 }
 
-fn marker(output: &Output, name: &str) -> String {
-    let prefix = format!("__STRATA_{name}__=");
-    combined_output(output)
-        .lines()
-        .map(|line| line.trim_end_matches('\r'))
-        .find_map(|line| line.strip_prefix(&prefix).map(str::to_string))
-        .unwrap_or_else(|| panic!("missing {prefix} marker: {}", combined_output(output)))
+fn pty_output(output: &PtyOutput) -> String {
+    String::from_utf8_lossy(&output.bytes).into_owned()
 }
 
-fn assert_terminal_restored(output: &Output) {
-    assert_eq!(marker(output, "BEFORE"), marker(output, "AFTER"));
+fn assert_terminal_restored(output: &PtyOutput) {
+    assert_eq!(
+        output.before, output.after,
+        "terminal termios must be restored exactly"
+    );
 }
 
 fn wait_for_path(path: &Path) {
@@ -177,20 +171,14 @@ fn wait_for_path(path: &Path) {
     panic!("timed out waiting for {}", path.display());
 }
 
-fn spawn_live_tui(profile: &TerminalProfile) -> std::process::Child {
-    let binary = shell_quote(Path::new(env!("CARGO_BIN_EXE_strata")));
-    Command::new("script")
-        .args(["-qefc", &binary, "/dev/null"])
-        .env("XDG_DATA_HOME", &profile.data_home)
-        .env("XDG_STATE_HOME", &profile.state_home)
-        .env("XDG_CONFIG_HOME", &profile.config_home)
-        .env_remove("STRATA_PROFILE")
-        .env_remove("STRATA_DATA_DIR")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("live TUI should start")
+fn spawn_live_tui(profile: &TerminalProfile) -> PtyChild {
+    profile.spawn_tui(None, None)
+}
+
+fn quit_tui(tui: &mut PtyChild) {
+    tui.write_all(b"q").expect("quit should reach TUI");
+    let output = tui.wait(PTY_TIMEOUT).expect("TUI should exit");
+    assert!(output.status.success(), "{}", pty_output(&output));
 }
 
 fn persisted_sand_state(profile: &TerminalProfile) -> (i64, i64, serde_json::Value) {
@@ -245,11 +233,7 @@ fn sediment_mass_for_category(payload: &serde_json::Value, category_id: u64) -> 
 fn normal_quit_and_detach_restore_terminal_once() {
     let quit = TerminalProfile::new("quit");
     let quit_output = quit.run_case(None, Some(b'q'));
-    assert!(
-        quit_output.status.success(),
-        "{}",
-        combined_output(&quit_output)
-    );
+    assert!(quit_output.status.success(), "{}", pty_output(&quit_output));
     assert_terminal_restored(&quit_output);
 
     let detach = TerminalProfile::new("detach");
@@ -257,7 +241,7 @@ fn normal_quit_and_detach_restore_terminal_once() {
     assert!(
         detach_output.status.success(),
         "{}",
-        combined_output(&detach_output)
+        pty_output(&detach_output)
     );
     assert_terminal_restored(&detach_output);
     assert!(detach.checkpoint_exists());
@@ -270,7 +254,7 @@ fn draw_poll_and_read_failures_restore_terminal_and_checkpoint() {
         let output = profile.run_case(Some(stage), input);
         assert!(!output.status.success(), "{stage} should fail");
         assert_terminal_restored(&output);
-        let combined = combined_output(&output);
+        let combined = pty_output(&output);
         assert!(combined.contains(&format!("injected TUI {stage} failure")));
         assert!(combined.contains("emergency checkpoint: committed"));
         assert!(profile.checkpoint_exists());
@@ -282,20 +266,7 @@ fn live_cli_control_is_profile_scoped_and_preserves_continuous_idle() {
     let profile = TerminalProfile::new("live-control");
     profile.seed_work_category();
 
-    let binary = shell_quote(Path::new(env!("CARGO_BIN_EXE_strata")));
-    let mut tui = Command::new("script")
-        .args(["-qefc", &binary, "/dev/null"])
-        .env("XDG_DATA_HOME", &profile.data_home)
-        .env("XDG_STATE_HOME", &profile.state_home)
-        .env("XDG_CONFIG_HOME", &profile.config_home)
-        .env_remove("STRATA_PROFILE")
-        .env_remove("STRATA_DATA_DIR")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("live TUI should start");
-
+    let mut tui = spawn_live_tui(&profile);
     wait_for_path(&profile.control_socket_path());
 
     let start = profile.cli(&["start", "Work", "--desc", "focus"]);
@@ -326,12 +297,7 @@ fn live_cli_control_is_profile_scoped_and_preserves_continuous_idle() {
         .unwrap();
     assert_eq!(idle_category, 0);
 
-    if let Some(mut stdin) = tui.stdin.take() {
-        stdin.write_all(b"q").ok();
-        stdin.flush().ok();
-    }
-    let status = tui.wait().expect("live TUI should exit");
-    assert!(status.success());
+    quit_tui(&mut tui);
 }
 
 #[test]
@@ -350,11 +316,7 @@ fn shift_c_clears_only_idle_sediment_and_preserves_sqlite_extent() {
     assert!(stop.status.success(), "{}", combined_output(&stop));
     thread::sleep(Duration::from_millis(2_300));
 
-    let mut stdin = tui.stdin.take().expect("live TUI stdin should exist");
-    stdin.write_all(b"q").expect("quit should reach TUI");
-    stdin.flush().expect("quit should flush");
-    let status = tui.wait().expect("mixed-sediment TUI should exit");
-    assert!(status.success());
+    quit_tui(&mut tui);
 
     let (before_width, before_height, before_payload) = persisted_sand_state(&profile);
     let work_before = sediment_mass_for_category(&before_payload, 1);
@@ -370,11 +332,8 @@ fn shift_c_clears_only_idle_sediment_and_preserves_sqlite_extent() {
 
     let mut tui = spawn_live_tui(&profile);
     wait_for_path(&profile.control_socket_path());
-    let mut stdin = tui.stdin.take().expect("live TUI stdin should exist");
-    stdin
-        .write_all(b"C")
+    tui.write_all(b"C")
         .expect("uppercase C should reach the real PTY");
-    stdin.flush().expect("uppercase C should flush");
 
     let mut cleared = None;
     for _ in 0..80 {
@@ -393,23 +352,11 @@ fn shift_c_clears_only_idle_sediment_and_preserves_sqlite_extent() {
     assert_eq!(sediment_mass_for_category(&after_payload, 0), 0);
     assert_eq!(sediment_mass_for_category(&after_payload, 1), work_before);
 
-    stdin.write_all(b"q").expect("quit should reach TUI");
-    stdin.flush().expect("quit should flush");
-    let status = tui.wait().expect("post-clear TUI should exit");
-    assert!(status.success());
+    quit_tui(&mut tui);
 
     let mut reopened = spawn_live_tui(&profile);
     wait_for_path(&profile.control_socket_path());
-    let mut reopened_stdin = reopened
-        .stdin
-        .take()
-        .expect("reopened TUI stdin should exist");
-    reopened_stdin
-        .write_all(b"q")
-        .expect("reopened quit should reach TUI");
-    reopened_stdin.flush().expect("reopened quit should flush");
-    let status = reopened.wait().expect("reopened TUI should exit");
-    assert!(status.success());
+    quit_tui(&mut reopened);
 
     let (restart_width, restart_height, restart_payload) = persisted_sand_state(&profile);
     assert_eq!(
@@ -425,7 +372,7 @@ fn panic_restores_terminal_once_without_runtime_error_claim() {
     let output = profile.run_case(Some("panic"), None);
     assert!(!output.status.success());
     assert_terminal_restored(&output);
-    let combined = combined_output(&output);
+    let combined = pty_output(&output);
     assert!(combined.contains("injected TUI panic"));
     assert!(!combined.contains("emergency checkpoint: committed"));
 }
