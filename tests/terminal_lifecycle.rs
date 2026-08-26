@@ -420,11 +420,23 @@ fn active_subtitle_updates_live_and_persists_on_escape_without_enter() {
         "top-left frame must not substitute durable layer metadata for the session subtitle"
     );
 
+    let active_after_quit: i64 = Connection::open(profile.database_path())
+        .unwrap()
+        .query_row("SELECT count(*) FROM active_session", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        active_after_quit, 0,
+        "normal quit must finalize rather than preserve the active generation"
+    );
+
     let mut reopened = spawn_live_tui(&profile);
     wait_for_path(&profile.control_socket_path());
     let status = profile.cli(&["status"]);
     assert!(status.status.success(), "{}", combined_output(&status));
-    assert!(combined_output(&status).contains("tag 'deep'"));
+    assert!(
+        !combined_output(&status).contains("tag 'deep'"),
+        "normal quit must not resurrect the completed session as active"
+    );
     quit_tui(&mut reopened);
 }
 
