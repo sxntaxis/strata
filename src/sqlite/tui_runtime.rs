@@ -417,7 +417,9 @@ pub(crate) fn sync_categories(
                 expected_active_stable_id,
                 active_id,
                 actual
-                    .map(|(category_id, stable_id)| format!("{stable_id} on category {category_id}"))
+                    .map(|(category_id, stable_id)| format!(
+                        "{stable_id} on category {category_id}"
+                    ))
                     .unwrap_or_else(|| "no active session".to_string())
             ));
         }
@@ -1483,13 +1485,9 @@ mod tests {
         drop(repository);
 
         let started_at = Utc.with_ymd_and_hms(2026, 8, 25, 18, 0, 0).unwrap();
-        let stable_id = ensure_active_session(
-            &path,
-            CategoryId::new(1),
-            "Session subtitle",
-            started_at,
-        )
-        .unwrap();
+        let stable_id =
+            ensure_active_session(&path, CategoryId::new(1), "Session subtitle", started_at)
+                .unwrap();
         let mut state = load_state(&path).unwrap();
         state.loaded_categories.categories[1].description = "Changed metadata".to_string();
 

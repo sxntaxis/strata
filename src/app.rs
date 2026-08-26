@@ -676,7 +676,8 @@ impl App {
             return false;
         };
         let description = self.time_tracker.active_description().to_string();
-        let result = sqlite::update_tui_active_description(&database_path, &stable_id, &description);
+        let result =
+            sqlite::update_tui_active_description(&database_path, &stable_id, &description);
         if self
             .record_storage_result_for(
                 PersistenceOperation::ActiveDescription,

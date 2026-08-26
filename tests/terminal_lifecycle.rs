@@ -300,7 +300,6 @@ fn live_cli_control_is_profile_scoped_and_preserves_continuous_idle() {
     quit_tui(&mut tui);
 }
 
-
 #[test]
 fn active_subtitle_updates_live_and_persists_on_escape_without_enter() {
     let profile = TerminalProfile::new("active-subtitle-live-edit");
@@ -320,11 +319,14 @@ fn active_subtitle_updates_live_and_persists_on_escape_without_enter() {
     assert!(start.status.success(), "{}", combined_output(&start));
     let durable_before: String = Connection::open(profile.database_path())
         .unwrap()
-        .query_row("SELECT description FROM active_session", [], |row| row.get(0))
+        .query_row("SELECT description FROM active_session", [], |row| {
+            row.get(0)
+        })
         .unwrap();
     assert_eq!(durable_before, "");
 
-    tui.write_all(b"\r").expect("Enter should open the layer pop-up");
+    tui.write_all(b"\r")
+        .expect("Enter should open the layer pop-up");
     thread::sleep(Duration::from_millis(50));
     tui.write_all(b"focus")
         .expect("typing should reach the active subtitle editor");
@@ -346,7 +348,9 @@ fn active_subtitle_updates_live_and_persists_on_escape_without_enter() {
 
     let durable_while_open: String = Connection::open(profile.database_path())
         .unwrap()
-        .query_row("SELECT description FROM active_session", [], |row| row.get(0))
+        .query_row("SELECT description FROM active_session", [], |row| {
+            row.get(0)
+        })
         .unwrap();
     assert_eq!(
         durable_while_open, "",
@@ -359,7 +363,9 @@ fn active_subtitle_updates_live_and_persists_on_escape_without_enter() {
     for _ in 0..80 {
         let description: String = Connection::open(profile.database_path())
             .unwrap()
-            .query_row("SELECT description FROM active_session", [], |row| row.get(0))
+            .query_row("SELECT description FROM active_session", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         if description == "focus" {
             persisted = true;
@@ -369,7 +375,8 @@ fn active_subtitle_updates_live_and_persists_on_escape_without_enter() {
     }
     assert!(persisted, "Esc should persist the final active subtitle");
 
-    tui.write_all(b"\r").expect("Enter should reopen the layer pop-up");
+    tui.write_all(b"\r")
+        .expect("Enter should reopen the layer pop-up");
     thread::sleep(Duration::from_millis(50));
     tui.write_all(b"\x7f\x7f\x7f\x7f\x7fdeep")
         .expect("Backspace and typing should edit the running subtitle");
@@ -383,11 +390,16 @@ fn active_subtitle_updates_live_and_persists_on_escape_without_enter() {
         }
         thread::sleep(Duration::from_millis(25));
     }
-    assert!(edited_live, "editing should replace the live subtitle immediately");
+    assert!(
+        edited_live,
+        "editing should replace the live subtitle immediately"
+    );
 
     let durable_before_second_close: String = Connection::open(profile.database_path())
         .unwrap()
-        .query_row("SELECT description FROM active_session", [], |row| row.get(0))
+        .query_row("SELECT description FROM active_session", [], |row| {
+            row.get(0)
+        })
         .unwrap();
     assert_eq!(durable_before_second_close, "focus");
 
@@ -397,7 +409,9 @@ fn active_subtitle_updates_live_and_persists_on_escape_without_enter() {
     for _ in 0..80 {
         let description: String = Connection::open(profile.database_path())
             .unwrap()
-            .query_row("SELECT description FROM active_session", [], |row| row.get(0))
+            .query_row("SELECT description FROM active_session", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         if description == "deep" {
             edited_persisted = true;
@@ -405,7 +419,10 @@ fn active_subtitle_updates_live_and_persists_on_escape_without_enter() {
         }
         thread::sleep(Duration::from_millis(25));
     }
-    assert!(edited_persisted, "the subtitle present at Esc must remain durable");
+    assert!(
+        edited_persisted,
+        "the subtitle present at Esc must remain durable"
+    );
 
     tui.write_all(b"q").expect("quit should reach TUI");
     let output = tui.wait(PTY_TIMEOUT).expect("TUI should exit");

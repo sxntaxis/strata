@@ -50,10 +50,8 @@ impl App {
             String::new()
         };
 
-        let description = session_subtitle_for_frame(
-            active_category_id,
-            self.time_tracker.active_description(),
-        );
+        let description =
+            session_subtitle_for_frame(active_category_id, self.time_tracker.active_description());
 
         let session_timer = if is_drift_category_id(active_category_id) {
             Local::now().format("%H:%M:%S").to_string()
