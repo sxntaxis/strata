@@ -230,12 +230,16 @@ mod tests {
         text
     }
 
-    fn top_row_text(buffer: &Buffer, area: Rect) -> String {
-        let mut text = String::new();
-        for x in 0..area.width {
-            text.push_str(buffer.get(x, 0).symbol());
-        }
-        text
+    fn top_row_cell_start(buffer: &Buffer, area: Rect, needle: &str) -> u16 {
+        let needle = needle.chars().map(|ch| ch.to_string()).collect::<Vec<_>>();
+        let width = u16::try_from(needle.len()).expect("title needle should fit terminal width");
+        (0..=area.width.saturating_sub(width))
+            .find(|&start| {
+                needle.iter().enumerate().all(|(offset, expected)| {
+                    buffer.get(start + offset as u16, 0).symbol() == expected.as_str()
+                })
+            })
+            .unwrap_or_else(|| panic!("top-row title {needle:?} should render"))
     }
 
     #[test]
@@ -272,17 +276,13 @@ mod tests {
             Color::White,
         )
         .render(area, &mut styled);
-        let top = top_row_text(&styled, area);
-        let work_start = top.find("Work").expect("activity title should render");
-        let subtitle_start = top.find("focus").expect("subtitle should render");
-        for x in work_start..work_start + "Work".len() {
-            assert!(styled.get(x as u16, 0).modifier.contains(Modifier::BOLD));
+        let work_start = top_row_cell_start(&styled, area, "Work");
+        let subtitle_start = top_row_cell_start(&styled, area, "focus");
+        for x in work_start..work_start + "Work".len() as u16 {
+            assert!(styled.get(x, 0).modifier.contains(Modifier::BOLD));
         }
-        for x in subtitle_start..subtitle_start + "focus".len() {
-            assert!(styled
-                .get(x as u16, 0)
-                .modifier
-                .contains(Modifier::ITALIC));
+        for x in subtitle_start..subtitle_start + "focus".len() as u16 {
+            assert!(styled.get(x, 0).modifier.contains(Modifier::ITALIC));
         }
 
         let negative = rendered_text(frame_block(
