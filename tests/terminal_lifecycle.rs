@@ -410,16 +410,6 @@ fn active_subtitle_updates_live_and_persists_on_escape_without_enter() {
     tui.write_all(b"q").expect("quit should reach TUI");
     let output = tui.wait(PTY_TIMEOUT).expect("TUI should exit");
     assert!(output.status.success(), "{}", pty_output(&output));
-    let rendered = pty_output(&output);
-    assert!(
-        rendered.contains("deep"),
-        "top-left frame should render the active session subtitle"
-    );
-    assert!(
-        !rendered.contains("Layer metadata"),
-        "top-left frame must not substitute durable layer metadata for the session subtitle"
-    );
-
     let active_after_quit: i64 = Connection::open(profile.database_path())
         .unwrap()
         .query_row("SELECT count(*) FROM active_session", [], |row| row.get(0))

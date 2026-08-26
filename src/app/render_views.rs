@@ -8,7 +8,7 @@ use ratatui::{
 };
 
 use crate::constants::APP_LAYOUT_SETTINGS;
-use crate::domain::{DRIFT_CATEGORY_CONFIG_NAME, is_drift_category_id};
+use crate::domain::{CategoryId, DRIFT_CATEGORY_CONFIG_NAME, is_drift_category_id};
 
 use super::App;
 
@@ -50,11 +50,10 @@ impl App {
             String::new()
         };
 
-        let description = if is_drift_category_id(active_category_id) {
-            String::new()
-        } else {
-            self.time_tracker.active_description().to_string()
-        };
+        let description = session_subtitle_for_frame(
+            active_category_id,
+            self.time_tracker.active_description(),
+        );
 
         let session_timer = if is_drift_category_id(active_category_id) {
             Local::now().format("%H:%M:%S").to_string()
@@ -153,6 +152,14 @@ impl App {
     }
 }
 
+fn session_subtitle_for_frame(active_category_id: CategoryId, active_description: &str) -> String {
+    if is_drift_category_id(active_category_id) {
+        String::new()
+    } else {
+        active_description.to_string()
+    }
+}
+
 fn frame_block(
     category_name: String,
     description: String,
@@ -215,7 +222,7 @@ mod tests {
         widgets::{Widget, block::Block},
     };
 
-    use super::frame_block;
+    use super::{frame_block, session_subtitle_for_frame};
 
     fn rendered_text(block: Block<'static>) -> String {
         let area = Rect::new(0, 0, 60, 3);
@@ -240,6 +247,18 @@ mod tests {
                 })
             })
             .unwrap_or_else(|| panic!("top-row title {needle:?} should render"))
+    }
+
+    #[test]
+    fn frame_uses_active_session_subtitle_and_hides_it_while_idle() {
+        assert_eq!(
+            session_subtitle_for_frame(crate::domain::CategoryId::new(1), "deep"),
+            "deep"
+        );
+        assert_eq!(
+            session_subtitle_for_frame(crate::domain::DRIFT_CATEGORY_ID, "must not leak"),
+            ""
+        );
     }
 
     #[test]
