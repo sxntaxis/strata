@@ -79,9 +79,9 @@ impl App {
     }
 
     pub(super) fn current_report_window(&self) -> ReportWindow {
-        self.report_custom_window
-            .clone()
-            .unwrap_or_else(|| report_period_window_with_offset(self.report_period, self.report_period_offset))
+        self.report_custom_window.clone().unwrap_or_else(|| {
+            report_period_window_with_offset(self.report_period, self.report_period_offset)
+        })
     }
 
     pub(super) fn report_range_is_custom(&self) -> bool {

@@ -1309,7 +1309,10 @@ mod report_edit_tests {
             ReportRangeEditKeyIntent::NextField
         );
         assert_eq!(
-            resolve_report_range_edit_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), &keymap),
+            resolve_report_range_edit_key(
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                &keymap
+            ),
             ReportRangeEditKeyIntent::Commit
         );
     }
