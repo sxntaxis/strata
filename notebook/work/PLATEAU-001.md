@@ -83,7 +83,7 @@ Deliverables:
 
 #### HISTORY-001C — Retroactive missed activity
 
-Status: **IMPLEMENTED / NATIVE VALIDATION PENDING**.
+Status: **COMPLETE / NATIVE-GREEN** at `09412b703cf41016f889d725ba235a7a1e63ae6a`.
 
 Interaction decision: from a persisted Idle detail row in Balance, configurable `balance_log_missed` (default `l`) opens an inline Layer / From / To editor. This unit corrects completed Idle history only; active-Idle backdating and non-Idle reclassification are intentionally not smuggled into the safe first transaction.
 
@@ -99,13 +99,33 @@ Deliverables:
 - Preserve provenance sufficient to distinguish corrected history where useful without inventing per-grain time
   provenance.
 
-#### HISTORY-001D — General historical correction
+#### HISTORY-001D — Arbitrary retroactive activity
+
+Status: **ACTIVE / ARCHITECTURE ACCEPTED**.
+
+Product decision: the user states **From X to Y I did Z**. The operation is not scoped to a selected existing session and may cross zero, one, or many canonical rows. Existing session boundaries are implementation detail, not interaction authority.
+
+Accepted semantics:
+
+- `From < To <= now`; historical editing can never create future time.
+- Idle behaves as transparent background for collision policy.
+- Existing time already classified to the requested layer is non-conflicting.
+- Any intersecting explicit different layer produces one visible collision preview and requires confirmation before replacement.
+- Confirmation applies only to the exact observed collision plan; changed authority must be previewed again.
+- The current selected layer/description is protected. Retroactive correction may split/rebase its historical interval, but it never changes what the user is doing now. Changing the current activity remains an explicit live switch/stop action.
+- If the requested layer is the current selected layer and the assignment reaches backward into its start, the active start may move backward when chronology becomes continuously that layer. If a different historical layer is written through part of the active interval, the selected live activity resumes after the corrected interval.
+- No future timestamp, overlapping canonical double-count, or silent overwrite of a different explicit activity is permitted.
+- SQLite chronology, active-generation/checkpoint authority, daily contributions, and the in-memory projection publish coherently.
+- Current sand and authentic historical day-end snapshots remain unchanged in HISTORY-001D; visual recolor remains HISTORY-001E.
 
 Deliverables:
 
-- Deliberately reclassify an existing non-Idle interval when the user asks to correct it.
-- Define conflict, split, merge-adjacent, and failure behavior around canonical session identity.
-- Keep SQLite, in-memory authority, reports, and daily contribution reconciliation atomic/coherent.
+- Generalize `Log missed activity` into a Balance-wide `Log activity…` operation independent of selected Idle rows.
+- Accept arbitrary historical From/To boundaries up to the current snapshot time and an existing target layer.
+- Detect all intersecting explicit different-layer collisions across completed and current history.
+- Require explicit confirmation for collisions, then atomically rewrite the interval while conserving canonical whole seconds.
+- Preserve the current selected layer/description even when the rewrite intersects the active generation.
+- Reconcile every affected operational day and reload the in-memory ledger without restart.
 
 #### HISTORY-001E — Sediment recolor after correction (nice to have)
 
@@ -183,9 +203,9 @@ Preferred progression:
 
 ## Agent locator
 
-Current edge: **HISTORY-001C native validation — retroactive missed activity**.
+Current edge: **HISTORY-001D — arbitrary retroactive activity**.
 
-HISTORY-001A/B are native-green through `ce9dd7281d3fb064302099e7cb274800c4f0ca9c`: Balance vocabulary, shared `ReportWindow`, CLI/TUI arbitrary ranges, JSON schema 4, and the inline custom-range editor are established baseline. HISTORY-001C now adds the completed-Idle historical-correction transaction and Balance editor described above. Native formatting/compiler/test/process proof is the remaining gate before HISTORY-001D.
+HISTORY-001A/B/C are native-green through `09412b703cf41016f889d725ba235a7a1e63ae6a`. HISTORY-001C established the completed-Idle split transaction, active-preview validation, atomic daily-contribution reconciliation, and Balance historical editor. HISTORY-001D now generalizes that safe primitive into arbitrary From/To activity assignment with explicit collision confirmation and protected live selection.
 
 The old dirty adaptive-resize implementation is preserved externally as custody evidence and is superseded by the
 authoritative current-main visible-basin and atomic clear-all architecture. No adaptive code from that stale branch is

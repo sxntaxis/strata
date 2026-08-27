@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-08-27
 authority: working
-summary: HISTORY-001A/B are natively green; HISTORY-001C retroactive missed-activity correction is implemented and awaiting native validation.
-next: Native-validate HISTORY-001C completed-Idle retroactive correction, then begin HISTORY-001D deliberate non-Idle historical reclassification.
+summary: HISTORY-001A/B/C are natively green; HISTORY-001D arbitrary retroactive activity assignment is the current edge.
+next: Implement HISTORY-001D arbitrary retroactive activity assignment with collision confirmation and protected live selection.
 ---
 
 # NOW — Strata
