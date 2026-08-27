@@ -32,6 +32,20 @@ enum ReportRangeEditKeyIntent {
     Ignore,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MissedActivityEditKeyIntent {
+    Append(char),
+    Backspace,
+    NextField,
+    PreviousField,
+    PreviousTarget,
+    NextTarget,
+    Commit,
+    Cancel,
+    EmergencyQuit,
+    Ignore,
+}
+
 fn direct_command_or_fuzzy_fallback(
     query: &str,
     has_fuzzy_result: bool,
@@ -102,6 +116,41 @@ fn resolve_report_range_edit_key(
     }
 }
 
+fn resolve_missed_activity_edit_key(
+    key: KeyEvent,
+    keymap: &crate::keybindings::Keymap,
+) -> MissedActivityEditKeyIntent {
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+    {
+        return if keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
+            MissedActivityEditKeyIntent::EmergencyQuit
+        } else {
+            MissedActivityEditKeyIntent::Ignore
+        };
+    }
+
+    match key.code {
+        KeyCode::Esc => MissedActivityEditKeyIntent::Cancel,
+        KeyCode::Enter => MissedActivityEditKeyIntent::Commit,
+        KeyCode::Backspace | KeyCode::Delete => MissedActivityEditKeyIntent::Backspace,
+        KeyCode::BackTab => MissedActivityEditKeyIntent::PreviousField,
+        KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            MissedActivityEditKeyIntent::PreviousField
+        }
+        KeyCode::Tab => MissedActivityEditKeyIntent::NextField,
+        KeyCode::Left => MissedActivityEditKeyIntent::PreviousTarget,
+        KeyCode::Right => MissedActivityEditKeyIntent::NextTarget,
+        KeyCode::Char(character)
+            if character.is_ascii_digit() || matches!(character, '-' | ':' | ' ') =>
+        {
+            MissedActivityEditKeyIntent::Append(character)
+        }
+        _ => MissedActivityEditKeyIntent::Ignore,
+    }
+}
+
 impl App {
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> bool {
         if key.kind == KeyEventKind::Release {
@@ -127,6 +176,10 @@ impl App {
                 return false;
             }
             return true;
+        }
+
+        if self.missed_activity_edit.is_some() {
+            return self.handle_missed_activity_edit_key(key);
         }
 
         if self.report_range_edit.is_some() {
@@ -1154,6 +1207,9 @@ impl App {
             Action::ReportRange => {
                 self.begin_report_range_edit();
             }
+            Action::LogMissedActivity => {
+                handled = self.begin_missed_activity_edit();
+            }
             Action::DeleteCategory => {
                 if in_logs_view {
                     handled = self.delete_selected_report_session();
@@ -1215,6 +1271,62 @@ impl App {
             }
             _ => false,
         }
+    }
+
+    fn handle_missed_activity_edit_key(&mut self, key: KeyEvent) -> bool {
+        match resolve_missed_activity_edit_key(key, &self.keymap) {
+            MissedActivityEditKeyIntent::Append(character) => {
+                if let Some(edit) = self.missed_activity_edit.as_mut() {
+                    edit.append(character);
+                    self.render_needed = true;
+                }
+            }
+            MissedActivityEditKeyIntent::Backspace => {
+                if let Some(edit) = self.missed_activity_edit.as_mut() {
+                    edit.backspace();
+                    self.render_needed = true;
+                }
+            }
+            MissedActivityEditKeyIntent::NextField => {
+                if let Some(edit) = self.missed_activity_edit.as_mut() {
+                    edit.next_field();
+                    self.render_needed = true;
+                }
+            }
+            MissedActivityEditKeyIntent::PreviousField => {
+                if let Some(edit) = self.missed_activity_edit.as_mut() {
+                    edit.previous_field();
+                    self.render_needed = true;
+                }
+            }
+            MissedActivityEditKeyIntent::PreviousTarget => {
+                if self
+                    .missed_activity_edit
+                    .as_ref()
+                    .is_some_and(|edit| edit.active_field == super::MissedActivityField::Layer)
+                {
+                    self.cycle_missed_activity_target(-1);
+                }
+            }
+            MissedActivityEditKeyIntent::NextTarget => {
+                if self
+                    .missed_activity_edit
+                    .as_ref()
+                    .is_some_and(|edit| edit.active_field == super::MissedActivityField::Layer)
+                {
+                    self.cycle_missed_activity_target(1);
+                }
+            }
+            MissedActivityEditKeyIntent::Commit => {
+                self.commit_missed_activity_edit();
+            }
+            MissedActivityEditKeyIntent::Cancel => {
+                self.cancel_missed_activity_edit();
+            }
+            MissedActivityEditKeyIntent::EmergencyQuit => return true,
+            MissedActivityEditKeyIntent::Ignore => {}
+        }
+        false
     }
 
     fn handle_report_range_edit_key(&mut self, key: KeyEvent) -> bool {
@@ -1279,7 +1391,8 @@ impl App {
 #[cfg(test)]
 mod report_edit_tests {
     use super::{
-        ReportEditKeyIntent, ReportRangeEditKeyIntent, direct_command_or_fuzzy_fallback,
+        MissedActivityEditKeyIntent, ReportEditKeyIntent, ReportRangeEditKeyIntent,
+        direct_command_or_fuzzy_fallback, resolve_missed_activity_edit_key,
         resolve_report_edit_key, resolve_report_range_edit_key,
     };
     use crate::keybindings::default_keymap;
@@ -1314,6 +1427,48 @@ mod report_edit_tests {
                 &keymap
             ),
             ReportRangeEditKeyIntent::Commit
+        );
+    }
+
+    #[test]
+    fn missed_activity_editor_owns_timestamp_input_and_layer_navigation() {
+        let keymap = default_keymap();
+        for character in ['2', '0', '2', '6', '-', '0', '8', ' ', '1', '2', ':', '3', '0'] {
+            assert_eq!(
+                resolve_missed_activity_edit_key(
+                    KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
+                    &keymap,
+                ),
+                MissedActivityEditKeyIntent::Append(character)
+            );
+        }
+        assert_eq!(
+            resolve_missed_activity_edit_key(
+                KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
+                &keymap,
+            ),
+            MissedActivityEditKeyIntent::PreviousTarget
+        );
+        assert_eq!(
+            resolve_missed_activity_edit_key(
+                KeyEvent::new(KeyCode::Right, KeyModifiers::NONE),
+                &keymap,
+            ),
+            MissedActivityEditKeyIntent::NextTarget
+        );
+        assert_eq!(
+            resolve_missed_activity_edit_key(
+                KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE),
+                &keymap,
+            ),
+            MissedActivityEditKeyIntent::Ignore
+        );
+        assert_eq!(
+            resolve_missed_activity_edit_key(
+                KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+                &keymap,
+            ),
+            MissedActivityEditKeyIntent::EmergencyQuit
         );
     }
 

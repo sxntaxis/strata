@@ -68,9 +68,9 @@ entrypoint suitable for the TUI.
 
 #### HISTORY-001B — From/To in Balance
 
-Status: **IMPLEMENTED / NATIVE VALIDATION PENDING**.
+Status: **COMPLETE / NATIVE-GREEN** at `ce9dd7281d3fb064302099e7cb274800c4f0ca9c`.
 
-Interaction decision: `range` is a fourth Balance mode reached by the configurable `balance_range` action (default `r`). It edits explicit `From` and `To` ISO dates inline, commits only after validation, and then shifts as a whole window by its own span; it does not overload preset offsets.
+Interaction decision: `range` is a fourth Balance mode reached by the configurable `balance_range` action (default `r`). It edits explicit `From` and `To` ISO dates inline, commits only after validation, and then shifts as a whole window by its own span; it does not overload preset offsets. Native formatter, strict Clippy, 238 tests, smoke, and targeted TUI range proof pass; validation changed only rustfmt output.
 
 Deliverables:
 
@@ -82,6 +82,12 @@ Deliverables:
 - Converge visible TUI behavior with existing CLI range reporting.
 
 #### HISTORY-001C — Retroactive missed activity
+
+Status: **IMPLEMENTED / NATIVE VALIDATION PENDING**.
+
+Interaction decision: from a persisted Idle detail row in Balance, configurable `balance_log_missed` (default `l`) opens an inline Layer / From / To editor. This unit corrects completed Idle history only; active-Idle backdating and non-Idle reclassification are intentionally not smuggled into the safe first transaction.
+
+Persistence decision: one SQLite `IMMEDIATE` transaction validates the selected canonical Idle source, splits it into up to Idle-before / Activity / Idle-after, marks replacement provenance as `tui-history-correction`, and regenerates every affected `daily-contribution` artifact before commit. If an affected day also contains the current active generation, a stable-identity-qualified monotonic preview is validated against `active_session` and included atomically so historical correction cannot erase today's live mass. The source-start fragment retains the original session/stable identity; inserted fragments receive deterministic split identities. Whole-second conservation uses the source session's existing sub-second lattice and retained boundary provenance.
 
 Deliverables:
 
@@ -177,9 +183,9 @@ Preferred progression:
 
 ## Agent locator
 
-Current edge: **HISTORY-001B native validation — visible From → To selection in Balance**.
+Current edge: **HISTORY-001C native validation — retroactive missed activity**.
 
-The validated HISTORY-001A implementation includes the Balance runtime/source vocabulary cutover, default `b` opener, shared `ReportWindow`, preset and live/log routing through that window, CLI custom-range reuse of the same domain seam, and JSON export schema 4 for `balance_effect`. HISTORY-001B now adds the inline `range` editor and custom-window navigation on top of that seam; native formatter, Clippy, full tests, smoke, and targeted TUI proof are the remaining gate before moving to HISTORY-001C.
+HISTORY-001A/B are native-green through `ce9dd7281d3fb064302099e7cb274800c4f0ca9c`: Balance vocabulary, shared `ReportWindow`, CLI/TUI arbitrary ranges, JSON schema 4, and the inline custom-range editor are established baseline. HISTORY-001C now adds the completed-Idle historical-correction transaction and Balance editor described above. Native formatting/compiler/test/process proof is the remaining gate before HISTORY-001D.
 
 The old dirty adaptive-resize implementation is preserved externally as custody evidence and is superseded by the
 authoritative current-main visible-basin and atomic clear-all architecture. No adaptive code from that stale branch is

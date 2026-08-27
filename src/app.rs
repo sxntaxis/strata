@@ -91,6 +91,77 @@ struct ReportRangeEditState {
     error: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MissedActivityField {
+    Layer,
+    From,
+    To,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct MissedActivityEditState {
+    source_session_id: usize,
+    target_category_id: CategoryId,
+    from: String,
+    to: String,
+    active_field: MissedActivityField,
+    select_all: bool,
+    error: Option<String>,
+}
+
+impl MissedActivityEditState {
+    fn append(&mut self, character: char) {
+        let target = match self.active_field {
+            MissedActivityField::Layer => return,
+            MissedActivityField::From => &mut self.from,
+            MissedActivityField::To => &mut self.to,
+        };
+        if self.select_all {
+            target.clear();
+            self.select_all = false;
+        }
+        if target.len() < 19 {
+            target.push(character);
+        }
+        self.error = None;
+    }
+
+    fn backspace(&mut self) {
+        let target = match self.active_field {
+            MissedActivityField::Layer => return,
+            MissedActivityField::From => &mut self.from,
+            MissedActivityField::To => &mut self.to,
+        };
+        if self.select_all {
+            target.clear();
+            self.select_all = false;
+        } else {
+            target.pop();
+        }
+        self.error = None;
+    }
+
+    fn next_field(&mut self) {
+        self.active_field = match self.active_field {
+            MissedActivityField::Layer => MissedActivityField::From,
+            MissedActivityField::From => MissedActivityField::To,
+            MissedActivityField::To => MissedActivityField::Layer,
+        };
+        self.select_all = !matches!(self.active_field, MissedActivityField::Layer);
+        self.error = None;
+    }
+
+    fn previous_field(&mut self) {
+        self.active_field = match self.active_field {
+            MissedActivityField::Layer => MissedActivityField::To,
+            MissedActivityField::From => MissedActivityField::Layer,
+            MissedActivityField::To => MissedActivityField::From,
+        };
+        self.select_all = !matches!(self.active_field, MissedActivityField::Layer);
+        self.error = None;
+    }
+}
+
 impl ReportRangeEditState {
     fn append(&mut self, character: char) {
         let target = match self.active_field {
@@ -451,6 +522,7 @@ struct App {
     report_period_offset: usize,
     report_custom_window: Option<ReportWindow>,
     report_range_edit: Option<ReportRangeEditState>,
+    missed_activity_edit: Option<MissedActivityEditState>,
     report_logs_category_id: Option<CategoryId>,
     report_log_selected_index: usize,
     report_log_edit: Option<ReportLogEditState>,
@@ -545,6 +617,7 @@ impl App {
             report_period_offset: 0,
             report_custom_window: None,
             report_range_edit: None,
+            missed_activity_edit: None,
             report_logs_category_id: None,
             report_log_selected_index: 0,
             report_log_edit: None,
@@ -771,6 +844,7 @@ impl App {
         self.report_period_offset = 0;
         self.report_custom_window = None;
         self.report_range_edit = None;
+        self.missed_activity_edit = None;
         self.report_logs_category_id = None;
         self.report_log_selected_index = 0;
         self.report_log_edit = None;
@@ -788,6 +862,7 @@ impl App {
         self.report_log_selected_index = 0;
         self.report_log_edit = None;
         self.report_range_edit = None;
+        self.missed_activity_edit = None;
         self.report_snapshot_end_day = None;
         self.report_snapshot_artifact = None;
         self.report_snapshot_preview_key = None;

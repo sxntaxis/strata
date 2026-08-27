@@ -127,6 +127,31 @@ Invalid dates or reversed bounds remain in edit mode with visible validation fee
 
 After application, left/right shifts the whole custom window by its own inclusive span. Movement toward the present never advances the window beyond the current operational day. Switching back to a day/week/month preset leaves custom mode and restores normal preset-offset navigation.
 
+## Balance missed-activity editor
+
+HISTORY-001C introduces one explicit historical mutation path without turning ordinary Balance browsing into an
+editable ledger. The configurable `balance_log_missed` action defaults to `l` and is meaningful from a persisted
+Idle detail row. A live/provisional Idle row is not eligible in this unit.
+
+The inline editor owns three fields:
+
+- Layer: an existing active non-Idle target, cycled with Left/Right;
+- From: civil timestamp `YYYY-MM-DD HH:MM:SS`;
+- To: civil timestamp `YYYY-MM-DD HH:MM:SS`.
+
+The initial From/To values are the selected row's canonical whole-second slice projected through the source
+session's retained fixed-offset boundary provenance. Tab/BackTab moves field focus. Enter is the only commit path;
+Esc cancels. While the editor is active, plain command characters do not escape to normal actions and only
+mandatory `Ctrl-C` remains an application-level emergency command.
+
+A commit is accepted only when `From < To`, both boundaries remain inside the selected completed Idle session,
+and the target is a current non-Idle layer. Timestamp input is projected onto the source session's existing
+sub-second lattice so splitting cannot lose or invent a whole second at fractional boundaries.
+
+Persistence owns the mutation. Memory is reloaded from SQLite only after the atomic history transaction succeeds.
+Failure therefore cannot leave the TUI claiming a correction that SQLite did not publish. HISTORY-001C does not
+edit current sand or authentic historical photographs.
+
 ## Command atlas and palette truth
 
 The command atlas displays the same reachable graph used by runtime:

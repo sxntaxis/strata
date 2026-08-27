@@ -70,7 +70,7 @@ pub(crate) fn civil_from_policy(
     Ok(timestamp.with_timezone(&offset))
 }
 
-fn operational_day_from_policy(
+pub(crate) fn operational_day_from_policy(
     timestamp: DateTime<Utc>,
     policy: OperationalDayPolicy,
 ) -> Result<NaiveDate, String> {

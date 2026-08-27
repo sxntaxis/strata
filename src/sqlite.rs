@@ -23,6 +23,8 @@ pub(crate) use maintenance::{
 pub(crate) use runtime::resolve_runtime_database;
 pub(crate) use tui_runtime::{
     ClearAllStateRequest as TuiClearAllStateRequest,
+    HistoricalActivePreview as TuiHistoricalActivePreview,
+    HistoricalMissedActivityRequest as TuiHistoricalMissedActivityRequest,
     InitialActiveGenerationRequest as TuiInitialActiveGenerationRequest,
     archive_category as archive_tui_category, clear_all_state as clear_tui_state,
     clear_checkpoint as clear_tui_checkpoint,
@@ -33,7 +35,8 @@ pub(crate) use tui_runtime::{
     initial_active_stable_id as initial_tui_active_stable_id,
     load_checkpoint as load_tui_checkpoint, load_daily_snapshot as load_tui_daily_snapshot,
     load_day_end_snapshot as load_tui_day_end_snapshot, load_sand_state as load_tui_sand_state,
-    load_state as load_tui_state, quarantine_checkpoint as quarantine_tui_checkpoint,
+    load_state as load_tui_state, log_missed_activity as log_tui_missed_activity,
+    quarantine_checkpoint as quarantine_tui_checkpoint,
     replace_recovering_checkpoint as replace_tui_recovering_checkpoint,
     save_checkpoint as save_tui_checkpoint, save_daily_snapshot as save_tui_daily_snapshot,
     save_day_end_snapshot as save_tui_day_end_snapshot, save_sand_state as save_tui_sand_state,

@@ -1,6 +1,9 @@
 use std::collections::BTreeSet;
 
-use chrono::{Duration as ChronoDuration, NaiveDate};
+use chrono::{
+    DateTime, Duration as ChronoDuration, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Timelike,
+    Utc,
+};
 use ratatui::{prelude::Line, style::Color};
 
 use crate::domain::{
@@ -13,6 +16,7 @@ use crate::sand::{
     DailySedimentSlice, SedimentSnapshot, daily_contribution_from_slices,
     derived_preview_from_slices, select_historical_visual_artifact,
 };
+use crate::temporal;
 
 use super::{App, PersistenceOperation, RecoveryAction};
 
@@ -27,6 +31,25 @@ fn parse_report_range(from: &str, to: &str) -> Result<ReportWindow, String> {
         return Err("From must be on or before To".to_string());
     }
     ReportWindow::new(start, end)
+}
+
+fn parse_missed_activity_timestamp(
+    value: &str,
+    policy: OperationalDayPolicy,
+    source_started_at_utc: DateTime<Utc>,
+) -> Result<DateTime<Utc>, String> {
+    let civil = NaiveDateTime::parse_from_str(value.trim(), "%Y-%m-%d %H:%M:%S")
+        .map_err(|_| "time must use YYYY-MM-DD HH:MM:SS".to_string())?;
+    let offset = FixedOffset::east_opt(policy.utc_offset_seconds)
+        .ok_or_else(|| "selected Idle session has an invalid UTC offset".to_string())?;
+    let local = offset
+        .from_local_datetime(&civil)
+        .single()
+        .ok_or_else(|| "historical civil time is not unique".to_string())?;
+    local
+        .with_timezone(&Utc)
+        .with_nanosecond(source_started_at_utc.nanosecond())
+        .ok_or_else(|| "historical timestamp cannot preserve session precision".to_string())
 }
 
 fn shifted_custom_window_older(window: &ReportWindow) -> Option<ReportWindow> {
@@ -147,11 +170,320 @@ impl App {
         })
     }
 
+    fn missed_activity_targets(&self) -> Vec<Category> {
+        self.time_tracker
+            .categories_ordered()
+            .into_iter()
+            .filter(|category| category.id != DRIFT_CATEGORY_ID)
+            .collect()
+    }
+
+    pub(super) fn missed_activity_target_name(&self) -> Option<String> {
+        let edit = self.missed_activity_edit.as_ref()?;
+        self.time_tracker
+            .category_by_id(edit.target_category_id)
+            .map(|category| self.display_layer_name(&category.name))
+    }
+
+    pub(super) fn cycle_missed_activity_target(&mut self, direction: isize) {
+        let targets = self.missed_activity_targets();
+        if targets.is_empty() {
+            return;
+        }
+        let Some(edit) = self.missed_activity_edit.as_mut() else {
+            return;
+        };
+        let current = targets
+            .iter()
+            .position(|category| category.id == edit.target_category_id)
+            .unwrap_or(0);
+        let next = if direction < 0 {
+            if current == 0 { targets.len() - 1 } else { current - 1 }
+        } else {
+            (current + 1) % targets.len()
+        };
+        edit.target_category_id = targets[next].id;
+        edit.error = None;
+        self.render_needed = true;
+    }
+
+    fn selected_idle_session_and_slice_bounds(
+        &self,
+    ) -> Result<(crate::domain::Session, DateTime<Utc>, DateTime<Utc>), String> {
+        if self.report_logs_category_id != Some(DRIFT_CATEGORY_ID) {
+            return Err("log missed activity from the Idle detail view".to_string());
+        }
+        let logs = self.report_current_logs();
+        if logs.is_empty() {
+            return Err("there is no completed Idle interval to correct".to_string());
+        }
+        let selected = self.report_log_selected_index.min(logs.len() - 1);
+        let row = logs
+            .get(selected)
+            .ok_or_else(|| "selected Idle interval is unavailable".to_string())?;
+        let session_id = row
+            .session_id
+            .ok_or_else(|| "the current active Idle interval cannot be corrected yet".to_string())?;
+        let session = self
+            .time_tracker
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .cloned()
+            .ok_or_else(|| "selected Idle session is no longer in memory".to_string())?;
+        if session.category_id != DRIFT_CATEGORY_ID {
+            return Err("selected history is no longer Idle".to_string());
+        }
+        let started_at_utc = session
+            .started_at_utc
+            .ok_or_else(|| "selected Idle session has no UTC start".to_string())?;
+        let ended_at_utc = session
+            .ended_at_utc
+            .ok_or_else(|| "selected Idle session has no UTC end".to_string())?;
+        let policy = session
+            .operational_day_policy
+            .ok_or_else(|| "selected Idle session has no boundary provenance".to_string())?;
+        let selected_day = NaiveDate::parse_from_str(&row.date, "%Y-%m-%d")
+            .map_err(|_| "selected Idle row has an invalid operational day".to_string())?;
+        let slices = temporal::allocate_operational_day_slices(
+            started_at_utc,
+            ended_at_utc,
+            session.elapsed_seconds,
+            policy,
+        )?;
+        let mut allocated = 0usize;
+        for slice in slices {
+            let start_offset = allocated;
+            allocated = allocated.saturating_add(slice.elapsed_seconds);
+            if slice.operational_day != selected_day {
+                continue;
+            }
+            let start_offset = i64::try_from(start_offset)
+                .map_err(|_| "selected Idle slice start is too large".to_string())?;
+            let end_offset = i64::try_from(allocated)
+                .map_err(|_| "selected Idle slice end is too large".to_string())?;
+            let slice_start = started_at_utc
+                .checked_add_signed(ChronoDuration::seconds(start_offset))
+                .ok_or_else(|| "selected Idle slice start exceeds chrono range".to_string())?;
+            let slice_end = started_at_utc
+                .checked_add_signed(ChronoDuration::seconds(end_offset))
+                .ok_or_else(|| "selected Idle slice end exceeds chrono range".to_string())?;
+            return Ok((session, slice_start, slice_end));
+        }
+        Err("selected Idle slice is no longer part of its canonical session".to_string())
+    }
+
+    pub(super) fn begin_missed_activity_edit(&mut self) -> bool {
+        let targets = self.missed_activity_targets();
+        if targets.is_empty() {
+            return false;
+        }
+        let Ok((session, slice_start, slice_end)) = self.selected_idle_session_and_slice_bounds()
+        else {
+            return false;
+        };
+        let Some(policy) = session.operational_day_policy else {
+            return false;
+        };
+        let active_category_id = self.time_tracker.active_category_id();
+        let target_category_id = if active_category_id != DRIFT_CATEGORY_ID
+            && targets
+                .iter()
+                .any(|category| category.id == active_category_id)
+        {
+            active_category_id
+        } else {
+            targets[0].id
+        };
+        let format_civil = |timestamp| {
+            temporal::civil_from_policy(timestamp, policy)
+                .map(|civil| civil.format("%Y-%m-%d %H:%M:%S").to_string())
+        };
+        let Ok(from) = format_civil(slice_start) else {
+            return false;
+        };
+        let Ok(to) = format_civil(slice_end) else {
+            return false;
+        };
+        self.report_range_edit = None;
+        self.report_log_edit = None;
+        self.missed_activity_edit = Some(super::MissedActivityEditState {
+            source_session_id: session.id,
+            target_category_id,
+            from,
+            to,
+            active_field: super::MissedActivityField::Layer,
+            select_all: false,
+            error: None,
+        });
+        self.render_needed = true;
+        true
+    }
+
+    pub(super) fn cancel_missed_activity_edit(&mut self) {
+        self.missed_activity_edit = None;
+        self.render_needed = true;
+    }
+
+    fn historical_correction_active_preview(
+        &self,
+    ) -> Result<crate::sqlite::TuiHistoricalActivePreview, String> {
+        let stable_id = self
+            .session
+            .active_session_stable_id
+            .clone()
+            .ok_or_else(|| "active session has no stable identity".to_string())?;
+        let started_at_utc = self
+            .session
+            .active_session_started_at_utc
+            .ok_or_else(|| "active session has no UTC start".to_string())?;
+        let started = self
+            .time_tracker
+            .current_session_start
+            .ok_or_else(|| "active session has no monotonic start".to_string())?;
+        let elapsed_seconds = usize::try_from(started.elapsed().as_secs())
+            .map_err(|_| "active session duration exceeds this platform's range".to_string())?;
+        let elapsed = i64::try_from(elapsed_seconds)
+            .map_err(|_| "active session duration exceeds chrono range".to_string())?;
+        let ended_at_utc = started_at_utc
+            .checked_add_signed(ChronoDuration::seconds(elapsed))
+            .ok_or_else(|| "active session end exceeds chrono range".to_string())?;
+        Ok(crate::sqlite::TuiHistoricalActivePreview {
+            stable_id,
+            category_id: self.time_tracker.active_category_id(),
+            started_at_utc,
+            ended_at_utc,
+            elapsed_seconds,
+            operational_day_policy: OperationalDayPolicy::from_config(day_boundary_config()),
+        })
+    }
+
+    pub(super) fn commit_missed_activity_edit(&mut self) -> bool {
+        let Some(edit) = self.missed_activity_edit.clone() else {
+            return false;
+        };
+        let Some(source) = self
+            .time_tracker
+            .sessions
+            .iter()
+            .find(|session| session.id == edit.source_session_id)
+            .cloned()
+        else {
+            if let Some(current) = self.missed_activity_edit.as_mut() {
+                current.error = Some("selected Idle session no longer exists".to_string());
+            }
+            self.render_needed = true;
+            return false;
+        };
+        if source.category_id != DRIFT_CATEGORY_ID {
+            if let Some(current) = self.missed_activity_edit.as_mut() {
+                current.error = Some("selected history is no longer Idle".to_string());
+            }
+            self.render_needed = true;
+            return false;
+        }
+        let Some(policy) = source.operational_day_policy else {
+            if let Some(current) = self.missed_activity_edit.as_mut() {
+                current.error = Some("selected Idle session lacks boundary provenance".to_string());
+            }
+            self.render_needed = true;
+            return false;
+        };
+        let Some(source_start) = source.started_at_utc else {
+            return false;
+        };
+        let from = match parse_missed_activity_timestamp(&edit.from, policy, source_start) {
+            Ok(value) => value,
+            Err(error) => {
+                if let Some(current) = self.missed_activity_edit.as_mut() {
+                    current.error = Some(format!("From {error}"));
+                }
+                self.render_needed = true;
+                return false;
+            }
+        };
+        let to = match parse_missed_activity_timestamp(&edit.to, policy, source_start) {
+            Ok(value) => value,
+            Err(error) => {
+                if let Some(current) = self.missed_activity_edit.as_mut() {
+                    current.error = Some(format!("To {error}"));
+                }
+                self.render_needed = true;
+                return false;
+            }
+        };
+        let source_elapsed = match i64::try_from(source.elapsed_seconds) {
+            Ok(value) => value,
+            Err(_) => return false,
+        };
+        let Some(source_end) = source_start.checked_add_signed(ChronoDuration::seconds(source_elapsed)) else {
+            return false;
+        };
+        let validation_error = if from >= to {
+            Some("From must be before To".to_string())
+        } else if from < source_start || to > source_end {
+            Some("interval must stay inside the selected completed Idle session".to_string())
+        } else if edit.target_category_id == DRIFT_CATEGORY_ID
+            || self.time_tracker.category_by_id(edit.target_category_id).is_none()
+        {
+            Some("choose an active non-Idle layer".to_string())
+        } else {
+            None
+        };
+        if let Some(error) = validation_error {
+            if let Some(current) = self.missed_activity_edit.as_mut() {
+                current.error = Some(error);
+            }
+            self.render_needed = true;
+            return false;
+        }
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            return false;
+        };
+        let active_preview = match self.historical_correction_active_preview() {
+            Ok(preview) => preview,
+            Err(error) => {
+                if let Some(current) = self.missed_activity_edit.as_mut() {
+                    current.error = Some(error);
+                }
+                self.render_needed = true;
+                return false;
+            }
+        };
+        let result = crate::sqlite::log_tui_missed_activity(
+            &database_path,
+            crate::sqlite::TuiHistoricalMissedActivityRequest {
+                source_session_id: edit.source_session_id,
+                target_category_id: edit.target_category_id,
+                started_at_utc: from,
+                ended_at_utc: to,
+                description: String::new(),
+                active_preview: Some(active_preview),
+            },
+        );
+        let Some(affected_days) = self.record_storage_result_for(
+            PersistenceOperation::SessionCorrection,
+            RecoveryAction::ReloadAuthority,
+            result,
+        ) else {
+            return false;
+        };
+        let _affected_days = affected_days;
+        if !self.reload_sqlite_sessions() {
+            return false;
+        }
+        self.missed_activity_edit = None;
+        self.clear_report_snapshot_cache();
+        self.sync_report_selection_for_interval();
+        true
+    }
+
     pub(super) fn set_report_period(&mut self, period: ReportPeriod) {
         self.report_period = period;
         self.report_period_offset = 0;
         self.report_custom_window = None;
         self.report_range_edit = None;
+        self.missed_activity_edit = None;
         self.clear_report_snapshot_cache();
         self.sync_report_selection_for_interval();
     }
@@ -578,13 +910,16 @@ fn retain_report_edit_after_commit(edit: &mut Option<super::ReportLogEditState>,
 
 #[cfg(test)]
 mod report_edit_state_tests {
-    use chrono::NaiveDate;
+    use chrono::{DateTime, NaiveDate, Timelike, Utc};
 
     use super::{
-        parse_report_range, retain_report_edit_after_commit, shifted_custom_window_newer,
-        shifted_custom_window_older,
+        parse_missed_activity_timestamp, parse_report_range, retain_report_edit_after_commit,
+        shifted_custom_window_newer, shifted_custom_window_older,
     };
-    use crate::{app::ReportLogEditState, domain::ReportWindow};
+    use crate::{
+        app::ReportLogEditState,
+        domain::{OperationalDayPolicy, ReportWindow},
+    };
 
     #[test]
     fn failed_commit_retains_complete_draft() {
@@ -613,6 +948,30 @@ mod report_edit_state_tests {
         assert_eq!(window.label, "2026-08-01..2026-08-27");
         assert!(parse_report_range("08/01/2026", "2026-08-27").is_err());
         assert!(parse_report_range("2026-08-28", "2026-08-27").is_err());
+    }
+
+    #[test]
+    fn missed_activity_timestamp_preserves_source_whole_second_lattice() {
+        let source = DateTime::parse_from_rfc3339("2026-08-02T05:30:00.500Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let policy = OperationalDayPolicy {
+            utc_offset_seconds: -6 * 60 * 60,
+            start_minutes: 0,
+        };
+        let parsed = parse_missed_activity_timestamp(
+            "2026-08-01 23:45:00",
+            policy,
+            source,
+        )
+        .unwrap();
+        assert_eq!(
+            parsed,
+            DateTime::parse_from_rfc3339("2026-08-02T05:45:00.500Z")
+                .unwrap()
+                .with_timezone(&Utc)
+        );
+        assert_eq!(parsed.nanosecond(), source.nanosecond());
     }
 
     #[test]

@@ -19,6 +19,31 @@ Balance exposes the same arbitrary-window contract through its `range` mode. The
 
 A canonical session remains one row. Exact overlap slices contribute only the seconds that belong inside the selected operational-day range.
 
+## Explicit historical correction
+
+Balance browsing and reporting remain read-only projections. Historical mutation occurs only through explicit
+committed correction commands.
+
+HISTORY-001C adds the first safe mutation: **Log missed activity**. It operates only on one persisted completed
+Idle session selected from Balance. The requested interval must be positive, must remain inside that canonical Idle
+session, and must target an existing active non-Idle layer. The operation never inserts overlapping elapsed time.
+Instead, one Idle row may become up to three chronological rows: Idle-before, corrected activity, and Idle-after.
+The original row identity is retained by the fragment that keeps the original session start; newly created
+fragments receive deterministic split identities and all replacement rows are marked with historical-correction
+source provenance.
+
+The SQLite publication is one `IMMEDIATE` transaction. Session splitting and replacement of every affected
+`daily-contribution` artifact commit together. When an affected day also contains the current active generation,
+the TUI supplies a stable-identity-qualified provisional preview; SQLite validates that preview against
+`active_session` and includes its canonical slices in the replacement. A stale preview fails closed rather than
+dropping live mass. The transaction preserves the original corrected session's canonical whole-second total,
+including across operational-day boundaries. Current canonical sediment is not recolored by HISTORY-001C, and
+first-write authentic day-end snapshots are not rewritten. Those visual semantics remain separate HISTORY-001E
+and explicit-product-decision territory.
+
+Non-Idle source reclassification is outside HISTORY-001C and fails closed; deliberate correction of already
+classified activity belongs to HISTORY-001D.
+
 ## Provisional active time
 
 Unless `--completed-only` is supplied, reports and JSON/ICS export include the current active interval projected from its persisted UTC start to one snapshot time.
@@ -62,4 +87,4 @@ Idle/category ID `0` and zero-duration intervals are omitted. A completed sessio
 
 ## Boundaries
 
-Reporting does not mutate the ledger, fragment canonical sessions, or create a second grouping axis. Future grouping/filter concepts above layers require separate product evidence.
+Passive reporting does not mutate the ledger or create a second grouping axis. Explicit historical correction is a separate committed command governed by the constraints above; it may deliberately split a canonical session while conserving its elapsed-time truth. Future grouping/filter concepts above layers require separate product evidence.

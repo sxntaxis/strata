@@ -937,7 +937,7 @@ fn query_category_tags(
     Ok(tags)
 }
 
-fn query_all_sessions(connection: &Connection) -> Result<Vec<SessionRecord>, RepositoryError> {
+pub(crate) fn query_all_sessions(connection: &Connection) -> Result<Vec<SessionRecord>, RepositoryError> {
     let mut statement = connection.prepare(
         "SELECT id, stable_id, category_id, description,
                 started_at_utc, ended_at_utc, operational_day,

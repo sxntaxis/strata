@@ -4,7 +4,9 @@ use std::{
     process,
 };
 
-use chrono::{DateTime, FixedOffset, SecondsFormat, Utc};
+use chrono::{
+    DateTime, Duration as ChronoDuration, FixedOffset, NaiveDate, SecondsFormat, Timelike, Utc,
+};
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -14,7 +16,8 @@ use crate::{
         Category, CategoryId, DRIFT_CATEGORY_CONFIG_NAME, OperationalDayPolicy, Session,
         day_boundary_config, runtime_settings,
     },
-    sand::{SandState, SedimentSnapshot},
+    sand::{DailySedimentSlice, SandState, SedimentSnapshot, daily_contribution_from_slices},
+    temporal,
     storage::{CategoryTagsState, LoadedCategories, LoadedSessions},
 };
 
@@ -38,6 +41,26 @@ pub(crate) struct SqliteTuiState {
     pub archived_categories: Vec<Category>,
     pub category_tags: CategoryTagsState,
     pub active_session: Option<SqliteTuiActiveSession>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct HistoricalActivePreview {
+    pub stable_id: String,
+    pub category_id: CategoryId,
+    pub started_at_utc: DateTime<Utc>,
+    pub ended_at_utc: DateTime<Utc>,
+    pub elapsed_seconds: usize,
+    pub operational_day_policy: OperationalDayPolicy,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct HistoricalMissedActivityRequest {
+    pub source_session_id: usize,
+    pub target_category_id: CategoryId,
+    pub started_at_utc: DateTime<Utc>,
+    pub ended_at_utc: DateTime<Utc>,
+    pub description: String,
+    pub active_preview: Option<HistoricalActivePreview>,
 }
 
 pub(crate) fn load_state(database_path: &Path) -> Result<SqliteTuiState, String> {
@@ -654,6 +677,556 @@ pub(crate) fn delete_session(database_path: &Path, session_id: usize) -> Result<
     runtime_coordination::maybe_inject_test_fault("session-delete", "commit")
         .map_err(|error| error.to_string())?;
     transaction.commit().map_err(|error| error.to_string())
+}
+
+fn correction_stable_id(
+    source_stable_id: &str,
+    role: &str,
+    started_at_utc: DateTime<Utc>,
+    category_id: CategoryId,
+) -> String {
+    format!(
+        "history:{source_stable_id}:{role}:{}:{}",
+        started_at_utc.to_rfc3339_opts(SecondsFormat::Nanos, true),
+        category_id.0,
+    )
+}
+
+fn fragment_operational_day(
+    ended_at_utc: DateTime<Utc>,
+    policy: OperationalDayPolicy,
+) -> Result<NaiveDate, String> {
+    temporal::operational_day_from_policy(ended_at_utc, policy)
+}
+
+fn write_history_fragment(
+    connection: &rusqlite::Connection,
+    existing_id: Option<i64>,
+    stable_id: &str,
+    category_id: CategoryId,
+    description: &str,
+    started_at_utc: DateTime<Utc>,
+    ended_at_utc: DateTime<Utc>,
+    elapsed_seconds: usize,
+    policy: OperationalDayPolicy,
+) -> Result<(), String> {
+    if elapsed_seconds == 0 {
+        return Err("historical correction refuses a zero-length fragment".to_string());
+    }
+    let operational_day = fragment_operational_day(ended_at_utc, policy)?;
+    let category_id = as_i64(category_id.0, "category ID")?;
+    let elapsed_seconds = i64::try_from(elapsed_seconds)
+        .map_err(|_| "historical correction duration is too large".to_string())?;
+    let started = timestamp(started_at_utc);
+    let ended = timestamp(ended_at_utc);
+    let day = operational_day.format("%Y-%m-%d").to_string();
+    const SOURCE: &str = "tui-history-correction";
+
+    if let Some(id) = existing_id {
+        let changed = connection
+            .execute(
+                "UPDATE sessions
+                 SET stable_id = ?1,
+                     category_id = ?2,
+                     description = ?3,
+                     started_at_utc = ?4,
+                     ended_at_utc = ?5,
+                     operational_day = ?6,
+                     elapsed_seconds = ?7,
+                     boundary_utc_offset_seconds = ?8,
+                     boundary_start_minutes = ?9,
+                     source = ?10
+                 WHERE id = ?11",
+                params![
+                    stable_id,
+                    category_id,
+                    description,
+                    started,
+                    ended,
+                    day,
+                    elapsed_seconds,
+                    policy.utc_offset_seconds,
+                    policy.start_minutes,
+                    SOURCE,
+                    id,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        if changed != 1 {
+            return Err(format!("SQLite session {id} disappeared during historical correction"));
+        }
+    } else {
+        connection
+            .execute(
+                "INSERT INTO sessions (
+                    stable_id, category_id, description,
+                    started_at_utc, ended_at_utc, operational_day,
+                    elapsed_seconds, boundary_utc_offset_seconds,
+                    boundary_start_minutes, source
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    stable_id,
+                    category_id,
+                    description,
+                    started,
+                    ended,
+                    day,
+                    elapsed_seconds,
+                    policy.utc_offset_seconds,
+                    policy.start_minutes,
+                    SOURCE,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn daily_slices_from_session_rows(
+    sessions: &[super::repository::SessionRecord],
+    day: NaiveDate,
+) -> Result<Vec<DailySedimentSlice>, String> {
+    let mut result = Vec::new();
+    for session in sessions {
+        let elapsed_seconds = usize::try_from(session.elapsed_seconds)
+            .map_err(|_| format!("session {} duration is invalid", session.id))?;
+        if elapsed_seconds == 0 {
+            continue;
+        }
+        let session_id = usize::try_from(session.id)
+            .map_err(|_| format!("session {} ID is outside the supported range", session.id))?;
+        let category_id = u64::try_from(session.category_id)
+            .map_err(|_| format!("session {} category identity is invalid", session.id))?;
+
+        match (
+            session.boundary_utc_offset_seconds,
+            session.boundary_start_minutes,
+        ) {
+            (Some(offset), Some(start_minutes)) => {
+                let policy = OperationalDayPolicy {
+                    utc_offset_seconds: i32::try_from(offset).map_err(|_| {
+                        format!("session {} boundary offset is invalid", session.id)
+                    })?,
+                    start_minutes: u16::try_from(start_minutes).map_err(|_| {
+                        format!("session {} boundary start is invalid", session.id)
+                    })?,
+                };
+                let started_at_utc = parse_utc(&session.started_at_utc)?;
+                let ended_at_utc = parse_utc(&session.ended_at_utc)?;
+                for slice in temporal::allocate_operational_day_slices(
+                    started_at_utc,
+                    ended_at_utc,
+                    elapsed_seconds,
+                    policy,
+                )? {
+                    if slice.operational_day != day {
+                        continue;
+                    }
+                    result.push(DailySedimentSlice {
+                        category_id,
+                        elapsed_seconds: slice.elapsed_seconds,
+                        start_time: temporal::civil_from_policy(slice.started_at_utc, policy)?
+                            .format("%H:%M:%S")
+                            .to_string(),
+                        end_time: temporal::civil_from_policy(slice.ended_at_utc, policy)?
+                            .format("%H:%M:%S")
+                            .to_string(),
+                        session_id,
+                    });
+                }
+            }
+            (None, None) => {
+                let Ok(stored_day) =
+                    NaiveDate::parse_from_str(&session.operational_day, "%Y-%m-%d")
+                else {
+                    continue;
+                };
+                if stored_day != day {
+                    continue;
+                }
+                result.push(DailySedimentSlice {
+                    category_id,
+                    elapsed_seconds,
+                    start_time: local_clock(&session.started_at_utc, None)?,
+                    end_time: local_clock(&session.ended_at_utc, None)?,
+                    session_id,
+                });
+            }
+            _ => {
+                return Err(format!(
+                    "session {} has partial boundary provenance during historical correction",
+                    session.id
+                ));
+            }
+        }
+    }
+    Ok(result)
+}
+
+fn daily_slices_from_active_preview(
+    preview: &HistoricalActivePreview,
+    day: NaiveDate,
+) -> Result<Vec<DailySedimentSlice>, String> {
+    if preview.elapsed_seconds == 0 {
+        return Ok(Vec::new());
+    }
+    let slices = temporal::allocate_operational_day_slices(
+        preview.started_at_utc,
+        preview.ended_at_utc,
+        preview.elapsed_seconds,
+        preview.operational_day_policy,
+    )?;
+    let mut result = Vec::new();
+    for slice in slices {
+        if slice.operational_day != day {
+            continue;
+        }
+        result.push(DailySedimentSlice {
+            category_id: preview.category_id.0,
+            elapsed_seconds: slice.elapsed_seconds,
+            start_time: temporal::civil_from_policy(
+                slice.started_at_utc,
+                preview.operational_day_policy,
+            )?
+            .format("%H:%M:%S")
+            .to_string(),
+            end_time: temporal::civil_from_policy(
+                slice.ended_at_utc,
+                preview.operational_day_policy,
+            )?
+            .format("%H:%M:%S")
+            .to_string(),
+            session_id: usize::MAX,
+        });
+    }
+    Ok(result)
+}
+
+fn validate_historical_active_preview(
+    transaction: &rusqlite::Transaction<'_>,
+    preview: Option<&HistoricalActivePreview>,
+) -> Result<(), String> {
+    let persisted: Option<(String, i64, String)> = transaction
+        .query_row(
+            "SELECT stable_id, category_id, started_at_utc
+             FROM active_session WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+
+    match (persisted, preview) {
+        (None, None) => Ok(()),
+        (Some((stable_id, _, _)), None) => Err(format!(
+            "historical correction is missing preview for active generation {stable_id}"
+        )),
+        (None, Some(preview)) => Err(format!(
+            "historical correction preview {} has no persisted active generation",
+            preview.stable_id
+        )),
+        (Some((stable_id, category_id, started_at_utc)), Some(preview)) => {
+            let preview_category = as_i64(preview.category_id.0, "active category ID")?;
+            let persisted_start = parse_utc(&started_at_utc)?;
+            if stable_id != preview.stable_id
+                || category_id != preview_category
+                || persisted_start != preview.started_at_utc
+            {
+                return Err("historical correction active preview is stale".to_string());
+            }
+            let elapsed = i64::try_from(preview.elapsed_seconds)
+                .map_err(|_| "active preview duration exceeds chrono range".to_string())?;
+            let expected_end = preview
+                .started_at_utc
+                .checked_add_signed(ChronoDuration::seconds(elapsed))
+                .ok_or_else(|| "active preview end exceeds chrono range".to_string())?;
+            if expected_end != preview.ended_at_utc {
+                return Err(
+                    "historical correction active preview does not conserve whole seconds"
+                        .to_string(),
+                );
+            }
+            Ok(())
+        }
+    }
+}
+
+fn replace_daily_contributions_in_transaction(
+    transaction: &rusqlite::Transaction<'_>,
+    affected_days: &BTreeSet<NaiveDate>,
+    active_preview: Option<&HistoricalActivePreview>,
+) -> Result<(), String> {
+    let sessions = super::repository::query_all_sessions(transaction)
+        .map_err(|error| error.to_string())?;
+    let existing_sand: Option<(String, i64)> = transaction
+        .query_row(
+            "SELECT formation_id, quantum_seconds FROM sand_state WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let (formation_id, quantum_seconds) =
+        existing_sand.unwrap_or_else(|| ("default".to_string(), 1));
+    let captured_at_utc = timestamp(Utc::now());
+
+    for day in affected_days {
+        let day_key = day.format("%Y-%m-%d").to_string();
+        let mut slices = daily_slices_from_session_rows(&sessions, *day)?;
+        if let Some(preview) = active_preview {
+            slices.extend(daily_slices_from_active_preview(preview, *day)?);
+        }
+        let expected = daily_contribution_from_slices(&day_key, &slices);
+        transaction
+            .execute(
+                "DELETE FROM sand_snapshots
+                 WHERE snapshot_kind = 'daily-contribution' AND operational_day = ?1",
+                params![day_key],
+            )
+            .map_err(|error| error.to_string())?;
+        if let Some(snapshot) = expected {
+            let payload_json =
+                serde_json::to_string(&snapshot).map_err(|error| error.to_string())?;
+            transaction
+                .execute(
+                    "INSERT INTO sand_snapshots (
+                        formation_id, snapshot_kind, operational_day, quantum_seconds,
+                        payload_json, captured_at_utc
+                     ) VALUES (?1, 'daily-contribution', ?2, ?3, ?4, ?5)",
+                    params![
+                        formation_id,
+                        day_key,
+                        quantum_seconds,
+                        payload_json,
+                        captured_at_utc,
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn log_missed_activity(
+    database_path: &Path,
+    request: HistoricalMissedActivityRequest,
+) -> Result<BTreeSet<NaiveDate>, String> {
+    runtime_coordination::maybe_inject_test_fault("history-correction", "before-write")
+        .map_err(|error| error.to_string())?;
+    if request.target_category_id == crate::domain::DRIFT_CATEGORY_ID {
+        return Err("missed activity target must be a non-Idle layer".to_string());
+    }
+    if request.started_at_utc >= request.ended_at_utc {
+        return Err("missed activity From must be before To".to_string());
+    }
+
+    let mut repository = open_cli_repository(database_path)?;
+    let transaction = repository
+        .connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let source_id = i64::try_from(request.source_session_id)
+        .map_err(|_| "source session ID is too large".to_string())?;
+    let sessions = super::repository::query_all_sessions(&transaction)
+        .map_err(|error| error.to_string())?;
+    let source = sessions
+        .iter()
+        .find(|session| session.id == source_id)
+        .cloned()
+        .ok_or_else(|| format!("SQLite session {source_id} does not exist"))?;
+    if source.category_id != 0 {
+        return Err("missed activity can only reclassify a completed Idle session".to_string());
+    }
+
+    let target_category_id = as_i64(request.target_category_id.0, "category ID")?;
+    let target_exists: bool = transaction
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM categories
+                WHERE id = ?1 AND archived_at_utc IS NULL AND id != 0
+             )",
+            params![target_category_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if !target_exists {
+        return Err(format!(
+            "target layer {} is not an active non-Idle layer",
+            request.target_category_id.0
+        ));
+    }
+
+    let source_started_at_utc = parse_utc(&source.started_at_utc)?;
+    let source_recorded_end_utc = parse_utc(&source.ended_at_utc)?;
+    let source_elapsed = usize::try_from(source.elapsed_seconds)
+        .map_err(|_| "source session duration is invalid".to_string())?;
+    let source_elapsed_i64 = i64::try_from(source_elapsed)
+        .map_err(|_| "source session duration exceeds chrono range".to_string())?;
+    let source_effective_end_utc = source_started_at_utc
+        .checked_add_signed(ChronoDuration::seconds(source_elapsed_i64))
+        .ok_or_else(|| "source session end exceeds chrono range".to_string())?;
+    if source_recorded_end_utc < source_effective_end_utc {
+        return Err("source session ends before its canonical elapsed duration".to_string());
+    }
+    if request.started_at_utc < source_started_at_utc
+        || request.ended_at_utc > source_effective_end_utc
+    {
+        return Err("missed activity interval is outside the selected Idle session".to_string());
+    }
+    if request.started_at_utc.nanosecond() != source_started_at_utc.nanosecond()
+        || request.ended_at_utc.nanosecond() != source_started_at_utc.nanosecond()
+    {
+        return Err(
+            "missed activity boundaries must align to the source session whole-second lattice"
+                .to_string(),
+        );
+    }
+
+    let Some(source_offset) = source.boundary_utc_offset_seconds else {
+        return Err("selected Idle session lacks boundary provenance".to_string());
+    };
+    let Some(source_start_minutes) = source.boundary_start_minutes else {
+        return Err("selected Idle session lacks boundary provenance".to_string());
+    };
+    let policy = OperationalDayPolicy {
+        utc_offset_seconds: i32::try_from(source_offset)
+            .map_err(|_| "selected Idle session has invalid boundary offset".to_string())?,
+        start_minutes: u16::try_from(source_start_minutes)
+            .map_err(|_| "selected Idle session has invalid boundary start".to_string())?,
+    };
+
+    let before_seconds = usize::try_from((request.started_at_utc - source_started_at_utc).num_seconds())
+        .map_err(|_| "missed activity start precedes the source session".to_string())?;
+    let activity_seconds = usize::try_from((request.ended_at_utc - request.started_at_utc).num_seconds())
+        .map_err(|_| "missed activity duration is invalid".to_string())?;
+    let consumed = before_seconds
+        .checked_add(activity_seconds)
+        .ok_or_else(|| "missed activity duration overflowed".to_string())?;
+    if activity_seconds == 0 || consumed > source_elapsed {
+        return Err("missed activity interval is not representable in canonical whole seconds".to_string());
+    }
+    let after_seconds = source_elapsed - consumed;
+
+    for other in sessions.iter().filter(|session| session.id != source_id) {
+        let other_start = parse_utc(&other.started_at_utc)?;
+        let other_elapsed = i64::try_from(other.elapsed_seconds)
+            .map_err(|_| format!("session {} duration is invalid", other.id))?;
+        let other_end = other_start
+            .checked_add_signed(ChronoDuration::seconds(other_elapsed))
+            .ok_or_else(|| format!("session {} end exceeds chrono range", other.id))?;
+        if other_start < request.ended_at_utc && other_end > request.started_at_utc {
+            return Err(format!(
+                "missed activity overlaps completed non-source session {} (layer {})",
+                other.id, other.category_id
+            ));
+        }
+    }
+    validate_historical_active_preview(&transaction, request.active_preview.as_ref())?;
+    if let Some(active_preview) = request.active_preview.as_ref()
+        && active_preview.started_at_utc < request.ended_at_utc
+    {
+        return Err("missed activity overlaps the current active session".to_string());
+    }
+
+    let affected_days = temporal::allocate_operational_day_slices(
+        source_started_at_utc,
+        source_recorded_end_utc,
+        source_elapsed,
+        policy,
+    )?
+    .into_iter()
+    .map(|slice| slice.operational_day)
+    .collect::<BTreeSet<_>>();
+
+    let source_row_category;
+    let source_row_description;
+    let source_row_end;
+    let source_row_elapsed;
+    if before_seconds > 0 {
+        source_row_category = crate::domain::DRIFT_CATEGORY_ID;
+        source_row_description = source.description.as_str();
+        source_row_end = request.started_at_utc;
+        source_row_elapsed = before_seconds;
+    } else {
+        source_row_category = request.target_category_id;
+        source_row_description = request.description.as_str();
+        source_row_end = if after_seconds == 0 {
+            source_recorded_end_utc
+        } else {
+            request.ended_at_utc
+        };
+        source_row_elapsed = activity_seconds;
+    }
+    write_history_fragment(
+        &transaction,
+        Some(source_id),
+        &source.stable_id,
+        source_row_category,
+        source_row_description,
+        source_started_at_utc,
+        source_row_end,
+        source_row_elapsed,
+        policy,
+    )?;
+
+    if before_seconds > 0 {
+        let stable_id = correction_stable_id(
+            &source.stable_id,
+            "activity",
+            request.started_at_utc,
+            request.target_category_id,
+        );
+        write_history_fragment(
+            &transaction,
+            None,
+            &stable_id,
+            request.target_category_id,
+            &request.description,
+            request.started_at_utc,
+            if after_seconds == 0 {
+                source_recorded_end_utc
+            } else {
+                request.ended_at_utc
+            },
+            activity_seconds,
+            policy,
+        )?;
+    }
+
+    if after_seconds > 0 {
+        let stable_id = correction_stable_id(
+            &source.stable_id,
+            "idle-after",
+            request.ended_at_utc,
+            crate::domain::DRIFT_CATEGORY_ID,
+        );
+        write_history_fragment(
+            &transaction,
+            None,
+            &stable_id,
+            crate::domain::DRIFT_CATEGORY_ID,
+            &source.description,
+            request.ended_at_utc,
+            source_recorded_end_utc,
+            after_seconds,
+            policy,
+        )?;
+    }
+
+    runtime_coordination::maybe_inject_test_fault("history-correction", "sessions")
+        .map_err(|error| error.to_string())?;
+    replace_daily_contributions_in_transaction(
+        &transaction,
+        &affected_days,
+        request.active_preview.as_ref(),
+    )?;
+    runtime_coordination::maybe_inject_test_fault("history-correction", "daily")
+        .map_err(|error| error.to_string())?;
+    runtime_coordination::maybe_inject_test_fault("history-correction", "commit")
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())?;
+
+    Ok(affected_days)
 }
 
 pub(crate) fn save_sand_state(database_path: &Path, state: &SandState) -> Result<(), String> {
@@ -1335,7 +1908,10 @@ mod tests {
     use chrono::TimeZone;
 
     use super::*;
-    use crate::sqlite::{SqliteRepository, repository::NewCategoryRecord};
+    use crate::sqlite::{
+        SqliteRepository,
+        repository::{NewCategoryRecord, NewSessionRecord},
+    };
 
     fn repository_file(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -2306,4 +2882,306 @@ mod clear_all_additional_transaction_tests {
         assert_original_state(&path);
         remove_database(&path);
     }
+
+    fn seed_history_session(
+        path: &Path,
+        category_id: i64,
+        stable_id: &str,
+        started_at_utc: &str,
+        ended_at_utc: &str,
+        operational_day: &str,
+        elapsed_seconds: i64,
+    ) {
+        let mut repository = SqliteRepository::open(path).unwrap();
+        if repository
+            .list_categories(true)
+            .unwrap()
+            .iter()
+            .all(|category| category.id != 1)
+        {
+            repository
+                .create_category(&NewCategoryRecord {
+                    name: "Work",
+                    description: "",
+                    color_index: 1,
+                    balance_effect: 1,
+                })
+                .unwrap();
+        }
+        repository
+            .insert_session(&NewSessionRecord {
+                stable_id,
+                category_id,
+                description: "",
+                started_at_utc,
+                ended_at_utc,
+                operational_day,
+                elapsed_seconds,
+                boundary_utc_offset_seconds: -6 * 60 * 60,
+                boundary_start_minutes: 0,
+                source: "tui-runtime",
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn missed_activity_splits_idle_transactionally_and_rewrites_each_affected_day() {
+        let path = repository_file("history-missed-cross-day");
+        seed_history_session(
+            &path,
+            0,
+            "idle-a",
+            "2026-08-02T05:30:00.500Z",
+            "2026-08-02T06:30:00.700Z",
+            "2026-08-02",
+            3600,
+        );
+
+        let affected_days = log_missed_activity(
+            &path,
+            HistoricalMissedActivityRequest {
+                source_session_id: 1,
+                target_category_id: CategoryId::new(1),
+                started_at_utc: DateTime::parse_from_rfc3339("2026-08-02T05:45:00.500Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+                ended_at_utc: DateTime::parse_from_rfc3339("2026-08-02T06:15:00.500Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+                description: String::new(),
+                active_preview: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            affected_days,
+            [
+                NaiveDate::from_ymd_opt(2026, 8, 1).unwrap(),
+                NaiveDate::from_ymd_opt(2026, 8, 2).unwrap(),
+            ]
+            .into_iter()
+            .collect()
+        );
+
+        let repository = open_cli_repository(&path).unwrap();
+        let rows = repository.list_sessions().unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(
+            rows.iter().map(|row| row.category_id).collect::<Vec<_>>(),
+            vec![0, 1, 0]
+        );
+        assert_eq!(
+            rows.iter().map(|row| row.elapsed_seconds).collect::<Vec<_>>(),
+            vec![900, 1800, 900]
+        );
+        assert_eq!(rows.iter().map(|row| row.elapsed_seconds).sum::<i64>(), 3600);
+        assert_eq!(rows[0].stable_id, "idle-a");
+        assert!(rows.iter().all(|row| row.source == "tui-history-correction"));
+        assert_eq!(rows[0].ended_at_utc, rows[1].started_at_utc);
+        assert_eq!(rows[1].ended_at_utc, rows[2].started_at_utc);
+        assert_eq!(rows[2].ended_at_utc, "2026-08-02T06:30:00.700Z");
+        drop(repository);
+
+        let first = load_daily_snapshot(&path, "2026-08-01")
+            .unwrap()
+            .expect("first affected day should be rewritten");
+        let second = load_daily_snapshot(&path, "2026-08-02")
+            .unwrap()
+            .expect("second affected day should be rewritten");
+        let first_mass = first
+            .state
+            .pending_runs
+            .iter()
+            .map(|run| run.count)
+            .sum::<usize>();
+        let second_mass = second
+            .state
+            .pending_runs
+            .iter()
+            .map(|run| run.count)
+            .sum::<usize>();
+        assert_eq!(first_mass, 1799);
+        assert_eq!(second_mass, 1801);
+        assert!(
+            first
+                .state
+                .pending_runs
+                .iter()
+                .any(|run| run.category_id == 1 && run.count == 899)
+        );
+        assert!(
+            second
+                .state
+                .pending_runs
+                .iter()
+                .any(|run| run.category_id == 1 && run.count == 901)
+        );
+
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn missed_activity_daily_rewrite_preserves_current_active_preview() {
+        let path = repository_file("history-missed-active-preview");
+        seed_history_session(
+            &path,
+            0,
+            "idle-a",
+            "2026-08-02T10:00:00Z",
+            "2026-08-02T11:00:00Z",
+            "2026-08-02",
+            3600,
+        );
+        let mut repository = open_cli_repository(&path).unwrap();
+        runtime_coordination::start_active_session(
+            &mut repository,
+            &NewActiveSession {
+                stable_id: "active-now",
+                category_id: 1,
+                description: "",
+                started_at_utc: "2026-08-02T11:00:00Z",
+                recovery_kind: "live",
+            },
+        )
+        .unwrap();
+        drop(repository);
+
+        let policy = OperationalDayPolicy {
+            utc_offset_seconds: -6 * 60 * 60,
+            start_minutes: 0,
+        };
+        let active_started = Utc.with_ymd_and_hms(2026, 8, 2, 11, 0, 0).unwrap();
+        let active_preview = HistoricalActivePreview {
+            stable_id: "active-now".to_string(),
+            category_id: CategoryId::new(1),
+            started_at_utc: active_started,
+            ended_at_utc: active_started + ChronoDuration::seconds(600),
+            elapsed_seconds: 600,
+            operational_day_policy: policy,
+        };
+
+        log_missed_activity(
+            &path,
+            HistoricalMissedActivityRequest {
+                source_session_id: 1,
+                target_category_id: CategoryId::new(1),
+                started_at_utc: Utc.with_ymd_and_hms(2026, 8, 2, 10, 15, 0).unwrap(),
+                ended_at_utc: Utc.with_ymd_and_hms(2026, 8, 2, 10, 45, 0).unwrap(),
+                description: String::new(),
+                active_preview: Some(active_preview),
+            },
+        )
+        .unwrap();
+
+        let daily = load_daily_snapshot(&path, "2026-08-02")
+            .unwrap()
+            .expect("affected current day should retain completed plus active mass");
+        let total_mass = daily
+            .state
+            .pending_runs
+            .iter()
+            .map(|run| run.count)
+            .sum::<usize>();
+        let work_mass = daily
+            .state
+            .pending_runs
+            .iter()
+            .filter(|run| run.category_id == 1)
+            .map(|run| run.count)
+            .sum::<usize>();
+        assert_eq!(total_mass, 4200);
+        assert_eq!(work_mass, 2400);
+
+        let repository = open_cli_repository(&path).unwrap();
+        let active = repository.active_session().unwrap().unwrap();
+        assert_eq!(active.stable_id, "active-now");
+        assert_eq!(active.category_id, 1);
+        drop(repository);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn missed_activity_kill_points_roll_back_sessions_and_daily_contribution() {
+        for point in ["before-write", "sessions", "daily", "commit"] {
+            let path = repository_file(&format!("history-missed-kill-{point}"));
+            seed_history_session(
+                &path,
+                0,
+                "idle-a",
+                "2026-08-02T10:00:00Z",
+                "2026-08-02T11:00:00Z",
+                "2026-08-02",
+                3600,
+            );
+            let result = runtime_coordination::with_test_fault(
+                "history-correction",
+                point,
+                "io",
+                || {
+                    log_missed_activity(
+                        &path,
+                        HistoricalMissedActivityRequest {
+                            source_session_id: 1,
+                            target_category_id: CategoryId::new(1),
+                            started_at_utc: Utc
+                                .with_ymd_and_hms(2026, 8, 2, 10, 15, 0)
+                                .unwrap(),
+                            ended_at_utc: Utc
+                                .with_ymd_and_hms(2026, 8, 2, 10, 45, 0)
+                                .unwrap(),
+                            description: String::new(),
+                            active_preview: None,
+                        },
+                    )
+                },
+            );
+            assert!(result.is_err(), "kill point {point} unexpectedly committed");
+            let repository = open_cli_repository(&path).unwrap();
+            let rows = repository.list_sessions().unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].stable_id, "idle-a");
+            assert_eq!(rows[0].category_id, 0);
+            assert_eq!(rows[0].elapsed_seconds, 3600);
+            drop(repository);
+            assert!(load_daily_snapshot(&path, "2026-08-02").unwrap().is_none());
+            std::fs::remove_file(path).ok();
+        }
+    }
+
+    #[test]
+    fn missed_activity_rejects_non_idle_source_without_mutation() {
+        let path = repository_file("history-missed-non-idle");
+        seed_history_session(
+            &path,
+            1,
+            "work-a",
+            "2026-08-02T16:00:00Z",
+            "2026-08-02T17:00:00Z",
+            "2026-08-02",
+            3600,
+        );
+        let error = log_missed_activity(
+            &path,
+            HistoricalMissedActivityRequest {
+                source_session_id: 1,
+                target_category_id: CategoryId::new(1),
+                started_at_utc: Utc.with_ymd_and_hms(2026, 8, 2, 16, 15, 0).unwrap(),
+                ended_at_utc: Utc.with_ymd_and_hms(2026, 8, 2, 16, 45, 0).unwrap(),
+                description: String::new(),
+                active_preview: None,
+            },
+        )
+        .unwrap_err();
+        assert!(error.contains("only reclassify a completed Idle session"));
+        let repository = open_cli_repository(&path).unwrap();
+        let rows = repository.list_sessions().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].stable_id, "work-a");
+        assert_eq!(rows[0].category_id, 1);
+        assert_eq!(rows[0].source, "tui-runtime");
+        drop(repository);
+        std::fs::remove_file(path).ok();
+    }
+
 }
