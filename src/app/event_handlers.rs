@@ -1433,7 +1433,9 @@ mod report_edit_tests {
     #[test]
     fn missed_activity_editor_owns_timestamp_input_and_layer_navigation() {
         let keymap = default_keymap();
-        for character in ['2', '0', '2', '6', '-', '0', '8', ' ', '1', '2', ':', '3', '0'] {
+        for character in [
+            '2', '0', '2', '6', '-', '0', '8', ' ', '1', '2', ':', '3', '0',
+        ] {
             assert_eq!(
                 resolve_missed_activity_edit_key(
                     KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),

@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use chrono::{
-    DateTime, Duration as ChronoDuration, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Timelike,
-    Utc,
+    DateTime, Duration as ChronoDuration, FixedOffset, NaiveDate, NaiveDateTime, TimeZone,
+    Timelike, Utc,
 };
 use ratatui::{prelude::Line, style::Color};
 
@@ -198,7 +198,11 @@ impl App {
             .position(|category| category.id == edit.target_category_id)
             .unwrap_or(0);
         let next = if direction < 0 {
-            if current == 0 { targets.len() - 1 } else { current - 1 }
+            if current == 0 {
+                targets.len() - 1
+            } else {
+                current - 1
+            }
         } else {
             (current + 1) % targets.len()
         };
@@ -221,9 +225,9 @@ impl App {
         let row = logs
             .get(selected)
             .ok_or_else(|| "selected Idle interval is unavailable".to_string())?;
-        let session_id = row
-            .session_id
-            .ok_or_else(|| "the current active Idle interval cannot be corrected yet".to_string())?;
+        let session_id = row.session_id.ok_or_else(|| {
+            "the current active Idle interval cannot be corrected yet".to_string()
+        })?;
         let session = self
             .time_tracker
             .sessions
@@ -337,6 +341,9 @@ impl App {
             .session
             .active_session_started_at_utc
             .ok_or_else(|| "active session has no UTC start".to_string())?;
+        let started_at_utc = started_at_utc
+            .with_nanosecond(started_at_utc.nanosecond() / 1_000_000 * 1_000_000)
+            .ok_or_else(|| "active session start cannot be represented".to_string())?;
         let started = self
             .time_tracker
             .current_session_start
@@ -416,7 +423,9 @@ impl App {
             Ok(value) => value,
             Err(_) => return false,
         };
-        let Some(source_end) = source_start.checked_add_signed(ChronoDuration::seconds(source_elapsed)) else {
+        let Some(source_end) =
+            source_start.checked_add_signed(ChronoDuration::seconds(source_elapsed))
+        else {
             return false;
         };
         let validation_error = if from >= to {
@@ -424,7 +433,10 @@ impl App {
         } else if from < source_start || to > source_end {
             Some("interval must stay inside the selected completed Idle session".to_string())
         } else if edit.target_category_id == DRIFT_CATEGORY_ID
-            || self.time_tracker.category_by_id(edit.target_category_id).is_none()
+            || self
+                .time_tracker
+                .category_by_id(edit.target_category_id)
+                .is_none()
         {
             Some("choose an active non-Idle layer".to_string())
         } else {
@@ -959,12 +971,8 @@ mod report_edit_state_tests {
             utc_offset_seconds: -6 * 60 * 60,
             start_minutes: 0,
         };
-        let parsed = parse_missed_activity_timestamp(
-            "2026-08-01 23:45:00",
-            policy,
-            source,
-        )
-        .unwrap();
+        let parsed =
+            parse_missed_activity_timestamp("2026-08-01 23:45:00", policy, source).unwrap();
         assert_eq!(
             parsed,
             DateTime::parse_from_rfc3339("2026-08-02T05:45:00.500Z")

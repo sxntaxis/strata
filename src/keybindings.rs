@@ -238,7 +238,9 @@ impl Action {
             Action::ReportWeek => "Set balance pop-up range to week",
             Action::ReportMonth => "Set balance pop-up range to month",
             Action::ReportRange => "Edit an explicit From/To balance range",
-            Action::LogMissedActivity => "Reclassify part of a completed Idle session as missed activity",
+            Action::LogMissedActivity => {
+                "Reclassify part of a completed Idle session as missed activity"
+            }
 
             Action::HelpTop => "Jump command atlas to top",
             Action::HelpBottom => "Jump command atlas to bottom",

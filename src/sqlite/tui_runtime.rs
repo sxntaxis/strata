@@ -17,8 +17,8 @@ use crate::{
         day_boundary_config, runtime_settings,
     },
     sand::{DailySedimentSlice, SandState, SedimentSnapshot, daily_contribution_from_slices},
-    temporal,
     storage::{CategoryTagsState, LoadedCategories, LoadedSessions},
+    temporal,
 };
 
 use super::{
@@ -699,6 +699,7 @@ fn fragment_operational_day(
     temporal::operational_day_from_policy(ended_at_utc, policy)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_history_fragment(
     connection: &rusqlite::Connection,
     existing_id: Option<i64>,
@@ -753,7 +754,9 @@ fn write_history_fragment(
             )
             .map_err(|error| error.to_string())?;
         if changed != 1 {
-            return Err(format!("SQLite session {id} disappeared during historical correction"));
+            return Err(format!(
+                "SQLite session {id} disappeared during historical correction"
+            ));
         }
     } else {
         connection
@@ -807,9 +810,8 @@ fn daily_slices_from_session_rows(
                     utc_offset_seconds: i32::try_from(offset).map_err(|_| {
                         format!("session {} boundary offset is invalid", session.id)
                     })?,
-                    start_minutes: u16::try_from(start_minutes).map_err(|_| {
-                        format!("session {} boundary start is invalid", session.id)
-                    })?,
+                    start_minutes: u16::try_from(start_minutes)
+                        .map_err(|_| format!("session {} boundary start is invalid", session.id))?,
                 };
                 let started_at_utc = parse_utc(&session.started_at_utc)?;
                 let ended_at_utc = parse_utc(&session.ended_at_utc)?;
@@ -956,8 +958,8 @@ fn replace_daily_contributions_in_transaction(
     affected_days: &BTreeSet<NaiveDate>,
     active_preview: Option<&HistoricalActivePreview>,
 ) -> Result<(), String> {
-    let sessions = super::repository::query_all_sessions(transaction)
-        .map_err(|error| error.to_string())?;
+    let sessions =
+        super::repository::query_all_sessions(transaction).map_err(|error| error.to_string())?;
     let existing_sand: Option<(String, i64)> = transaction
         .query_row(
             "SELECT formation_id, quantum_seconds FROM sand_state WHERE singleton = 1",
@@ -1027,8 +1029,8 @@ pub(crate) fn log_missed_activity(
         .map_err(|error| error.to_string())?;
     let source_id = i64::try_from(request.source_session_id)
         .map_err(|_| "source session ID is too large".to_string())?;
-    let sessions = super::repository::query_all_sessions(&transaction)
-        .map_err(|error| error.to_string())?;
+    let sessions =
+        super::repository::query_all_sessions(&transaction).map_err(|error| error.to_string())?;
     let source = sessions
         .iter()
         .find(|session| session.id == source_id)
@@ -1095,22 +1097,25 @@ pub(crate) fn log_missed_activity(
             .map_err(|_| "selected Idle session has invalid boundary start".to_string())?,
     };
 
-    let before_seconds = usize::try_from((request.started_at_utc - source_started_at_utc).num_seconds())
-        .map_err(|_| "missed activity start precedes the source session".to_string())?;
-    let activity_seconds = usize::try_from((request.ended_at_utc - request.started_at_utc).num_seconds())
-        .map_err(|_| "missed activity duration is invalid".to_string())?;
+    let before_seconds =
+        usize::try_from((request.started_at_utc - source_started_at_utc).num_seconds())
+            .map_err(|_| "missed activity start precedes the source session".to_string())?;
+    let activity_seconds =
+        usize::try_from((request.ended_at_utc - request.started_at_utc).num_seconds())
+            .map_err(|_| "missed activity duration is invalid".to_string())?;
     let consumed = before_seconds
         .checked_add(activity_seconds)
         .ok_or_else(|| "missed activity duration overflowed".to_string())?;
     if activity_seconds == 0 || consumed > source_elapsed {
-        return Err("missed activity interval is not representable in canonical whole seconds".to_string());
+        return Err(
+            "missed activity interval is not representable in canonical whole seconds".to_string(),
+        );
     }
     let after_seconds = source_elapsed - consumed;
 
     for other in sessions.iter().filter(|session| session.id != source_id) {
         let other_start = parse_utc(&other.started_at_utc)?;
-        let other_elapsed = i64::try_from(other.elapsed_seconds)
-            .map_err(|_| format!("session {} duration is invalid", other.id))?;
+        let other_elapsed = other.elapsed_seconds;
         let other_end = other_start
             .checked_add_signed(ChronoDuration::seconds(other_elapsed))
             .ok_or_else(|| format!("session {} end exceeds chrono range", other.id))?;
@@ -1908,10 +1913,7 @@ mod tests {
     use chrono::TimeZone;
 
     use super::*;
-    use crate::sqlite::{
-        SqliteRepository,
-        repository::{NewCategoryRecord, NewSessionRecord},
-    };
+    use crate::sqlite::{SqliteRepository, repository::NewCategoryRecord};
 
     fn repository_file(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -2666,8 +2668,14 @@ mod clear_all_transaction_tests {
 mod clear_all_additional_transaction_tests {
     use std::path::{Path, PathBuf};
 
+    use chrono::TimeZone;
+
     use super::*;
-    use crate::sqlite::{NewActiveSession, SqliteRepository, runtime_coordination};
+    use crate::sqlite::{
+        NewActiveSession, SqliteRepository,
+        repository::{NewCategoryRecord, NewSessionRecord},
+        runtime_coordination,
+    };
 
     fn database_path(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -2675,6 +2683,10 @@ mod clear_all_additional_transaction_tests {
             std::process::id(),
             Utc::now().timestamp_nanos_opt().unwrap_or_default()
         ))
+    }
+
+    fn repository_file(name: &str) -> PathBuf {
+        database_path(&format!("history-{name}"))
     }
 
     fn remove_database(path: &Path) {
@@ -2972,12 +2984,20 @@ mod clear_all_additional_transaction_tests {
             vec![0, 1, 0]
         );
         assert_eq!(
-            rows.iter().map(|row| row.elapsed_seconds).collect::<Vec<_>>(),
+            rows.iter()
+                .map(|row| row.elapsed_seconds)
+                .collect::<Vec<_>>(),
             vec![900, 1800, 900]
         );
-        assert_eq!(rows.iter().map(|row| row.elapsed_seconds).sum::<i64>(), 3600);
+        assert_eq!(
+            rows.iter().map(|row| row.elapsed_seconds).sum::<i64>(),
+            3600
+        );
         assert_eq!(rows[0].stable_id, "idle-a");
-        assert!(rows.iter().all(|row| row.source == "tui-history-correction"));
+        assert!(
+            rows.iter()
+                .all(|row| row.source == "tui-history-correction")
+        );
         assert_eq!(rows[0].ended_at_utc, rows[1].started_at_utc);
         assert_eq!(rows[1].ended_at_utc, rows[2].started_at_utc);
         assert_eq!(rows[2].ended_at_utc, "2026-08-02T06:30:00.700Z");
@@ -3114,28 +3134,20 @@ mod clear_all_additional_transaction_tests {
                 "2026-08-02",
                 3600,
             );
-            let result = runtime_coordination::with_test_fault(
-                "history-correction",
-                point,
-                "io",
-                || {
+            let result =
+                runtime_coordination::with_test_fault("history-correction", point, "io", || {
                     log_missed_activity(
                         &path,
                         HistoricalMissedActivityRequest {
                             source_session_id: 1,
                             target_category_id: CategoryId::new(1),
-                            started_at_utc: Utc
-                                .with_ymd_and_hms(2026, 8, 2, 10, 15, 0)
-                                .unwrap(),
-                            ended_at_utc: Utc
-                                .with_ymd_and_hms(2026, 8, 2, 10, 45, 0)
-                                .unwrap(),
+                            started_at_utc: Utc.with_ymd_and_hms(2026, 8, 2, 10, 15, 0).unwrap(),
+                            ended_at_utc: Utc.with_ymd_and_hms(2026, 8, 2, 10, 45, 0).unwrap(),
                             description: String::new(),
                             active_preview: None,
                         },
                     )
-                },
-            );
+                });
             assert!(result.is_err(), "kill point {point} unexpectedly committed");
             let repository = open_cli_repository(&path).unwrap();
             let rows = repository.list_sessions().unwrap();
@@ -3183,5 +3195,4 @@ mod clear_all_additional_transaction_tests {
         drop(repository);
         std::fs::remove_file(path).ok();
     }
-
 }
