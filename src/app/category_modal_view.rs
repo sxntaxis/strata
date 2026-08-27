@@ -23,7 +23,11 @@ impl App {
             .enumerate()
             .map(|(i, cat)| {
                 let is_selected = i == self.selected_index;
-                let dot = if cat.karma_effect < 0 { "◯ " } else { "● " };
+                let dot = if cat.balance_effect < 0 {
+                    "◯ "
+                } else {
+                    "● "
+                };
 
                 if is_selected {
                     let text_color = if cat.id == DRIFT_CATEGORY_ID {

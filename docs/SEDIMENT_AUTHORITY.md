@@ -4,7 +4,7 @@ Status: implemented and certified
 Program: SEDIMENT-001
 Current completed unit: SEDIMENT-001D2
 Issues completed: #6, #7, #16, #18, #26
-Last reviewed: 2026-08-02
+Last reviewed: 2026-08-27
 
 ## Purpose
 
@@ -94,7 +94,7 @@ These kinds are not interchangeable. Historical bare daily payloads are cumulati
 
 ## Authentic day-end visual memory
 
-Karma historical background is visual memory, not a synthetic chart. While the live simulation crosses an operational-day cutoff, Strata captures the exact cumulative canonical `SandState` after processing events due through that boundary. For a fixed 06:00 day start, the artifact for a day is therefore the canonical canvas photo taken at the following 06:00 cutoff.
+Balance historical background is visual memory, not a synthetic chart. While the live simulation crosses an operational-day cutoff, Strata captures the exact cumulative canonical `SandState` after processing events due through that boundary. For a fixed 06:00 day start, the artifact for a day is therefore the canonical canvas photo taken at the following 06:00 cutoff.
 
 The day-end artifact is first-write-wins evidence:
 
@@ -103,13 +103,13 @@ The day-end artifact is first-write-wins evidence:
 - each operational day may therefore own a different canonical canvas size;
 - `snapshot_kind = 'daily'` stores this cumulative visual checkpoint, while `daily-contribution` remains a separate accounting artifact.
 
-If Strata did not observe a boundary through the ordinary live simulation path—for example because it was closed, detached through the cutoff, or bounded recovery deliberately skipped historical physics—it does not fabricate an authentic photo. Karma may then show a `DerivedPreview`, explicitly marked reconstructed.
+If Strata did not observe a boundary through the ordinary live simulation path—for example because it was closed, detached through the cutoff, or bounded recovery deliberately skipped historical physics—it does not fabricate an authentic photo. Balance may then show a `DerivedPreview`, explicitly marked reconstructed.
 
 ## Immutable historical viewing
 
 Historical viewing is projection-only:
 
-- Karma prefers the authentic day-end checkpoint for the selected interval end day;
+- Balance prefers the authentic day-end checkpoint for the selected interval end day;
 - the snapshot envelope and `SandState` remain immutable;
 - rendering restores a clone into a fresh viewport engine;
 - a smaller current viewport crops the historical canvas around horizontal center and bottom baseline;
@@ -120,7 +120,7 @@ Historical viewing is projection-only:
 - the report UI exposes kind, reconstruction status, and idle policy;
 - viewing never writes or deletes persistence.
 
-Day, week, and month Karma use the visual artifact for the selected interval's end day. The numerical report rows remain ledger-derived for the selected period. If no authentic photo exists, an in-memory `DerivedPreview` is the visual fallback and never becomes authority merely by being viewed.
+Day, week, and month Balance use the visual artifact for the selected interval's end day. The numerical report rows remain ledger-derived for the selected period. If no authentic photo exists, an in-memory `DerivedPreview` is the visual fallback and never becomes authority merely by being viewed.
 
 ## Authoritative daily contributions
 

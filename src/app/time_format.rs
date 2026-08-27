@@ -11,7 +11,7 @@ impl App {
         self.time_tracker.get_category_time(category_name)
     }
 
-    pub(super) fn get_karma_adjusted_time(&self) -> isize {
+    pub(super) fn get_balance_adjusted_time(&self) -> isize {
         let today = operational_day_key_now().format("%Y-%m-%d").to_string();
         let mut total: isize = 0;
         for cat in self.time_tracker.categories_ordered() {
@@ -25,12 +25,12 @@ impl App {
                 .filter(|s| s.date == today && s.category_id == cat.id)
                 .map(|s| s.elapsed_seconds as isize)
                 .sum();
-            total += cat_time * cat.karma_effect as isize;
+            total += cat_time * cat.balance_effect as isize;
         }
         total
     }
 
-    pub(super) fn get_category_karma_adjusted_time(&self, category_name: &str) -> isize {
+    pub(super) fn get_category_balance_adjusted_time(&self, category_name: &str) -> isize {
         let today = operational_day_key_now().format("%Y-%m-%d").to_string();
         let categories = self.time_tracker.categories_ordered();
         let cat = categories.iter().find(|c| c.name == category_name);
@@ -42,7 +42,7 @@ impl App {
                 .filter(|s| s.date == today && s.category_id == cat.id)
                 .map(|s| s.elapsed_seconds as isize)
                 .sum();
-            cat_time * cat.karma_effect as isize
+            cat_time * cat.balance_effect as isize
         } else {
             0
         }
@@ -60,7 +60,7 @@ impl App {
         )
     }
 
-    pub(super) fn format_karma_time(&self, seconds: isize) -> String {
+    pub(super) fn format_balance_time(&self, seconds: isize) -> String {
         let abs_secs = seconds.unsigned_abs();
         let sign = if seconds < 0 { "-" } else { "+" };
         format!(

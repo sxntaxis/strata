@@ -177,7 +177,7 @@ fn emergency_categories(
             name: category.name,
             description: category.description,
             color: format!("{:?}", category.color),
-            balance_effect: category.karma_effect,
+            balance_effect: category.balance_effect,
             archived: false,
         })
         .chain(
@@ -189,7 +189,7 @@ fn emergency_categories(
                     name: category.name,
                     description: category.description,
                     color: format!("{:?}", category.color),
-                    balance_effect: category.karma_effect,
+                    balance_effect: category.balance_effect,
                     archived: true,
                 }),
         )
@@ -828,7 +828,7 @@ mod tests {
                 crate::constants::COLORS[((id - 1) as usize) % crate::constants::COLORS.len()]
             },
             description: description.to_string(),
-            karma_effect: if id == 0 { 0 } else { 1 },
+            balance_effect: if id == 0 { 0 } else { 1 },
         }
     }
 

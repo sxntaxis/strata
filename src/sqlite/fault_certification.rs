@@ -90,7 +90,7 @@ fn category(id: u64, name: &str, description: &str, color_index: usize, balance:
         name: name.to_string(),
         color: COLORS[color_index % COLORS.len()],
         description: description.to_string(),
-        karma_effect: balance,
+        balance_effect: balance,
     }
 }
 

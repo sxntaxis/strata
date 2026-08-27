@@ -117,7 +117,7 @@ impl App {
             return None;
         }
 
-        let context = if self.in_karma_modal() {
+        let context = if self.in_balance_modal() {
             InputContext::Report
         } else if self.in_category_modal() || self.show_keybindings_modal {
             InputContext::Other
@@ -152,7 +152,7 @@ impl App {
             return false;
         }
 
-        if self.in_karma_modal() {
+        if self.in_balance_modal() {
             return self.handle_report_modal_action(action);
         }
 
@@ -326,11 +326,11 @@ impl App {
             CommandIntent::Status => self.command_status(),
             CommandIntent::Start { layer, tag } => self.command_start(layer, tag),
             CommandIntent::Stop { layer, tag } => self.command_stop(layer, tag),
-            CommandIntent::Karma {
+            CommandIntent::Balance {
                 selector,
                 layer,
                 tag,
-            } => self.command_karma(selector, layer, tag),
+            } => self.command_balance(selector, layer, tag),
             CommandIntent::DeleteLastSession { layer, tag } => {
                 self.command_delete_last_session(layer, tag)
             }
@@ -499,13 +499,13 @@ impl App {
         Ok(format!("Stopped layer '{active_name}'"))
     }
 
-    fn command_karma(
+    fn command_balance(
         &self,
-        selector: command::KarmaSelector,
+        selector: command::BalanceSelector,
         layer_filter: Option<String>,
         tag_filter: Option<String>,
     ) -> Result<String, String> {
-        let window = command::resolve_karma_window(
+        let window = command::resolve_balance_window(
             &selector,
             crate::domain::operational_day_key_now(),
             self.runtime_settings.first_day_of_week,
@@ -531,7 +531,7 @@ impl App {
                     .unwrap_or_else(|| value.to_string())
             });
         let mut total_elapsed = 0usize;
-        let mut total_karma = 0isize;
+        let mut total_balance = 0isize;
         for session in &self.time_tracker.sessions {
             let Ok(day) = NaiveDate::parse_from_str(&session.date, "%Y-%m-%d") else {
                 continue;
@@ -555,12 +555,12 @@ impl App {
                     if is_drift_category_id(category.id) {
                         0
                     } else {
-                        category.karma_effect
+                        category.balance_effect
                     }
                 })
                 .unwrap_or(0);
             total_elapsed = total_elapsed.saturating_add(session.elapsed_seconds);
-            total_karma = total_karma
+            total_balance = total_balance
                 .saturating_add((session.elapsed_seconds as isize).saturating_mul(effect as isize));
         }
         if let Some(start) = self.time_tracker.current_session_start {
@@ -581,13 +581,13 @@ impl App {
                         if is_drift_category_id(category.id) {
                             0
                         } else {
-                            category.karma_effect
+                            category.balance_effect
                         }
                     })
                     .unwrap_or(0);
                 total_elapsed = total_elapsed.saturating_add(elapsed);
-                total_karma =
-                    total_karma.saturating_add((elapsed as isize).saturating_mul(effect as isize));
+                total_balance = total_balance
+                    .saturating_add((elapsed as isize).saturating_mul(effect as isize));
             }
         }
         let mut scope = String::new();
@@ -601,10 +601,10 @@ impl App {
             scope.push_str(&format!(" tag '{tag}'"));
         }
         Ok(format!(
-            "Karma {}{}: {} (elapsed {})",
+            "Balance {}{}: {} (elapsed {})",
             window.label,
             scope,
-            command::format_signed_hms(total_karma),
+            command::format_signed_hms(total_balance),
             command::format_hms(total_elapsed)
         ))
     }
@@ -658,7 +658,7 @@ impl App {
             }
             PaletteCommand::Action(action) => self.handle_main_action(action),
             PaletteCommand::SetReportPeriod(period) => {
-                if !self.in_karma_modal() {
+                if !self.in_balance_modal() {
                     self.open_report_modal();
                 }
                 self.set_report_period(period);
@@ -961,24 +961,24 @@ impl App {
                     self.delete_category();
                 }
             }
-            Action::IncreaseKarma => {
+            Action::IncreaseBalance => {
                 if !self.is_on_insert_space()
                     && self.selected_index > 0
                     && self.selected_index < self.time_tracker.category_count()
                     && self
                         .time_tracker
-                        .set_category_karma_by_index(self.selected_index, 1)
+                        .set_category_balance_by_index(self.selected_index, 1)
                 {
                     self.persist_categories();
                 }
             }
-            Action::DecreaseKarma => {
+            Action::DecreaseBalance => {
                 if !self.is_on_insert_space()
                     && self.selected_index > 0
                     && self.selected_index < self.time_tracker.category_count()
                     && self
                         .time_tracker
-                        .set_category_karma_by_index(self.selected_index, -1)
+                        .set_category_balance_by_index(self.selected_index, -1)
                 {
                     self.persist_categories();
                 }

@@ -9,7 +9,7 @@ use ratatui::{
 
 use crate::constants::REPORT_MODAL_SETTINGS;
 use crate::domain::{
-    CategoryId, CategoryLogEntry, DRIFT_CATEGORY_ID, KarmaReportSummary, ReportPeriod,
+    BalanceReportSummary, CategoryId, CategoryLogEntry, DRIFT_CATEGORY_ID, ReportPeriod,
 };
 
 use super::{App, ui_helpers, view_style};
@@ -57,7 +57,7 @@ impl App {
         .alignment(Alignment::Left);
 
         let center_title = Line::from(Span::styled(
-            "Karma",
+            "Balance",
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
@@ -65,8 +65,8 @@ impl App {
         .alignment(Alignment::Center);
 
         let total_title = Line::from(Span::styled(
-            self.format_karma_time(summary.total_karma_seconds),
-            Style::default().fg(view_style::karma_color(summary.total_karma_seconds)),
+            self.format_balance_time(summary.total_balance_seconds),
+            Style::default().fg(view_style::balance_color(summary.total_balance_seconds)),
         ))
         .alignment(Alignment::Right);
 
@@ -135,7 +135,7 @@ impl App {
 
     fn preferred_report_inner_width(
         &self,
-        summary: &KarmaReportSummary,
+        summary: &BalanceReportSummary,
         logs_for_view: Option<&[CategoryLogEntry]>,
     ) -> usize {
         if let Some(logs) = logs_for_view {
@@ -285,25 +285,25 @@ impl App {
 
                 let metric_value = if is_none_category {
                     self.format_time(row.elapsed_seconds)
-                } else if row.karma_seconds == 0 && row.karma_effect < 0 {
+                } else if row.balance_seconds == 0 && row.balance_effect < 0 {
                     "-00:00:00".to_string()
                 } else {
-                    self.format_karma_time(row.karma_seconds)
+                    self.format_balance_time(row.balance_seconds)
                 };
                 let metric_cell = format!("{metric_value:>width$}", width = metric_width);
 
                 let metric_color = if is_none_category {
                     Color::Gray
-                } else if row.karma_seconds == 0 {
-                    if row.karma_effect < 0 {
+                } else if row.balance_seconds == 0 {
+                    if row.balance_effect < 0 {
                         Color::Red
-                    } else if row.karma_effect > 0 {
+                    } else if row.balance_effect > 0 {
                         Color::Green
                     } else {
                         Color::Gray
                     }
                 } else {
-                    view_style::karma_color(row.karma_seconds)
+                    view_style::balance_color(row.balance_seconds)
                 };
 
                 if is_selected {
@@ -357,7 +357,7 @@ impl App {
         &self,
         f: &mut Frame,
         list_area: Rect,
-        summary: &KarmaReportSummary,
+        summary: &BalanceReportSummary,
         selected_summary_index: Option<usize>,
     ) {
         let row_width = list_area.width as usize;
@@ -373,9 +373,9 @@ impl App {
             .enumerate()
             .map(|(idx, entry)| {
                 let is_selected = selected_summary_index == Some(idx);
-                let dot = if entry.karma_effect < 0 {
+                let dot = if entry.balance_effect < 0 {
                     "◯ "
-                } else if entry.karma_effect == 0 {
+                } else if entry.balance_effect == 0 {
                     "· "
                 } else {
                     "● "
@@ -386,23 +386,23 @@ impl App {
                 let is_none_row = entry.category_id == DRIFT_CATEGORY_ID;
                 let metric_value = if is_none_row {
                     self.format_time(entry.elapsed_seconds)
-                } else if entry.karma_seconds == 0 && entry.karma_effect < 0 {
+                } else if entry.balance_seconds == 0 && entry.balance_effect < 0 {
                     "-00:00:00".to_string()
                 } else {
-                    self.format_karma_time(entry.karma_seconds)
+                    self.format_balance_time(entry.balance_seconds)
                 };
                 let metric_color = if is_none_row {
                     Color::Gray
-                } else if entry.karma_seconds == 0 {
-                    if entry.karma_effect < 0 {
+                } else if entry.balance_seconds == 0 {
+                    if entry.balance_effect < 0 {
                         Color::Red
-                    } else if entry.karma_effect > 0 {
+                    } else if entry.balance_effect > 0 {
                         Color::Green
                     } else {
                         Color::Gray
                     }
                 } else {
-                    view_style::karma_color(entry.karma_seconds)
+                    view_style::balance_color(entry.balance_seconds)
                 };
 
                 if is_selected {

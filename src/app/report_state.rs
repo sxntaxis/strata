@@ -4,11 +4,10 @@ use chrono::{Duration as ChronoDuration, NaiveDate};
 use ratatui::{prelude::Line, style::Color};
 
 use crate::domain::{
-    Category, CategoryId, CategoryLogEntry, DRIFT_CATEGORY_ID, KarmaReportSummary,
-    LiveSessionPreview, OperationalDayPolicy, ReportPeriod,
-    build_category_logs_for_period_with_offset, build_period_karma_report_with_live_and_offset,
-    day_boundary_config, operational_day_key_now, report_period_date_bounds_with_offset,
-    session_slices,
+    BalanceReportSummary, Category, CategoryId, CategoryLogEntry, DRIFT_CATEGORY_ID,
+    LiveSessionPreview, OperationalDayPolicy, ReportPeriod, ReportWindow,
+    build_balance_report_with_live_for_window, build_category_logs_for_window, day_boundary_config,
+    operational_day_key_now, report_period_window_with_offset, session_slices,
 };
 use crate::sand::{
     DailySedimentSlice, SedimentSnapshot, daily_contribution_from_slices,
@@ -46,15 +45,19 @@ impl App {
             .unwrap_or(Color::White)
     }
 
-    pub(super) fn report_rows(&self) -> KarmaReportSummary {
+    pub(super) fn current_report_window(&self) -> ReportWindow {
+        report_period_window_with_offset(self.report_period, self.report_period_offset)
+    }
+
+    pub(super) fn report_rows(&self) -> BalanceReportSummary {
         let categories = self.report_categories();
         let live_preview = self.live_session_preview();
+        let window = self.current_report_window();
 
-        build_period_karma_report_with_live_and_offset(
+        build_balance_report_with_live_for_window(
             &self.time_tracker.sessions,
             &categories,
-            self.report_period,
-            self.report_period_offset,
+            &window,
             live_preview.as_ref(),
         )
     }
@@ -66,12 +69,12 @@ impl App {
         let categories = self.report_categories();
         let live_preview = self.live_session_preview();
 
-        build_category_logs_for_period_with_offset(
+        let window = self.current_report_window();
+        build_category_logs_for_window(
             &self.time_tracker.sessions,
             &categories,
             category_id,
-            self.report_period,
-            self.report_period_offset,
+            &window,
             live_preview.as_ref(),
         )
     }
@@ -172,7 +175,7 @@ impl App {
     }
 
     pub(super) fn report_interval_end_day(&self) -> NaiveDate {
-        report_period_date_bounds_with_offset(self.report_period, self.report_period_offset).1
+        self.current_report_window().end
     }
 
     pub(super) fn should_use_report_snapshot(&self) -> bool {

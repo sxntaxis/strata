@@ -1,11 +1,15 @@
 # Report and export authority
 
 Status: accepted and certified
-Last reviewed: 2026-08-20
+Last reviewed: 2026-08-27
 
 ## Purpose
 
 Reports and exports are projections over Strata's canonical chronological ledger. They expose active uncertainty and operational-day allocation without rewriting canonical sessions.
+
+## Current product vocabulary
+
+The interactive historical/report surface is named **Balance**. Day, week, and month are presets over report windows; arbitrary inclusive operational-day windows are already valid reporting semantics and HISTORY-001 exposes them directly in the TUI rather than creating a second report engine.
 
 ## Range semantics
 
@@ -34,18 +38,19 @@ Report entries sort by elapsed time, case-insensitive category name, then catego
 
 ## JSON contract
 
-General JSON export schema version 3 contains:
+General JSON export schema version 4 contains:
 
 - optional repository numeric ID;
 - stable UID;
 - provisional flag;
 - category ID and name;
+- category `balance_effect`;
 - description;
 - civil display fields;
 - elapsed seconds;
 - authoritative UTC endpoints when known.
 
-The retired independent `project` field is not part of schema 3. General JSON is a projection format; deterministic full-state interchange uses the separate SQLite portable-bundle contract.
+The retired independent `project` field is not part of schema 4. Schema 4 also retires the old exported `karma_effect` field name in favor of `balance_effect`. General JSON is a projection format; deterministic full-state interchange uses the separate SQLite portable-bundle contract.
 
 ## ICS contract
 

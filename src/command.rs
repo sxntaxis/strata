@@ -1,7 +1,7 @@
 use chrono::{Datelike, Duration as ChronoDuration, NaiveDate, Weekday};
 use serde::{Deserialize, Serialize};
 
-use crate::domain::FirstDayOfWeek;
+use crate::domain::{FirstDayOfWeek, ReportWindow};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum CommandIntent {
@@ -14,8 +14,8 @@ pub(crate) enum CommandIntent {
         layer: Option<String>,
         tag: Option<String>,
     },
-    Karma {
-        selector: KarmaSelector,
+    Balance {
+        selector: BalanceSelector,
         layer: Option<String>,
         tag: Option<String>,
     },
@@ -37,7 +37,7 @@ impl CommandIntent {
         matches!(
             self,
             Self::Status
-                | Self::Karma { .. }
+                | Self::Balance { .. }
                 | Self::DataDir
                 | Self::ConfigDir
                 | Self::Timer { .. }
@@ -46,7 +46,7 @@ impl CommandIntent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum KarmaSelector {
+pub(crate) enum BalanceSelector {
     Today,
     Yesterday,
     Weekday(Weekday),
@@ -59,18 +59,11 @@ pub(crate) enum KarmaSelector {
     Date(NaiveDate),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct KarmaWindow {
-    pub start: NaiveDate,
-    pub end: NaiveDate,
-    pub label: String,
-}
-
 pub(crate) fn parse(input: &str) -> Result<CommandIntent, String> {
     let tokens = tokenize(input)?;
     let Some((command, args)) = tokens.split_first() else {
         return Err(
-            "Missing command. Try: status, start, stop, karma, x, datadir, configdir, timer"
+            "Missing command. Try: status, start, stop, balance, x, datadir, configdir, timer"
                 .to_string(),
         );
     };
@@ -79,7 +72,7 @@ pub(crate) fn parse(input: &str) -> Result<CommandIntent, String> {
         "status" if args.is_empty() => Ok(CommandIntent::Status),
         "start" => parse_start(args),
         "stop" => parse_stop(args),
-        "karma" => parse_karma(args),
+        "balance" => parse_balance(args),
         "x" => parse_delete_last_session(args),
         "datadir" if args.is_empty() => Ok(CommandIntent::DataDir),
         "configdir" if args.is_empty() => Ok(CommandIntent::ConfigDir),
@@ -155,23 +148,23 @@ fn parse_stop(args: &[String]) -> Result<CommandIntent, String> {
     })
 }
 
-fn parse_karma(args: &[String]) -> Result<CommandIntent, String> {
+fn parse_balance(args: &[String]) -> Result<CommandIntent, String> {
     if args.is_empty() {
-        return Ok(CommandIntent::Karma {
-            selector: KarmaSelector::Today,
+        return Ok(CommandIntent::Balance {
+            selector: BalanceSelector::Today,
             layer: None,
             tag: None,
         });
     }
 
     let mut index = 0usize;
-    let mut selector = KarmaSelector::Today;
-    if let Some((parsed, consumed)) = parse_karma_selector(args) {
+    let mut selector = BalanceSelector::Today;
+    if let Some((parsed, consumed)) = parse_balance_selector(args) {
         selector = parsed;
         index = consumed;
     }
-    let (layer, tag) = parse_karma_scope(&args[index..])?;
-    Ok(CommandIntent::Karma {
+    let (layer, tag) = parse_balance_scope(&args[index..])?;
+    Ok(CommandIntent::Balance {
         selector,
         layer,
         tag,
@@ -193,7 +186,7 @@ fn parse_delete_last_session(args: &[String]) -> Result<CommandIntent, String> {
     })
 }
 
-fn parse_karma_scope(tokens: &[String]) -> Result<(Option<String>, Option<String>), String> {
+fn parse_balance_scope(tokens: &[String]) -> Result<(Option<String>, Option<String>), String> {
     if tokens.is_empty() {
         return Ok((None, None));
     }
@@ -203,88 +196,88 @@ fn parse_karma_scope(tokens: &[String]) -> Result<(Option<String>, Option<String
         return Err("Expected layer name after 'layer'".to_string());
     }
     if scoped.len() > 2 {
-        return Err("Usage: karma [time] [layer [tag]]".to_string());
+        return Err("Usage: balance [time] [layer [tag]]".to_string());
     }
     Ok((scoped.first().cloned(), scoped.get(1).cloned()))
 }
 
-fn parse_karma_selector(tokens: &[String]) -> Option<(KarmaSelector, usize)> {
+fn parse_balance_selector(tokens: &[String]) -> Option<(BalanceSelector, usize)> {
     let first = tokens.first()?.trim_end_matches('=').to_ascii_lowercase();
     let selector = match first.as_str() {
-        "today" => Some((KarmaSelector::Today, 1)),
-        "yesterday" => Some((KarmaSelector::Yesterday, 1)),
-        "week" => Some((KarmaSelector::CurrentWeek, 1)),
-        "lastweek" => Some((KarmaSelector::LastWeek, 1)),
-        "month" => Some((KarmaSelector::CurrentMonth, 1)),
-        "lastmonth" => Some((KarmaSelector::LastMonth, 1)),
-        "monday" => Some((KarmaSelector::Weekday(Weekday::Mon), 1)),
-        "tuesday" => Some((KarmaSelector::Weekday(Weekday::Tue), 1)),
-        "wednesday" => Some((KarmaSelector::Weekday(Weekday::Wed), 1)),
-        "thursday" => Some((KarmaSelector::Weekday(Weekday::Thu), 1)),
-        "friday" => Some((KarmaSelector::Weekday(Weekday::Fri), 1)),
-        "saturday" => Some((KarmaSelector::Weekday(Weekday::Sat), 1)),
-        "sunday" => Some((KarmaSelector::Weekday(Weekday::Sun), 1)),
+        "today" => Some((BalanceSelector::Today, 1)),
+        "yesterday" => Some((BalanceSelector::Yesterday, 1)),
+        "week" => Some((BalanceSelector::CurrentWeek, 1)),
+        "lastweek" => Some((BalanceSelector::LastWeek, 1)),
+        "month" => Some((BalanceSelector::CurrentMonth, 1)),
+        "lastmonth" => Some((BalanceSelector::LastMonth, 1)),
+        "monday" => Some((BalanceSelector::Weekday(Weekday::Mon), 1)),
+        "tuesday" => Some((BalanceSelector::Weekday(Weekday::Tue), 1)),
+        "wednesday" => Some((BalanceSelector::Weekday(Weekday::Wed), 1)),
+        "thursday" => Some((BalanceSelector::Weekday(Weekday::Thu), 1)),
+        "friday" => Some((BalanceSelector::Weekday(Weekday::Fri), 1)),
+        "saturday" => Some((BalanceSelector::Weekday(Weekday::Sat), 1)),
+        "sunday" => Some((BalanceSelector::Weekday(Weekday::Sun), 1)),
         _ => None,
     };
     if selector.is_some() {
         return selector;
     }
     if let Some(week) = parse_week_token(&first) {
-        return Some((KarmaSelector::IsoWeek(week), 1));
+        return Some((BalanceSelector::IsoWeek(week), 1));
     }
     if let Ok(date) = NaiveDate::parse_from_str(&first, "%Y-%m-%d") {
-        return Some((KarmaSelector::Date(date), 1));
+        return Some((BalanceSelector::Date(date), 1));
     }
     if let Some((month, day)) = parse_month_day_compact(&first) {
-        return Some((KarmaSelector::MonthDay { month, day }, 1));
+        return Some((BalanceSelector::MonthDay { month, day }, 1));
     }
     if tokens.len() >= 2
         && let Some(month) = parse_month_name(&first)
         && let Ok(day) = tokens[1].parse::<u32>()
         && (1..=31).contains(&day)
     {
-        return Some((KarmaSelector::MonthDay { month, day }, 2));
+        return Some((BalanceSelector::MonthDay { month, day }, 2));
     }
     None
 }
 
-pub(crate) fn resolve_karma_window(
-    selector: &KarmaSelector,
+pub(crate) fn resolve_balance_window(
+    selector: &BalanceSelector,
     today: NaiveDate,
     first_day_of_week: FirstDayOfWeek,
-) -> Result<KarmaWindow, String> {
+) -> Result<ReportWindow, String> {
     match selector {
-        KarmaSelector::Today => Ok(single_day(today)),
-        KarmaSelector::Yesterday => Ok(single_day(today - ChronoDuration::days(1))),
-        KarmaSelector::Weekday(target) => {
+        BalanceSelector::Today => Ok(single_day(today)),
+        BalanceSelector::Yesterday => Ok(single_day(today - ChronoDuration::days(1))),
+        BalanceSelector::Weekday(target) => {
             let today_index = today.weekday().num_days_from_monday() as i64;
             let target_index = target.num_days_from_monday() as i64;
             Ok(single_day(
                 today - ChronoDuration::days((7 + today_index - target_index) % 7),
             ))
         }
-        KarmaSelector::CurrentWeek => {
+        BalanceSelector::CurrentWeek => {
             let start = start_of_week(today, first_day_of_week);
             Ok(window(start, today))
         }
-        KarmaSelector::LastWeek => {
+        BalanceSelector::LastWeek => {
             let start = start_of_week(today, first_day_of_week) - ChronoDuration::days(7);
             Ok(window(start, start + ChronoDuration::days(6)))
         }
-        KarmaSelector::CurrentMonth => Ok(window(today.with_day(1).unwrap_or(today), today)),
-        KarmaSelector::LastMonth => {
+        BalanceSelector::CurrentMonth => Ok(window(today.with_day(1).unwrap_or(today), today)),
+        BalanceSelector::LastMonth => {
             let previous_end = today.with_day(1).unwrap_or(today) - ChronoDuration::days(1);
             Ok(window(
                 previous_end.with_day(1).unwrap_or(previous_end),
                 previous_end,
             ))
         }
-        KarmaSelector::IsoWeek(week) => {
+        BalanceSelector::IsoWeek(week) => {
             let start = NaiveDate::from_isoywd_opt(today.year(), *week, Weekday::Mon)
                 .ok_or_else(|| format!("Invalid ISO week '{week}'"))?;
             Ok(window(start, start + ChronoDuration::days(6)))
         }
-        KarmaSelector::MonthDay { month, day } => {
+        BalanceSelector::MonthDay { month, day } => {
             let mut year = today.year();
             let mut resolved = NaiveDate::from_ymd_opt(year, *month, *day)
                 .ok_or_else(|| format!("Invalid date selector '{}{}'", month_name(*month), day))?;
@@ -296,24 +289,16 @@ pub(crate) fn resolve_karma_window(
             }
             Ok(single_day(resolved))
         }
-        KarmaSelector::Date(date) => Ok(single_day(*date)),
+        BalanceSelector::Date(date) => Ok(single_day(*date)),
     }
 }
 
-fn single_day(day: NaiveDate) -> KarmaWindow {
-    KarmaWindow {
-        start: day,
-        end: day,
-        label: day.format("%Y-%m-%d").to_string(),
-    }
+fn single_day(day: NaiveDate) -> ReportWindow {
+    ReportWindow::single_day(day)
 }
 
-fn window(start: NaiveDate, end: NaiveDate) -> KarmaWindow {
-    KarmaWindow {
-        start,
-        end,
-        label: format!("{}..{}", start.format("%Y-%m-%d"), end.format("%Y-%m-%d")),
-    }
+fn window(start: NaiveDate, end: NaiveDate) -> ReportWindow {
+    ReportWindow::new(start, end).expect("resolved balance window must be chronological")
 }
 
 fn parse_week_token(value: &str) -> Option<u32> {
@@ -494,19 +479,24 @@ mod tests {
     }
 
     #[test]
-    fn parses_karma_selectors_and_scope() {
+    fn legacy_karma_command_is_not_part_of_balance_vocabulary() {
+        assert!(parse("karma").is_err());
+    }
+
+    #[test]
+    fn parses_balance_selectors_and_scope() {
         assert_eq!(
-            parse("karma lastweek Work focus").unwrap(),
-            CommandIntent::Karma {
-                selector: KarmaSelector::LastWeek,
+            parse("balance lastweek Work focus").unwrap(),
+            CommandIntent::Balance {
+                selector: BalanceSelector::LastWeek,
                 layer: Some("Work".into()),
                 tag: Some("focus".into()),
             }
         );
         assert_eq!(
-            parse("karma 2026-08-20").unwrap(),
-            CommandIntent::Karma {
-                selector: KarmaSelector::Date(NaiveDate::from_ymd_opt(2026, 8, 20).unwrap()),
+            parse("balance 2026-08-20").unwrap(),
+            CommandIntent::Balance {
+                selector: BalanceSelector::Date(NaiveDate::from_ymd_opt(2026, 8, 20).unwrap()),
                 layer: None,
                 tag: None,
             }

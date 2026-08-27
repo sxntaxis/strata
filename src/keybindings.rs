@@ -35,7 +35,7 @@ impl ActionCategory {
             Self::Global => "Core Commands",
             Self::Navigation => "Flow Controls",
             Self::CategoryModal => "Layer Pop-up",
-            Self::ReportModal => "Karma Pop-up",
+            Self::ReportModal => "Balance Pop-up",
             Self::HelpModal => "Command Atlas",
         }
     }
@@ -66,8 +66,8 @@ pub(crate) enum Action {
 
     DeleteCategory,
     EditCategoryDescription,
-    IncreaseKarma,
-    DecreaseKarma,
+    IncreaseBalance,
+    DecreaseBalance,
     Backspace,
 
     ReportToday,
@@ -101,8 +101,8 @@ impl Action {
         Action::Cancel,
         Action::DeleteCategory,
         Action::EditCategoryDescription,
-        Action::IncreaseKarma,
-        Action::DecreaseKarma,
+        Action::IncreaseBalance,
+        Action::DecreaseBalance,
         Action::Backspace,
         Action::ReportToday,
         Action::ReportWeek,
@@ -120,7 +120,7 @@ impl Action {
             Action::Quit => "quit",
             Action::ToggleCommandPalette => "toggle_command_palette",
             Action::OpenCategoryModal => "open_layer_popup",
-            Action::OpenReportModal => "open_karma_popup",
+            Action::OpenReportModal => "open_balance_popup",
             Action::Detach => "detach",
             Action::SwitchToNone => "switch_to_drift",
             Action::ClearAllSand => "clear_all_sand",
@@ -140,13 +140,13 @@ impl Action {
 
             Action::DeleteCategory => "delete_layer",
             Action::EditCategoryDescription => "edit_layer_metadata",
-            Action::IncreaseKarma => "boost_layer_karma",
-            Action::DecreaseKarma => "drain_layer_karma",
+            Action::IncreaseBalance => "boost_layer_balance",
+            Action::DecreaseBalance => "drain_layer_balance",
             Action::Backspace => "backspace",
 
-            Action::ReportToday => "karma_today",
-            Action::ReportWeek => "karma_week",
-            Action::ReportMonth => "karma_month",
+            Action::ReportToday => "balance_today",
+            Action::ReportWeek => "balance_week",
+            Action::ReportMonth => "balance_month",
 
             Action::HelpTop => "atlas_top",
             Action::HelpBottom => "atlas_bottom",
@@ -159,7 +159,7 @@ impl Action {
             "toggle_command_palette" | "toggle_palette" => Some(Self::ToggleCommandPalette),
 
             "open_layer_popup" | "open_category_modal" => Some(Self::OpenCategoryModal),
-            "open_karma_popup" | "open_report_modal" => Some(Self::OpenReportModal),
+            "open_balance_popup" | "open_report_modal" => Some(Self::OpenReportModal),
             "detach" | "detach_from_main" => Some(Self::Detach),
             "switch_to_drift" | "switch_to_none" => Some(Self::SwitchToNone),
 
@@ -182,13 +182,13 @@ impl Action {
             "edit_layer_metadata" | "edit_category_description" => {
                 Some(Self::EditCategoryDescription)
             }
-            "boost_layer_karma" | "increase_karma" => Some(Self::IncreaseKarma),
-            "drain_layer_karma" | "decrease_karma" => Some(Self::DecreaseKarma),
+            "boost_layer_balance" | "increase_balance" => Some(Self::IncreaseBalance),
+            "drain_layer_balance" | "decrease_balance" => Some(Self::DecreaseBalance),
             "backspace" => Some(Self::Backspace),
 
-            "karma_today" | "report_today" => Some(Self::ReportToday),
-            "karma_week" | "report_week" => Some(Self::ReportWeek),
-            "karma_month" | "report_month" => Some(Self::ReportMonth),
+            "balance_today" | "report_today" => Some(Self::ReportToday),
+            "balance_week" | "report_week" => Some(Self::ReportWeek),
+            "balance_month" | "report_month" => Some(Self::ReportMonth),
 
             "atlas_top" | "help_top" => Some(Self::HelpTop),
             "atlas_bottom" | "help_bottom" => Some(Self::HelpBottom),
@@ -202,8 +202,8 @@ impl Action {
             Action::Quit => "Exit Strata",
             Action::ToggleCommandPalette => "Open/close command palette",
             Action::OpenCategoryModal => "Open layer pop-up from main view",
-            Action::OpenReportModal => "Open karma pop-up from main view",
-            Action::Detach => "Detach from main view (in karma pop-up: day range)",
+            Action::OpenReportModal => "Open balance pop-up from main view",
+            Action::Detach => "Detach from main view (in balance pop-up: day range)",
             Action::SwitchToNone => "Switch active layer to idle",
             Action::ClearAllSand => "Clear all sand and reset idle timer",
             Action::ClearNoneSand => "Clear only idle sand",
@@ -211,8 +211,8 @@ impl Action {
 
             Action::Up => "Move up / previous item",
             Action::Down => "Move down / next item",
-            Action::Left => "Context ← action (layer tags or older karma interval)",
-            Action::Right => "Context → action (layer tags or newer karma interval)",
+            Action::Left => "Context ← action (layer tags or older balance interval)",
+            Action::Right => "Context → action (layer tags or newer balance interval)",
             Action::ShiftUp => "Shift+↑ action (layer reorder)",
             Action::ShiftDown => "Shift+↓ action (layer reorder)",
             Action::ShiftLeft => "Shift+← action (color or period)",
@@ -222,13 +222,13 @@ impl Action {
 
             Action::DeleteCategory => "Archive selected layer / delete selected report session",
             Action::EditCategoryDescription => "Toggle durable layer-metadata editing",
-            Action::IncreaseKarma => "Set selected layer karma to +1",
-            Action::DecreaseKarma => "Set selected layer karma to -1",
+            Action::IncreaseBalance => "Set selected layer balance to +1",
+            Action::DecreaseBalance => "Set selected layer balance to -1",
             Action::Backspace => "Delete one typed character in layer pop-up",
 
-            Action::ReportToday => "Set karma pop-up range to day",
-            Action::ReportWeek => "Set karma pop-up range to week",
-            Action::ReportMonth => "Set karma pop-up range to month",
+            Action::ReportToday => "Set balance pop-up range to day",
+            Action::ReportWeek => "Set balance pop-up range to week",
+            Action::ReportMonth => "Set balance pop-up range to month",
 
             Action::HelpTop => "Jump command atlas to top",
             Action::HelpBottom => "Jump command atlas to bottom",
@@ -260,8 +260,8 @@ impl Action {
 
             Action::DeleteCategory
             | Action::EditCategoryDescription
-            | Action::IncreaseKarma
-            | Action::DecreaseKarma
+            | Action::IncreaseBalance
+            | Action::DecreaseBalance
             | Action::Backspace => ActionCategory::CategoryModal,
 
             Action::ReportToday | Action::ReportWeek | Action::ReportMonth => {
@@ -799,7 +799,7 @@ const DEFAULT_BINDINGS: [(&str, Action); 31] = [
     ("ctrl-p", Action::ToggleCommandPalette),
     ("enter", Action::Confirm),
     ("esc", Action::Cancel),
-    ("k", Action::OpenReportModal),
+    ("b", Action::OpenReportModal),
     ("d", Action::Detach),
     ("c", Action::ClearAllSand),
     ("shift-c", Action::ClearNoneSand),
@@ -815,10 +815,10 @@ const DEFAULT_BINDINGS: [(&str, Action); 31] = [
     ("shift-right", Action::ShiftRight),
     ("x", Action::DeleteCategory),
     ("shift-e", Action::EditCategoryDescription),
-    ("+", Action::IncreaseKarma),
-    ("=", Action::IncreaseKarma),
-    ("-", Action::DecreaseKarma),
-    ("_", Action::DecreaseKarma),
+    ("+", Action::IncreaseBalance),
+    ("=", Action::IncreaseBalance),
+    ("-", Action::DecreaseBalance),
+    ("_", Action::DecreaseBalance),
     ("backspace", Action::Backspace),
     ("t", Action::ReportToday),
     ("w", Action::ReportWeek),
@@ -853,7 +853,7 @@ const DEFAULT_CONTEXTUAL_ALIASES: [ContextualAliasDefinition; 4] = [
         condition: AliasCondition::TargetUnbound,
     },
     ContextualAliasDefinition {
-        name: "main.karma_today",
+        name: "main.balance_today",
         context: InputContext::Main,
         source: Action::ReportToday,
         target: Action::Detach,
@@ -1301,12 +1301,12 @@ mod tests {
     }
 
     #[test]
-    fn test_default_keymap_keeps_k_for_karma() {
+    fn test_default_keymap_has_b_for_balance() {
         let keymap = default_keymap();
-        let k = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE);
+        let b = KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE);
 
         assert_eq!(
-            keymap.action_for_key_event(k),
+            keymap.action_for_key_event(b),
             Some(Action::OpenReportModal)
         );
     }
@@ -1333,7 +1333,7 @@ mod tests {
     }
 
     #[test]
-    fn test_default_keymap_has_t_for_karma_day() {
+    fn test_default_keymap_has_t_for_balance_day() {
         let keymap = default_keymap();
         let t = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE);
 
@@ -1562,8 +1562,8 @@ mod tests {
         fs::write(
             &path,
             r#"{
-              "keymap":{"ctrl-r":"open_karma_popup"},
-              "unbind_actions":["open_karma_popup"]
+              "keymap":{"ctrl-r":"open_balance_popup"},
+              "unbind_actions":["open_balance_popup"]
             }"#,
         )
         .unwrap();
@@ -1605,7 +1605,7 @@ mod tests {
     #[test]
     fn configuring_mandatory_ctrl_c_is_rejected() {
         let path = unique_path("strata_keymap_mandatory_conflict");
-        fs::write(&path, r#"{"keymap":{"ctrl-c":"open_karma_popup"}}"#).unwrap();
+        fs::write(&path, r#"{"keymap":{"ctrl-c":"open_balance_popup"}}"#).unwrap();
         let error = load_keymap_for_test(&path).unwrap_err();
         assert!(error.contains("mandatory Quit policy"));
         fs::remove_file(path).ok();

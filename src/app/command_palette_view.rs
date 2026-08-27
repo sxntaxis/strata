@@ -152,8 +152,8 @@ impl App {
             ),
             self.palette_action_entry(
                 Action::OpenReportModal,
-                "Open karma pop-up",
-                &["karma", "report", "popup"],
+                "Open balance pop-up",
+                &["balance", "report", "popup"],
             ),
             self.palette_action_entry(
                 Action::Detach,
@@ -170,12 +170,20 @@ impl App {
                 "Switch layer: idle",
                 &["drift", "idle", "none", "neutral"],
             ),
-            self.palette_period_entry(ReportPeriod::Today, Action::ReportToday, "Karma range: day"),
-            self.palette_period_entry(ReportPeriod::Week, Action::ReportWeek, "Karma range: week"),
+            self.palette_period_entry(
+                ReportPeriod::Today,
+                Action::ReportToday,
+                "Balance range: day",
+            ),
+            self.palette_period_entry(
+                ReportPeriod::Week,
+                Action::ReportWeek,
+                "Balance range: week",
+            ),
             self.palette_period_entry(
                 ReportPeriod::Month,
                 Action::ReportMonth,
-                "Karma range: month",
+                "Balance range: month",
             ),
             self.palette_action_entry(
                 Action::ClearAllSand,
@@ -253,7 +261,7 @@ impl App {
     ) -> PaletteEntry {
         let hint = self.palette_hint_for_action(hint_action);
         let search_text = format!(
-            "{} karma report {}",
+            "{} balance report {}",
             title.to_ascii_lowercase(),
             period_search_label(period)
         );
@@ -531,14 +539,14 @@ mod tests {
 
     #[test]
     fn test_palette_token_score_accepts_small_typos() {
-        let exact = palette_token_score("karma", "karma range day").expect("exact match");
-        let typo = palette_token_score("karmma", "karma range day").expect("typo match");
+        let exact = palette_token_score("balance", "balance range day").expect("exact match");
+        let typo = palette_token_score("balnce", "balance range day").expect("typo match");
 
         assert!(exact < typo);
     }
 
     #[test]
     fn test_levenshtein_distance_limit_rejects_large_typos() {
-        assert_eq!(levenshtein_distance_with_limit("karma", "krmzz", 2), None);
+        assert_eq!(levenshtein_distance_with_limit("balance", "krmzz", 2), None);
     }
 }

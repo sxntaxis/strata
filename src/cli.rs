@@ -11,8 +11,8 @@ use crate::{
     command::CommandIntent,
     constants::COLORS,
     domain::{
-        CategoryId, OperationalDayPolicy, ReportPeriod, Session, build_period_report,
-        build_report_for_date_range, civil_time_for_utc, day_boundary_config,
+        CategoryId, OperationalDayPolicy, ReportPeriod, ReportWindow, Session, build_period_report,
+        build_report_for_window, civil_time_for_utc, day_boundary_config,
         operational_day_key_for_utc,
     },
     profile, sqlite, storage,
@@ -228,7 +228,7 @@ pub struct CategoryExport {
     pub name: String,
     pub description: String,
     pub color_index: usize,
-    pub karma_effect: i8,
+    pub balance_effect: i8,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -360,15 +360,12 @@ fn print_report(
             (title, build_period_report(sessions, categories, period))
         }
         ReportSelection::Custom { start, end } => {
-            if start > end {
-                return Err(format!(
-                    "Invalid report range: --from {start} is later than --to {end}"
-                ));
-            }
-            let label = format!("{start}..{end}");
+            let window = ReportWindow::new(start, end).map_err(|_| {
+                format!("Invalid report range: --from {start} is later than --to {end}")
+            })?;
             (
                 "Custom Report".to_string(),
-                build_report_for_date_range(sessions, categories, start, end, label),
+                build_report_for_window(sessions, categories, &window),
             )
         }
     };
@@ -502,14 +499,14 @@ fn export_data_sqlite(
                 name: category.name.clone(),
                 description: category.description.clone(),
                 color_index: color_pos,
-                karma_effect: category.karma_effect,
+                balance_effect: category.balance_effect,
             }
         })
         .collect::<Vec<_>>();
     sort_exports(&mut categories, &mut sessions);
     write_export(
         DataExport {
-            schema_version: 3,
+            schema_version: 4,
             exported_at: snapshot_at,
             categories,
             sessions,
@@ -949,7 +946,7 @@ mod report_export_tests {
 
     fn sample_export() -> DataExport {
         DataExport {
-            schema_version: 3,
+            schema_version: 4,
             exported_at: DateTime::parse_from_rfc3339("2026-08-02T03:00:00Z")
                 .unwrap()
                 .with_timezone(&Utc),
@@ -1006,14 +1003,14 @@ mod report_export_tests {
                 name: "beta".into(),
                 description: String::new(),
                 color_index: 0,
-                karma_effect: 1,
+                balance_effect: 1,
             },
             CategoryExport {
                 id: 1,
                 name: "Alpha".into(),
                 description: String::new(),
                 color_index: 0,
-                karma_effect: 1,
+                balance_effect: 1,
             },
         ];
         let mut sessions = vec![

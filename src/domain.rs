@@ -41,7 +41,7 @@ pub struct Category {
     pub name: String,
     pub color: Color,
     pub description: String,
-    pub karma_effect: i8,
+    pub balance_effect: i8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -99,21 +99,21 @@ pub struct ReportSummary {
 }
 
 #[derive(Debug, Clone)]
-pub struct KarmaReportEntry {
+pub struct BalanceReportEntry {
     pub category_id: CategoryId,
     pub category_name: String,
     pub color: Color,
     pub elapsed_seconds: usize,
-    pub karma_effect: i8,
-    pub karma_seconds: isize,
+    pub balance_effect: i8,
+    pub balance_seconds: isize,
 }
 
 #[derive(Debug, Clone)]
-pub struct KarmaReportSummary {
+pub struct BalanceReportSummary {
     pub date: String,
-    pub entries: Vec<KarmaReportEntry>,
+    pub entries: Vec<BalanceReportEntry>,
     pub total_seconds: usize,
-    pub total_karma_seconds: isize,
+    pub total_balance_seconds: isize,
 }
 
 #[derive(Debug, Clone)]
@@ -124,8 +124,8 @@ pub struct CategoryLogEntry {
     pub end_time: String,
     pub description: String,
     pub elapsed_seconds: usize,
-    pub karma_effect: i8,
-    pub karma_seconds: isize,
+    pub balance_effect: i8,
+    pub balance_seconds: isize,
 }
 
 #[derive(Debug, Clone)]
@@ -143,6 +143,40 @@ pub enum ReportPeriod {
     Today,
     Week,
     Month,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReportWindow {
+    pub start: NaiveDate,
+    pub end: NaiveDate,
+    pub label: String,
+}
+
+impl ReportWindow {
+    pub fn new(start: NaiveDate, end: NaiveDate) -> Result<Self, String> {
+        if start > end {
+            return Err(format!(
+                "report window start {} is after end {}",
+                start.format("%Y-%m-%d"),
+                end.format("%Y-%m-%d")
+            ));
+        }
+
+        let label = if start == end {
+            start.format("%Y-%m-%d").to_string()
+        } else {
+            format!("{}..{}", start.format("%Y-%m-%d"), end.format("%Y-%m-%d"))
+        };
+        Ok(Self { start, end, label })
+    }
+
+    pub fn single_day(day: NaiveDate) -> Self {
+        Self {
+            start: day,
+            end: day,
+            label: day.format("%Y-%m-%d").to_string(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -269,12 +303,9 @@ pub fn civil_time_for_utc(timestamp: DateTime<Utc>) -> DateTime<FixedOffset> {
         .expect("runtime UTC offset must be validated before time authority is used")
 }
 
-pub fn report_period_date_bounds_with_offset(
-    period: ReportPeriod,
-    offset: usize,
-) -> (NaiveDate, NaiveDate) {
-    let (start, end, _) = period_bounds_with_offset(period, offset);
-    (start, end)
+pub fn report_period_window_with_offset(period: ReportPeriod, offset: usize) -> ReportWindow {
+    let (start, end, label) = period_bounds_with_offset(period, offset);
+    ReportWindow { start, end, label }
 }
 
 pub(crate) fn operational_day_key_from_utc(
@@ -300,7 +331,7 @@ impl CategoryStore {
             name: DRIFT_CATEGORY_CONFIG_NAME.to_string(),
             color: Color::White,
             description: String::new(),
-            karma_effect: 0,
+            balance_effect: 0,
         };
         by_id.insert(none.id, none);
 
@@ -409,7 +440,7 @@ impl CategoryStore {
                 name: trimmed.to_string(),
                 color: COLORS[color_idx % COLORS.len()],
                 description,
-                karma_effect: 1,
+                balance_effect: 1,
             },
         );
         self.order.push(id);
@@ -495,7 +526,7 @@ impl CategoryStore {
         true
     }
 
-    pub fn set_karma_by_index(&mut self, index: usize, karma_effect: i8) -> bool {
+    pub fn set_balance_by_index(&mut self, index: usize, balance_effect: i8) -> bool {
         if index == 0 {
             return false;
         }
@@ -508,7 +539,7 @@ impl CategoryStore {
             return false;
         };
 
-        category.karma_effect = karma_effect;
+        category.balance_effect = balance_effect;
         true
     }
 }
@@ -623,8 +654,9 @@ impl TimeTracker {
         self.category_store.set_color_by_index(index, color)
     }
 
-    pub fn set_category_karma_by_index(&mut self, index: usize, karma_effect: i8) -> bool {
-        self.category_store.set_karma_by_index(index, karma_effect)
+    pub fn set_category_balance_by_index(&mut self, index: usize, balance_effect: i8) -> bool {
+        self.category_store
+            .set_balance_by_index(index, balance_effect)
     }
 
     pub fn move_category_up(&mut self, index: usize) -> bool {
@@ -863,11 +895,6 @@ fn live_session_slices(live: &LiveSessionPreview) -> Vec<SessionSlice> {
     .collect()
 }
 
-pub fn build_today_report(sessions: &[Session], categories: &[Category]) -> ReportSummary {
-    let today = operational_day_key_now().format("%Y-%m-%d").to_string();
-    build_report_for_date(sessions, categories, &today)
-}
-
 pub fn build_period_report(
     sessions: &[Session],
     categories: &[Category],
@@ -882,12 +909,22 @@ pub fn build_period_report_with_offset(
     period: ReportPeriod,
     offset: usize,
 ) -> ReportSummary {
-    if period == ReportPeriod::Today && offset == 0 {
-        return build_today_report(sessions, categories);
-    }
+    let window = report_period_window_with_offset(period, offset);
+    build_report_for_window(sessions, categories, &window)
+}
 
-    let (start, end, label) = period_bounds_with_offset(period, offset);
-    build_report_for_date_range(sessions, categories, start, end, label)
+pub fn build_report_for_window(
+    sessions: &[Session],
+    categories: &[Category],
+    window: &ReportWindow,
+) -> ReportSummary {
+    build_report_for_date_range(
+        sessions,
+        categories,
+        window.start,
+        window.end,
+        window.label.clone(),
+    )
 }
 
 fn period_bounds_with_offset(
@@ -939,20 +976,6 @@ fn shift_month_start(base_start: NaiveDate, delta_months: i32) -> NaiveDate {
     NaiveDate::from_ymd_opt(year, month0 + 1, 1).unwrap_or(base_start)
 }
 
-pub fn build_period_karma_report_with_offset(
-    sessions: &[Session],
-    categories: &[Category],
-    period: ReportPeriod,
-    offset: usize,
-) -> KarmaReportSummary {
-    if period == ReportPeriod::Today && offset == 0 {
-        return build_today_karma_report(sessions, categories);
-    }
-
-    let (start, end, label) = period_bounds_with_offset(period, offset);
-    build_karma_report_for_date_range(sessions, categories, start, end, label)
-}
-
 fn start_of_week(day: NaiveDate, first_day: FirstDayOfWeek) -> NaiveDate {
     let day_index = day.weekday().num_days_from_monday() as i64;
     let first_index = first_day.num_days_from_monday() as i64;
@@ -960,57 +983,40 @@ fn start_of_week(day: NaiveDate, first_day: FirstDayOfWeek) -> NaiveDate {
     day - ChronoDuration::days(distance)
 }
 
-pub fn build_today_karma_report(
+pub fn build_balance_report_for_window(
     sessions: &[Session],
     categories: &[Category],
-) -> KarmaReportSummary {
-    let today = operational_day_key_now().format("%Y-%m-%d").to_string();
-    build_karma_report_for_date(sessions, categories, &today)
-}
-
-pub fn build_karma_report_for_date(
-    sessions: &[Session],
-    categories: &[Category],
-    date: &str,
-) -> KarmaReportSummary {
-    let Some(date) = NaiveDate::parse_from_str(date, "%Y-%m-%d").ok() else {
-        return KarmaReportSummary {
-            date: String::new(),
-            entries: vec![],
-            total_seconds: 0,
-            total_karma_seconds: 0,
-        };
-    };
-
-    build_karma_report_for_date_range(
+    window: &ReportWindow,
+) -> BalanceReportSummary {
+    build_balance_report_for_date_range(
         sessions,
         categories,
-        date,
-        date,
-        date.format("%Y-%m-%d").to_string(),
+        window.start,
+        window.end,
+        window.label.clone(),
     )
 }
 
-fn build_karma_report_for_date_range(
+fn build_balance_report_for_date_range(
     sessions: &[Session],
     categories: &[Category],
     start: NaiveDate,
     end: NaiveDate,
     label: String,
-) -> KarmaReportSummary {
-    let mut entries: Vec<KarmaReportEntry> = categories
+) -> BalanceReportSummary {
+    let mut entries: Vec<BalanceReportEntry> = categories
         .iter()
-        .map(|category| KarmaReportEntry {
+        .map(|category| BalanceReportEntry {
             category_id: category.id,
             category_name: category.name.clone(),
             color: category.color,
             elapsed_seconds: 0,
-            karma_effect: if is_drift_category_id(category.id) || is_drift_name(&category.name) {
+            balance_effect: if is_drift_category_id(category.id) || is_drift_name(&category.name) {
                 0
             } else {
-                category.karma_effect
+                category.balance_effect
             },
-            karma_seconds: 0,
+            balance_seconds: 0,
         })
         .collect();
 
@@ -1030,40 +1036,18 @@ fn build_karma_report_for_date_range(
     }
 
     for entry in &mut entries {
-        entry.karma_seconds = entry.elapsed_seconds as isize * entry.karma_effect as isize;
+        entry.balance_seconds = entry.elapsed_seconds as isize * entry.balance_effect as isize;
     }
 
     let total_seconds = entries.iter().map(|entry| entry.elapsed_seconds).sum();
-    let total_karma_seconds = entries.iter().map(|entry| entry.karma_seconds).sum();
+    let total_balance_seconds = entries.iter().map(|entry| entry.balance_seconds).sum();
 
-    KarmaReportSummary {
+    BalanceReportSummary {
         date: label,
         entries,
         total_seconds,
-        total_karma_seconds,
+        total_balance_seconds,
     }
-}
-
-pub fn build_report_for_date(
-    sessions: &[Session],
-    categories: &[Category],
-    date: &str,
-) -> ReportSummary {
-    let Some(date) = NaiveDate::parse_from_str(date, "%Y-%m-%d").ok() else {
-        return ReportSummary {
-            date: String::new(),
-            entries: vec![],
-            total_seconds: 0,
-        };
-    };
-
-    build_report_for_date_range(
-        sessions,
-        categories,
-        date,
-        date,
-        date.format("%Y-%m-%d").to_string(),
-    )
 }
 
 pub fn build_report_for_date_range(
@@ -1128,7 +1112,7 @@ pub fn build_report_for_date_range(
     }
 }
 
-fn category_karma_effect(categories: &[Category], category_id: CategoryId) -> i8 {
+fn category_balance_effect(categories: &[Category], category_id: CategoryId) -> i8 {
     categories
         .iter()
         .find(|category| category.id == category_id)
@@ -1136,18 +1120,18 @@ fn category_karma_effect(categories: &[Category], category_id: CategoryId) -> i8
             if is_drift_category_id(category.id) || is_drift_name(&category.name) {
                 0
             } else {
-                category.karma_effect
+                category.balance_effect
             }
         })
         .unwrap_or(0)
 }
 
-pub fn sort_karma_entries_for_display(entries: &mut [KarmaReportEntry]) {
+pub fn sort_balance_entries_for_display(entries: &mut [BalanceReportEntry]) {
     entries.sort_by(|a, b| {
-        let group = |entry: &KarmaReportEntry| -> u8 {
+        let group = |entry: &BalanceReportEntry| -> u8 {
             if is_drift_category_id(entry.category_id) {
                 1
-            } else if entry.karma_effect < 0 {
+            } else if entry.balance_effect < 0 {
                 2
             } else {
                 0
@@ -1159,8 +1143,8 @@ pub fn sort_karma_entries_for_display(entries: &mut [KarmaReportEntry]) {
 
         ga.cmp(&gb).then_with(|| match ga {
             0 => b
-                .karma_seconds
-                .cmp(&a.karma_seconds)
+                .balance_seconds
+                .cmp(&a.balance_seconds)
                 .then(b.elapsed_seconds.cmp(&a.elapsed_seconds))
                 .then(a.category_name.cmp(&b.category_name)),
             1 => {
@@ -1172,8 +1156,8 @@ pub fn sort_karma_entries_for_display(entries: &mut [KarmaReportEntry]) {
                     .then(a.category_name.cmp(&b.category_name))
             }
             _ => a
-                .karma_seconds
-                .cmp(&b.karma_seconds)
+                .balance_seconds
+                .cmp(&b.balance_seconds)
                 .reverse()
                 .then(a.elapsed_seconds.cmp(&b.elapsed_seconds))
                 .then(a.category_name.cmp(&b.category_name)),
@@ -1181,16 +1165,14 @@ pub fn sort_karma_entries_for_display(entries: &mut [KarmaReportEntry]) {
     });
 }
 
-pub fn build_period_karma_report_with_live_and_offset(
+pub fn build_balance_report_with_live_for_window(
     sessions: &[Session],
     categories: &[Category],
-    period: ReportPeriod,
-    offset: usize,
+    window: &ReportWindow,
     live_session: Option<&LiveSessionPreview>,
-) -> KarmaReportSummary {
-    let mut summary = build_period_karma_report_with_offset(sessions, categories, period, offset);
+) -> BalanceReportSummary {
+    let mut summary = build_balance_report_for_window(sessions, categories, window);
 
-    let (start, end) = report_period_date_bounds_with_offset(period, offset);
     if let Some(live) = live_session
         && let Some(entry) = summary
             .entries
@@ -1199,29 +1181,31 @@ pub fn build_period_karma_report_with_live_and_offset(
     {
         let seconds: usize = live_session_slices(live)
             .into_iter()
-            .filter(|slice| slice.operational_day >= start && slice.operational_day <= end)
+            .filter(|slice| {
+                slice.operational_day >= window.start && slice.operational_day <= window.end
+            })
             .map(|slice| slice.elapsed_seconds)
             .sum();
         entry.elapsed_seconds += seconds;
-        entry.karma_seconds += seconds as isize * entry.karma_effect as isize;
+        entry.balance_seconds += seconds as isize * entry.balance_effect as isize;
         summary.total_seconds += seconds;
-        summary.total_karma_seconds += seconds as isize * entry.karma_effect as isize;
+        summary.total_balance_seconds += seconds as isize * entry.balance_effect as isize;
     }
 
-    sort_karma_entries_for_display(&mut summary.entries);
+    sort_balance_entries_for_display(&mut summary.entries);
     summary
 }
 
-pub fn build_category_logs_for_period_with_offset(
+pub fn build_category_logs_for_window(
     sessions: &[Session],
     categories: &[Category],
     category_id: CategoryId,
-    period: ReportPeriod,
-    offset: usize,
+    window: &ReportWindow,
     live_session: Option<&LiveSessionPreview>,
 ) -> Vec<CategoryLogEntry> {
-    let (start, end) = report_period_date_bounds_with_offset(period, offset);
-    let karma_effect = category_karma_effect(categories, category_id);
+    let start = window.start;
+    let end = window.end;
+    let balance_effect = category_balance_effect(categories, category_id);
 
     let mut logs: Vec<CategoryLogEntry> = sessions
         .iter()
@@ -1237,8 +1221,8 @@ pub fn build_category_logs_for_period_with_offset(
                     end_time: slice.end_time,
                     description: session.description.clone(),
                     elapsed_seconds: slice.elapsed_seconds,
-                    karma_effect,
-                    karma_seconds: slice.elapsed_seconds as isize * karma_effect as isize,
+                    balance_effect,
+                    balance_seconds: slice.elapsed_seconds as isize * balance_effect as isize,
                 })
         })
         .collect();
@@ -1257,8 +1241,8 @@ pub fn build_category_logs_for_period_with_offset(
                     end_time: slice.end_time,
                     description: live.description.clone(),
                     elapsed_seconds: slice.elapsed_seconds,
-                    karma_effect,
-                    karma_seconds: slice.elapsed_seconds as isize * karma_effect as isize,
+                    balance_effect,
+                    balance_seconds: slice.elapsed_seconds as isize * balance_effect as isize,
                 }),
         );
     }
@@ -1327,28 +1311,28 @@ mod tests {
                 name: "none".to_string(),
                 color: Color::White,
                 description: String::new(),
-                karma_effect: 1,
+                balance_effect: 1,
             },
             Category {
                 id: CategoryId::new(1),
                 name: "Work".to_string(),
                 color: COLORS[0],
                 description: String::new(),
-                karma_effect: 1,
+                balance_effect: 1,
             },
             Category {
                 id: CategoryId::new(1),
                 name: "Work Duplicate Id".to_string(),
                 color: COLORS[1],
                 description: String::new(),
-                karma_effect: 1,
+                balance_effect: 1,
             },
             Category {
                 id: CategoryId::new(2),
                 name: "work".to_string(),
                 color: COLORS[2],
                 description: String::new(),
-                karma_effect: 1,
+                balance_effect: 1,
             },
         ];
 
@@ -1494,14 +1478,14 @@ mod tests {
                 name: "beta".to_string(),
                 color: COLORS[0],
                 description: String::new(),
-                karma_effect: 1,
+                balance_effect: 1,
             },
             Category {
                 id: CategoryId::new(2),
                 name: "Alpha".to_string(),
                 color: COLORS[1],
                 description: String::new(),
-                karma_effect: 1,
+                balance_effect: 1,
             },
         ];
         let make_session = |id, date: &str, category_id, elapsed_seconds| Session {
@@ -1560,21 +1544,21 @@ mod tests {
                 name: "none".to_string(),
                 color: Color::White,
                 description: String::new(),
-                karma_effect: 1,
+                balance_effect: 1,
             },
             Category {
                 id: CategoryId::new(1),
                 name: "Work".to_string(),
                 color: COLORS[0],
                 description: String::new(),
-                karma_effect: 1,
+                balance_effect: 1,
             },
             Category {
                 id: CategoryId::new(2),
                 name: "Personal".to_string(),
                 color: COLORS[1],
                 description: String::new(),
-                karma_effect: 1,
+                balance_effect: 1,
             },
         ];
 
@@ -1629,7 +1613,8 @@ mod tests {
             },
         ];
 
-        let summary = build_report_for_date(&sessions, &categories, "2026-02-25");
+        let window = ReportWindow::single_day(NaiveDate::from_ymd_opt(2026, 2, 25).unwrap());
+        let summary = build_report_for_window(&sessions, &categories, &window);
         assert_eq!(summary.total_seconds, 5400);
         assert_eq!(summary.entries.len(), 2);
         assert_eq!(summary.entries[0].category_name, "Work");
@@ -1639,35 +1624,35 @@ mod tests {
     }
 
     #[test]
-    fn test_build_karma_report_for_date_tracks_totals_and_zero_entries() {
+    fn test_build_balance_report_for_date_tracks_totals_and_zero_entries() {
         let categories = vec![
             Category {
                 id: CategoryId::new(0),
                 name: "none".to_string(),
                 color: Color::White,
                 description: String::new(),
-                karma_effect: 1,
+                balance_effect: 1,
             },
             Category {
                 id: CategoryId::new(1),
                 name: "Work".to_string(),
                 color: COLORS[0],
                 description: String::new(),
-                karma_effect: 1,
+                balance_effect: 1,
             },
             Category {
                 id: CategoryId::new(2),
                 name: "Gaming".to_string(),
                 color: COLORS[5],
                 description: String::new(),
-                karma_effect: -1,
+                balance_effect: -1,
             },
             Category {
                 id: CategoryId::new(3),
                 name: "Reading".to_string(),
                 color: COLORS[2],
                 description: String::new(),
-                karma_effect: 1,
+                balance_effect: 1,
             },
         ];
 
@@ -1698,7 +1683,8 @@ mod tests {
             },
         ];
 
-        let summary = build_karma_report_for_date(&sessions, &categories, "2026-02-25");
+        let window = ReportWindow::single_day(NaiveDate::from_ymd_opt(2026, 2, 25).unwrap());
+        let summary = build_balance_report_for_window(&sessions, &categories, &window);
         assert_eq!(summary.entries.len(), 4, "all categories are listed");
         assert_eq!(summary.total_seconds, 5400);
 
@@ -1708,7 +1694,7 @@ mod tests {
             .find(|entry| entry.category_name == "Work")
             .expect("work entry");
         assert_eq!(work.elapsed_seconds, 3600);
-        assert_eq!(work.karma_seconds, 3600);
+        assert_eq!(work.balance_seconds, 3600);
 
         let gaming = summary
             .entries
@@ -1716,7 +1702,7 @@ mod tests {
             .find(|entry| entry.category_name == "Gaming")
             .expect("gaming entry");
         assert_eq!(gaming.elapsed_seconds, 1800);
-        assert_eq!(gaming.karma_seconds, -1800);
+        assert_eq!(gaming.balance_seconds, -1800);
 
         let reading = summary
             .entries
@@ -1734,28 +1720,28 @@ mod tests {
             .find(|entry| entry.category_name == "none")
             .expect("none entry");
         assert_eq!(none.elapsed_seconds, 0);
-        assert_eq!(none.karma_seconds, 0);
-        assert_eq!(none.karma_effect, 0);
+        assert_eq!(none.balance_seconds, 0);
+        assert_eq!(none.balance_effect, 0);
 
-        assert_eq!(summary.total_karma_seconds, 1800);
+        assert_eq!(summary.total_balance_seconds, 1800);
     }
 
     #[test]
-    fn test_build_karma_report_includes_none_as_neutral_counter() {
+    fn test_build_balance_report_includes_none_as_neutral_counter() {
         let categories = vec![
             Category {
                 id: CategoryId::new(0),
                 name: "none".to_string(),
                 color: Color::White,
                 description: String::new(),
-                karma_effect: 1,
+                balance_effect: 1,
             },
             Category {
                 id: CategoryId::new(1),
                 name: "Work".to_string(),
                 color: COLORS[0],
                 description: String::new(),
-                karma_effect: 1,
+                balance_effect: 1,
             },
         ];
 
@@ -1786,10 +1772,11 @@ mod tests {
             },
         ];
 
-        let summary = build_karma_report_for_date(&sessions, &categories, "2026-02-25");
+        let window = ReportWindow::single_day(NaiveDate::from_ymd_opt(2026, 2, 25).unwrap());
+        let summary = build_balance_report_for_window(&sessions, &categories, &window);
 
         assert_eq!(summary.total_seconds, 3000);
-        assert_eq!(summary.total_karma_seconds, 1800);
+        assert_eq!(summary.total_balance_seconds, 1800);
 
         let none = summary
             .entries
@@ -1797,8 +1784,8 @@ mod tests {
             .find(|entry| entry.category_name == "none")
             .expect("none entry");
         assert_eq!(none.elapsed_seconds, 1200);
-        assert_eq!(none.karma_effect, 0);
-        assert_eq!(none.karma_seconds, 0);
+        assert_eq!(none.balance_effect, 0);
+        assert_eq!(none.balance_seconds, 0);
     }
 
     #[test]
@@ -1809,14 +1796,14 @@ mod tests {
                 name: "none".to_string(),
                 color: Color::White,
                 description: String::new(),
-                karma_effect: 1,
+                balance_effect: 1,
             },
             Category {
                 id: CategoryId::new(1),
                 name: "Work".to_string(),
                 color: COLORS[0],
                 description: String::new(),
-                karma_effect: 1,
+                balance_effect: 1,
             },
         ];
 
@@ -1874,28 +1861,28 @@ mod tests {
     }
 
     #[test]
-    fn test_build_period_karma_report_month_aggregates_range() {
+    fn test_build_period_balance_report_month_aggregates_range() {
         let categories = vec![
             Category {
                 id: CategoryId::new(0),
                 name: "none".to_string(),
                 color: Color::White,
                 description: String::new(),
-                karma_effect: 1,
+                balance_effect: 1,
             },
             Category {
                 id: CategoryId::new(1),
                 name: "Work".to_string(),
                 color: COLORS[0],
                 description: String::new(),
-                karma_effect: 1,
+                balance_effect: 1,
             },
             Category {
                 id: CategoryId::new(2),
                 name: "Gaming".to_string(),
                 color: COLORS[5],
                 description: String::new(),
-                karma_effect: -1,
+                balance_effect: -1,
             },
         ];
 
@@ -1942,10 +1929,10 @@ mod tests {
             },
         ];
 
-        let summary =
-            build_period_karma_report_with_offset(&sessions, &categories, ReportPeriod::Month, 0);
+        let window = report_period_window_with_offset(ReportPeriod::Month, 0);
+        let summary = build_balance_report_for_window(&sessions, &categories, &window);
         assert_eq!(summary.total_seconds, 5400);
-        assert_eq!(summary.total_karma_seconds, 1800);
+        assert_eq!(summary.total_balance_seconds, 1800);
 
         let work = summary
             .entries
@@ -1953,7 +1940,7 @@ mod tests {
             .find(|entry| entry.category_name == "Work")
             .expect("work entry");
         assert_eq!(work.elapsed_seconds, 3600);
-        assert_eq!(work.karma_seconds, 3600);
+        assert_eq!(work.balance_seconds, 3600);
 
         let gaming = summary
             .entries
@@ -1961,15 +1948,15 @@ mod tests {
             .find(|entry| entry.category_name == "Gaming")
             .expect("gaming entry");
         assert_eq!(gaming.elapsed_seconds, 1800);
-        assert_eq!(gaming.karma_seconds, -1800);
+        assert_eq!(gaming.balance_seconds, -1800);
     }
 
     #[test]
     fn test_report_period_month_offset_uses_previous_calendar_month() {
-        let (current_start, current_end) =
-            report_period_date_bounds_with_offset(ReportPeriod::Month, 0);
-        let (previous_start, previous_end) =
-            report_period_date_bounds_with_offset(ReportPeriod::Month, 1);
+        let current = report_period_window_with_offset(ReportPeriod::Month, 0);
+        let previous = report_period_window_with_offset(ReportPeriod::Month, 1);
+        let (current_start, current_end) = (current.start, current.end);
+        let (previous_start, previous_end) = (previous.start, previous.end);
 
         assert_eq!(current_start.day(), 1);
         assert_eq!(current_end, operational_day_key_now());
@@ -1978,34 +1965,35 @@ mod tests {
     }
 
     #[test]
-    fn test_build_period_karma_report_month_offset_aggregates_previous_month_only() {
+    fn test_build_period_balance_report_month_offset_aggregates_previous_month_only() {
         let categories = vec![
             Category {
                 id: CategoryId::new(0),
                 name: "none".to_string(),
                 color: Color::White,
                 description: String::new(),
-                karma_effect: 0,
+                balance_effect: 0,
             },
             Category {
                 id: CategoryId::new(1),
                 name: "Work".to_string(),
                 color: COLORS[0],
                 description: String::new(),
-                karma_effect: 1,
+                balance_effect: 1,
             },
             Category {
                 id: CategoryId::new(2),
                 name: "Gaming".to_string(),
                 color: COLORS[5],
                 description: String::new(),
-                karma_effect: -1,
+                balance_effect: -1,
             },
         ];
 
-        let (current_start, _) = report_period_date_bounds_with_offset(ReportPeriod::Month, 0);
-        let (previous_start, previous_end) =
-            report_period_date_bounds_with_offset(ReportPeriod::Month, 1);
+        let current = report_period_window_with_offset(ReportPeriod::Month, 0);
+        let previous = report_period_window_with_offset(ReportPeriod::Month, 1);
+        let current_start = current.start;
+        let (previous_start, previous_end) = (previous.start, previous.end);
 
         let sessions = vec![
             Session {
@@ -2046,22 +2034,37 @@ mod tests {
             },
         ];
 
-        let summary =
-            build_period_karma_report_with_offset(&sessions, &categories, ReportPeriod::Month, 1);
+        let window = report_period_window_with_offset(ReportPeriod::Month, 1);
+        let summary = build_balance_report_for_window(&sessions, &categories, &window);
 
         assert_eq!(
             summary.date,
             format!("{}..{}", previous_start, previous_end)
         );
         assert_eq!(summary.total_seconds, 1800);
-        assert_eq!(summary.total_karma_seconds, 600);
+        assert_eq!(summary.total_balance_seconds, 600);
+    }
+
+    #[test]
+    fn report_window_rejects_reverse_bounds_and_labels_valid_ranges() {
+        let start = NaiveDate::from_ymd_opt(2026, 8, 1).unwrap();
+        let end = NaiveDate::from_ymd_opt(2026, 8, 7).unwrap();
+
+        let window = ReportWindow::new(start, end).expect("chronological range should be valid");
+        assert_eq!(window.start, start);
+        assert_eq!(window.end, end);
+        assert_eq!(window.label, "2026-08-01..2026-08-07");
+        assert!(ReportWindow::new(end, start).is_err());
+        assert_eq!(ReportWindow::single_day(start).label, "2026-08-01");
     }
 
     #[test]
     fn test_report_period_day_offset_moves_back_by_days() {
         let today = operational_day_key_now();
-        let (start0, end0) = report_period_date_bounds_with_offset(ReportPeriod::Today, 0);
-        let (start2, end2) = report_period_date_bounds_with_offset(ReportPeriod::Today, 2);
+        let current = report_period_window_with_offset(ReportPeriod::Today, 0);
+        let older = report_period_window_with_offset(ReportPeriod::Today, 2);
+        let (start0, end0) = (current.start, current.end);
+        let (start2, end2) = (older.start, older.end);
 
         assert_eq!(start0, today);
         assert_eq!(end0, today);
@@ -2071,10 +2074,10 @@ mod tests {
 
     #[test]
     fn test_report_period_week_offset_previous_is_full_week() {
-        let (current_start, current_end) =
-            report_period_date_bounds_with_offset(ReportPeriod::Week, 0);
-        let (previous_start, previous_end) =
-            report_period_date_bounds_with_offset(ReportPeriod::Week, 1);
+        let current = report_period_window_with_offset(ReportPeriod::Week, 0);
+        let previous = report_period_window_with_offset(ReportPeriod::Week, 1);
+        let (current_start, current_end) = (current.start, current.end);
+        let (previous_start, previous_end) = (previous.start, previous.end);
 
         assert_eq!(current_end, operational_day_key_now());
         assert_eq!(previous_start, current_start - ChronoDuration::days(7));
@@ -2082,21 +2085,21 @@ mod tests {
     }
 
     #[test]
-    fn test_build_period_karma_report_today_path_is_non_recursive() {
+    fn test_build_period_balance_report_today_path_is_non_recursive() {
         let categories = vec![
             Category {
                 id: CategoryId::new(0),
                 name: "none".to_string(),
                 color: Color::White,
                 description: String::new(),
-                karma_effect: 1,
+                balance_effect: 1,
             },
             Category {
                 id: CategoryId::new(1),
                 name: "Work".to_string(),
                 color: COLORS[0],
                 description: String::new(),
-                karma_effect: 1,
+                balance_effect: 1,
             },
         ];
 
@@ -2114,11 +2117,11 @@ mod tests {
             operational_day_policy: None,
         }];
 
-        let summary =
-            build_period_karma_report_with_offset(&sessions, &categories, ReportPeriod::Today, 0);
+        let window = report_period_window_with_offset(ReportPeriod::Today, 0);
+        let summary = build_balance_report_for_window(&sessions, &categories, &window);
         assert_eq!(summary.date, today);
         assert_eq!(summary.total_seconds, 600);
-        assert_eq!(summary.total_karma_seconds, 600);
+        assert_eq!(summary.total_balance_seconds, 600);
     }
 
     #[test]
@@ -2130,14 +2133,14 @@ mod tests {
                 name: "none".to_string(),
                 color: Color::White,
                 description: String::new(),
-                karma_effect: 0,
+                balance_effect: 0,
             },
             Category {
                 id: CategoryId::new(1),
                 name: "Work".to_string(),
                 color: COLORS[0],
                 description: String::new(),
-                karma_effect: 1,
+                balance_effect: 1,
             },
         ];
 
@@ -2168,12 +2171,12 @@ mod tests {
             },
         ];
 
-        let logs = build_category_logs_for_period_with_offset(
+        let window = report_period_window_with_offset(ReportPeriod::Today, 0);
+        let logs = build_category_logs_for_window(
             &sessions,
             &categories,
             CategoryId::new(1),
-            ReportPeriod::Today,
-            0,
+            &window,
             None,
         );
 
@@ -2263,7 +2266,7 @@ mod tests {
             name: "Work".to_string(),
             color: COLORS[0],
             description: String::new(),
-            karma_effect: 1,
+            balance_effect: 1,
         };
         let session = Session {
             id: 1,
@@ -2289,12 +2292,14 @@ mod tests {
             }),
         };
 
-        let first = build_report_for_date(
+        let first_window = ReportWindow::single_day(NaiveDate::from_ymd_opt(2026, 8, 1).unwrap());
+        let second_window = ReportWindow::single_day(NaiveDate::from_ymd_opt(2026, 8, 2).unwrap());
+        let first = build_report_for_window(
             std::slice::from_ref(&session),
             std::slice::from_ref(&category),
-            "2026-08-01",
+            &first_window,
         );
-        let second = build_report_for_date(&[session], &[category], "2026-08-02");
+        let second = build_report_for_window(&[session], &[category], &second_window);
 
         assert_eq!(first.total_seconds, 1800);
         assert_eq!(second.total_seconds, 1800);

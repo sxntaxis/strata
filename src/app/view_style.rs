@@ -30,7 +30,7 @@ pub(super) fn text_color_for_bg(bg_color: Color) -> Color {
     }
 }
 
-pub(super) fn karma_color(seconds: isize) -> Color {
+pub(super) fn balance_color(seconds: isize) -> Color {
     if seconds < 0 {
         Color::Red
     } else if seconds > 0 {

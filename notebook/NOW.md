@@ -3,10 +3,10 @@ id: NOW-001
 kind: status
 state: active
 created: 2026-08-01
-updated: 2026-08-25
+updated: 2026-08-27
 authority: working
-summary: v0.7.7 direct interaction and visible-basin sediment are certified; authentic day-end Karma visual snapshots are implemented and awaiting native certification.
-next: Native-certify authentic day-end Karma snapshots, canvas-size independence, and reconstructed fallback behavior without changing the implementation semantics.
+summary: Day-end Balance visual snapshots are accepted as working baseline; HISTORY-001A is integrated and natively green; HISTORY-001B is next.
+next: Begin HISTORY-001B visible From/To range selection in Balance.
 ---
 
 # NOW — Strata
@@ -30,12 +30,12 @@ canvas to the current viewport; uppercase `C` preserves extent and non-Idle mass
 SQLite persistence; restore into a larger live viewport expands monotonically; zero-viewport recovery
 restore remains exact; the idle tamagotchi is removed; and zero effective counters are hidden.
 
-Karma visual-memory correction is implemented on top of that baseline and awaits native certification. A
-live operational-day cutoff now stages the exact cumulative canonical `SandState` as a first-write-wins
-`daily` checkpoint, including its original canvas dimensions and topology. Historical Karma prefers that
-authentic photo for the selected interval end day; `DailyContribution` is now dimension-independent
-ledger mass only, and the deterministic row-major `DerivedPreview` remains fallback for cutoffs that were
-not observed by live physics. No historical photo is fabricated during bounded recovery.
+The day-end visual-memory behavior is now accepted as working baseline product behavior. A live operational-day
+cutoff stages the exact cumulative canonical `SandState` as a first-write-wins `daily` checkpoint, including its
+original canvas dimensions and topology. Historical Balance prefers that authentic photo for the selected interval
+end day; `DailyContribution` is dimension-independent ledger mass only, and the deterministic row-major
+`DerivedPreview` remains fallback for cutoffs that were not observed by live physics. No historical photo is
+fabricated during bounded recovery.
 
 The certified system includes:
 
@@ -61,6 +61,20 @@ The independent `project` axis and speculative category merge/permanent-delete l
 Clear-all is receipt-free and atomic. Switch, finish, and reset receipts remain only for their real
 runtime/checkpoint failure boundary. Final native validation passed formatting, strict Clippy, the full
 test suite, build, help smoke, diff hygiene, and the long-profile dangling-symlink runtime proof.
+
+## Current plateau program
+
+`notebook/work/PLATEAU-001.md` is the durable roadmap for the remaining core-development arc. The owner has accepted the existing day-end snapshot behavior as baseline and does not want an artificial re-certification gate before continuing.
+
+The active edge is **HISTORY-001B — visible From/To selection in Balance**. HISTORY-001A is integrated on verified
+current main: the Karma→Balance historical/report vocabulary cutover, default `b` opener, explicit `ReportWindow`
+seam for Day/Week/Month and live/log routing, CLI custom-range reuse, and JSON schema 4 with `balance_effect` are
+natively green. This is preparation for visible custom range selection, not a second reporting implementation.
+
+The stale dirty adaptive-resize branch remains preserved as custody evidence and is superseded by the current-main
+visible-basin, resize/restore, and atomic clear-all authority. No adaptive code was ported.
+
+Later required order is HISTORY-001B/C/D (custom range and historical correction), optional HISTORY-001E current-sediment recolor, SEDIMENT-002 organic formation, then INTERACTION-002 menu/Settings convergence and product hardening. Pomodoro/RHYTHM-001 remains optional and must not block plateau.
 
 ## Completed post-migration units
 
@@ -98,10 +112,10 @@ test suite, build, help smoke, diff hygiene, and the long-profile dangling-symli
 
 ## Known non-blocking questions
 
-The accepted implementation does not settle every possible future product direction. Remaining design questions include vertical chronology, optional category relationships, final Karma terminology, future sediment clearing/formation semantics, zoom/compression/panning, configurable quantum migration, possible IANA timezone support, and any future stable identity for queued cross-authority mutation replay.
+The accepted implementation does not settle every possible future product direction. Remaining design questions include vertical chronology, optional category relationships, future sediment clearing/formation semantics, zoom/compression/panning, configurable quantum migration, possible IANA timezone support, and any future stable identity for queued cross-authority mutation replay.
 
 These are not open implementation defects. They require new evidence and an explicit future unit before constraining the current system.
 
 ## Next
 
-Promote the bounded-catch-up and clear-all conservation head as the next baseline; future work must preserve bounded settlement, exact boundary allocation, and fail-closed queued-evidence handling.
+Run the repository-native formatting, strict Clippy, full test, and help-smoke lanes for HISTORY-001A. Fix only fallout from the Balance/report-window cutover. Once green, mark HISTORY-001A complete in `notebook/work/PLATEAU-001.md` and begin HISTORY-001B: visible From/To range selection in Balance using the shared `ReportWindow` path.

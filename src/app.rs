@@ -48,7 +48,7 @@ use terminal_lifecycle::{ManagedTerminal, TerminalSession};
 enum UiMode {
     Main,
     CategoryModal,
-    KarmaModal,
+    BalanceModal,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -706,7 +706,7 @@ impl App {
     }
 
     fn open_report_modal(&mut self) {
-        self.ui_mode = UiMode::KarmaModal;
+        self.ui_mode = UiMode::BalanceModal;
         self.report_selected_index = 0;
         self.report_period = ReportPeriod::Today;
         self.report_period_offset = 0;
@@ -737,8 +737,8 @@ impl App {
         matches!(self.ui_mode, UiMode::CategoryModal)
     }
 
-    fn in_karma_modal(&self) -> bool {
-        matches!(self.ui_mode, UiMode::KarmaModal)
+    fn in_balance_modal(&self) -> bool {
+        matches!(self.ui_mode, UiMode::BalanceModal)
     }
 
     fn is_drift_name(name: &str) -> bool {
@@ -798,7 +798,7 @@ impl App {
     fn atlas_item_description(&self, item: AtlasSelectable) -> String {
         match item {
             AtlasSelectable::WeekStartDay => {
-                "First weekday used by Week range in Karma pop-up.".to_string()
+                "First weekday used by Week range in Balance pop-up.".to_string()
             }
             AtlasSelectable::Action(action) => action.description().to_string(),
         }
@@ -2728,7 +2728,7 @@ mod category_catalog_tests {
             name: name.to_string(),
             color: Color::White,
             description: String::new(),
-            karma_effect: 0,
+            balance_effect: 0,
         }
     }
 

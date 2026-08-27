@@ -252,7 +252,7 @@ pub(crate) fn read_snapshot(database_path: &Path) -> Result<SqliteCliSnapshot, S
             .map_err(|_| format!("Category ID {} is outside the supported range", record.id))?;
         let color_index = usize::try_from(record.color_index)
             .map_err(|_| format!("Category color {} is invalid", record.color_index))?;
-        let karma_effect = i8::try_from(record.balance_effect)
+        let balance_effect = i8::try_from(record.balance_effect)
             .map_err(|_| format!("Category balance {} is invalid", record.balance_effect))?;
         let name = display_category_name(record.id, &record.name);
         category_names.insert(record.id, name.clone());
@@ -261,7 +261,7 @@ pub(crate) fn read_snapshot(database_path: &Path) -> Result<SqliteCliSnapshot, S
             name,
             color: COLORS[color_index % COLORS.len()],
             description: record.description,
-            karma_effect,
+            balance_effect,
         });
     }
 

@@ -393,7 +393,7 @@ pub(crate) fn sync_categories(
                     name,
                     category.description,
                     i64::try_from(color_index).unwrap_or(0),
-                    i64::from(category.karma_effect),
+                    i64::from(category.balance_effect),
                     i64::try_from(sort_order).map_err(|_| "too many categories".to_string())?,
                 ],
             )
@@ -1264,7 +1264,7 @@ fn category_from_row(
     let id = u64::try_from(id).map_err(|_| format!("Category ID {id} is invalid"))?;
     let color_index = usize::try_from(color_index)
         .map_err(|_| format!("Category color index {color_index} is invalid"))?;
-    let karma_effect = i8::try_from(balance_effect)
+    let balance_effect = i8::try_from(balance_effect)
         .map_err(|_| format!("Category balance {balance_effect} is invalid"))?;
     Ok(Category {
         id: CategoryId::new(id),
@@ -1275,7 +1275,7 @@ fn category_from_row(
         },
         color: COLORS[color_index % COLORS.len()],
         description: description.to_string(),
-        karma_effect,
+        balance_effect,
     })
 }
 

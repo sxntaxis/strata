@@ -4,7 +4,7 @@ Status: implemented and certified
 Program: INTERACTION-001
 Current completed unit: INTERACTION-001C
 Issues completed: #19, #20, #24
-Last reviewed: 2026-08-02
+Last reviewed: 2026-08-27
 
 ## Purpose
 
@@ -95,12 +95,16 @@ Accepted inherited aliases are:
 
 - `main.confirm → open_layer_popup` when the target is Unbound;
 - `main.cancel → switch_to_drift` when the target is Unbound;
-- `main.karma_today → detach` when the target is Unbound;
-- `report.detach → karma_today` always when the target is not Disabled.
+- `main.balance_today → detach` when the target is Unbound;
+- `report.detach → balance_today` always when the target is not Disabled.
 
 Aliases are named configuration policy, not handler inspection. A disabled target is never reached. Removing an alias leaves the source action unchanged. Event handlers execute the resolver result without inspecting whether some other action has direct keys.
 
 Modal-local text and capture controls remain owned by their explicit modal modes and are not represented as configurable action bindings.
+
+## Balance vocabulary cutover
+
+The owner has accepted **Balance** as the report/historical surface vocabulary. HISTORY-001A changes the default main-view opener to `b` and current action/config names to `open_balance_popup` / `balance_*`. This vocabulary change must preserve the configured Bound / Unbound / Disabled model and contextual routing semantics described below.
 
 ## Command atlas and palette truth
 
