@@ -1277,6 +1277,7 @@ fn historical_gap_intervals(
     Ok(gaps)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn update_historical_checkpoint(
     transaction: &rusqlite::Transaction<'_>,
     request: &HistoricalActivityRequest,
@@ -1365,26 +1366,24 @@ fn recolor_historical_current_sediment(
         return Ok(None);
     }
 
-    let mut state = historical_checkpoint_sand_state(request)?;
+    let Some(mut state) = historical_checkpoint_sand_state(request)? else {
+        return Ok(None);
+    };
     let mut changed = false;
     for (source_category_id, requested_grains) in transfer_seconds {
         if *requested_grains == 0 || *source_category_id == request.target_category_id.0 {
             continue;
         }
-        let recolored = if let Some(current) = state.as_mut() {
-            recolor_state_category_mass(
-                current,
-                CategoryId::new(*source_category_id),
-                request.target_category_id,
-                *requested_grains,
-            )
-        } else {
-            0
-        };
+        let recolored = recolor_state_category_mass(
+            &mut state,
+            CategoryId::new(*source_category_id),
+            request.target_category_id,
+            *requested_grains,
+        );
         changed |= recolored > 0;
     }
 
-    Ok(changed.then_some(state.expect("changed recolor requires sand state")))
+    Ok(changed.then_some(state))
 }
 
 fn persist_historical_sand_state(
@@ -1399,8 +1398,7 @@ fn persist_historical_sand_state(
         )
         .optional()
         .map_err(|error| error.to_string())?;
-    let (formation_id, quantum_seconds) =
-        existing.unwrap_or_else(|| ("default".to_string(), 1));
+    let (formation_id, quantum_seconds) = existing.unwrap_or_else(|| ("default".to_string(), 1));
     let payload_json = serde_json::to_string(state).map_err(|error| error.to_string())?;
     transaction
         .execute(
@@ -1498,9 +1496,9 @@ pub(crate) fn log_historical_activity(
             let entry = sediment_transfer_seconds
                 .entry(source_category_id)
                 .or_default();
-            *entry = (*entry)
-                .checked_add(changed_seconds)
-                .ok_or_else(|| "historical sediment transfer exceeds supported range".to_string())?;
+            *entry = (*entry).checked_add(changed_seconds).ok_or_else(|| {
+                "historical sediment transfer exceeds supported range".to_string()
+            })?;
         }
         if session.category_id != 0 && session.category_id != target_category_id {
             let left =
@@ -4815,12 +4813,14 @@ mod clear_all_additional_transaction_tests {
             "2026-08-02T12:00:00Z",
             "2026-08-02T12:10:00Z",
         );
-        let before = historical_sand_state(&[(u64::try_from(work_id).unwrap(), 3), (0, 2), (u64::try_from(reading_id).unwrap(), 1)]);
+        let before = historical_sand_state(&[
+            (u64::try_from(work_id).unwrap(), 3),
+            (0, 2),
+            (u64::try_from(reading_id).unwrap(), 1),
+        ]);
         save_sand_state(&path, &before).unwrap();
-        let authentic = SedimentSnapshot::day_end_checkpoint(
-            "2026-08-02".to_string(),
-            before.clone(),
-        );
+        let authentic =
+            SedimentSnapshot::day_end_checkpoint("2026-08-02".to_string(), before.clone());
         save_day_end_snapshot(
             &path,
             "2026-08-02",
@@ -4868,8 +4868,16 @@ mod clear_all_additional_transaction_tests {
         assert_eq!(after.sweep_left_to_right, before.sweep_left_to_right);
         assert_eq!(after.rng_state, before.rng_state);
         assert_eq!(
-            after.pending_runs.iter().map(|run| run.count).sum::<usize>(),
-            before.pending_runs.iter().map(|run| run.count).sum::<usize>()
+            after
+                .pending_runs
+                .iter()
+                .map(|run| run.count)
+                .sum::<usize>(),
+            before
+                .pending_runs
+                .iter()
+                .map(|run| run.count)
+                .sum::<usize>()
         );
         assert_eq!(
             after
@@ -4971,7 +4979,11 @@ mod clear_all_additional_transaction_tests {
         };
         let after = receipt.resulting_sand_state.unwrap();
         assert_eq!(
-            after.pending_runs.iter().map(|run| run.count).sum::<usize>(),
+            after
+                .pending_runs
+                .iter()
+                .map(|run| run.count)
+                .sum::<usize>(),
             5
         );
         assert_eq!(

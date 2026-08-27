@@ -757,7 +757,9 @@ mod tests {
 
     use crate::{
         domain::CategoryId,
-        sand::{PendingGrainRun, SandEngine, SandState, SandStateGrain, recolor_state_category_mass},
+        sand::{
+            PendingGrainRun, SandEngine, SandState, SandStateGrain, recolor_state_category_mass,
+        },
     };
 
     fn category_mass(engine: &SandEngine, category_id: CategoryId) -> usize {
@@ -820,14 +822,14 @@ mod tests {
             .map(|grain| (grain.x, grain.y))
             .collect::<Vec<_>>();
         let before_mass = state.grains.len()
-            + state.pending_runs.iter().map(|run| run.count).sum::<usize>();
+            + state
+                .pending_runs
+                .iter()
+                .map(|run| run.count)
+                .sum::<usize>();
 
-        let recolored = recolor_state_category_mass(
-            &mut state,
-            CategoryId::new(1),
-            CategoryId::new(3),
-            4,
-        );
+        let recolored =
+            recolor_state_category_mass(&mut state, CategoryId::new(1), CategoryId::new(3), 4);
 
         assert_eq!(recolored, 4);
         assert_eq!(
@@ -859,7 +861,12 @@ mod tests {
             ]
         );
         assert_eq!(
-            state.grains.len() + state.pending_runs.iter().map(|run| run.count).sum::<usize>(),
+            state.grains.len()
+                + state
+                    .pending_runs
+                    .iter()
+                    .map(|run| run.count)
+                    .sum::<usize>(),
             before_mass
         );
         assert_eq!(state.frame_count, 77);
@@ -890,12 +897,8 @@ mod tests {
             }],
         };
 
-        let recolored = recolor_state_category_mass(
-            &mut state,
-            CategoryId::new(1),
-            CategoryId::new(3),
-            60,
-        );
+        let recolored =
+            recolor_state_category_mass(&mut state, CategoryId::new(1), CategoryId::new(3), 60);
 
         assert_eq!(recolored, 1);
         assert_eq!(state.grains[0].category_id, 3);
