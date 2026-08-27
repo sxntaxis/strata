@@ -127,30 +127,44 @@ Invalid dates or reversed bounds remain in edit mode with visible validation fee
 
 After application, left/right shifts the whole custom window by its own inclusive span. Movement toward the present never advances the window beyond the current operational day. Switching back to a day/week/month preset leaves custom mode and restores normal preset-offset navigation.
 
-## Balance missed-activity editor
+## Balance historical activity editor
 
-HISTORY-001C introduces one explicit historical mutation path without turning ordinary Balance browsing into an
-editable ledger. The configurable `balance_log_missed` action defaults to `l` and is meaningful from a persisted
-Idle detail row. A live/provisional Idle row is not eligible in this unit.
+HISTORY-001C introduced the first historical editor from completed Idle detail rows. HISTORY-001D generalizes that
+interaction into one Balance-wide **Log activity…** operation. The configurable `balance_log_activity` action
+defaults to `l`; it is available from Balance summary/detail views and through the command palette rather than
+depending on a selected source session. Existing session rows are bookkeeping material, not part of the user
+contract.
 
 The inline editor owns three fields:
 
-- Layer: an existing active non-Idle target, cycled with Left/Right;
+- Layer: an existing active layer, including Idle, cycled with Left/Right;
 - From: civil timestamp `YYYY-MM-DD HH:MM:SS`;
 - To: civil timestamp `YYYY-MM-DD HH:MM:SS`.
 
-The initial From/To values are the selected row's canonical whole-second slice projected through the source
-session's retained fixed-offset boundary provenance. Tab/BackTab moves field focus. Enter is the only commit path;
-Esc cancels. While the editor is active, plain command characters do not escape to normal actions and only
-mandatory `Ctrl-C` remains an application-level emergency command.
+A fresh editor starts with the currently selected live layer when non-Idle, otherwise the first non-Idle layer,
+and defaults to the last fifteen minutes of canonical history ending at the current active-preview snapshot time. The focused field owns its input; Tab/BackTab moves focus, Enter validates/commits,
+and Esc cancels. Ordinary bound action characters do not escape the editor; only mandatory `Ctrl-C` remains an
+application-level emergency command.
 
-A commit is accepted only when `From < To`, both boundaries remain inside the selected completed Idle session,
-and the target is a current non-Idle layer. Timestamp input is projected onto the source session's existing
-sub-second lattice so splitting cannot lose or invent a whole second at fractional boundaries.
+`From < To <= now` is mandatory. The operation may span true gaps and any number of completed rows. Idle and
+already-target-layer time do not require confirmation. Any intersecting different explicit layer, including the
+historical portion of the active generation, produces one visible collision preview. Enter on that preview
+confirms replacement of exactly the observed plan; Esc returns to editing. If canonical authority changes before
+confirmation, the old plan token is rejected and the user must preview the new collision set.
 
-Persistence owns the mutation. Memory is reloaded from SQLite only after the atomic history transaction succeeds.
-Failure therefore cannot leave the TUI claiming a correction that SQLite did not publish. HISTORY-001C does not
-edit current sand or authentic historical photographs.
+Historical editing never selects a new current activity. When the requested interval intersects the active
+generation, persistence may finalize displaced past time and rebase/restart the same selected live layer after the
+corrected interval. When the requested layer already matches the selected live layer and chronology becomes
+continuous backward to it, the active start may move earlier. The live layer and live description remain
+unchanged; changing what the user is doing now belongs to ordinary Main/Layer switching.
+
+Persistence owns the mutation. SQLite publishes completed-history carving/insertion, active-generation and
+runtime-checkpoint rebasing when needed, and every affected daily-contribution replacement in one transaction.
+Memory reloads only after commit. Current sediment and authentic historical day-end photographs remain unchanged.
+
+The current HISTORY-001D editor does not expose a historical Tag field. Newly inserted retroactive rows therefore
+use an empty description instead of borrowing the current live tag. If the active generation is rebased, its
+persisted live description is preserved.
 
 ## Command atlas and palette truth
 

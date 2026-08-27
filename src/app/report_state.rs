@@ -33,23 +33,19 @@ fn parse_report_range(from: &str, to: &str) -> Result<ReportWindow, String> {
     ReportWindow::new(start, end)
 }
 
-fn parse_missed_activity_timestamp(
+fn parse_historical_activity_timestamp(
     value: &str,
     policy: OperationalDayPolicy,
-    source_started_at_utc: DateTime<Utc>,
 ) -> Result<DateTime<Utc>, String> {
     let civil = NaiveDateTime::parse_from_str(value.trim(), "%Y-%m-%d %H:%M:%S")
         .map_err(|_| "time must use YYYY-MM-DD HH:MM:SS".to_string())?;
     let offset = FixedOffset::east_opt(policy.utc_offset_seconds)
-        .ok_or_else(|| "selected Idle session has an invalid UTC offset".to_string())?;
+        .ok_or_else(|| "historical activity has an invalid UTC offset".to_string())?;
     let local = offset
         .from_local_datetime(&civil)
         .single()
         .ok_or_else(|| "historical civil time is not unique".to_string())?;
-    local
-        .with_timezone(&Utc)
-        .with_nanosecond(source_started_at_utc.nanosecond())
-        .ok_or_else(|| "historical timestamp cannot preserve session precision".to_string())
+    Ok(local.with_timezone(&Utc))
 }
 
 fn shifted_custom_window_older(window: &ReportWindow) -> Option<ReportWindow> {
@@ -170,27 +166,72 @@ impl App {
         })
     }
 
-    fn missed_activity_targets(&self) -> Vec<Category> {
-        self.time_tracker
-            .categories_ordered()
-            .into_iter()
-            .filter(|category| category.id != DRIFT_CATEGORY_ID)
-            .collect()
+    fn historical_activity_targets(&self) -> Vec<Category> {
+        self.time_tracker.categories_ordered()
     }
 
-    pub(super) fn missed_activity_target_name(&self) -> Option<String> {
-        let edit = self.missed_activity_edit.as_ref()?;
+    pub(super) fn historical_activity_target_name(&self) -> Option<String> {
+        let edit = self.historical_activity_edit.as_ref()?;
         self.time_tracker
             .category_by_id(edit.target_category_id)
             .map(|category| self.display_layer_name(&category.name))
     }
 
-    pub(super) fn cycle_missed_activity_target(&mut self, direction: isize) {
-        let targets = self.missed_activity_targets();
+    pub(super) fn historical_activity_conflict_labels(&self) -> Vec<String> {
+        let Some(confirmation) = self
+            .historical_activity_edit
+            .as_ref()
+            .and_then(|edit| edit.confirmation.as_ref())
+        else {
+            return Vec::new();
+        };
+        let policy = OperationalDayPolicy::from_config(day_boundary_config());
+        confirmation
+            .conflicts
+            .iter()
+            .map(|conflict| {
+                let name = self
+                    .time_tracker
+                    .category_by_id(conflict.category_id)
+                    .map(|category| self.display_layer_name(&category.name))
+                    .or_else(|| {
+                        self.archived_categories
+                            .iter()
+                            .find(|category| category.id == conflict.category_id)
+                            .map(|category| self.display_layer_name(&category.name))
+                    })
+                    .unwrap_or_else(|| format!("layer {}", conflict.category_id.0));
+                let start = temporal::civil_from_policy(conflict.started_at_utc, policy).ok();
+                let end = temporal::civil_from_policy(conflict.ended_at_utc, policy).ok();
+                let interval = match (start, end) {
+                    (Some(start), Some(end)) if start.date() == end.date() => format!(
+                        "{} {}-{}",
+                        start.format("%Y-%m-%d"),
+                        start.format("%H:%M:%S"),
+                        end.format("%H:%M:%S")
+                    ),
+                    (Some(start), Some(end)) => format!(
+                        "{}-{}",
+                        start.format("%Y-%m-%d %H:%M:%S"),
+                        end.format("%Y-%m-%d %H:%M:%S")
+                    ),
+                    _ => "?".to_string(),
+                };
+                if conflict.active {
+                    format!("{name} {interval} (current)")
+                } else {
+                    format!("{name} {interval}")
+                }
+            })
+            .collect()
+    }
+
+    pub(super) fn cycle_historical_activity_target(&mut self, direction: isize) {
+        let targets = self.historical_activity_targets();
         if targets.is_empty() {
             return;
         }
-        let Some(edit) = self.missed_activity_edit.as_mut() else {
+        let Some(edit) = self.historical_activity_edit.as_mut() else {
             return;
         };
         let current = targets
@@ -208,125 +249,68 @@ impl App {
         };
         edit.target_category_id = targets[next].id;
         edit.error = None;
+        edit.confirmation = None;
         self.render_needed = true;
     }
 
-    fn selected_idle_session_and_slice_bounds(
-        &self,
-    ) -> Result<(crate::domain::Session, DateTime<Utc>, DateTime<Utc>), String> {
-        if self.report_logs_category_id != Some(DRIFT_CATEGORY_ID) {
-            return Err("log missed activity from the Idle detail view".to_string());
-        }
-        let logs = self.report_current_logs();
-        if logs.is_empty() {
-            return Err("there is no completed Idle interval to correct".to_string());
-        }
-        let selected = self.report_log_selected_index.min(logs.len() - 1);
-        let row = logs
-            .get(selected)
-            .ok_or_else(|| "selected Idle interval is unavailable".to_string())?;
-        let session_id = row.session_id.ok_or_else(|| {
-            "the current active Idle interval cannot be corrected yet".to_string()
-        })?;
-        let session = self
-            .time_tracker
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .cloned()
-            .ok_or_else(|| "selected Idle session is no longer in memory".to_string())?;
-        if session.category_id != DRIFT_CATEGORY_ID {
-            return Err("selected history is no longer Idle".to_string());
-        }
-        let started_at_utc = session
-            .started_at_utc
-            .ok_or_else(|| "selected Idle session has no UTC start".to_string())?;
-        let ended_at_utc = session
-            .ended_at_utc
-            .ok_or_else(|| "selected Idle session has no UTC end".to_string())?;
-        let policy = session
-            .operational_day_policy
-            .ok_or_else(|| "selected Idle session has no boundary provenance".to_string())?;
-        let selected_day = NaiveDate::parse_from_str(&row.date, "%Y-%m-%d")
-            .map_err(|_| "selected Idle row has an invalid operational day".to_string())?;
-        let slices = temporal::allocate_operational_day_slices(
-            started_at_utc,
-            ended_at_utc,
-            session.elapsed_seconds,
-            policy,
-        )?;
-        let mut allocated = 0usize;
-        for slice in slices {
-            let start_offset = allocated;
-            allocated = allocated.saturating_add(slice.elapsed_seconds);
-            if slice.operational_day != selected_day {
-                continue;
-            }
-            let start_offset = i64::try_from(start_offset)
-                .map_err(|_| "selected Idle slice start is too large".to_string())?;
-            let end_offset = i64::try_from(allocated)
-                .map_err(|_| "selected Idle slice end is too large".to_string())?;
-            let slice_start = started_at_utc
-                .checked_add_signed(ChronoDuration::seconds(start_offset))
-                .ok_or_else(|| "selected Idle slice start exceeds chrono range".to_string())?;
-            let slice_end = started_at_utc
-                .checked_add_signed(ChronoDuration::seconds(end_offset))
-                .ok_or_else(|| "selected Idle slice end exceeds chrono range".to_string())?;
-            return Ok((session, slice_start, slice_end));
-        }
-        Err("selected Idle slice is no longer part of its canonical session".to_string())
-    }
-
-    pub(super) fn begin_missed_activity_edit(&mut self) -> bool {
-        let targets = self.missed_activity_targets();
+    pub(super) fn begin_historical_activity_edit(&mut self) -> bool {
+        let targets = self.historical_activity_targets();
         if targets.is_empty() {
             return false;
         }
-        let Ok((session, slice_start, slice_end)) = self.selected_idle_session_and_slice_bounds()
-        else {
-            return false;
+        let preview = match self.historical_correction_active_preview() {
+            Ok(preview) => preview,
+            Err(_) => return false,
         };
-        let Some(policy) = session.operational_day_policy else {
-            return false;
-        };
-        let active_category_id = self.time_tracker.active_category_id();
-        let target_category_id = if active_category_id != DRIFT_CATEGORY_ID
-            && targets
-                .iter()
-                .any(|category| category.id == active_category_id)
-        {
-            active_category_id
+        let target_category_id = if preview.category_id != DRIFT_CATEGORY_ID {
+            preview.category_id
         } else {
-            targets[0].id
+            targets
+                .iter()
+                .find(|category| category.id != DRIFT_CATEGORY_ID)
+                .map(|category| category.id)
+                .unwrap_or(DRIFT_CATEGORY_ID)
         };
+        let to = preview.ended_at_utc;
+        let from = to
+            .checked_sub_signed(ChronoDuration::minutes(15))
+            .unwrap_or(to);
         let format_civil = |timestamp| {
-            temporal::civil_from_policy(timestamp, policy)
+            temporal::civil_from_policy(timestamp, preview.operational_day_policy)
                 .map(|civil| civil.format("%Y-%m-%d %H:%M:%S").to_string())
         };
-        let Ok(from) = format_civil(slice_start) else {
+        let Ok(from) = format_civil(from) else {
             return false;
         };
-        let Ok(to) = format_civil(slice_end) else {
+        let Ok(to) = format_civil(to) else {
             return false;
         };
         self.report_range_edit = None;
         self.report_log_edit = None;
-        self.missed_activity_edit = Some(super::MissedActivityEditState {
-            source_session_id: session.id,
+        self.historical_activity_edit = Some(super::HistoricalActivityEditState {
             target_category_id,
             from,
             to,
-            active_field: super::MissedActivityField::Layer,
+            active_field: super::HistoricalActivityField::Layer,
             select_all: false,
             error: None,
+            confirmation: None,
         });
         self.render_needed = true;
         true
     }
 
-    pub(super) fn cancel_missed_activity_edit(&mut self) {
-        self.missed_activity_edit = None;
+    pub(super) fn cancel_historical_activity_edit(&mut self) {
+        self.historical_activity_edit = None;
         self.render_needed = true;
+    }
+
+    pub(super) fn dismiss_historical_activity_confirmation(&mut self) {
+        if let Some(edit) = self.historical_activity_edit.as_mut() {
+            edit.confirmation = None;
+            edit.error = None;
+            self.render_needed = true;
+        }
     }
 
     fn historical_correction_active_preview(
@@ -365,86 +349,70 @@ impl App {
         })
     }
 
-    pub(super) fn commit_missed_activity_edit(&mut self) -> bool {
-        let Some(edit) = self.missed_activity_edit.clone() else {
+    pub(super) fn commit_historical_activity_edit(&mut self) -> bool {
+        let Some(edit) = self.historical_activity_edit.clone() else {
             return false;
         };
-        let Some(source) = self
-            .time_tracker
-            .sessions
-            .iter()
-            .find(|session| session.id == edit.source_session_id)
-            .cloned()
-        else {
-            if let Some(current) = self.missed_activity_edit.as_mut() {
-                current.error = Some("selected Idle session no longer exists".to_string());
-            }
-            self.render_needed = true;
-            return false;
-        };
-        if source.category_id != DRIFT_CATEGORY_ID {
-            if let Some(current) = self.missed_activity_edit.as_mut() {
-                current.error = Some("selected history is no longer Idle".to_string());
+        if let Err(error) = self.settle_transition_boundary(Utc::now()) {
+            if let Some(current) = self.historical_activity_edit.as_mut() {
+                current.error = Some(error);
             }
             self.render_needed = true;
             return false;
         }
-        let Some(policy) = source.operational_day_policy else {
-            if let Some(current) = self.missed_activity_edit.as_mut() {
-                current.error = Some("selected Idle session lacks boundary provenance".to_string());
+        let active_preview = match self.historical_correction_active_preview() {
+            Ok(preview) => preview,
+            Err(error) => {
+                if let Some(current) = self.historical_activity_edit.as_mut() {
+                    current.error = Some(error);
+                }
+                self.render_needed = true;
+                return false;
             }
-            self.render_needed = true;
-            return false;
         };
-        let Some(source_start) = source.started_at_utc else {
-            return false;
-        };
-        let from = match parse_missed_activity_timestamp(&edit.from, policy, source_start) {
+        let from = match parse_historical_activity_timestamp(
+            &edit.from,
+            active_preview.operational_day_policy,
+        ) {
             Ok(value) => value,
             Err(error) => {
-                if let Some(current) = self.missed_activity_edit.as_mut() {
+                if let Some(current) = self.historical_activity_edit.as_mut() {
                     current.error = Some(format!("From {error}"));
                 }
                 self.render_needed = true;
                 return false;
             }
         };
-        let to = match parse_missed_activity_timestamp(&edit.to, policy, source_start) {
+        let to = match parse_historical_activity_timestamp(
+            &edit.to,
+            active_preview.operational_day_policy,
+        ) {
             Ok(value) => value,
             Err(error) => {
-                if let Some(current) = self.missed_activity_edit.as_mut() {
+                if let Some(current) = self.historical_activity_edit.as_mut() {
                     current.error = Some(format!("To {error}"));
                 }
                 self.render_needed = true;
                 return false;
             }
         };
-        let source_elapsed = match i64::try_from(source.elapsed_seconds) {
-            Ok(value) => value,
-            Err(_) => return false,
-        };
-        let Some(source_end) =
-            source_start.checked_add_signed(ChronoDuration::seconds(source_elapsed))
-        else {
-            return false;
-        };
         let validation_error = if from >= to {
             Some("From must be before To".to_string())
-        } else if from < source_start || to > source_end {
-            Some("interval must stay inside the selected completed Idle session".to_string())
-        } else if edit.target_category_id == DRIFT_CATEGORY_ID
-            || self
-                .time_tracker
-                .category_by_id(edit.target_category_id)
-                .is_none()
+        } else if to > active_preview.ended_at_utc {
+            Some("To cannot be later than now".to_string())
+        } else if self
+            .time_tracker
+            .category_by_id(edit.target_category_id)
+            .is_none()
         {
-            Some("choose an active non-Idle layer".to_string())
+            Some("choose an active layer".to_string())
         } else {
             None
         };
         if let Some(error) = validation_error {
-            if let Some(current) = self.missed_activity_edit.as_mut() {
+            if let Some(current) = self.historical_activity_edit.as_mut() {
                 current.error = Some(error);
+                current.confirmation = None;
             }
             self.render_needed = true;
             return false;
@@ -452,42 +420,91 @@ impl App {
         let Some(database_path) = self.sqlite_database_path.clone() else {
             return false;
         };
-        let active_preview = match self.historical_correction_active_preview() {
-            Ok(preview) => preview,
+        let checkpoint = match self.build_runtime_checkpoint() {
+            Ok(checkpoint) => checkpoint,
             Err(error) => {
-                if let Some(current) = self.missed_activity_edit.as_mut() {
+                if let Some(current) = self.historical_activity_edit.as_mut() {
                     current.error = Some(error);
                 }
                 self.render_needed = true;
                 return false;
             }
         };
-        let result = crate::sqlite::log_tui_missed_activity(
+        let checkpoint_json = match serde_json::to_string(&checkpoint) {
+            Ok(value) => value,
+            Err(error) => {
+                if let Some(current) = self.historical_activity_edit.as_mut() {
+                    current.error = Some(error.to_string());
+                }
+                self.render_needed = true;
+                return false;
+            }
+        };
+        let description = String::new();
+        let confirmed_plan_token = edit
+            .confirmation
+            .as_ref()
+            .map(|confirmation| confirmation.plan_token.clone());
+        let result = crate::sqlite::log_tui_historical_activity(
             &database_path,
-            crate::sqlite::TuiHistoricalMissedActivityRequest {
-                source_session_id: edit.source_session_id,
+            crate::sqlite::TuiHistoricalActivityRequest {
                 target_category_id: edit.target_category_id,
                 started_at_utc: from,
                 ended_at_utc: to,
-                description: String::new(),
-                active_preview: Some(active_preview),
+                description,
+                active_preview,
+                confirmed_plan_token,
+                checkpoint_json,
+                checkpoint_detached_at_utc: checkpoint.detached_at_utc,
+                checkpoint_simulation_time_utc: checkpoint.simulation_time_utc,
             },
         );
-        let Some(affected_days) = self.record_storage_result_for(
+        let Some(outcome) = self.record_storage_result_for(
             PersistenceOperation::SessionCorrection,
             RecoveryAction::ReloadAuthority,
             result,
         ) else {
             return false;
         };
-        let _affected_days = affected_days;
-        if !self.reload_sqlite_sessions() {
-            return false;
+        match outcome {
+            crate::sqlite::TuiHistoricalActivityOutcome::NeedsConfirmation {
+                plan_token,
+                conflicts,
+            } => {
+                if let Some(current) = self.historical_activity_edit.as_mut() {
+                    current.confirmation = Some(super::HistoricalActivityConfirmation {
+                        plan_token,
+                        conflicts,
+                    });
+                    current.error = None;
+                }
+                self.render_needed = true;
+                false
+            }
+            crate::sqlite::TuiHistoricalActivityOutcome::Applied(receipt) => {
+                let active_start_changed = self.session.active_session_started_at_utc
+                    != Some(receipt.resulting_active_started_at_utc);
+                self.session.active_session_stable_id =
+                    Some(receipt.resulting_active_stable_id.clone());
+                if active_start_changed
+                    && let Err(error) =
+                        self.begin_active_session_at(receipt.resulting_active_started_at_utc, true)
+                {
+                    if let Some(current) = self.historical_activity_edit.as_mut() {
+                        current.error = Some(error);
+                    }
+                    self.render_needed = true;
+                    return false;
+                }
+                if !self.reload_sqlite_sessions() {
+                    return false;
+                }
+                self.historical_activity_edit = None;
+                self.clear_report_snapshot_cache();
+                self.sync_report_selection_for_interval();
+                true
+            }
         }
-        self.missed_activity_edit = None;
-        self.clear_report_snapshot_cache();
-        self.sync_report_selection_for_interval();
-        true
     }
 
     pub(super) fn set_report_period(&mut self, period: ReportPeriod) {
@@ -495,7 +512,7 @@ impl App {
         self.report_period_offset = 0;
         self.report_custom_window = None;
         self.report_range_edit = None;
-        self.missed_activity_edit = None;
+        self.historical_activity_edit = None;
         self.clear_report_snapshot_cache();
         self.sync_report_selection_for_interval();
     }
@@ -922,10 +939,10 @@ fn retain_report_edit_after_commit(edit: &mut Option<super::ReportLogEditState>,
 
 #[cfg(test)]
 mod report_edit_state_tests {
-    use chrono::{DateTime, NaiveDate, Timelike, Utc};
+    use chrono::NaiveDate;
 
     use super::{
-        parse_missed_activity_timestamp, parse_report_range, retain_report_edit_after_commit,
+        parse_historical_activity_timestamp, parse_report_range, retain_report_edit_after_commit,
         shifted_custom_window_newer, shifted_custom_window_older,
     };
     use crate::{
@@ -963,23 +980,15 @@ mod report_edit_state_tests {
     }
 
     #[test]
-    fn missed_activity_timestamp_preserves_source_whole_second_lattice() {
-        let source = DateTime::parse_from_rfc3339("2026-08-02T05:30:00.500Z")
-            .unwrap()
-            .with_timezone(&Utc);
+    fn historical_activity_timestamp_uses_explicit_civil_second() {
         let policy = OperationalDayPolicy {
             utc_offset_seconds: -6 * 60 * 60,
             start_minutes: 0,
         };
         let parsed =
-            parse_missed_activity_timestamp("2026-08-01 23:45:00", policy, source).unwrap();
-        assert_eq!(
-            parsed,
-            DateTime::parse_from_rfc3339("2026-08-02T05:45:00.500Z")
-                .unwrap()
-                .with_timezone(&Utc)
-        );
-        assert_eq!(parsed.nanosecond(), source.nanosecond());
+            parse_historical_activity_timestamp("2026-08-01 23:45:00", policy).unwrap();
+        assert_eq!(parsed.to_rfc3339(), "2026-08-02T05:45:00+00:00");
+        assert!(parse_historical_activity_timestamp("2026/08/01 23:45", policy).is_err());
     }
 
     #[test]

@@ -74,7 +74,7 @@ pub(crate) enum Action {
     ReportWeek,
     ReportMonth,
     ReportRange,
-    LogMissedActivity,
+    LogActivity,
 
     HelpTop,
     HelpBottom,
@@ -110,7 +110,7 @@ impl Action {
         Action::ReportWeek,
         Action::ReportMonth,
         Action::ReportRange,
-        Action::LogMissedActivity,
+        Action::LogActivity,
         Action::HelpTop,
         Action::HelpBottom,
     ];
@@ -152,7 +152,7 @@ impl Action {
             Action::ReportWeek => "balance_week",
             Action::ReportMonth => "balance_month",
             Action::ReportRange => "balance_range",
-            Action::LogMissedActivity => "balance_log_missed",
+            Action::LogActivity => "balance_log_activity",
 
             Action::HelpTop => "atlas_top",
             Action::HelpBottom => "atlas_bottom",
@@ -196,7 +196,7 @@ impl Action {
             "balance_week" | "report_week" => Some(Self::ReportWeek),
             "balance_month" | "report_month" => Some(Self::ReportMonth),
             "balance_range" | "report_range" => Some(Self::ReportRange),
-            "balance_log_missed" | "report_log_missed" => Some(Self::LogMissedActivity),
+            "balance_log_activity" | "report_log_activity" => Some(Self::LogActivity),
 
             "atlas_top" | "help_top" => Some(Self::HelpTop),
             "atlas_bottom" | "help_bottom" => Some(Self::HelpBottom),
@@ -238,9 +238,7 @@ impl Action {
             Action::ReportWeek => "Set balance pop-up range to week",
             Action::ReportMonth => "Set balance pop-up range to month",
             Action::ReportRange => "Edit an explicit From/To balance range",
-            Action::LogMissedActivity => {
-                "Reclassify part of a completed Idle session as missed activity"
-            }
+            Action::LogActivity => "Log or correct an arbitrary past activity interval",
 
             Action::HelpTop => "Jump command atlas to top",
             Action::HelpBottom => "Jump command atlas to bottom",
@@ -280,7 +278,7 @@ impl Action {
             | Action::ReportWeek
             | Action::ReportMonth
             | Action::ReportRange
-            | Action::LogMissedActivity => ActionCategory::ReportModal,
+            | Action::LogActivity => ActionCategory::ReportModal,
 
             Action::HelpTop | Action::HelpBottom => ActionCategory::HelpModal,
         }
@@ -838,7 +836,7 @@ const DEFAULT_BINDINGS: [(&str, Action); 33] = [
     ("w", Action::ReportWeek),
     ("m", Action::ReportMonth),
     ("r", Action::ReportRange),
-    ("l", Action::LogMissedActivity),
+    ("l", Action::LogActivity),
     ("home", Action::HelpTop),
     ("g", Action::HelpTop),
     ("end", Action::HelpBottom),
@@ -1365,13 +1363,13 @@ mod tests {
     }
 
     #[test]
-    fn test_default_keymap_has_l_for_balance_log_missed() {
+    fn test_default_keymap_has_l_for_balance_log_activity() {
         let keymap = default_keymap();
         let l = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE);
 
         assert_eq!(
             keymap.action_for_key_event(l),
-            Some(Action::LogMissedActivity)
+            Some(Action::LogActivity)
         );
     }
 

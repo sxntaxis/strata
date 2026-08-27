@@ -101,7 +101,7 @@ Deliverables:
 
 #### HISTORY-001D — Arbitrary retroactive activity
 
-Status: **ACTIVE / ARCHITECTURE ACCEPTED**.
+Status: **ACTIVE / IMPLEMENTED CANDIDATE — NATIVE VALIDATION PENDING**.
 
 Product decision: the user states **From X to Y I did Z**. The operation is not scoped to a selected existing session and may cross zero, one, or many canonical rows. Existing session boundaries are implementation detail, not interaction authority.
 

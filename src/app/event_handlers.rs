@@ -33,7 +33,7 @@ enum ReportRangeEditKeyIntent {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum MissedActivityEditKeyIntent {
+enum HistoricalActivityEditKeyIntent {
     Append(char),
     Backspace,
     NextField,
@@ -116,38 +116,38 @@ fn resolve_report_range_edit_key(
     }
 }
 
-fn resolve_missed_activity_edit_key(
+fn resolve_historical_activity_edit_key(
     key: KeyEvent,
     keymap: &crate::keybindings::Keymap,
-) -> MissedActivityEditKeyIntent {
+) -> HistoricalActivityEditKeyIntent {
     if key
         .modifiers
         .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
     {
         return if keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
-            MissedActivityEditKeyIntent::EmergencyQuit
+            HistoricalActivityEditKeyIntent::EmergencyQuit
         } else {
-            MissedActivityEditKeyIntent::Ignore
+            HistoricalActivityEditKeyIntent::Ignore
         };
     }
 
     match key.code {
-        KeyCode::Esc => MissedActivityEditKeyIntent::Cancel,
-        KeyCode::Enter => MissedActivityEditKeyIntent::Commit,
-        KeyCode::Backspace | KeyCode::Delete => MissedActivityEditKeyIntent::Backspace,
-        KeyCode::BackTab => MissedActivityEditKeyIntent::PreviousField,
+        KeyCode::Esc => HistoricalActivityEditKeyIntent::Cancel,
+        KeyCode::Enter => HistoricalActivityEditKeyIntent::Commit,
+        KeyCode::Backspace | KeyCode::Delete => HistoricalActivityEditKeyIntent::Backspace,
+        KeyCode::BackTab => HistoricalActivityEditKeyIntent::PreviousField,
         KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
-            MissedActivityEditKeyIntent::PreviousField
+            HistoricalActivityEditKeyIntent::PreviousField
         }
-        KeyCode::Tab => MissedActivityEditKeyIntent::NextField,
-        KeyCode::Left => MissedActivityEditKeyIntent::PreviousTarget,
-        KeyCode::Right => MissedActivityEditKeyIntent::NextTarget,
+        KeyCode::Tab => HistoricalActivityEditKeyIntent::NextField,
+        KeyCode::Left => HistoricalActivityEditKeyIntent::PreviousTarget,
+        KeyCode::Right => HistoricalActivityEditKeyIntent::NextTarget,
         KeyCode::Char(character)
             if character.is_ascii_digit() || matches!(character, '-' | ':' | ' ') =>
         {
-            MissedActivityEditKeyIntent::Append(character)
+            HistoricalActivityEditKeyIntent::Append(character)
         }
-        _ => MissedActivityEditKeyIntent::Ignore,
+        _ => HistoricalActivityEditKeyIntent::Ignore,
     }
 }
 
@@ -178,8 +178,8 @@ impl App {
             return true;
         }
 
-        if self.missed_activity_edit.is_some() {
-            return self.handle_missed_activity_edit_key(key);
+        if self.historical_activity_edit.is_some() {
+            return self.handle_historical_activity_edit_key(key);
         }
 
         if self.report_range_edit.is_some() {
@@ -1207,8 +1207,8 @@ impl App {
             Action::ReportRange => {
                 self.begin_report_range_edit();
             }
-            Action::LogMissedActivity => {
-                handled = self.begin_missed_activity_edit();
+            Action::LogActivity => {
+                handled = self.begin_historical_activity_edit();
             }
             Action::DeleteCategory => {
                 if in_logs_view {
@@ -1269,62 +1269,86 @@ impl App {
                 self.begin_report_range_edit();
                 false
             }
+            Action::LogActivity => {
+                self.open_report_modal();
+                self.begin_historical_activity_edit();
+                false
+            }
             _ => false,
         }
     }
 
-    fn handle_missed_activity_edit_key(&mut self, key: KeyEvent) -> bool {
-        match resolve_missed_activity_edit_key(key, &self.keymap) {
-            MissedActivityEditKeyIntent::Append(character) => {
-                if let Some(edit) = self.missed_activity_edit.as_mut() {
+    fn handle_historical_activity_edit_key(&mut self, key: KeyEvent) -> bool {
+        let intent = resolve_historical_activity_edit_key(key, &self.keymap);
+        if self
+            .historical_activity_edit
+            .as_ref()
+            .is_some_and(|edit| edit.confirmation.is_some())
+        {
+            match intent {
+                HistoricalActivityEditKeyIntent::Commit => {
+                    self.commit_historical_activity_edit();
+                }
+                HistoricalActivityEditKeyIntent::Cancel => {
+                    self.dismiss_historical_activity_confirmation();
+                }
+                HistoricalActivityEditKeyIntent::EmergencyQuit => return true,
+                _ => {}
+            }
+            return false;
+        }
+
+        match intent {
+            HistoricalActivityEditKeyIntent::Append(character) => {
+                if let Some(edit) = self.historical_activity_edit.as_mut() {
                     edit.append(character);
                     self.render_needed = true;
                 }
             }
-            MissedActivityEditKeyIntent::Backspace => {
-                if let Some(edit) = self.missed_activity_edit.as_mut() {
+            HistoricalActivityEditKeyIntent::Backspace => {
+                if let Some(edit) = self.historical_activity_edit.as_mut() {
                     edit.backspace();
                     self.render_needed = true;
                 }
             }
-            MissedActivityEditKeyIntent::NextField => {
-                if let Some(edit) = self.missed_activity_edit.as_mut() {
+            HistoricalActivityEditKeyIntent::NextField => {
+                if let Some(edit) = self.historical_activity_edit.as_mut() {
                     edit.next_field();
                     self.render_needed = true;
                 }
             }
-            MissedActivityEditKeyIntent::PreviousField => {
-                if let Some(edit) = self.missed_activity_edit.as_mut() {
+            HistoricalActivityEditKeyIntent::PreviousField => {
+                if let Some(edit) = self.historical_activity_edit.as_mut() {
                     edit.previous_field();
                     self.render_needed = true;
                 }
             }
-            MissedActivityEditKeyIntent::PreviousTarget => {
+            HistoricalActivityEditKeyIntent::PreviousTarget => {
                 if self
-                    .missed_activity_edit
+                    .historical_activity_edit
                     .as_ref()
-                    .is_some_and(|edit| edit.active_field == super::MissedActivityField::Layer)
+                    .is_some_and(|edit| edit.active_field == super::HistoricalActivityField::Layer)
                 {
-                    self.cycle_missed_activity_target(-1);
+                    self.cycle_historical_activity_target(-1);
                 }
             }
-            MissedActivityEditKeyIntent::NextTarget => {
+            HistoricalActivityEditKeyIntent::NextTarget => {
                 if self
-                    .missed_activity_edit
+                    .historical_activity_edit
                     .as_ref()
-                    .is_some_and(|edit| edit.active_field == super::MissedActivityField::Layer)
+                    .is_some_and(|edit| edit.active_field == super::HistoricalActivityField::Layer)
                 {
-                    self.cycle_missed_activity_target(1);
+                    self.cycle_historical_activity_target(1);
                 }
             }
-            MissedActivityEditKeyIntent::Commit => {
-                self.commit_missed_activity_edit();
+            HistoricalActivityEditKeyIntent::Commit => {
+                self.commit_historical_activity_edit();
             }
-            MissedActivityEditKeyIntent::Cancel => {
-                self.cancel_missed_activity_edit();
+            HistoricalActivityEditKeyIntent::Cancel => {
+                self.cancel_historical_activity_edit();
             }
-            MissedActivityEditKeyIntent::EmergencyQuit => return true,
-            MissedActivityEditKeyIntent::Ignore => {}
+            HistoricalActivityEditKeyIntent::EmergencyQuit => return true,
+            HistoricalActivityEditKeyIntent::Ignore => {}
         }
         false
     }
@@ -1391,8 +1415,8 @@ impl App {
 #[cfg(test)]
 mod report_edit_tests {
     use super::{
-        MissedActivityEditKeyIntent, ReportEditKeyIntent, ReportRangeEditKeyIntent,
-        direct_command_or_fuzzy_fallback, resolve_missed_activity_edit_key,
+        HistoricalActivityEditKeyIntent, ReportEditKeyIntent, ReportRangeEditKeyIntent,
+        direct_command_or_fuzzy_fallback, resolve_historical_activity_edit_key,
         resolve_report_edit_key, resolve_report_range_edit_key,
     };
     use crate::keybindings::default_keymap;
@@ -1431,46 +1455,46 @@ mod report_edit_tests {
     }
 
     #[test]
-    fn missed_activity_editor_owns_timestamp_input_and_layer_navigation() {
+    fn historical_activity_editor_owns_timestamp_input_and_layer_navigation() {
         let keymap = default_keymap();
         for character in [
             '2', '0', '2', '6', '-', '0', '8', ' ', '1', '2', ':', '3', '0',
         ] {
             assert_eq!(
-                resolve_missed_activity_edit_key(
+                resolve_historical_activity_edit_key(
                     KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
                     &keymap,
                 ),
-                MissedActivityEditKeyIntent::Append(character)
+                HistoricalActivityEditKeyIntent::Append(character)
             );
         }
         assert_eq!(
-            resolve_missed_activity_edit_key(
+            resolve_historical_activity_edit_key(
                 KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
                 &keymap,
             ),
-            MissedActivityEditKeyIntent::PreviousTarget
+            HistoricalActivityEditKeyIntent::PreviousTarget
         );
         assert_eq!(
-            resolve_missed_activity_edit_key(
+            resolve_historical_activity_edit_key(
                 KeyEvent::new(KeyCode::Right, KeyModifiers::NONE),
                 &keymap,
             ),
-            MissedActivityEditKeyIntent::NextTarget
+            HistoricalActivityEditKeyIntent::NextTarget
         );
         assert_eq!(
-            resolve_missed_activity_edit_key(
+            resolve_historical_activity_edit_key(
                 KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE),
                 &keymap,
             ),
-            MissedActivityEditKeyIntent::Ignore
+            HistoricalActivityEditKeyIntent::Ignore
         );
         assert_eq!(
-            resolve_missed_activity_edit_key(
+            resolve_historical_activity_edit_key(
                 KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
                 &keymap,
             ),
-            MissedActivityEditKeyIntent::EmergencyQuit
+            HistoricalActivityEditKeyIntent::EmergencyQuit
         );
     }
 

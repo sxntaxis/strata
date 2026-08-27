@@ -28,8 +28,8 @@ impl App {
 
         let preferred_inner_width = self
             .preferred_report_inner_width(&summary, logs_for_view.as_deref())
-            .max(if self.missed_activity_edit.is_some() {
-                REPORT_MODAL_SETTINGS.missed_activity_editor_min_width
+            .max(if self.historical_activity_edit.is_some() {
+                REPORT_MODAL_SETTINGS.historical_activity_editor_min_width
             } else if self.report_range_edit.is_some() {
                 REPORT_MODAL_SETTINGS.range_editor_min_width
             } else {
@@ -46,17 +46,6 @@ impl App {
         } else {
             Some(self.report_selected_index.min(summary.entries.len() - 1))
         };
-        let selected_log_is_persisted = logs_for_view
-            .as_ref()
-            .and_then(|logs| {
-                if logs.is_empty() {
-                    None
-                } else {
-                    logs.get(self.report_log_selected_index.min(logs.len() - 1))
-                }
-            })
-            .is_some_and(|row| row.session_id.is_some());
-
         let interval_label = ui_helpers::format_report_interval_label(&summary.date);
 
         let border_color = if let Some(category_id) = self.report_logs_category_id {
@@ -113,59 +102,97 @@ impl App {
             Style::default().fg(Color::DarkGray),
         ))
         .alignment(Alignment::Left);
-        let interaction_bottom_title = if let Some(edit) = self.missed_activity_edit.as_ref() {
-            let active_style = Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
-            let inactive_style = Style::default().fg(Color::White);
-            let target = self
-                .missed_activity_target_name()
-                .unwrap_or_else(|| "unavailable".to_string());
-            let mut spans = vec![
-                Span::styled("log missed · layer ", Style::default().fg(Color::Gray)),
-                Span::styled(
-                    target,
-                    if edit.active_field == super::MissedActivityField::Layer {
-                        active_style
-                    } else {
-                        inactive_style
-                    },
-                ),
-                Span::styled(" · from ", Style::default().fg(Color::Gray)),
-                Span::styled(
-                    edit.from.clone(),
-                    if edit.active_field == super::MissedActivityField::From {
-                        active_style
-                    } else {
-                        inactive_style
-                    },
-                ),
-                Span::styled(" · to ", Style::default().fg(Color::Gray)),
-                Span::styled(
-                    edit.to.clone(),
-                    if edit.active_field == super::MissedActivityField::To {
-                        active_style
-                    } else {
-                        inactive_style
-                    },
-                ),
-            ];
-            if let Some(error) = edit.error.as_ref() {
+        let interaction_bottom_title = if let Some(edit) = self.historical_activity_edit.as_ref() {
+            if edit.confirmation.is_some() {
+                let labels = self.historical_activity_conflict_labels();
+                let preview = if labels.is_empty() {
+                    "recorded activity".to_string()
+                } else {
+                    let remaining = labels.len().saturating_sub(3);
+                    let mut preview = labels.into_iter().take(3).collect::<Vec<_>>().join("; ");
+                    if remaining > 0 {
+                        preview.push_str(&format!("; +{remaining} more"));
+                    }
+                    preview
+                };
+                let mut spans = vec![
+                    Span::styled("collision · ", Style::default().fg(Color::Yellow)),
+                    Span::styled(preview, Style::default().fg(Color::White)),
+                ];
+                if edit
+                    .confirmation
+                    .as_ref()
+                    .is_some_and(|confirmation| confirmation.conflicts.iter().any(|item| item.active))
+                {
+                    let active_name = self
+                        .time_tracker
+                        .category_by_id(self.time_tracker.active_category_id())
+                        .map(|category| self.display_layer_name(&category.name))
+                        .unwrap_or_else(|| "current layer".to_string());
+                    spans.push(Span::styled(
+                        format!(" · current stays {active_name}"),
+                        Style::default().fg(Color::Gray),
+                    ));
+                }
                 spans.push(Span::styled(
-                    format!(" · {error}"),
-                    Style::default().fg(Color::Red),
-                ));
-                spans.push(Span::styled(
-                    " · Enter retry · Esc cancel",
+                    " · Enter replace · Esc back",
                     Style::default().fg(Color::Gray),
                 ));
+                Some(Line::from(spans).alignment(Alignment::Right))
             } else {
-                spans.push(Span::styled(
-                    " · ←/→ layer · Tab field · Enter log · Esc cancel",
-                    Style::default().fg(Color::Gray),
-                ));
+                let active_style = Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+                let inactive_style = Style::default().fg(Color::White);
+                let target = self
+                    .historical_activity_target_name()
+                    .unwrap_or_else(|| "unavailable".to_string());
+                let mut spans = vec![
+                    Span::styled("log activity · layer ", Style::default().fg(Color::Gray)),
+                    Span::styled(
+                        target,
+                        if edit.active_field == super::HistoricalActivityField::Layer {
+                            active_style
+                        } else {
+                            inactive_style
+                        },
+                    ),
+                    Span::styled(" · from ", Style::default().fg(Color::Gray)),
+                    Span::styled(
+                        edit.from.clone(),
+                        if edit.active_field == super::HistoricalActivityField::From {
+                            active_style
+                        } else {
+                            inactive_style
+                        },
+                    ),
+                    Span::styled(" · to ", Style::default().fg(Color::Gray)),
+                    Span::styled(
+                        edit.to.clone(),
+                        if edit.active_field == super::HistoricalActivityField::To {
+                            active_style
+                        } else {
+                            inactive_style
+                        },
+                    ),
+                ];
+                if let Some(error) = edit.error.as_ref() {
+                    spans.push(Span::styled(
+                        format!(" · {error}"),
+                        Style::default().fg(Color::Red),
+                    ));
+                    spans.push(Span::styled(
+                        " · Enter retry · Esc cancel",
+                        Style::default().fg(Color::Gray),
+                    ));
+                } else {
+                    spans.push(Span::styled(
+                        " · ←/→ layer · Tab field · Enter log · Esc cancel",
+                        Style::default().fg(Color::Gray),
+                    ));
+                }
+                Some(Line::from(spans).alignment(Alignment::Right))
             }
-            Some(Line::from(spans).alignment(Alignment::Right))
         } else if let Some(edit) = self.report_range_edit.as_ref() {
             let active_style = Style::default()
                 .fg(Color::Cyan)
@@ -208,29 +235,34 @@ impl App {
             }
             Some(Line::from(spans).alignment(Alignment::Right))
         } else if self.report_logs_category_id.is_some() {
+            let log_key = self
+                .keymap
+                .keys_for_action(Action::LogActivity)
+                .first()
+                .map(ToString::to_string);
             let label = if self.report_log_edit.is_some() {
                 "edit · Enter commit · Esc cancel".to_string()
-            } else if self.report_logs_category_id == Some(DRIFT_CATEGORY_ID)
-                && selected_log_is_persisted
-            {
-                let missed_key = self
-                    .keymap
-                    .keys_for_action(Action::LogMissedActivity)
-                    .first()
-                    .map(ToString::to_string);
-                missed_key.map_or_else(
-                    || "view · Enter edit · Esc back".to_string(),
-                    |key| format!("view · {key} log missed · Enter edit · Esc back"),
-                )
             } else {
-                "view · Enter edit · Esc back".to_string()
+                log_key.map_or_else(
+                    || "view · Enter edit · Esc back".to_string(),
+                    |key| format!("view · {key} log activity · Enter edit · Esc back"),
+                )
             };
             Some(
                 Line::from(Span::styled(label, Style::default().fg(Color::Gray)))
                     .alignment(Alignment::Right),
             )
         } else {
-            None
+            self.keymap
+                .keys_for_action(Action::LogActivity)
+                .first()
+                .map(|key| {
+                    Line::from(Span::styled(
+                        format!("{key} log activity"),
+                        Style::default().fg(Color::Gray),
+                    ))
+                    .alignment(Alignment::Right)
+                })
         };
 
         let mut frame_block = Block::default()
