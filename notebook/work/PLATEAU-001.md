@@ -68,6 +68,10 @@ entrypoint suitable for the TUI.
 
 #### HISTORY-001B — From/To in Balance
 
+Status: **IMPLEMENTED / NATIVE VALIDATION PENDING**.
+
+Interaction decision: `range` is a fourth Balance mode reached by the configurable `balance_range` action (default `r`). It edits explicit `From` and `To` ISO dates inline, commits only after validation, and then shifts as a whole window by its own span; it does not overload preset offsets.
+
 Deliverables:
 
 - Add a visible custom range choice beside Day / Week / Month.
@@ -173,12 +177,9 @@ Preferred progression:
 
 ## Agent locator
 
-Current edge: **HISTORY-001B — visible From → To selection in Balance**.
+Current edge: **HISTORY-001B native validation — visible From → To selection in Balance**.
 
-The validated implementation includes the Balance runtime/source vocabulary cutover, default `b` opener, shared
-`ReportWindow`, preset and live/log routing through that window, CLI custom-range reuse of the same domain seam, and
-JSON export schema 4 for `balance_effect`. Native formatter, Clippy, full tests, help smoke, and targeted report
-proofs pass on the verified current mainline.
+The validated HISTORY-001A implementation includes the Balance runtime/source vocabulary cutover, default `b` opener, shared `ReportWindow`, preset and live/log routing through that window, CLI custom-range reuse of the same domain seam, and JSON export schema 4 for `balance_effect`. HISTORY-001B now adds the inline `range` editor and custom-window navigation on top of that seam; native formatter, Clippy, full tests, smoke, and targeted TUI proof are the remaining gate before moving to HISTORY-001C.
 
 The old dirty adaptive-resize implementation is preserved externally as custody evidence and is superseded by the
 authoritative current-main visible-basin and atomic clear-all architecture. No adaptive code from that stale branch is

@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-08-27
 authority: working
-summary: Day-end Balance visual snapshots are accepted as working baseline; HISTORY-001A is integrated and natively green; HISTORY-001B is next.
-next: Begin HISTORY-001B visible From/To range selection in Balance.
+summary: HISTORY-001A is natively green; HISTORY-001B From/To range editing is implemented and awaiting native validation.
+next: Native-validate HISTORY-001B custom From/To range editing, then begin HISTORY-001C retroactive missed activity.
 ---
 
 # NOW — Strata
@@ -66,10 +66,7 @@ test suite, build, help smoke, diff hygiene, and the long-profile dangling-symli
 
 `notebook/work/PLATEAU-001.md` is the durable roadmap for the remaining core-development arc. The owner has accepted the existing day-end snapshot behavior as baseline and does not want an artificial re-certification gate before continuing.
 
-The active edge is **HISTORY-001B — visible From/To selection in Balance**. HISTORY-001A is integrated on verified
-current main: the Karma→Balance historical/report vocabulary cutover, default `b` opener, explicit `ReportWindow`
-seam for Day/Week/Month and live/log routing, CLI custom-range reuse, and JSON schema 4 with `balance_effect` are
-natively green. This is preparation for visible custom range selection, not a second reporting implementation.
+The active edge is **HISTORY-001B native validation — visible From/To selection in Balance**. HISTORY-001A is integrated and green. HISTORY-001B now adds `range` beside Day/Week/Month, a configurable default `r` action, inline ISO From/To editing with validation, and same-span custom-window navigation capped at the current operational day. Summary rows, detail logs, provisional active time, and historical sediment remain routed through the shared `ReportWindow`; no second reporting implementation was introduced.
 
 The stale dirty adaptive-resize branch remains preserved as custody evidence and is superseded by the current-main
 visible-basin, resize/restore, and atomic clear-all authority. No adaptive code was ported.
@@ -118,4 +115,4 @@ These are not open implementation defects. They require new evidence and an expl
 
 ## Next
 
-Run the repository-native formatting, strict Clippy, full test, and help-smoke lanes for HISTORY-001A. Fix only fallout from the Balance/report-window cutover. Once green, mark HISTORY-001A complete in `notebook/work/PLATEAU-001.md` and begin HISTORY-001B: visible From/To range selection in Balance using the shared `ReportWindow` path.
+Run repository-native formatting, strict Clippy, full tests, help smoke, and a focused PTY/interaction proof for HISTORY-001B. Validate `r` range entry, From/To overwrite and field switching, reversed/invalid rejection, commit/cancel behavior, custom-range summary/log/live routing, same-span left/right navigation, and return to preset ranges. Fix only HISTORY-001B fallout. Once green, mark HISTORY-001B complete and begin HISTORY-001C — retroactive missed activity.

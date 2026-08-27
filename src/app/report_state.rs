@@ -16,6 +16,39 @@ use crate::sand::{
 
 use super::{App, PersistenceOperation, RecoveryAction};
 
+fn parse_report_range(from: &str, to: &str) -> Result<ReportWindow, String> {
+    let parse = |label: &str, value: &str| {
+        NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d")
+            .map_err(|_| format!("{label} must use YYYY-MM-DD"))
+    };
+    let start = parse("From", from)?;
+    let end = parse("To", to)?;
+    if start > end {
+        return Err("From must be on or before To".to_string());
+    }
+    ReportWindow::new(start, end)
+}
+
+fn shifted_custom_window_older(window: &ReportWindow) -> Option<ReportWindow> {
+    let width_days = (window.end - window.start).num_days().saturating_add(1);
+    let delta = ChronoDuration::days(width_days);
+    let start = window.start.checked_sub_signed(delta)?;
+    let end = window.end.checked_sub_signed(delta)?;
+    ReportWindow::new(start, end).ok()
+}
+
+fn shifted_custom_window_newer(window: &ReportWindow, today: NaiveDate) -> Option<ReportWindow> {
+    if window.end >= today {
+        return None;
+    }
+    let width_days = (window.end - window.start).num_days().saturating_add(1);
+    let delta = ChronoDuration::days(width_days);
+    let candidate_end = window.end.checked_add_signed(delta)?;
+    let end = candidate_end.min(today);
+    let start = end.checked_sub_signed(ChronoDuration::days(width_days.saturating_sub(1)))?;
+    ReportWindow::new(start, end).ok()
+}
+
 impl App {
     pub(super) fn focus_none_report_row(&mut self) {
         let summary = self.report_rows();
@@ -46,7 +79,13 @@ impl App {
     }
 
     pub(super) fn current_report_window(&self) -> ReportWindow {
-        report_period_window_with_offset(self.report_period, self.report_period_offset)
+        self.report_custom_window
+            .clone()
+            .unwrap_or_else(|| report_period_window_with_offset(self.report_period, self.report_period_offset))
+    }
+
+    pub(super) fn report_range_is_custom(&self) -> bool {
+        self.report_custom_window.is_some()
     }
 
     pub(super) fn report_rows(&self) -> BalanceReportSummary {
@@ -111,18 +150,77 @@ impl App {
     pub(super) fn set_report_period(&mut self, period: ReportPeriod) {
         self.report_period = period;
         self.report_period_offset = 0;
+        self.report_custom_window = None;
+        self.report_range_edit = None;
         self.clear_report_snapshot_cache();
         self.sync_report_selection_for_interval();
+    }
+
+    pub(super) fn begin_report_range_edit(&mut self) {
+        let window = self.current_report_window();
+        self.report_range_edit = Some(super::ReportRangeEditState {
+            from: window.start.format("%Y-%m-%d").to_string(),
+            to: window.end.format("%Y-%m-%d").to_string(),
+            active_field: super::ReportRangeField::From,
+            select_all: true,
+            error: None,
+        });
+        self.render_needed = true;
+    }
+
+    pub(super) fn cancel_report_range_edit(&mut self) {
+        self.report_range_edit = None;
+        self.render_needed = true;
+    }
+
+    pub(super) fn commit_report_range_edit(&mut self) -> bool {
+        let Some(edit) = self.report_range_edit.clone() else {
+            return false;
+        };
+        let window = match parse_report_range(&edit.from, &edit.to) {
+            Ok(window) => window,
+            Err(error) => {
+                if let Some(current) = self.report_range_edit.as_mut() {
+                    current.error = Some(error);
+                }
+                self.render_needed = true;
+                return false;
+            }
+        };
+        self.report_custom_window = Some(window);
+        self.report_period_offset = 0;
+        self.report_range_edit = None;
+        self.clear_report_snapshot_cache();
+        self.sync_report_selection_for_interval();
+        true
     }
 
     pub(super) fn shift_report_interval_older(&mut self) {
-        self.report_period_offset = self.report_period_offset.saturating_add(1);
+        if let Some(window) = self.report_custom_window.clone() {
+            if let Some(shifted) = shifted_custom_window_older(&window) {
+                self.report_custom_window = Some(shifted);
+            }
+        } else {
+            self.report_period_offset = self.report_period_offset.saturating_add(1);
+        }
         self.clear_report_snapshot_cache();
         self.sync_report_selection_for_interval();
     }
 
+    pub(super) fn can_shift_report_interval_newer(&self) -> bool {
+        self.report_custom_window
+            .as_ref()
+            .map(|window| window.end < operational_day_key_now())
+            .unwrap_or(self.report_period_offset > 0)
+    }
+
     pub(super) fn shift_report_interval_newer(&mut self) {
-        if self.report_period_offset > 0 {
+        if let Some(window) = self.report_custom_window.clone() {
+            if let Some(shifted) = shifted_custom_window_newer(&window, operational_day_key_now()) {
+                self.report_custom_window = Some(shifted);
+                self.clear_report_snapshot_cache();
+            }
+        } else if self.report_period_offset > 0 {
             self.report_period_offset -= 1;
             self.clear_report_snapshot_cache();
         }
@@ -480,8 +578,13 @@ fn retain_report_edit_after_commit(edit: &mut Option<super::ReportLogEditState>,
 
 #[cfg(test)]
 mod report_edit_state_tests {
-    use super::retain_report_edit_after_commit;
-    use crate::app::ReportLogEditState;
+    use chrono::NaiveDate;
+
+    use super::{
+        parse_report_range, retain_report_edit_after_commit, shifted_custom_window_newer,
+        shifted_custom_window_older,
+    };
+    use crate::{app::ReportLogEditState, domain::ReportWindow};
 
     #[test]
     fn failed_commit_retains_complete_draft() {
@@ -502,5 +605,30 @@ mod report_edit_state_tests {
         });
         retain_report_edit_after_commit(&mut edit, true);
         assert_eq!(edit, None);
+    }
+
+    #[test]
+    fn custom_range_requires_iso_dates_and_chronological_bounds() {
+        let window = parse_report_range("2026-08-01", "2026-08-27").unwrap();
+        assert_eq!(window.label, "2026-08-01..2026-08-27");
+        assert!(parse_report_range("08/01/2026", "2026-08-27").is_err());
+        assert!(parse_report_range("2026-08-28", "2026-08-27").is_err());
+    }
+
+    #[test]
+    fn custom_range_navigation_preserves_span_and_caps_at_today() {
+        let start = NaiveDate::from_ymd_opt(2026, 8, 10).unwrap();
+        let end = NaiveDate::from_ymd_opt(2026, 8, 14).unwrap();
+        let window = ReportWindow::new(start, end).unwrap();
+
+        let older = shifted_custom_window_older(&window).unwrap();
+        assert_eq!(older.start, NaiveDate::from_ymd_opt(2026, 8, 5).unwrap());
+        assert_eq!(older.end, NaiveDate::from_ymd_opt(2026, 8, 9).unwrap());
+
+        let today = NaiveDate::from_ymd_opt(2026, 8, 17).unwrap();
+        let newer = shifted_custom_window_newer(&window, today).unwrap();
+        assert_eq!(newer.start, NaiveDate::from_ymd_opt(2026, 8, 13).unwrap());
+        assert_eq!(newer.end, today);
+        assert!(shifted_custom_window_newer(&newer, today).is_none());
     }
 }

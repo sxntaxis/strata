@@ -15,6 +15,8 @@ The interactive historical/report surface is named **Balance**. Day, week, and m
 
 `--today`, `--week`, and `--month` use the configured operational-day/calendar policy. `report --from YYYY-MM-DD --to YYYY-MM-DD` selects an inclusive range of operational-day keys; reversed or incomplete ranges fail.
 
+Balance exposes the same arbitrary-window contract through its `range` mode. The inline From/To editor accepts `YYYY-MM-DD`, validates `from <= to`, and applies one `ReportWindow`; it does not synthesize a different TUI-specific interval model. A custom window may be shifted backward or toward the present by its own inclusive span, but forward navigation never extends past the current operational day.
+
 A canonical session remains one row. Exact overlap slices contribute only the seconds that belong inside the selected operational-day range.
 
 ## Provisional active time

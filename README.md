@@ -189,6 +189,7 @@ The emergency JSON bundle is a custody artifact generated from current applicati
 - Open Balance with `b`.
 - In main view, `d` detaches Strata while tracking continues.
 - In Balance, `d` or `t` selects day range, `w` week, and `m` month.
+- Press `r` in Balance for an explicit From/To range. Dates use `YYYY-MM-DD`; `Tab` switches fields, `Enter` applies, and `Esc` cancels.
 - In layer text entry, `?` remains a normal character; use `F1` there.
 - Optional config file: `~/.config/strata/keymap.json`.
 - In Balance, `←` moves to older intervals and `→` moves toward current.

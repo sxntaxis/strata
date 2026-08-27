@@ -82,6 +82,7 @@ pub const REPORT_MODAL_SETTINGS: ReportModalSettings = ReportModalSettings {
     detail_date_preview_width: 7,
     min_tag_width: 4,
     summary_name_gap: 4,
+    range_editor_min_width: 64,
 };
 
 pub const ATLAS_LAYOUT_SETTINGS: AtlasLayoutSettings = AtlasLayoutSettings {
@@ -160,6 +161,7 @@ pub struct ReportModalSettings {
     pub detail_date_preview_width: usize,
     pub min_tag_width: usize,
     pub summary_name_gap: usize,
+    pub range_editor_min_width: usize,
 }
 
 pub struct AtlasLayoutSettings {

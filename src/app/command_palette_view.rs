@@ -186,6 +186,11 @@ impl App {
                 "Balance range: month",
             ),
             self.palette_action_entry(
+                Action::ReportRange,
+                "Balance range: custom…",
+                &["range", "from", "to", "dates", "custom"],
+            ),
+            self.palette_action_entry(
                 Action::ClearAllSand,
                 "Clear all sand",
                 &["reset", "wipe", "clear"],

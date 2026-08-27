@@ -25,8 +25,13 @@ impl App {
             .as_ref()
             .map_or(summary.entries.len(), |logs| logs.len());
 
-        let preferred_inner_width =
-            self.preferred_report_inner_width(&summary, logs_for_view.as_deref());
+        let preferred_inner_width = self
+            .preferred_report_inner_width(&summary, logs_for_view.as_deref())
+            .max(if self.report_range_edit.is_some() {
+                REPORT_MODAL_SETTINGS.range_editor_min_width
+            } else {
+                0
+            });
 
         let modal_rect = self.report_modal_rect(
             terminal_size,
@@ -70,15 +75,24 @@ impl App {
         ))
         .alignment(Alignment::Right);
 
+        let custom_range_active = self.report_range_is_custom() || self.report_range_edit.is_some();
         let period_bottom_title = Line::from(vec![
-            view_style::report_period_label_span("day", self.report_period == ReportPeriod::Today),
+            view_style::report_period_label_span(
+                "day",
+                !custom_range_active && self.report_period == ReportPeriod::Today,
+            ),
             Span::styled("·", Style::default().fg(Color::DarkGray)),
-            view_style::report_period_label_span("week", self.report_period == ReportPeriod::Week),
+            view_style::report_period_label_span(
+                "week",
+                !custom_range_active && self.report_period == ReportPeriod::Week,
+            ),
             Span::styled("·", Style::default().fg(Color::DarkGray)),
             view_style::report_period_label_span(
                 "month",
-                self.report_period == ReportPeriod::Month,
+                !custom_range_active && self.report_period == ReportPeriod::Month,
             ),
+            Span::styled("·", Style::default().fg(Color::DarkGray)),
+            view_style::report_period_label_span("range", custom_range_active),
         ])
         .alignment(Alignment::Center);
         let snapshot_bottom_title = Line::from(Span::styled(
@@ -86,7 +100,48 @@ impl App {
             Style::default().fg(Color::DarkGray),
         ))
         .alignment(Alignment::Left);
-        let interaction_bottom_title = if self.report_logs_category_id.is_some() {
+        let interaction_bottom_title = if let Some(edit) = self.report_range_edit.as_ref() {
+            let active_style = Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+            let inactive_style = Style::default().fg(Color::White);
+            let mut spans = vec![
+                Span::styled("from ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    edit.from.clone(),
+                    if edit.active_field == super::ReportRangeField::From {
+                        active_style
+                    } else {
+                        inactive_style
+                    },
+                ),
+                Span::styled(" · to ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    edit.to.clone(),
+                    if edit.active_field == super::ReportRangeField::To {
+                        active_style
+                    } else {
+                        inactive_style
+                    },
+                ),
+            ];
+            if let Some(error) = edit.error.as_ref() {
+                spans.push(Span::styled(
+                    format!(" · {error}"),
+                    Style::default().fg(Color::Red),
+                ));
+                spans.push(Span::styled(
+                    " · Enter retry · Esc cancel",
+                    Style::default().fg(Color::Gray),
+                ));
+            } else {
+                spans.push(Span::styled(
+                    " · Tab field · Enter apply · Esc cancel",
+                    Style::default().fg(Color::Gray),
+                ));
+            }
+            Some(Line::from(spans).alignment(Alignment::Right))
+        } else if self.report_logs_category_id.is_some() {
             let label = if self.report_log_edit.is_some() {
                 "edit · Enter commit · Esc cancel"
             } else {
@@ -175,7 +230,7 @@ impl App {
     }
 
     fn render_report_navigation_arrows(&self, f: &mut Frame, modal_rect: Rect) {
-        if modal_rect.width <= 2 || modal_rect.height <= 2 {
+        if self.report_range_edit.is_some() || modal_rect.width <= 2 || modal_rect.height <= 2 {
             return;
         }
 
@@ -186,7 +241,7 @@ impl App {
         )));
         let right_arrow = Paragraph::new(Line::from(Span::styled(
             "→",
-            if self.report_period_offset == 0 {
+            if !self.can_shift_report_interval_newer() {
                 Style::default()
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::DIM)
@@ -228,7 +283,8 @@ impl App {
         } else {
             REPORT_MODAL_SETTINGS.detail_metric_width_default
         };
-        let show_date_column = self.report_period != ReportPeriod::Today;
+        let window = self.current_report_window();
+        let show_date_column = window.start != window.end;
         let date_width = if show_date_column {
             REPORT_MODAL_SETTINGS.detail_date_width
         } else {
@@ -445,6 +501,9 @@ impl App {
     }
 
     fn format_log_date_label(&self, date: &str) -> String {
+        if self.report_range_is_custom() {
+            return ui_helpers::format_report_interval_label(date);
+        }
         match self.report_period {
             ReportPeriod::Today => String::new(),
             ReportPeriod::Week => NaiveDate::parse_from_str(date, "%Y-%m-%d")

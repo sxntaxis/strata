@@ -106,6 +106,27 @@ Modal-local text and capture controls remain owned by their explicit modal modes
 
 The owner has accepted **Balance** as the report/historical surface vocabulary. HISTORY-001A changes the default main-view opener to `b` and current action/config names to `open_balance_popup` / `balance_*`. This vocabulary change must preserve the configured Bound / Unbound / Disabled model and contextual routing semantics described below.
 
+## Balance custom-range editor
+
+HISTORY-001B exposes arbitrary operational-day windows inside Balance without creating a second report surface or report engine. `day`, `week`, and `month` remain presets; `range` is an explicit custom window backed by the same domain `ReportWindow`.
+
+The default `balance_range` action is bound to `r` and opens an inline From/To editor. The editor starts from the currently displayed window so the user can refine an existing preset or custom range rather than re-entering both dates from memory.
+
+While the range editor is active:
+
+- From and To use `YYYY-MM-DD`;
+- the focused field is visually explicit and starts selected as a whole field;
+- typing a digit or `-` replaces the selected field and then appends normally;
+- Backspace/Delete clears a whole selected field or removes one character otherwise;
+- Tab/BackTab switches fields and selects the destination field;
+- Enter validates and applies the complete range;
+- Esc cancels without changing the active report window;
+- only mandatory `Ctrl-C` may escape the editor as an application-level action.
+
+Invalid dates or reversed bounds remain in edit mode with visible validation feedback. Applying a valid range updates summary rows, detail logs, provisional active time, and historical sediment selection together because all consume the same explicit report window.
+
+After application, left/right shifts the whole custom window by its own inclusive span. Movement toward the present never advances the window beyond the current operational day. Switching back to a day/week/month preset leaves custom mode and restores normal preset-offset navigation.
+
 ## Command atlas and palette truth
 
 The command atlas displays the same reachable graph used by runtime:

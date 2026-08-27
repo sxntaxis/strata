@@ -14,8 +14,8 @@ use crate::{
     constants::{APP_LAYOUT_SETTINGS, CATCHUP_SETTINGS, RUNTIME_LOOP_SETTINGS, TIME_SETTINGS},
     domain::{
         Category, CategoryId, DRIFT_CATEGORY_DISPLAY_NAME, DRIFT_CATEGORY_ID, FirstDayOfWeek,
-        OperationalDayPolicy, ReportPeriod, RuntimeSettings, TimeTracker, is_drift_category_id,
-        operational_day_key_for_utc, set_runtime_settings,
+        OperationalDayPolicy, ReportPeriod, ReportWindow, RuntimeSettings, TimeTracker,
+        is_drift_category_id, operational_day_key_for_utc, set_runtime_settings,
     },
     keybindings::{self, Action, ActionBindingState, KeyBinding},
     runtime_identity::transition_identity,
@@ -74,6 +74,61 @@ enum PaletteCommand {
     Action(keybindings::Action),
     SetReportPeriod(ReportPeriod),
     SwitchLayer(CategoryId),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReportRangeField {
+    From,
+    To,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ReportRangeEditState {
+    from: String,
+    to: String,
+    active_field: ReportRangeField,
+    select_all: bool,
+    error: Option<String>,
+}
+
+impl ReportRangeEditState {
+    fn append(&mut self, character: char) {
+        let target = match self.active_field {
+            ReportRangeField::From => &mut self.from,
+            ReportRangeField::To => &mut self.to,
+        };
+        if self.select_all {
+            target.clear();
+            self.select_all = false;
+        }
+        if target.len() < 10 {
+            target.push(character);
+        }
+        self.error = None;
+    }
+
+    fn backspace(&mut self) {
+        let target = match self.active_field {
+            ReportRangeField::From => &mut self.from,
+            ReportRangeField::To => &mut self.to,
+        };
+        if self.select_all {
+            target.clear();
+            self.select_all = false;
+        } else {
+            target.pop();
+        }
+        self.error = None;
+    }
+
+    fn switch_field(&mut self) {
+        self.active_field = match self.active_field {
+            ReportRangeField::From => ReportRangeField::To,
+            ReportRangeField::To => ReportRangeField::From,
+        };
+        self.select_all = true;
+        self.error = None;
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -394,6 +449,8 @@ struct App {
     report_selected_index: usize,
     report_period: ReportPeriod,
     report_period_offset: usize,
+    report_custom_window: Option<ReportWindow>,
+    report_range_edit: Option<ReportRangeEditState>,
     report_logs_category_id: Option<CategoryId>,
     report_log_selected_index: usize,
     report_log_edit: Option<ReportLogEditState>,
@@ -486,6 +543,8 @@ impl App {
             report_selected_index: 0,
             report_period: ReportPeriod::Today,
             report_period_offset: 0,
+            report_custom_window: None,
+            report_range_edit: None,
             report_logs_category_id: None,
             report_log_selected_index: 0,
             report_log_edit: None,
@@ -710,6 +769,8 @@ impl App {
         self.report_selected_index = 0;
         self.report_period = ReportPeriod::Today;
         self.report_period_offset = 0;
+        self.report_custom_window = None;
+        self.report_range_edit = None;
         self.report_logs_category_id = None;
         self.report_log_selected_index = 0;
         self.report_log_edit = None;
@@ -726,6 +787,7 @@ impl App {
         self.report_logs_category_id = None;
         self.report_log_selected_index = 0;
         self.report_log_edit = None;
+        self.report_range_edit = None;
         self.report_snapshot_end_day = None;
         self.report_snapshot_artifact = None;
         self.report_snapshot_preview_key = None;

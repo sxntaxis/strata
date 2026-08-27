@@ -20,6 +20,18 @@ enum ReportEditKeyIntent {
     Ignore,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReportRangeEditKeyIntent {
+    Append(char),
+    Backspace,
+    NextField,
+    PreviousField,
+    Commit,
+    Cancel,
+    EmergencyQuit,
+    Ignore,
+}
+
 fn direct_command_or_fuzzy_fallback(
     query: &str,
     has_fuzzy_result: bool,
@@ -59,6 +71,37 @@ fn resolve_report_edit_key(
     }
 }
 
+fn resolve_report_range_edit_key(
+    key: KeyEvent,
+    keymap: &crate::keybindings::Keymap,
+) -> ReportRangeEditKeyIntent {
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+    {
+        return if keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
+            ReportRangeEditKeyIntent::EmergencyQuit
+        } else {
+            ReportRangeEditKeyIntent::Ignore
+        };
+    }
+
+    match key.code {
+        KeyCode::Esc => ReportRangeEditKeyIntent::Cancel,
+        KeyCode::Enter => ReportRangeEditKeyIntent::Commit,
+        KeyCode::Backspace | KeyCode::Delete => ReportRangeEditKeyIntent::Backspace,
+        KeyCode::BackTab => ReportRangeEditKeyIntent::PreviousField,
+        KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            ReportRangeEditKeyIntent::PreviousField
+        }
+        KeyCode::Tab => ReportRangeEditKeyIntent::NextField,
+        KeyCode::Char(character) if character.is_ascii_digit() || character == '-' => {
+            ReportRangeEditKeyIntent::Append(character)
+        }
+        _ => ReportRangeEditKeyIntent::Ignore,
+    }
+}
+
 impl App {
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> bool {
         if key.kind == KeyEventKind::Release {
@@ -84,6 +127,10 @@ impl App {
                 return false;
             }
             return true;
+        }
+
+        if self.report_range_edit.is_some() {
+            return self.handle_report_range_edit_key(key);
         }
 
         if self.report_log_edit.is_some() {
@@ -1082,10 +1129,18 @@ impl App {
                 self.shift_report_interval_newer();
             }
             Action::ShiftLeft => {
-                self.set_report_period(ui_helpers::report_period_prev(self.report_period));
+                if self.report_range_is_custom() {
+                    self.set_report_period(ReportPeriod::Month);
+                } else {
+                    self.set_report_period(ui_helpers::report_period_prev(self.report_period));
+                }
             }
             Action::ShiftRight => {
-                self.set_report_period(ui_helpers::report_period_next(self.report_period));
+                if self.report_range_is_custom() {
+                    self.set_report_period(ReportPeriod::Today);
+                } else {
+                    self.set_report_period(ui_helpers::report_period_next(self.report_period));
+                }
             }
             Action::ReportToday => {
                 self.set_report_period(ReportPeriod::Today);
@@ -1095,6 +1150,9 @@ impl App {
             }
             Action::ReportMonth => {
                 self.set_report_period(ReportPeriod::Month);
+            }
+            Action::ReportRange => {
+                self.begin_report_range_edit();
             }
             Action::DeleteCategory => {
                 if in_logs_view {
@@ -1150,8 +1208,45 @@ impl App {
                 self.set_report_period(ReportPeriod::Today);
                 false
             }
+            Action::ReportRange => {
+                self.open_report_modal();
+                self.begin_report_range_edit();
+                false
+            }
             _ => false,
         }
+    }
+
+    fn handle_report_range_edit_key(&mut self, key: KeyEvent) -> bool {
+        match resolve_report_range_edit_key(key, &self.keymap) {
+            ReportRangeEditKeyIntent::Append(character) => {
+                if let Some(edit) = self.report_range_edit.as_mut() {
+                    edit.append(character);
+                    self.render_needed = true;
+                }
+            }
+            ReportRangeEditKeyIntent::Backspace => {
+                if let Some(edit) = self.report_range_edit.as_mut() {
+                    edit.backspace();
+                    self.render_needed = true;
+                }
+            }
+            ReportRangeEditKeyIntent::NextField | ReportRangeEditKeyIntent::PreviousField => {
+                if let Some(edit) = self.report_range_edit.as_mut() {
+                    edit.switch_field();
+                    self.render_needed = true;
+                }
+            }
+            ReportRangeEditKeyIntent::Commit => {
+                self.commit_report_range_edit();
+            }
+            ReportRangeEditKeyIntent::Cancel => {
+                self.cancel_report_range_edit();
+            }
+            ReportRangeEditKeyIntent::EmergencyQuit => return true,
+            ReportRangeEditKeyIntent::Ignore => {}
+        }
+        false
     }
 
     fn handle_report_log_edit_key(&mut self, key: KeyEvent) -> bool {
@@ -1183,9 +1278,41 @@ impl App {
 
 #[cfg(test)]
 mod report_edit_tests {
-    use super::{ReportEditKeyIntent, direct_command_or_fuzzy_fallback, resolve_report_edit_key};
+    use super::{
+        ReportEditKeyIntent, ReportRangeEditKeyIntent, direct_command_or_fuzzy_fallback,
+        resolve_report_edit_key, resolve_report_range_edit_key,
+    };
     use crate::keybindings::default_keymap;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    #[test]
+    fn range_edit_accepts_iso_date_input_and_owns_plain_range_keys() {
+        let keymap = default_keymap();
+        for character in ['2', '0', '2', '6', '-', '0', '8'] {
+            assert_eq!(
+                resolve_report_range_edit_key(
+                    KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
+                    &keymap,
+                ),
+                ReportRangeEditKeyIntent::Append(character)
+            );
+        }
+        assert_eq!(
+            resolve_report_range_edit_key(
+                KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
+                &keymap,
+            ),
+            ReportRangeEditKeyIntent::Ignore
+        );
+        assert_eq!(
+            resolve_report_range_edit_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), &keymap),
+            ReportRangeEditKeyIntent::NextField
+        );
+        assert_eq!(
+            resolve_report_range_edit_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), &keymap),
+            ReportRangeEditKeyIntent::Commit
+        );
+    }
 
     #[test]
     fn plain_command_letters_are_text_only_in_edit_mode() {

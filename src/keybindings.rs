@@ -73,13 +73,14 @@ pub(crate) enum Action {
     ReportToday,
     ReportWeek,
     ReportMonth,
+    ReportRange,
 
     HelpTop,
     HelpBottom,
 }
 
 impl Action {
-    const ALL: [Action; 29] = [
+    const ALL: [Action; 30] = [
         Action::Quit,
         Action::ToggleCommandPalette,
         Action::OpenCategoryModal,
@@ -107,6 +108,7 @@ impl Action {
         Action::ReportToday,
         Action::ReportWeek,
         Action::ReportMonth,
+        Action::ReportRange,
         Action::HelpTop,
         Action::HelpBottom,
     ];
@@ -147,6 +149,7 @@ impl Action {
             Action::ReportToday => "balance_today",
             Action::ReportWeek => "balance_week",
             Action::ReportMonth => "balance_month",
+            Action::ReportRange => "balance_range",
 
             Action::HelpTop => "atlas_top",
             Action::HelpBottom => "atlas_bottom",
@@ -189,6 +192,7 @@ impl Action {
             "balance_today" | "report_today" => Some(Self::ReportToday),
             "balance_week" | "report_week" => Some(Self::ReportWeek),
             "balance_month" | "report_month" => Some(Self::ReportMonth),
+            "balance_range" | "report_range" => Some(Self::ReportRange),
 
             "atlas_top" | "help_top" => Some(Self::HelpTop),
             "atlas_bottom" | "help_bottom" => Some(Self::HelpBottom),
@@ -229,6 +233,7 @@ impl Action {
             Action::ReportToday => "Set balance pop-up range to day",
             Action::ReportWeek => "Set balance pop-up range to week",
             Action::ReportMonth => "Set balance pop-up range to month",
+            Action::ReportRange => "Edit an explicit From/To balance range",
 
             Action::HelpTop => "Jump command atlas to top",
             Action::HelpBottom => "Jump command atlas to bottom",
@@ -264,9 +269,10 @@ impl Action {
             | Action::DecreaseBalance
             | Action::Backspace => ActionCategory::CategoryModal,
 
-            Action::ReportToday | Action::ReportWeek | Action::ReportMonth => {
-                ActionCategory::ReportModal
-            }
+            Action::ReportToday
+            | Action::ReportWeek
+            | Action::ReportMonth
+            | Action::ReportRange => ActionCategory::ReportModal,
 
             Action::HelpTop | Action::HelpBottom => ActionCategory::HelpModal,
         }
@@ -794,7 +800,7 @@ fn default_true() -> bool {
     true
 }
 
-const DEFAULT_BINDINGS: [(&str, Action); 31] = [
+const DEFAULT_BINDINGS: [(&str, Action); 32] = [
     ("q", Action::Quit),
     ("ctrl-p", Action::ToggleCommandPalette),
     ("enter", Action::Confirm),
@@ -823,6 +829,7 @@ const DEFAULT_BINDINGS: [(&str, Action); 31] = [
     ("t", Action::ReportToday),
     ("w", Action::ReportWeek),
     ("m", Action::ReportMonth),
+    ("r", Action::ReportRange),
     ("home", Action::HelpTop),
     ("g", Action::HelpTop),
     ("end", Action::HelpBottom),
@@ -1338,6 +1345,14 @@ mod tests {
         let t = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE);
 
         assert_eq!(keymap.action_for_key_event(t), Some(Action::ReportToday));
+    }
+
+    #[test]
+    fn test_default_keymap_has_r_for_balance_range() {
+        let keymap = default_keymap();
+        let r = KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE);
+
+        assert_eq!(keymap.action_for_key_event(r), Some(Action::ReportRange));
     }
 
     #[test]
