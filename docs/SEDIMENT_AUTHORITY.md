@@ -137,6 +137,23 @@ The builder:
 
 Description text and canvas dimensions are deliberately absent from the contribution revision because neither changes sediment mass or chronology. Consequently, resizing or clearing the visual canvas today cannot make an old accounting contribution stale. Persisted contribution reconciliation remains ledger-driven and separate from the immutable day-end visual artifact.
 
+## Historical correction and retained current sediment
+
+Retroactive ledger correction does not replay historical physics and does not make the current pile a complete ledger chart. The live canonical `SandState` may have lost earlier mass through full clear or category-specific clear, while arbitrary historical assignment may also fill a true chronological gap that never emitted sand.
+
+When a historical assignment changes already-classified canonical seconds from one category to another, Strata derives a category-transfer count from those changed seconds. The current pile then applies that transfer only against source-category mass that is still retained:
+
+- placed source grains are recolored deterministically in canonical serialized order before pending mass;
+- pending mass is recolored without changing FIFO order or total count;
+- grain coordinates, topology, canvas dimensions, frame count, sweep direction, RNG state, and total logical mass do not change;
+- true-gap seconds have no source transfer and therefore create no current grains;
+- if prior clears leave fewer source-category grains than the transfer requests, only the retained amount is recolored; unrelated categories are never consumed to make the pile numerically match corrected ledger history;
+- because grains intentionally carry no temporal/session provenance, the deterministic category-only choice does not claim that a particular recolored grain physically originated in the corrected interval.
+
+The resulting current `SandState`, runtime checkpoint, canonical history rewrite, and affected `DailyContribution` rows publish coherently in one SQLite transaction. The application installs that exact committed `SandState` after the receipt returns. This operation adds no per-grain timestamp or session identity.
+
+Authentic first-write day-end `daily` checkpoints remain immutable visual evidence and are never recolored by later history correction. Ledger-derived `DailyContribution` and in-memory `DerivedPreview` continue to reflect corrected chronology under their existing authority.
+
 ## Mutation and recovery reconciliation
 
 Daily contribution reconciliation occurs at autosave, full-state flush, checkpoint recovery completion, and relevant session mutation boundaries.

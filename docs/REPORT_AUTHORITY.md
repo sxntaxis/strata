@@ -53,9 +53,7 @@ The transaction rejects pre-existing overlapping canonical history rather than r
 authority. Whole-second allocation continues to use retained boundary provenance and the existing cumulative
 allocator, including fractional UTC boundaries and operational-day cuts.
 
-Current canonical sediment is not recolored by HISTORY-001D and first-write authentic day-end snapshots are not
-rewritten. Visual reconciliation remains separate HISTORY-001E territory; historical ledger truth must not be
-blocked by sediment topology.
+HISTORY-001D established ledger truth without changing sediment. HISTORY-001E extends that same assignment transaction with bounded current-pile reconciliation: canonical seconds reclassified from one existing category to another request an in-place transfer of retained source-category sediment into the target category. True-gap seconds create no current grains, and prior clears may limit how much source mass remains available. Missing visual mass never blocks the ledger correction and unrelated categories are never consumed to force the current pile to equal historical accounting. First-write authentic day-end snapshots remain immutable.
 
 The current inline editor assigns layer and From/To time. Historical descriptions/tags are not inferred from the
 currently active description; until an explicit historical Tag field is designed, newly inserted retroactive rows

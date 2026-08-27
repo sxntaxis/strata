@@ -482,6 +482,22 @@ impl App {
                 false
             }
             crate::sqlite::TuiHistoricalActivityOutcome::Applied(receipt) => {
+                if let Some(state) = receipt.resulting_sand_state.as_ref() {
+                    let valid_category_ids = self
+                        .report_categories()
+                        .into_iter()
+                        .map(|category| category.id)
+                        .collect();
+                    if let Err(error) = self.sand_engine.restore_state(state, &valid_category_ids) {
+                        if let Some(current) = self.historical_activity_edit.as_mut() {
+                            current.error = Some(format!(
+                                "history committed but sediment refresh failed: {error}"
+                            ));
+                        }
+                        self.render_needed = true;
+                        return false;
+                    }
+                }
                 let active_start_changed = self.session.active_session_started_at_utc
                     != Some(receipt.resulting_active_started_at_utc);
                 self.session.active_session_stable_id =

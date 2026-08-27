@@ -101,7 +101,7 @@ Deliverables:
 
 #### HISTORY-001D — Arbitrary retroactive activity
 
-Status: **ACTIVE / IMPLEMENTED CANDIDATE — NATIVE VALIDATION PENDING**.
+Status: **COMPLETE / NATIVE-GREEN** at `bfaa8bf29f8019c25fe4f2ee8b1d60c554e5e988`.
 
 Product decision: the user states **From X to Y I did Z**. The operation is not scoped to a selected existing session and may cross zero, one, or many canonical rows. Existing session boundaries are implementation detail, not interaction authority.
 
@@ -127,15 +127,24 @@ Deliverables:
 - Preserve the current selected layer/description even when the rewrite intersects the active generation.
 - Reconcile every affected operational day and reload the in-memory ledger without restart.
 
-#### HISTORY-001E — Sediment recolor after correction (nice to have)
+#### HISTORY-001E — Retained current-sediment recolor after correction (nice to have)
+
+Status: **ACTIVE**.
+
+Product decision: current canonical sediment is retained visual mass, not a complete replayable ledger. A historical assignment can fill a true gap, and prior full/category clears can remove sediment that once corresponded to corrected chronology. HISTORY-001E therefore reconciles only source-category mass that is still retained in the current canonical `SandState`.
 
 Deliverables:
 
-- Change the current canonical sediment category composition by the corrected duration.
-- Prefer deterministic in-place recolor of equivalent old-category grains to new-category grains.
-- Preserve grain coordinates/topology and total mass.
+- Derive category-transfer counts from canonical seconds that changed from one existing category to the requested category; true-gap seconds have no source sediment transfer.
+- Deterministically recolor up to the retained amount of each source category into the requested category, preferring placed grains before pending mass.
+- Preserve grain coordinates/topology, pending order/count, total mass, frame/sweep/RNG metadata, and canonical canvas dimensions.
+- If a prior clear means less source-category mass remains than the corrected duration, recolor only what remains; do not fabricate grains or steal unrelated categories to force the pile to equal the ledger.
+- Treat the chosen grains as deterministic category-composition reconciliation only; without per-grain temporal provenance, do not claim they are the exact physical grains emitted by the corrected interval.
+- Publish history, affected daily contributions, current canonical sediment, and runtime checkpoint coherently in the same SQLite transaction.
+- Return/install the exact persisted resulting `SandState` in memory after commit.
 - Do not add timestamps/session IDs to every grain solely for this feature.
-- Keep the historical day-end-snapshot rewrite question explicit and separate.
+- Authentic first-write day-end snapshots remain immutable. `DerivedPreview` and `DailyContribution` continue to follow corrected ledger truth without rewriting authentic photographs.
+
 
 ### SEDIMENT-002 — Organic formation
 

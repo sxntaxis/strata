@@ -158,9 +158,7 @@ corrected interval. When the requested layer already matches the selected live l
 continuous backward to it, the active start may move earlier. The live layer and live description remain
 unchanged; changing what the user is doing now belongs to ordinary Main/Layer switching.
 
-Persistence owns the mutation. SQLite publishes completed-history carving/insertion, active-generation and
-runtime-checkpoint rebasing when needed, and every affected daily-contribution replacement in one transaction.
-Memory reloads only after commit. Current sediment and authentic historical day-end photographs remain unchanged.
+Persistence owns the mutation. SQLite publishes completed-history carving/insertion, active-generation rebasing when needed, every affected daily-contribution replacement, and any HISTORY-001E retained current-sediment recolor in one transaction. Runtime checkpoint sediment is updated to the same committed `SandState`, and memory installs that exact state only after commit. Recolor is category-composition reconciliation only: true gaps do not fabricate grains, cleared source mass may limit the applied amount, and authentic first-write historical day-end photographs remain unchanged.
 
 The current HISTORY-001D editor does not expose a historical Tag field. Newly inserted retroactive rows therefore
 use an empty description instead of borrowing the current live tag. If the active generation is rebased, its

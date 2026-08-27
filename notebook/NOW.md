@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-08-27
 authority: working
-summary: HISTORY-001A/B/C are natively green; HISTORY-001D arbitrary retroactive activity assignment is the current edge.
-next: Implement HISTORY-001D arbitrary retroactive activity assignment with collision confirmation and protected live selection.
+summary: HISTORY-001A/B/C/D are natively green; HISTORY-001E retained current-sediment recolor is the current edge.
+next: Implement HISTORY-001E as deterministic in-place recolor of retained source-category mass without rewriting authentic historical snapshots.
 ---
 
 # NOW — Strata
@@ -70,12 +70,14 @@ HISTORY-001B is now **COMPLETE / NATIVE-GREEN** at `ce9dd7281d3fb064302099e7cb27
 
 HISTORY-001C is now **COMPLETE / NATIVE-GREEN** at `09412b703cf41016f889d725ba235a7a1e63ae6a`: formatting, strict Clippy, 245 tests, focused editor/transaction proofs, isolated startup smoke, and validator profile-custody proof all pass. Its completed-Idle split transaction, active-preview validation, atomic daily-contribution replacement, rollback proof, and post-commit memory reload are retained as the safe foundation for generalized historical editing.
 
-The active edge is **HISTORY-001D — arbitrary retroactive activity**. The accepted interaction is “From X to Y I did Z”: `From < To <= now`, independent of existing session boundaries. Idle and already-target-layer time are non-conflicting; different explicit activity requires one collision preview and exact-plan confirmation. True gaps are writable. If the interval intersects the active generation, Strata may rebase its historical boundary but must preserve the selected live layer/description. Current sediment and authentic historical snapshots remain unchanged in this unit.
+HISTORY-001D is now **COMPLETE / NATIVE-GREEN** at `bfaa8bf29f8019c25fe4f2ee8b1d60c554e5e988`: formatting, strict Clippy, 258 tests, 18 focused generalized transaction tests, Balance/report regression, isolated startup, and bubblewrap profile-custody proof all pass. Arbitrary `From < To <= now` assignment, gap insertion, collision confirmation, active-generation rebasing with protected live selection, daily-contribution reconciliation, rollback, and sediment/snapshot non-mutation are certified.
+
+The active edge is **HISTORY-001E — retained current-sediment recolor after historical correction**. The current pile is not a replayable complete ledger: full/Idle clears can remove mass and 001D can fill true historical gaps. Therefore 001E may recolor only retained grains/pending mass that still belong to categories reclassified by the correction. It must never fabricate missing historical grains or recolor unrelated categories to force a ledger-shaped pile. Coordinates, topology, total mass, frame/RNG state, and authentic first-write day-end snapshots remain unchanged; ledger-derived daily contributions continue to follow corrected chronology.
 
 The stale dirty adaptive-resize branch remains preserved as custody evidence and is superseded by the current-main
 visible-basin, resize/restore, and atomic clear-all authority. No adaptive code was ported.
 
-Later required order is HISTORY-001D arbitrary retroactive activity, optional HISTORY-001E current-sediment recolor, SEDIMENT-002 organic formation, then INTERACTION-002 menu/Settings convergence and product hardening. Pomodoro/RHYTHM-001 remains optional and must not block plateau.
+Later required order is HISTORY-001E retained current-sediment recolor, SEDIMENT-002 organic formation, then INTERACTION-002 menu/Settings convergence and product hardening. Pomodoro/RHYTHM-001 remains optional and must not block plateau.
 
 ## Completed post-migration units
 

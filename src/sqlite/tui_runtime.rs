@@ -14,7 +14,10 @@ use crate::{
         Category, CategoryId, DRIFT_CATEGORY_CONFIG_NAME, OperationalDayPolicy, Session,
         day_boundary_config, runtime_settings,
     },
-    sand::{DailySedimentSlice, SandState, SedimentSnapshot, daily_contribution_from_slices},
+    sand::{
+        DailySedimentSlice, SandState, SedimentSnapshot, daily_contribution_from_slices,
+        recolor_state_category_mass,
+    },
     storage::{CategoryTagsState, LoadedCategories, LoadedSessions},
     temporal,
 };
@@ -76,6 +79,7 @@ pub(crate) struct HistoricalActivityRequest {
 pub(crate) struct HistoricalActivityReceipt {
     pub resulting_active_stable_id: String,
     pub resulting_active_started_at_utc: DateTime<Utc>,
+    pub resulting_sand_state: Option<SandState>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1281,6 +1285,7 @@ fn update_historical_checkpoint(
     resulting_started_at_utc: DateTime<Utc>,
     active_category_id: CategoryId,
     active_description: &str,
+    resulting_sand_state: Option<&SandState>,
 ) -> Result<(), String> {
     let checkpoint_state: Option<(String, Option<String>)> = transaction
         .query_row(
@@ -1308,6 +1313,10 @@ fn update_historical_checkpoint(
     checkpoint["active_description"] = serde_json::json!(active_description);
     checkpoint["active_session_started_at_utc"] =
         serde_json::to_value(resulting_started_at_utc).map_err(|error| error.to_string())?;
+    if let Some(state) = resulting_sand_state {
+        checkpoint["sand_state"] =
+            serde_json::to_value(state).map_err(|error| error.to_string())?;
+    }
     let checkpoint_json = serde_json::to_string(&checkpoint).map_err(|error| error.to_string())?;
     transaction
         .execute(
@@ -1326,6 +1335,95 @@ fn update_historical_checkpoint(
                 timestamp(request.checkpoint_simulation_time_utc),
                 resulting_active_stable_id,
                 checkpoint_json,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn historical_checkpoint_sand_state(
+    request: &HistoricalActivityRequest,
+) -> Result<Option<SandState>, String> {
+    let checkpoint: serde_json::Value = serde_json::from_str(&request.checkpoint_json)
+        .map_err(|error| format!("historical checkpoint is invalid JSON: {error}"))?;
+    let Some(value) = checkpoint.get("sand_state") else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    serde_json::from_value(value.clone())
+        .map(Some)
+        .map_err(|error| format!("historical checkpoint sand state is invalid: {error}"))
+}
+
+fn recolor_historical_current_sediment(
+    request: &HistoricalActivityRequest,
+    transfer_seconds: &BTreeMap<u64, usize>,
+) -> Result<Option<SandState>, String> {
+    if transfer_seconds.is_empty() {
+        return Ok(None);
+    }
+
+    let mut state = historical_checkpoint_sand_state(request)?;
+    let mut changed = false;
+    for (source_category_id, requested_grains) in transfer_seconds {
+        if *requested_grains == 0 || *source_category_id == request.target_category_id.0 {
+            continue;
+        }
+        let recolored = if let Some(current) = state.as_mut() {
+            recolor_state_category_mass(
+                current,
+                CategoryId::new(*source_category_id),
+                request.target_category_id,
+                *requested_grains,
+            )
+        } else {
+            0
+        };
+        changed |= recolored > 0;
+    }
+
+    Ok(changed.then_some(state.expect("changed recolor requires sand state")))
+}
+
+fn persist_historical_sand_state(
+    transaction: &rusqlite::Transaction<'_>,
+    state: &SandState,
+) -> Result<(), String> {
+    let existing: Option<(String, i64)> = transaction
+        .query_row(
+            "SELECT formation_id, quantum_seconds FROM sand_state WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let (formation_id, quantum_seconds) =
+        existing.unwrap_or_else(|| ("default".to_string(), 1));
+    let payload_json = serde_json::to_string(state).map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "INSERT INTO sand_state (
+                singleton, formation_id, quantum_seconds, grid_width, grid_height,
+                payload_json, updated_at_utc
+             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(singleton) DO UPDATE SET
+                formation_id = excluded.formation_id,
+                quantum_seconds = excluded.quantum_seconds,
+                grid_width = excluded.grid_width,
+                grid_height = excluded.grid_height,
+                payload_json = excluded.payload_json,
+                updated_at_utc = excluded.updated_at_utc",
+            params![
+                formation_id,
+                quantum_seconds,
+                i64::try_from(state.grid_width)
+                    .map_err(|_| "sand width is too large".to_string())?,
+                i64::try_from(state.grid_height)
+                    .map_err(|_| "sand height is too large".to_string())?,
+                payload_json,
+                timestamp(Utc::now()),
             ],
         )
         .map_err(|error| error.to_string())?;
@@ -1382,6 +1480,7 @@ pub(crate) fn log_historical_activity(
     )?;
     let plan_token = historical_plan_token(&request, &sessions)?;
     let mut conflicts = Vec::new();
+    let mut sediment_transfer_seconds: BTreeMap<u64, usize> = BTreeMap::new();
     for session in &sessions {
         let (start, end, _, elapsed) = historical_session_bounds(session)?;
         if start >= request.ended_at_utc || end <= request.started_at_utc {
@@ -1392,15 +1491,24 @@ pub(crate) fn log_historical_activity(
         if right <= left {
             continue;
         }
+        let source_category_id = u64::try_from(session.category_id)
+            .map_err(|_| format!("session {} has invalid category identity", session.id))?;
+        if source_category_id != request.target_category_id.0 {
+            let changed_seconds = right - left;
+            let entry = sediment_transfer_seconds
+                .entry(source_category_id)
+                .or_default();
+            *entry = (*entry)
+                .checked_add(changed_seconds)
+                .ok_or_else(|| "historical sediment transfer exceeds supported range".to_string())?;
+        }
         if session.category_id != 0 && session.category_id != target_category_id {
             let left =
                 i64::try_from(left).map_err(|_| "historical split is too large".to_string())?;
             let right =
                 i64::try_from(right).map_err(|_| "historical split is too large".to_string())?;
             conflicts.push(HistoricalConflict {
-                category_id: CategoryId::new(u64::try_from(session.category_id).map_err(|_| {
-                    format!("session {} has invalid category identity", session.id)
-                })?),
+                category_id: CategoryId::new(source_category_id),
                 started_at_utc: start + ChronoDuration::seconds(left),
                 ended_at_utc: start + ChronoDuration::seconds(right),
                 active: false,
@@ -1419,6 +1527,15 @@ pub(crate) fn log_historical_activity(
         active.elapsed_seconds,
     )?;
     let active_overlap = active_right > active_left;
+    if active_overlap && active.category_id != request.target_category_id {
+        let changed_seconds = active_right - active_left;
+        let entry = sediment_transfer_seconds
+            .entry(active.category_id.0)
+            .or_default();
+        *entry = (*entry)
+            .checked_add(changed_seconds)
+            .ok_or_else(|| "historical sediment transfer exceeds supported range".to_string())?;
+    }
     if active_overlap
         && active.category_id != crate::domain::DRIFT_CATEGORY_ID
         && active.category_id != request.target_category_id
@@ -1740,6 +1857,19 @@ pub(crate) fn log_historical_activity(
             .map_err(|_| "resulting active duration is too large".to_string())?;
         resulting_preview.ended_at_utc =
             resulting_active_started_at_utc + ChronoDuration::seconds(resulting_elapsed);
+    }
+
+    runtime_coordination::maybe_inject_test_fault("history-assignment", "sessions")
+        .map_err(|error| error.to_string())?;
+
+    let resulting_sand_state =
+        recolor_historical_current_sediment(&request, &sediment_transfer_seconds)?;
+    if let Some(state) = resulting_sand_state.as_ref() {
+        persist_historical_sand_state(&transaction, state)?;
+        runtime_coordination::maybe_inject_test_fault("history-assignment", "sand")
+            .map_err(|error| error.to_string())?;
+    }
+    if active_changed || resulting_sand_state.is_some() {
         update_historical_checkpoint(
             &transaction,
             &request,
@@ -1748,7 +1878,10 @@ pub(crate) fn log_historical_activity(
             resulting_active_started_at_utc,
             active.category_id,
             &active_row.2,
+            resulting_sand_state.as_ref(),
         )?;
+        runtime_coordination::maybe_inject_test_fault("history-assignment", "checkpoint")
+            .map_err(|error| error.to_string())?;
     }
 
     affected_days.extend(historical_affected_days(
@@ -1764,8 +1897,6 @@ pub(crate) fn log_historical_activity(
         resulting_preview.operational_day_policy,
     )?);
 
-    runtime_coordination::maybe_inject_test_fault("history-assignment", "sessions")
-        .map_err(|error| error.to_string())?;
     replace_daily_contributions_in_transaction(
         &transaction,
         &affected_days,
@@ -1781,6 +1912,7 @@ pub(crate) fn log_historical_activity(
         HistoricalActivityReceipt {
             resulting_active_stable_id,
             resulting_active_started_at_utc,
+            resulting_sand_state,
         },
     ))
 }
@@ -3576,6 +3708,40 @@ mod clear_all_additional_transaction_tests {
         .to_string()
     }
 
+    fn historical_sand_state(runs: &[(u64, usize)]) -> SandState {
+        SandState {
+            version: SandState::VERSION,
+            grid_width: 4,
+            grid_height: 4,
+            grains: Vec::new(),
+            frame_count: 17,
+            sweep_left_to_right: false,
+            rng_state: 99,
+            pending_grains: Vec::new(),
+            pending_runs: runs
+                .iter()
+                .map(|(category_id, count)| crate::sand::PendingGrainRun {
+                    category_id: *category_id,
+                    count: *count,
+                })
+                .collect(),
+        }
+    }
+
+    fn historical_checkpoint_json_with_sand(
+        preview: &HistoricalActivePreview,
+        description: &str,
+        state: &SandState,
+    ) -> String {
+        serde_json::json!({
+            "active_category_id": preview.category_id.0,
+            "active_description": description,
+            "active_session_started_at_utc": preview.started_at_utc,
+            "sand_state": state,
+        })
+        .to_string()
+    }
+
     fn historical_activity_request(
         target_category_id: i64,
         started_at_utc: &str,
@@ -4628,6 +4794,242 @@ mod clear_all_additional_transaction_tests {
     }
 
     #[test]
+    fn historical_activity_recolors_retained_current_sediment_atomically() {
+        let path = repository_file("history-assignment-sediment-recolor");
+        let work_id = ensure_history_category(&path, "Work");
+        let reading_id = ensure_history_category(&path, "Reading");
+        seed_history_session(
+            &path,
+            work_id,
+            "work-sediment",
+            "2026-08-02T10:00:00Z",
+            "2026-08-02T10:00:05Z",
+            "2026-08-02",
+            5,
+        );
+        let active = seed_history_active(
+            &path,
+            "active-sediment",
+            0,
+            "",
+            "2026-08-02T12:00:00Z",
+            "2026-08-02T12:10:00Z",
+        );
+        let before = historical_sand_state(&[(u64::try_from(work_id).unwrap(), 3), (0, 2), (u64::try_from(reading_id).unwrap(), 1)]);
+        save_sand_state(&path, &before).unwrap();
+        let authentic = SedimentSnapshot::day_end_checkpoint(
+            "2026-08-02".to_string(),
+            before.clone(),
+        );
+        save_day_end_snapshot(
+            &path,
+            "2026-08-02",
+            &authentic,
+            Utc.with_ymd_and_hms(2026, 8, 3, 6, 0, 0).unwrap(),
+        )
+        .unwrap();
+
+        let mut first = historical_activity_request(
+            reading_id,
+            "2026-08-02T10:00:01Z",
+            "2026-08-02T10:00:04Z",
+            active.clone(),
+            None,
+        );
+        first.checkpoint_json = historical_checkpoint_json_with_sand(&active, "", &before);
+        let plan_token = match log_historical_activity(&path, first).unwrap() {
+            HistoricalActivityOutcome::NeedsConfirmation { plan_token, .. } => plan_token,
+            HistoricalActivityOutcome::Applied(_) => {
+                panic!("explicit sediment correction applied without confirmation")
+            }
+        };
+        assert_eq!(load_sand_state(&path).unwrap(), Some(before.clone()));
+
+        let mut confirmed = historical_activity_request(
+            reading_id,
+            "2026-08-02T10:00:01Z",
+            "2026-08-02T10:00:04Z",
+            active.clone(),
+            Some(plan_token),
+        );
+        confirmed.checkpoint_json = historical_checkpoint_json_with_sand(&active, "", &before);
+        let receipt = match log_historical_activity(&path, confirmed).unwrap() {
+            HistoricalActivityOutcome::Applied(receipt) => receipt,
+            HistoricalActivityOutcome::NeedsConfirmation { .. } => {
+                panic!("unchanged sediment correction did not accept confirmation")
+            }
+        };
+
+        let after = load_sand_state(&path).unwrap().unwrap();
+        assert_eq!(receipt.resulting_sand_state.as_ref(), Some(&after));
+        assert_eq!(after.grid_width, before.grid_width);
+        assert_eq!(after.grid_height, before.grid_height);
+        assert_eq!(after.frame_count, before.frame_count);
+        assert_eq!(after.sweep_left_to_right, before.sweep_left_to_right);
+        assert_eq!(after.rng_state, before.rng_state);
+        assert_eq!(
+            after.pending_runs.iter().map(|run| run.count).sum::<usize>(),
+            before.pending_runs.iter().map(|run| run.count).sum::<usize>()
+        );
+        assert_eq!(
+            after
+                .pending_runs
+                .iter()
+                .filter(|run| run.category_id == u64::try_from(work_id).unwrap())
+                .map(|run| run.count)
+                .sum::<usize>(),
+            0
+        );
+        assert_eq!(
+            after
+                .pending_runs
+                .iter()
+                .filter(|run| run.category_id == u64::try_from(reading_id).unwrap())
+                .map(|run| run.count)
+                .sum::<usize>(),
+            4
+        );
+        assert_eq!(
+            after
+                .pending_runs
+                .iter()
+                .filter(|run| run.category_id == 0)
+                .map(|run| run.count)
+                .sum::<usize>(),
+            2
+        );
+
+        let repository = open_cli_repository(&path).unwrap();
+        let checkpoint_json: String = repository
+            .connection
+            .query_row(
+                "SELECT payload_json FROM runtime_checkpoint WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let checkpoint_json: serde_json::Value = serde_json::from_str(&checkpoint_json).unwrap();
+        let checkpoint_sand: SandState =
+            serde_json::from_value(checkpoint_json["sand_state"].clone()).unwrap();
+        assert_eq!(checkpoint_sand, after);
+        drop(repository);
+        assert_eq!(
+            load_day_end_snapshot(&path, "2026-08-02").unwrap(),
+            Some(authentic)
+        );
+        remove_database(&path);
+    }
+
+    #[test]
+    fn historical_activity_recolor_caps_at_retained_source_mass() {
+        let path = repository_file("history-assignment-sediment-shortfall");
+        let work_id = ensure_history_category(&path, "Work");
+        let reading_id = ensure_history_category(&path, "Reading");
+        seed_history_session(
+            &path,
+            work_id,
+            "work-shortfall",
+            "2026-08-02T10:00:00Z",
+            "2026-08-02T10:00:03Z",
+            "2026-08-02",
+            3,
+        );
+        let active = seed_history_active(
+            &path,
+            "active-shortfall",
+            0,
+            "",
+            "2026-08-02T12:00:00Z",
+            "2026-08-02T12:10:00Z",
+        );
+        let before = historical_sand_state(&[(u64::try_from(work_id).unwrap(), 1), (0, 4)]);
+        save_sand_state(&path, &before).unwrap();
+
+        let mut first = historical_activity_request(
+            reading_id,
+            "2026-08-02T10:00:00Z",
+            "2026-08-02T10:00:03Z",
+            active.clone(),
+            None,
+        );
+        first.checkpoint_json = historical_checkpoint_json_with_sand(&active, "", &before);
+        let plan_token = match log_historical_activity(&path, first).unwrap() {
+            HistoricalActivityOutcome::NeedsConfirmation { plan_token, .. } => plan_token,
+            HistoricalActivityOutcome::Applied(_) => panic!("shortfall collision skipped preview"),
+        };
+        let mut confirmed = historical_activity_request(
+            reading_id,
+            "2026-08-02T10:00:00Z",
+            "2026-08-02T10:00:03Z",
+            active.clone(),
+            Some(plan_token),
+        );
+        confirmed.checkpoint_json = historical_checkpoint_json_with_sand(&active, "", &before);
+        let receipt = match log_historical_activity(&path, confirmed).unwrap() {
+            HistoricalActivityOutcome::Applied(receipt) => receipt,
+            HistoricalActivityOutcome::NeedsConfirmation { .. } => panic!("shortfall re-previewed"),
+        };
+        let after = receipt.resulting_sand_state.unwrap();
+        assert_eq!(
+            after.pending_runs.iter().map(|run| run.count).sum::<usize>(),
+            5
+        );
+        assert_eq!(
+            after
+                .pending_runs
+                .iter()
+                .filter(|run| run.category_id == u64::try_from(reading_id).unwrap())
+                .map(|run| run.count)
+                .sum::<usize>(),
+            1
+        );
+        assert_eq!(
+            after
+                .pending_runs
+                .iter()
+                .filter(|run| run.category_id == 0)
+                .map(|run| run.count)
+                .sum::<usize>(),
+            4
+        );
+        assert_eq!(load_sand_state(&path).unwrap(), Some(after));
+        remove_database(&path);
+    }
+
+    #[test]
+    fn historical_gap_insertion_does_not_fabricate_current_sediment() {
+        let path = repository_file("history-assignment-gap-no-sediment");
+        let reading_id = ensure_history_category(&path, "Reading");
+        let active = seed_history_active(
+            &path,
+            "active-gap-sediment",
+            0,
+            "",
+            "2026-08-02T12:00:00Z",
+            "2026-08-02T12:10:00Z",
+        );
+        let before = historical_sand_state(&[(0, 2)]);
+        save_sand_state(&path, &before).unwrap();
+        let mut request = historical_activity_request(
+            reading_id,
+            "2026-08-02T10:00:00Z",
+            "2026-08-02T10:05:00Z",
+            active.clone(),
+            None,
+        );
+        request.checkpoint_json = historical_checkpoint_json_with_sand(&active, "", &before);
+        let receipt = match log_historical_activity(&path, request).unwrap() {
+            HistoricalActivityOutcome::Applied(receipt) => receipt,
+            HistoricalActivityOutcome::NeedsConfirmation { .. } => {
+                panic!("true gap unexpectedly required confirmation")
+            }
+        };
+        assert!(receipt.resulting_sand_state.is_none());
+        assert_eq!(load_sand_state(&path).unwrap(), Some(before));
+        remove_database(&path);
+    }
+
+    #[test]
     fn historical_activity_multi_session_collision_preview_ignores_idle_and_gaps() {
         let path = repository_file("history-assignment-multi-session");
         let work_id = ensure_history_category(&path, "Work");
@@ -4746,7 +5148,14 @@ mod clear_all_additional_transaction_tests {
 
     #[test]
     fn historical_activity_kill_points_roll_back_active_checkpoint_sessions_and_daily() {
-        for point in ["before-write", "sessions", "daily", "commit"] {
+        for point in [
+            "before-write",
+            "sessions",
+            "sand",
+            "checkpoint",
+            "daily",
+            "commit",
+        ] {
             let path = repository_file(&format!("history-assignment-kill-{point}"));
             seed_history_session(
                 &path,
@@ -4765,6 +5174,8 @@ mod clear_all_additional_transaction_tests {
                 "2026-08-02T11:00:00Z",
                 "2026-08-02T11:15:00Z",
             );
+            let before_sand = state(true);
+            save_sand_state(&path, &before_sand).unwrap();
             let mut request = historical_activity_request(
                 1,
                 "2026-08-02T10:45:00Z",
@@ -4777,6 +5188,7 @@ mod clear_all_additional_transaction_tests {
                 "active_category_id": 1,
                 "active_description": "feature",
                 "active_session_started_at_utc": "2026-08-02T11:00:00Z",
+                "sand_state": before_sand,
             })
             .to_string();
 
@@ -4805,6 +5217,7 @@ mod clear_all_additional_transaction_tests {
                 .unwrap();
             assert_eq!(checkpoint_count, 0);
             drop(repository);
+            assert_eq!(load_sand_state(&path).unwrap(), Some(state(true)));
             assert!(load_daily_snapshot(&path, "2026-08-02").unwrap().is_none());
             remove_database(&path);
         }

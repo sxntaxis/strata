@@ -47,6 +47,82 @@ impl SandState {
     pub const LEGACY_VERSION: u8 = 1;
 }
 
+pub(crate) fn recolor_state_category_mass(
+    state: &mut SandState,
+    from_category_id: CategoryId,
+    to_category_id: CategoryId,
+    count: usize,
+) -> usize {
+    if count == 0 || from_category_id == to_category_id {
+        return 0;
+    }
+
+    let from = from_category_id.0;
+    let to = to_category_id.0;
+    let mut remaining = count;
+    let mut recolored = 0usize;
+
+    // `SandEngine::snapshot_state` serializes placed grains in canonical
+    // row-major order. Recoloring in that same order is deterministic while
+    // leaving every coordinate and all topology untouched.
+    for grain in &mut state.grains {
+        if remaining == 0 {
+            break;
+        }
+        if grain.category_id == from {
+            grain.category_id = to;
+            remaining -= 1;
+            recolored += 1;
+        }
+    }
+
+    // Legacy/uncompressed pending grains remain FIFO; only category identity
+    // changes.
+    for category_id in &mut state.pending_grains {
+        if remaining == 0 {
+            break;
+        }
+        if *category_id == from {
+            *category_id = to;
+            remaining -= 1;
+            recolored += 1;
+        }
+    }
+
+    if remaining == 0 || state.pending_runs.is_empty() {
+        return recolored;
+    }
+
+    let mut rewritten = Vec::with_capacity(state.pending_runs.len().saturating_add(1));
+    let append = |runs: &mut Vec<PendingGrainRun>, category_id: u64, count: usize| {
+        if count == 0 {
+            return;
+        }
+        if let Some(last) = runs.last_mut()
+            && last.category_id == category_id
+        {
+            last.count = last.count.saturating_add(count);
+        } else {
+            runs.push(PendingGrainRun { category_id, count });
+        }
+    };
+
+    for run in state.pending_runs.drain(..) {
+        if remaining == 0 || run.category_id != from {
+            append(&mut rewritten, run.category_id, run.count);
+            continue;
+        }
+
+        let take = run.count.min(remaining);
+        append(&mut rewritten, to, take);
+        append(&mut rewritten, from, run.count - take);
+        remaining -= take;
+        recolored += take;
+    }
+    state.pending_runs = rewritten;
+    recolored
+}
+
 fn default_sweep_left_to_right() -> bool {
     true
 }
@@ -679,7 +755,10 @@ impl SandEngine {
 mod tests {
     use std::collections::HashSet;
 
-    use crate::{domain::CategoryId, sand::SandEngine};
+    use crate::{
+        domain::CategoryId,
+        sand::{PendingGrainRun, SandEngine, SandState, SandStateGrain, recolor_state_category_mass},
+    };
 
     fn category_mass(engine: &SandEngine, category_id: CategoryId) -> usize {
         let placed = engine
@@ -695,6 +774,133 @@ mod tests {
             .map(|run| run.count)
             .sum::<usize>();
         placed + pending
+    }
+
+    #[test]
+    fn state_recolor_preserves_topology_mass_metadata_and_pending_order() {
+        let mut state = SandState {
+            version: SandState::VERSION,
+            grid_width: 4,
+            grid_height: 3,
+            grains: vec![
+                SandStateGrain {
+                    x: 0,
+                    y: 2,
+                    category_id: 1,
+                },
+                SandStateGrain {
+                    x: 1,
+                    y: 2,
+                    category_id: 2,
+                },
+                SandStateGrain {
+                    x: 2,
+                    y: 2,
+                    category_id: 1,
+                },
+            ],
+            frame_count: 77,
+            sweep_left_to_right: false,
+            rng_state: 12345,
+            pending_grains: Vec::new(),
+            pending_runs: vec![
+                PendingGrainRun {
+                    category_id: 1,
+                    count: 3,
+                },
+                PendingGrainRun {
+                    category_id: 2,
+                    count: 2,
+                },
+            ],
+        };
+        let before_coordinates = state
+            .grains
+            .iter()
+            .map(|grain| (grain.x, grain.y))
+            .collect::<Vec<_>>();
+        let before_mass = state.grains.len()
+            + state.pending_runs.iter().map(|run| run.count).sum::<usize>();
+
+        let recolored = recolor_state_category_mass(
+            &mut state,
+            CategoryId::new(1),
+            CategoryId::new(3),
+            4,
+        );
+
+        assert_eq!(recolored, 4);
+        assert_eq!(
+            state
+                .grains
+                .iter()
+                .map(|grain| (grain.x, grain.y))
+                .collect::<Vec<_>>(),
+            before_coordinates
+        );
+        assert_eq!(state.grains[0].category_id, 3);
+        assert_eq!(state.grains[1].category_id, 2);
+        assert_eq!(state.grains[2].category_id, 3);
+        assert_eq!(
+            state.pending_runs,
+            vec![
+                PendingGrainRun {
+                    category_id: 3,
+                    count: 2,
+                },
+                PendingGrainRun {
+                    category_id: 1,
+                    count: 1,
+                },
+                PendingGrainRun {
+                    category_id: 2,
+                    count: 2,
+                },
+            ]
+        );
+        assert_eq!(
+            state.grains.len() + state.pending_runs.iter().map(|run| run.count).sum::<usize>(),
+            before_mass
+        );
+        assert_eq!(state.frame_count, 77);
+        assert!(!state.sweep_left_to_right);
+        assert_eq!(state.rng_state, 12345);
+        assert_eq!(state.grid_width, 4);
+        assert_eq!(state.grid_height, 3);
+    }
+
+    #[test]
+    fn state_recolor_caps_at_retained_source_mass_without_fabrication() {
+        let mut state = SandState {
+            version: SandState::VERSION,
+            grid_width: 2,
+            grid_height: 2,
+            grains: vec![SandStateGrain {
+                x: 0,
+                y: 1,
+                category_id: 1,
+            }],
+            frame_count: 0,
+            sweep_left_to_right: true,
+            rng_state: 7,
+            pending_grains: Vec::new(),
+            pending_runs: vec![PendingGrainRun {
+                category_id: 2,
+                count: 4,
+            }],
+        };
+
+        let recolored = recolor_state_category_mass(
+            &mut state,
+            CategoryId::new(1),
+            CategoryId::new(3),
+            60,
+        );
+
+        assert_eq!(recolored, 1);
+        assert_eq!(state.grains[0].category_id, 3);
+        assert_eq!(state.pending_runs[0].category_id, 2);
+        assert_eq!(state.pending_runs[0].count, 4);
     }
 
     #[test]
