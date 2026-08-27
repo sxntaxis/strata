@@ -119,11 +119,9 @@ impl App {
                     Span::styled("collision · ", Style::default().fg(Color::Yellow)),
                     Span::styled(preview, Style::default().fg(Color::White)),
                 ];
-                if edit
-                    .confirmation
-                    .as_ref()
-                    .is_some_and(|confirmation| confirmation.conflicts.iter().any(|item| item.active))
-                {
+                if edit.confirmation.as_ref().is_some_and(|confirmation| {
+                    confirmation.conflicts.iter().any(|item| item.active)
+                }) {
                     let active_name = self
                         .time_tracker
                         .category_by_id(self.time_tracker.active_category_id())

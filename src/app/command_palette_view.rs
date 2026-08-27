@@ -193,7 +193,14 @@ impl App {
             self.palette_action_entry(
                 Action::LogActivity,
                 "Log activity…",
-                &["history", "retroactive", "from", "to", "correct", "activity"],
+                &[
+                    "history",
+                    "retroactive",
+                    "from",
+                    "to",
+                    "correct",
+                    "activity",
+                ],
             ),
             self.palette_action_entry(
                 Action::ClearAllSand,

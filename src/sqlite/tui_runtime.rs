@@ -4,9 +4,7 @@ use std::{
     process,
 };
 
-use chrono::{
-    DateTime, Duration as ChronoDuration, FixedOffset, NaiveDate, SecondsFormat, Timelike, Utc,
-};
+use chrono::{DateTime, Duration as ChronoDuration, FixedOffset, NaiveDate, SecondsFormat, Utc};
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -88,6 +86,9 @@ pub(crate) enum HistoricalActivityOutcome {
     },
     Applied(HistoricalActivityReceipt),
 }
+
+type HistoricalSessionBounds = (DateTime<Utc>, DateTime<Utc>, DateTime<Utc>, usize);
+type HistoricalInterval = (DateTime<Utc>, DateTime<Utc>);
 
 pub(crate) fn load_state(database_path: &Path) -> Result<SqliteTuiState, String> {
     runtime_coordination::maybe_inject_test_fault("state-load", "before-read")
@@ -1035,7 +1036,6 @@ fn replace_daily_contributions_in_transaction(
     Ok(())
 }
 
-
 fn historical_session_policy(
     session: &super::repository::SessionRecord,
 ) -> Result<OperationalDayPolicy, String> {
@@ -1058,7 +1058,7 @@ fn historical_session_policy(
 
 fn historical_session_bounds(
     session: &super::repository::SessionRecord,
-) -> Result<(DateTime<Utc>, DateTime<Utc>, DateTime<Utc>, usize), String> {
+) -> Result<HistoricalSessionBounds, String> {
     let started_at_utc = parse_utc(&session.started_at_utc)?;
     let recorded_end_utc = parse_utc(&session.ended_at_utc)?;
     let elapsed_seconds = usize::try_from(session.elapsed_seconds)
@@ -1199,8 +1199,12 @@ fn historical_plan_token(
     let mut parts = vec![format!(
         "target={}|from={}|to={}",
         request.target_category_id.0,
-        request.started_at_utc.to_rfc3339_opts(SecondsFormat::Nanos, true),
-        request.ended_at_utc.to_rfc3339_opts(SecondsFormat::Nanos, true),
+        request
+            .started_at_utc
+            .to_rfc3339_opts(SecondsFormat::Nanos, true),
+        request
+            .ended_at_utc
+            .to_rfc3339_opts(SecondsFormat::Nanos, true),
     )];
     if request.active_preview.started_at_utc < request.ended_at_utc
         && request.active_preview.ended_at_utc > request.started_at_utc
@@ -1236,7 +1240,7 @@ fn historical_gap_intervals(
     request_end: DateTime<Utc>,
     sessions: &[super::repository::SessionRecord],
     active_preview: &HistoricalActivePreview,
-) -> Result<Vec<(DateTime<Utc>, DateTime<Utc>)>, String> {
+) -> Result<Vec<HistoricalInterval>, String> {
     let mut covered = Vec::new();
     for session in sessions {
         let (start, end, _, _) = historical_session_bounds(session)?;
@@ -1251,7 +1255,7 @@ fn historical_gap_intervals(
     if active_start < active_end {
         covered.push((active_start, active_end));
     }
-    covered.sort_by(|left, right| left.0.cmp(&right.0));
+    covered.sort_by_key(|left| left.0);
 
     let mut gaps = Vec::new();
     let mut cursor = request_start;
@@ -1302,8 +1306,8 @@ fn update_historical_checkpoint(
         .map_err(|error| format!("historical checkpoint is invalid JSON: {error}"))?;
     checkpoint["active_category_id"] = serde_json::json!(active_category_id.0);
     checkpoint["active_description"] = serde_json::json!(active_description);
-    checkpoint["active_session_started_at_utc"] = serde_json::to_value(resulting_started_at_utc)
-        .map_err(|error| error.to_string())?;
+    checkpoint["active_session_started_at_utc"] =
+        serde_json::to_value(resulting_started_at_utc).map_err(|error| error.to_string())?;
     let checkpoint_json = serde_json::to_string(&checkpoint).map_err(|error| error.to_string())?;
     transaction
         .execute(
@@ -1389,8 +1393,10 @@ pub(crate) fn log_historical_activity(
             continue;
         }
         if session.category_id != 0 && session.category_id != target_category_id {
-            let left = i64::try_from(left).map_err(|_| "historical split is too large".to_string())?;
-            let right = i64::try_from(right).map_err(|_| "historical split is too large".to_string())?;
+            let left =
+                i64::try_from(left).map_err(|_| "historical split is too large".to_string())?;
+            let right =
+                i64::try_from(right).map_err(|_| "historical split is too large".to_string())?;
             conflicts.push(HistoricalConflict {
                 category_id: CategoryId::new(u64::try_from(session.category_id).map_err(|_| {
                     format!("session {} has invalid category identity", session.id)
@@ -1417,8 +1423,10 @@ pub(crate) fn log_historical_activity(
         && active.category_id != crate::domain::DRIFT_CATEGORY_ID
         && active.category_id != request.target_category_id
     {
-        let left = i64::try_from(active_left).map_err(|_| "active split is too large".to_string())?;
-        let right = i64::try_from(active_right).map_err(|_| "active split is too large".to_string())?;
+        let left =
+            i64::try_from(active_left).map_err(|_| "active split is too large".to_string())?;
+        let right =
+            i64::try_from(active_right).map_err(|_| "active split is too large".to_string())?;
         conflicts.push(HistoricalConflict {
             category_id: active.category_id,
             started_at_utc: active.started_at_utc + ChronoDuration::seconds(left),
@@ -1428,8 +1436,7 @@ pub(crate) fn log_historical_activity(
     }
 
     let conflicts = normalize_historical_conflicts(conflicts);
-    if !conflicts.is_empty()
-        && request.confirmed_plan_token.as_deref() != Some(plan_token.as_str())
+    if !conflicts.is_empty() && request.confirmed_plan_token.as_deref() != Some(plan_token.as_str())
     {
         return Ok(HistoricalActivityOutcome::NeedsConfirmation {
             plan_token,
@@ -1464,11 +1471,7 @@ pub(crate) fn log_historical_activity(
                 && end > request.started_at_utc
                 && start < active.started_at_utc
             {
-                let index = historical_index_at_or_after(
-                    start,
-                    request.started_at_utc,
-                    elapsed,
-                )?;
+                let index = historical_index_at_or_after(start, request.started_at_utc, elapsed)?;
                 let index = i64::try_from(index)
                     .map_err(|_| "historical backdate split is too large".to_string())?;
                 let candidate = start + ChronoDuration::seconds(index);
@@ -1506,12 +1509,19 @@ pub(crate) fn log_historical_activity(
         if right <= left {
             continue;
         }
-        let left_i64 = i64::try_from(left).map_err(|_| "historical split is too large".to_string())?;
-        let right_i64 = i64::try_from(right).map_err(|_| "historical split is too large".to_string())?;
+        let left_i64 =
+            i64::try_from(left).map_err(|_| "historical split is too large".to_string())?;
+        let right_i64 =
+            i64::try_from(right).map_err(|_| "historical split is too large".to_string())?;
         let selected_start = start + ChronoDuration::seconds(left_i64);
         let selected_end = start + ChronoDuration::seconds(right_i64);
         let policy = historical_session_policy(session)?;
-        affected_days.extend(historical_affected_days(start, recorded_end, elapsed, policy)?);
+        affected_days.extend(historical_affected_days(
+            start,
+            recorded_end,
+            elapsed,
+            policy,
+        )?);
 
         let absorbed = active_absorb_start.is_some_and(|absorb_start| {
             selected_end > absorb_start && selected_start < active.started_at_utc
@@ -1623,12 +1633,8 @@ pub(crate) fn log_historical_activity(
         }
         let gap_seconds = usize::try_from(gap_seconds)
             .map_err(|_| "historical gap duration is too large".to_string())?;
-        let stable_id = correction_stable_id(
-            "gap",
-            "assignment",
-            gap_start,
-            request.target_category_id,
-        );
+        let stable_id =
+            correction_stable_id("gap", "assignment", gap_start, request.target_category_id);
         write_history_fragment(
             &transaction,
             None,
@@ -1651,8 +1657,10 @@ pub(crate) fn log_historical_activity(
     let mut resulting_active_stable_id = active.stable_id.clone();
     let mut resulting_active_started_at_utc = active.started_at_utc;
     if active_overlap && active.category_id != request.target_category_id {
-        let left = i64::try_from(active_left).map_err(|_| "active split is too large".to_string())?;
-        let right = i64::try_from(active_right).map_err(|_| "active split is too large".to_string())?;
+        let left =
+            i64::try_from(active_left).map_err(|_| "active split is too large".to_string())?;
+        let right =
+            i64::try_from(active_right).map_err(|_| "active split is too large".to_string())?;
         let selected_start = active.started_at_utc + ChronoDuration::seconds(left);
         let selected_end = active.started_at_utc + ChronoDuration::seconds(right);
         if active_left > 0 {
@@ -1721,7 +1729,8 @@ pub(crate) fn log_historical_activity(
         if changed != 1 {
             return Err("active session changed during historical assignment".to_string());
         }
-        let resulting_elapsed = (active.ended_at_utc - resulting_active_started_at_utc).num_seconds();
+        let resulting_elapsed =
+            (active.ended_at_utc - resulting_active_started_at_utc).num_seconds();
         if resulting_elapsed < 0 {
             return Err("historical assignment moved active start beyond now".to_string());
         }
@@ -1729,8 +1738,8 @@ pub(crate) fn log_historical_activity(
         resulting_preview.started_at_utc = resulting_active_started_at_utc;
         resulting_preview.elapsed_seconds = usize::try_from(resulting_elapsed)
             .map_err(|_| "resulting active duration is too large".to_string())?;
-        resulting_preview.ended_at_utc = resulting_active_started_at_utc
-            + ChronoDuration::seconds(resulting_elapsed);
+        resulting_preview.ended_at_utc =
+            resulting_active_started_at_utc + ChronoDuration::seconds(resulting_elapsed);
         update_historical_checkpoint(
             &transaction,
             &request,
@@ -1768,10 +1777,12 @@ pub(crate) fn log_historical_activity(
         .map_err(|error| error.to_string())?;
     transaction.commit().map_err(|error| error.to_string())?;
 
-    Ok(HistoricalActivityOutcome::Applied(HistoricalActivityReceipt {
-        resulting_active_stable_id,
-        resulting_active_started_at_utc,
-    }))
+    Ok(HistoricalActivityOutcome::Applied(
+        HistoricalActivityReceipt {
+            resulting_active_stable_id,
+            resulting_active_started_at_utc,
+        },
+    ))
 }
 
 fn validate_historical_active_preview_for_request(
@@ -3544,7 +3555,8 @@ mod clear_all_additional_transaction_tests {
         drop(repository);
         let started_at_utc = parse_utc(started_at_utc).unwrap();
         let ended_at_utc = parse_utc(ended_at_utc).unwrap();
-        let elapsed_seconds = usize::try_from((ended_at_utc - started_at_utc).num_seconds()).unwrap();
+        let elapsed_seconds =
+            usize::try_from((ended_at_utc - started_at_utc).num_seconds()).unwrap();
         HistoricalActivePreview {
             stable_id: stable_id.to_string(),
             category_id: CategoryId::new(u64::try_from(category_id).unwrap()),
@@ -3708,7 +3720,12 @@ mod clear_all_additional_transaction_tests {
         drop(repository);
         let daily = load_daily_snapshot(&path, "2026-08-02").unwrap().unwrap();
         assert_eq!(
-            daily.state.pending_runs.iter().map(|run| run.count).sum::<usize>(),
+            daily
+                .state
+                .pending_runs
+                .iter()
+                .map(|run| run.count)
+                .sum::<usize>(),
             3600 + 1800
         );
         remove_database(&path);
@@ -3756,10 +3773,15 @@ mod clear_all_additional_transaction_tests {
             vec![0, 1, 0]
         );
         assert_eq!(
-            rows.iter().map(|row| row.elapsed_seconds).collect::<Vec<_>>(),
+            rows.iter()
+                .map(|row| row.elapsed_seconds)
+                .collect::<Vec<_>>(),
             vec![900, 1800, 900]
         );
-        assert_eq!(rows.iter().map(|row| row.elapsed_seconds).sum::<i64>(), 3600);
+        assert_eq!(
+            rows.iter().map(|row| row.elapsed_seconds).sum::<i64>(),
+            3600
+        );
         drop(repository);
         remove_database(&path);
     }
@@ -3805,7 +3827,10 @@ mod clear_all_additional_transaction_tests {
         assert_eq!(rows[0].elapsed_seconds, 1800);
         assert_eq!(rows[1].category_id, 1);
         assert_eq!(rows[1].elapsed_seconds, 900);
-        assert_eq!(rows.iter().map(|row| row.elapsed_seconds).sum::<i64>(), 2700);
+        assert_eq!(
+            rows.iter().map(|row| row.elapsed_seconds).sum::<i64>(),
+            2700
+        );
         drop(repository);
         remove_database(&path);
     }
@@ -3843,7 +3868,10 @@ mod clear_all_additional_transaction_tests {
         )
         .unwrap();
         let plan_token = match preview {
-            HistoricalActivityOutcome::NeedsConfirmation { plan_token, conflicts } => {
+            HistoricalActivityOutcome::NeedsConfirmation {
+                plan_token,
+                conflicts,
+            } => {
                 assert_eq!(conflicts.len(), 1);
                 assert_eq!(conflicts[0].category_id, CategoryId::new(1));
                 plan_token
@@ -3873,7 +3901,10 @@ mod clear_all_additional_transaction_tests {
             rows.iter().map(|row| row.category_id).collect::<Vec<_>>(),
             vec![1, 0, 1]
         );
-        assert_eq!(rows.iter().map(|row| row.elapsed_seconds).sum::<i64>(), 3600);
+        assert_eq!(
+            rows.iter().map(|row| row.elapsed_seconds).sum::<i64>(),
+            3600
+        );
         drop(repository);
         remove_database(&path);
     }
@@ -3916,7 +3947,9 @@ mod clear_all_additional_transaction_tests {
                 plan_token,
                 conflicts,
             } => (plan_token, conflicts),
-            HistoricalActivityOutcome::Applied(_) => panic!("explicit collision applied without confirmation"),
+            HistoricalActivityOutcome::Applied(_) => {
+                panic!("explicit collision applied without confirmation")
+            }
         };
         assert_eq!(conflicts.len(), 1);
         assert_eq!(conflicts[0].category_id, CategoryId::new(1));
@@ -3944,7 +3977,9 @@ mod clear_all_additional_transaction_tests {
         .unwrap();
         let second_token = match second {
             HistoricalActivityOutcome::NeedsConfirmation { plan_token, .. } => plan_token,
-            HistoricalActivityOutcome::Applied(_) => panic!("wrong confirmation token was accepted"),
+            HistoricalActivityOutcome::Applied(_) => {
+                panic!("wrong confirmation token was accepted")
+            }
         };
         assert_eq!(second_token, plan_token);
 
@@ -3968,7 +4003,10 @@ mod clear_all_additional_transaction_tests {
             rows.iter().map(|row| row.category_id).collect::<Vec<_>>(),
             vec![1, reading_id, 1]
         );
-        assert_eq!(rows.iter().map(|row| row.elapsed_seconds).sum::<i64>(), 3600);
+        assert_eq!(
+            rows.iter().map(|row| row.elapsed_seconds).sum::<i64>(),
+            3600
+        );
         drop(repository);
         remove_database(&path);
     }
@@ -4034,13 +4072,21 @@ mod clear_all_additional_transaction_tests {
         request.checkpoint_json = checkpoint_json.clone();
         let first = log_historical_activity(&path, request).unwrap();
         let plan_token = match first {
-            HistoricalActivityOutcome::NeedsConfirmation { plan_token, conflicts } => {
+            HistoricalActivityOutcome::NeedsConfirmation {
+                plan_token,
+                conflicts,
+            } => {
                 assert_eq!(conflicts.len(), 1);
                 assert!(conflicts[0].active);
-                assert_eq!(conflicts[0].category_id, CategoryId::new(u64::try_from(work_id).unwrap()));
+                assert_eq!(
+                    conflicts[0].category_id,
+                    CategoryId::new(u64::try_from(work_id).unwrap())
+                );
                 plan_token
             }
-            HistoricalActivityOutcome::Applied(_) => panic!("active contradiction applied without confirmation"),
+            HistoricalActivityOutcome::Applied(_) => {
+                panic!("active contradiction applied without confirmation")
+            }
         };
 
         let mut confirmed = historical_activity_request(
@@ -4053,7 +4099,9 @@ mod clear_all_additional_transaction_tests {
         confirmed.checkpoint_json = checkpoint_json;
         let receipt = match log_historical_activity(&path, confirmed).unwrap() {
             HistoricalActivityOutcome::Applied(receipt) => receipt,
-            HistoricalActivityOutcome::NeedsConfirmation { .. } => panic!("unchanged active collision did not accept exact confirmation"),
+            HistoricalActivityOutcome::NeedsConfirmation { .. } => {
+                panic!("unchanged active collision did not accept exact confirmation")
+            }
         };
 
         let repository = open_cli_repository(&path).unwrap();
@@ -4071,7 +4119,10 @@ mod clear_all_additional_transaction_tests {
             persisted_active.started_at_utc,
             timestamp(Utc.with_ymd_and_hms(2026, 8, 2, 11, 30, 0).unwrap())
         );
-        assert_eq!(persisted_active.stable_id, receipt.resulting_active_stable_id);
+        assert_eq!(
+            persisted_active.stable_id,
+            receipt.resulting_active_stable_id
+        );
         let checkpoint: (String, String) = repository
             .connection
             .query_row(
@@ -4082,8 +4133,14 @@ mod clear_all_additional_transaction_tests {
             .unwrap();
         assert_eq!(checkpoint.0, persisted_active.stable_id);
         let checkpoint_json: serde_json::Value = serde_json::from_str(&checkpoint.1).unwrap();
-        assert_eq!(checkpoint_json["active_category_id"], serde_json::json!(work_id));
-        assert_eq!(checkpoint_json["active_description"], serde_json::json!("feature"));
+        assert_eq!(
+            checkpoint_json["active_category_id"],
+            serde_json::json!(work_id)
+        );
+        assert_eq!(
+            checkpoint_json["active_description"],
+            serde_json::json!("feature")
+        );
         assert_eq!(
             checkpoint_json["active_session_started_at_utc"],
             serde_json::to_value(Utc.with_ymd_and_hms(2026, 8, 2, 11, 30, 0).unwrap()).unwrap()
@@ -4091,7 +4148,12 @@ mod clear_all_additional_transaction_tests {
         drop(repository);
         let daily = load_daily_snapshot(&path, "2026-08-02").unwrap().unwrap();
         assert_eq!(
-            daily.state.pending_runs.iter().map(|run| run.count).sum::<usize>(),
+            daily
+                .state
+                .pending_runs
+                .iter()
+                .map(|run| run.count)
+                .sum::<usize>(),
             1800
         );
         assert_eq!(
@@ -4154,7 +4216,9 @@ mod clear_all_additional_transaction_tests {
 
         let receipt = match log_historical_activity(&path, request).unwrap() {
             HistoricalActivityOutcome::Applied(receipt) => receipt,
-            HistoricalActivityOutcome::NeedsConfirmation { .. } => panic!("Idle plus same active layer should not require confirmation"),
+            HistoricalActivityOutcome::NeedsConfirmation { .. } => {
+                panic!("Idle plus same active layer should not require confirmation")
+            }
         };
         let expected_start = Utc.with_ymd_and_hms(2026, 8, 2, 10, 45, 0).unwrap();
         assert_eq!(receipt.resulting_active_started_at_utc, expected_start);
@@ -4174,12 +4238,20 @@ mod clear_all_additional_transaction_tests {
             )
             .unwrap();
         let checkpoint_json: serde_json::Value = serde_json::from_str(&checkpoint_json).unwrap();
-        assert_eq!(checkpoint_json["active_description"], serde_json::json!("feature"));
+        assert_eq!(
+            checkpoint_json["active_description"],
+            serde_json::json!("feature")
+        );
         assert_eq!(checkpoint_json["active_category_id"], serde_json::json!(1));
         drop(repository);
         let daily = load_daily_snapshot(&path, "2026-08-02").unwrap().unwrap();
         assert_eq!(
-            daily.state.pending_runs.iter().map(|run| run.count).sum::<usize>(),
+            daily
+                .state
+                .pending_runs
+                .iter()
+                .map(|run| run.count)
+                .sum::<usize>(),
             1800
         );
         assert_eq!(
@@ -4207,7 +4279,7 @@ mod clear_all_additional_transaction_tests {
             "2026-08-02",
             300,
         );
-        let mut repository = open_cli_repository(&path).unwrap();
+        let repository = open_cli_repository(&path).unwrap();
         repository
             .connection
             .execute(
@@ -4368,7 +4440,10 @@ mod clear_all_additional_transaction_tests {
         assert_eq!(rows[1].category_id, 0);
         assert_eq!(rows[1].elapsed_seconds, 2700);
         assert!(rows.iter().all(|row| row.elapsed_seconds > 0));
-        assert_eq!(rows.iter().map(|row| row.elapsed_seconds).sum::<i64>(), 3600);
+        assert_eq!(
+            rows.iter().map(|row| row.elapsed_seconds).sum::<i64>(),
+            3600
+        );
         drop(repository);
         remove_database(&start_path);
 
@@ -4412,13 +4487,17 @@ mod clear_all_additional_transaction_tests {
         assert_eq!(rows[1].elapsed_seconds, 900);
         assert_eq!(rows[1].ended_at_utc, "2026-08-02T11:00:00.700Z");
         assert!(rows.iter().all(|row| row.elapsed_seconds > 0));
-        assert_eq!(rows.iter().map(|row| row.elapsed_seconds).sum::<i64>(), 3600);
+        assert_eq!(
+            rows.iter().map(|row| row.elapsed_seconds).sum::<i64>(),
+            3600
+        );
         drop(repository);
         remove_database(&end_path);
     }
 
     #[test]
-    fn historical_activity_whole_source_replacement_retains_source_identity_and_recorded_endpoint() {
+    fn historical_activity_whole_source_replacement_retains_source_identity_and_recorded_endpoint()
+    {
         let path = repository_file("history-assignment-whole-source");
         seed_history_session(
             &path,
@@ -4497,9 +4576,14 @@ mod clear_all_additional_transaction_tests {
 
         let repository = open_cli_repository(&path).unwrap();
         let rows = repository.list_sessions().unwrap();
-        assert_eq!(rows.iter().map(|row| row.elapsed_seconds).sum::<i64>(), 3600);
         assert_eq!(
-            rows.iter().map(|row| row.elapsed_seconds).collect::<Vec<_>>(),
+            rows.iter().map(|row| row.elapsed_seconds).sum::<i64>(),
+            3600
+        );
+        assert_eq!(
+            rows.iter()
+                .map(|row| row.elapsed_seconds)
+                .collect::<Vec<_>>(),
             vec![900, 1800, 900]
         );
         assert_eq!(rows[0].ended_at_utc, rows[1].started_at_utc);
@@ -4509,11 +4593,21 @@ mod clear_all_additional_transaction_tests {
         let first = load_daily_snapshot(&path, "2026-08-01").unwrap().unwrap();
         let second = load_daily_snapshot(&path, "2026-08-02").unwrap().unwrap();
         assert_eq!(
-            first.state.pending_runs.iter().map(|run| run.count).sum::<usize>(),
+            first
+                .state
+                .pending_runs
+                .iter()
+                .map(|run| run.count)
+                .sum::<usize>(),
             1799
         );
         assert_eq!(
-            second.state.pending_runs.iter().map(|run| run.count).sum::<usize>(),
+            second
+                .state
+                .pending_runs
+                .iter()
+                .map(|run| run.count)
+                .sum::<usize>(),
             1801 + 1800
         );
         assert!(
@@ -4600,12 +4694,20 @@ mod clear_all_additional_transaction_tests {
                 plan_token,
                 conflicts,
             } => (plan_token, conflicts),
-            HistoricalActivityOutcome::Applied(_) => panic!("multi-session contradiction applied without confirmation"),
+            HistoricalActivityOutcome::Applied(_) => {
+                panic!("multi-session contradiction applied without confirmation")
+            }
         };
         assert_eq!(conflicts.len(), 2);
         assert_eq!(
-            conflicts.iter().map(|conflict| conflict.category_id).collect::<Vec<_>>(),
-            vec![CategoryId::new(u64::try_from(work_id).unwrap()), CategoryId::new(u64::try_from(reading_id).unwrap())]
+            conflicts
+                .iter()
+                .map(|conflict| conflict.category_id)
+                .collect::<Vec<_>>(),
+            vec![
+                CategoryId::new(u64::try_from(work_id).unwrap()),
+                CategoryId::new(u64::try_from(reading_id).unwrap())
+            ]
         );
         assert!(conflicts.iter().all(|conflict| !conflict.active));
 
@@ -4633,7 +4735,10 @@ mod clear_all_additional_transaction_tests {
         for pair in rows.windows(2) {
             let (_, left_end, _, _) = historical_session_bounds(&pair[0]).unwrap();
             let (right_start, _, _, _) = historical_session_bounds(&pair[1]).unwrap();
-            assert!(left_end <= right_start, "historical assignment created overlapping canonical rows");
+            assert!(
+                left_end <= right_start,
+                "historical assignment created overlapping canonical rows"
+            );
         }
         drop(repository);
         remove_database(&path);
@@ -4675,12 +4780,10 @@ mod clear_all_additional_transaction_tests {
             })
             .to_string();
 
-            let result = runtime_coordination::with_test_fault(
-                "history-assignment",
-                point,
-                "io",
-                || log_historical_activity(&path, request.clone()),
-            );
+            let result =
+                runtime_coordination::with_test_fault("history-assignment", point, "io", || {
+                    log_historical_activity(&path, request.clone())
+                });
             assert!(result.is_err(), "kill point {point} unexpectedly committed");
 
             let repository = open_cli_repository(&path).unwrap();
@@ -4696,7 +4799,9 @@ mod clear_all_additional_transaction_tests {
             assert_eq!(persisted_active.started_at_utc, "2026-08-02T11:00:00Z");
             let checkpoint_count: i64 = repository
                 .connection
-                .query_row("SELECT count(*) FROM runtime_checkpoint", [], |row| row.get(0))
+                .query_row("SELECT count(*) FROM runtime_checkpoint", [], |row| {
+                    row.get(0)
+                })
                 .unwrap();
             assert_eq!(checkpoint_count, 0);
             drop(repository);
@@ -4704,5 +4809,4 @@ mod clear_all_additional_transaction_tests {
             remove_database(&path);
         }
     }
-
 }

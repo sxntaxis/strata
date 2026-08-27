@@ -204,7 +204,7 @@ impl App {
                 let start = temporal::civil_from_policy(conflict.started_at_utc, policy).ok();
                 let end = temporal::civil_from_policy(conflict.ended_at_utc, policy).ok();
                 let interval = match (start, end) {
-                    (Some(start), Some(end)) if start.date() == end.date() => format!(
+                    (Some(start), Some(end)) if start.date_naive() == end.date_naive() => format!(
                         "{} {}-{}",
                         start.format("%Y-%m-%d"),
                         start.format("%H:%M:%S"),
@@ -985,8 +985,7 @@ mod report_edit_state_tests {
             utc_offset_seconds: -6 * 60 * 60,
             start_minutes: 0,
         };
-        let parsed =
-            parse_historical_activity_timestamp("2026-08-01 23:45:00", policy).unwrap();
+        let parsed = parse_historical_activity_timestamp("2026-08-01 23:45:00", policy).unwrap();
         assert_eq!(parsed.to_rfc3339(), "2026-08-02T05:45:00+00:00");
         assert!(parse_historical_activity_timestamp("2026/08/01 23:45", policy).is_err());
     }

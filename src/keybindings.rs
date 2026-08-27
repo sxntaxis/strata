@@ -1367,10 +1367,7 @@ mod tests {
         let keymap = default_keymap();
         let l = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE);
 
-        assert_eq!(
-            keymap.action_for_key_event(l),
-            Some(Action::LogActivity)
-        );
+        assert_eq!(keymap.action_for_key_event(l), Some(Action::LogActivity));
     }
 
     #[test]
