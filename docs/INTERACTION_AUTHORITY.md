@@ -1,8 +1,8 @@
 # Interaction authority
 
-Status: implemented; INTERACTION-002 native validation pending
+Status: implemented and certified
 Program: INTERACTION-001 + INTERACTION-002 convergence
-Current completed unit: INTERACTION-001C; INTERACTION-002 source candidate active
+Current completed unit: INTERACTION-002; PLATEAU-001H H1 presentation hardening certified
 Issues completed: #19, #20, #24
 Last reviewed: 2026-08-27
 

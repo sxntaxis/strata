@@ -219,7 +219,7 @@ polish or optional ideas.
 
 #### H1 — De-nozzle rain + contextual Balance footer
 
-Status: **IMPLEMENTED CANDIDATE — NATIVE VALIDATION PENDING**.
+Status: **COMPLETE / NATIVE-GREEN** at `744b9f11a5341b0948178b932b23dd1d7e59662b`.
 
 Admitted directly from the first owner screenshots after the plateau cutover:
 
@@ -230,6 +230,8 @@ Admitted directly from the first owner screenshots after the plateau cutover:
 - render the retroactive action as a readable key hint plus **Log past**, and rename the visible action to **Log past activity…** without changing `balance_log_activity` persistence/API identity.
 
 This pack is bounded hardening. It introduces no new feature surface, SQLite migration, sediment state field, or historical-edit semantic change.
+
+Native evidence: formatting, strict Clippy, 284 tests, organic-formation and friction regression, deterministic full-width-rain coverage and weak-focus-bias proof, Balance rendering, HISTORY/recovery/schema regression, isolated bubblewrapped TUI smoke, and validator profile custody all pass. Native fallout was limited to one candidate test iterator correction plus rustfmt in `src/app/report_modal_view.rs` and `src/sand/engine.rs`; architecture semantics did not change.
 
 ### RHYTHM-001 — Focus/Pomodoro experiment (optional)
 
@@ -245,7 +247,7 @@ Preferred progression:
 
 ## Agent locator
 
-Current edge: **PLATEAU-001H / H1 — de-nozzle rain + contextual Balance footer**. The plateau build is cut over to the owner installation from published main `3062e115de1bdf16985275ff1476ba22f213f744`; H1 is the first change admitted from direct daily-use screenshots rather than roadmap feature seeking.
+Current edge: **PLATEAU-001H daily-use hardening**. H1 is native-green at `744b9f11a5341b0948178b932b23dd1d7e59662b` and is the first completed change admitted from direct daily-use screenshots rather than roadmap feature seeking. After H1 publication/cutover, further hardening is admitted only from concrete real-profile friction; no H2 is pre-invented.
 
 HISTORY-001A/B/C are native-green through `09412b703cf41016f889d725ba235a7a1e63ae6a`. HISTORY-001C established the completed-Idle split transaction, active-preview validation, atomic daily-contribution reconciliation, and Balance historical editor. HISTORY-001D now generalizes that safe primitive into arbitrary From/To activity assignment with explicit collision confirmation and protected live selection.
 

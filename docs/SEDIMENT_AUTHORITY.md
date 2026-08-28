@@ -1,8 +1,8 @@
 # Sediment authority
 
-Status: certified baseline; SEDIMENT-002 native validation pending
-Program: SEDIMENT-002
-Current completed unit: HISTORY-001E; SEDIMENT-002 implemented / native validation pending
+Status: implemented and certified
+Program: SEDIMENT-002 + PLATEAU-001H hardening
+Current completed unit: SEDIMENT-002; PLATEAU-001H H1 ingress hardening certified
 Issues completed: #6, #7, #16, #18, #26
 Last reviewed: 2026-08-27
 

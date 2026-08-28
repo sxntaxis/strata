@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-08-28
 authority: working
-summary: The validated plateau is installed on the real profile; PLATEAU-001H H1 hardens nozzle-like ingress and Balance footer clutter from first daily-use evidence.
-next: Native-validate H1 against the published plateau, then cut it over only if rain breadth, Balance footer clarity, and all persistence/history regressions remain green.
+summary: The validated plateau is installed on the real profile; PLATEAU-001H H1 is native-green and ready to cut over, after weakening nozzle-like ingress and simplifying Balance footer guidance from first daily-use evidence.
+next: Publish and cut over native-green H1, then resume real-profile daily use and admit further PLATEAU-001H changes only from concrete product friction.
 ---
 
 # NOW — Strata
@@ -80,7 +80,7 @@ INTERACTION-002 is **COMPLETE / NATIVE-GREEN** at `b0f60eb3c6d76d1afee8d46737baa
 
 The plateau cutover is **COMPLETE / REAL-PROFILE GREEN** from published main `3062e115de1bdf16985275ff1476ba22f213f744`: the new binary started on the real profile, v1/v2 sediment restored and persisted as SandState v3 with a valid ingress focus, Settings and Balance were visible, normal restart passed, and the pre-v3 backup was retained.
 
-The active edge is **PLATEAU-001H / H1 — de-nozzle rain + contextual Balance footer**. First owner screenshots after cutover showed two bounded daily-use defects: falling grains still reveal the persisted ingress focus too clearly, and the Balance bottom border stacks technical status/period/action hints such that the bare `l` is not understandable. H1 is implemented as a source candidate: every drop keeps full-width support with only occasional soft focus preference; current `live sediment` footer noise is hidden; period hints stay on the default summary; detail/editor footers become contextual; and the visible retroactive action is **Log past activity…** while `balance_log_activity` remains the stable config/API name. Native validation is pending.
+PLATEAU-001H / H1 — de-nozzle rain + contextual Balance footer — is **COMPLETE / NATIVE-GREEN** at `744b9f11a5341b0948178b932b23dd1d7e59662b`. The first owner screenshots after cutover exposed two bounded daily-use defects: falling grains still revealed the persisted ingress focus too clearly, and the Balance bottom border stacked technical status/period/action hints such that the bare `l` was not understandable. H1 keeps full-width support on every drop with only occasional soft focus preference; hides current `live sediment` footer noise; keeps period hints on the default summary; makes detail/editor footers contextual; and presents the visible retroactive action as **Log past activity…** while preserving `balance_log_activity` as the stable config/API name. Native validation passed formatting, strict Clippy, 284 tests, deterministic broad-rain/weak-bias proof, Balance render proof, HISTORY/recovery regressions, isolated TUI smoke, and profile custody.
 
 The stale dirty adaptive-resize branch remains preserved as custody evidence and is superseded by the current-main
 visible-basin, resize/restore, and atomic clear-all authority. No adaptive code was ported.
