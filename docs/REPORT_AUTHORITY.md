@@ -22,7 +22,7 @@ A canonical session remains one row. Exact overlap slices contribute only the se
 ## Explicit historical correction
 
 Balance browsing and reporting remain read-only projections. Historical mutation occurs only through an explicit
-committed **Log activity…** operation. The user states one past interval plus one existing target layer; canonical
+committed **Log past activity…** operation. The user states one past interval plus one existing target layer; canonical
 session boundaries are persistence detail rather than interaction authority.
 
 HISTORY-001C established the first safe transactional primitive by reclassifying a positive sub-interval of one

@@ -3,7 +3,7 @@ id: PLATEAU-001
 kind: work
 state: active
 created: 2026-08-27
-updated: 2026-08-27
+updated: 2026-08-28
 authority: working
 summary: Final core-development roadmap: historical time editing, more organic sediment formation, interaction/menu convergence, then sustained product hardening; Pomodoro remains an optional post-plateau experiment.
 ---
@@ -155,7 +155,7 @@ Goal: make emergent shapes less white-noise-like while preserving ordinary falli
 Accepted implementation:
 
 - Down remains unconditional. When down is blocked and at least one diagonal is open, apply a memoryless stochastic-friction gate: initially one-quarter slide and three-quarters temporary hold. After a permitted slide, take the sole open diagonal or randomize left/right when both are open. No-route grains stay put without a friction/lateral choice.
-- Replace independent uniform top-edge ingress with biased rain around one slowly wandering focus. The focus moves by at most one dot only on occasional focus-update events; most grains sample a broad triangular cloud around it and occasional grains sample the whole visible width. Occupancy chooses the nearest free visible ingress column without moving the focus.
+- Replace independent uniform top-edge ingress with rain influenced by one slowly wandering persisted focus. SEDIMENT-002 established the persisted focus and nearest-free visible fallback; PLATEAU-001H H1 later weakens the per-grain focus effect so short-term fall remains broad rain while long-run accumulation stays biased.
 - The ingress focus is canonical dot-grid state, constrained to the active visible basin when used and shifted with the existing horizontal-center canvas expansion so growth does not teleport the favored rain region relative to retained topology.
 - Persist the focus in `SandState` v3 beside the existing RNG state. v1 legacy pending vectors and v2 compressed-pending states remain readable and migrate to v3 with no invented focus; the existing RNG state deterministically seeds the first post-migration ingress.
 - Full clear removes all mass and resets the ingress focus while retaining the RNG stream; category-specific clear preserves the formation focus.
@@ -195,8 +195,10 @@ Accepted implementation:
 - Settings keeps the established F1 / `?` defaults; a plain-letter Settings key is deliberately avoided because Layer owns ordinary text input.
 - Settings rows use human action names rather than config identifiers and are grouped as Main / Navigation / Layer / Balance / Settings. Bound / Unbound / Disabled and mandatory Ctrl-C remain exactly the underlying keymap truth.
 - Default contextual routing is reduced to Main Confirm→Layer when Layer is otherwise unbound, Main Cancel→Idle when Idle switch is otherwise unbound, and Balance Detach→Day. The old conditional Main Balance-day→Detach route is retired.
-- Balance physical keys `t/w/m/r/l` do not act as hidden Main shortcuts. The command palette remains the explicit universal launcher for Balance periods, custom range, and Log activity.
+- Balance physical keys `t/w/m/r/l` do not act as hidden Main shortcuts. The command palette remains the explicit universal launcher for Balance periods, custom range, and Log past activity.
 - No new menu framework or Settings tab architecture is introduced in this unit; the existing surface is converged rather than replaced.
+- First real-profile hardening evidence after cutover: the persisted sediment focus is still too visually legible as a nozzle. Short-term fall should look like broad rain; the focus should become apparent only through long-term accumulation.
+- The same real-profile pass found Balance footer overload. A bare `l` is not self-explanatory; current-day `live sediment` status is noise; summary/detail/editor controls should be contextual and the retroactive action should read **Log past activity…**.
 
 ### PLATEAU-001H — Product hardening
 
@@ -215,6 +217,20 @@ Hunt:
 Plateau condition: sustained real-profile use stops uncovering structural/core changes and mostly produces bounded
 polish or optional ideas.
 
+#### H1 — De-nozzle rain + contextual Balance footer
+
+Status: **IMPLEMENTED CANDIDATE — NATIVE VALIDATION PENDING**.
+
+Admitted directly from the first owner screenshots after the plateau cutover:
+
+- replace the hard local ingress cloud / rare-global mixture with full-width rain on every drop plus only an occasional soft two-candidate preference toward the slow persisted focus;
+- retain the existing friction/avalanche rule, focus persistence, visible-basin custody, mass conservation, and SandState v3 schema;
+- hide non-informative current `live sediment` footer status;
+- keep period labels on the default Balance summary, but remove them while detail/edit modes own the footer;
+- render the retroactive action as a readable key hint plus **Log past**, and rename the visible action to **Log past activity…** without changing `balance_log_activity` persistence/API identity.
+
+This pack is bounded hardening. It introduces no new feature surface, SQLite migration, sediment state field, or historical-edit semantic change.
+
 ### RHYTHM-001 — Focus/Pomodoro experiment (optional)
 
 Not a plateau blocker.
@@ -229,7 +245,7 @@ Preferred progression:
 
 ## Agent locator
 
-Current edge: **INTERACTION-002 — Settings and vocabulary convergence**. SEDIMENT-002 is native-green at `4059e28df2ebf82bd31453ee208093eef57a4511`; interaction work now converges the existing truthful keymap/palette surface onto plain Settings vocabulary and removes misplaced historical-key shortcuts without creating a new menu framework.
+Current edge: **PLATEAU-001H / H1 — de-nozzle rain + contextual Balance footer**. The plateau build is cut over to the owner installation from published main `3062e115de1bdf16985275ff1476ba22f213f744`; H1 is the first change admitted from direct daily-use screenshots rather than roadmap feature seeking.
 
 HISTORY-001A/B/C are native-green through `09412b703cf41016f889d725ba235a7a1e63ae6a`. HISTORY-001C established the completed-Idle split transaction, active-preview validation, atomic daily-contribution reconciliation, and Balance historical editor. HISTORY-001D now generalizes that safe primitive into arbitrary From/To activity assignment with explicit collision confirmation and protected live selection.
 

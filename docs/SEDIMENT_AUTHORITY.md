@@ -63,16 +63,16 @@ For each visible grain during a gravity pass:
 
 The temporary hold is deliberately memoryless: no per-grain friction age, pressure, or slope field exists. Repeated gravity passes therefore let steep local stacks survive briefly and then yield into small avalanches, while straight-down motion remains unconditional. The one-quarter slide ratio is an internal physical-personality constant for this unit, not a user-facing tuning control. The existing alternating horizontal sweep remains an ordering/fairness mechanism.
 
-New physical ingress keeps the rain-like cadence while introducing long-term spatial preference. One persisted **ingress focus** wanders slowly across the visible top edge, but individual grains do not all spawn at that focus. For each physical ingress:
+New physical ingress keeps the rain-like cadence while introducing only a weak long-term spatial preference. One persisted **ingress focus** wanders slowly across the visible top edge, but it must not be visually traceable as a nozzle from a handful of falling grains. For each physical ingress:
 
 1. initialize the focus from the persisted RNG when no focus exists;
 2. otherwise move the focus by at most one canonical dot only on an occasional focus-update event, so it changes on a slower timescale than individual grains;
-3. usually sample a broad triangular probability cloud around the focus, making nearby columns more likely without turning the source into a nozzle;
-4. occasionally sample the whole visible width, retaining visibly rain-like outliers away from the favored region;
+3. begin with a full-visible-width rain sample for every grain;
+4. on only an occasional bias event, draw one second full-width candidate and prefer whichever candidate is closer to the focus, using RNG only for an equal-distance tie;
 5. if the sampled top cell is occupied, choose the nearest currently free visible ingress column, randomizing only an equal-distance tie;
 6. if no visible top column is free, leave the logical mass pending exactly as before.
 
-The initial SEDIMENT-002 physical personality uses an occasional one-in-four focus move, a one-in-five whole-width rain sample, and a local cloud radius of roughly one-sixth of the visible width with a small minimum radius. These are private implementation constants chosen to establish one coherent default personality; Settings do not expose them in this unit.
+The hardening personality keeps the one-in-four focus move and applies the soft two-candidate focus preference on one-in-four ingress samples. There is no hard local radius: every grain retains full-width support, and most grains are ordinary uniform rain. The intended visual test is temporal: short observation should read as rain, while accumulated mass over a much longer interval should reveal that one region received somewhat more sediment. These are private implementation constants; Settings do not expose them.
 
 The ingress focus is small stochastic engine state, not grain provenance. Actual grain placement does not overwrite the focus when occupancy forces a farther fallback. The focus shifts by the same horizontal offset when the canonical canvas expands around its center. A shrink does not mutate hidden canonical topology; when the focus lies outside the smaller visible basin, the next physical ingress clamps it into that basin without placing outside it. Re-expansion exposes the retained topology normally. Full clear resets the focus along with the pile, while the RNG stream continues; category-specific clear leaves the focus intact.
 

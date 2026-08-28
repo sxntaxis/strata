@@ -131,7 +131,7 @@ After application, left/right shifts the whole custom window by its own inclusiv
 ## Balance historical activity editor
 
 HISTORY-001C introduced the first historical editor from completed Idle detail rows. HISTORY-001D generalizes that
-interaction into one Balance-wide **Log activity…** operation. The configurable `balance_log_activity` action
+interaction into one Balance-wide **Log past activity…** operation. The configurable `balance_log_activity` action
 defaults to `l`; it is available from Balance summary/detail views and through the command palette rather than
 depending on a selected source session. Existing session rows are bookkeeping material, not part of the user
 contract.
@@ -165,6 +165,17 @@ The current HISTORY-001D editor does not expose a historical Tag field. Newly in
 use an empty description instead of borrowing the current live tag. If the active generation is rebased, its
 persisted live description is preserved.
 
+### Balance footer hardening
+
+Daily-use proof showed that the original Balance bottom border exposed too many simultaneous implementation hints: current-sediment status, period choices, a bare `l`, and editor controls could all compete on one line. PLATEAU-001H therefore makes the footer contextual rather than encyclopedic.
+
+- The default summary keeps the period choices centered and exposes the retroactive action as a legible key hint plus **Log past** rather than a bare letter or the ambiguous phrase `log activity`.
+- The non-informative `live sediment` status is omitted for the current live interval; historical sediment provenance remains visible when Balance is actually showing a historical artifact.
+- Detail and edit modes show only controls relevant to that mode. Period selectors are not repeated while a detail/editor owns the footer.
+- The user-facing action name is **Log past activity…**; the stable configuration/API action remains `balance_log_activity`.
+
+This is presentation hardening only. It does not alter historical-assignment semantics, collision confirmation, keymap authority, or command-palette reachability.
+
 ## Settings and palette truth
 
 Settings and the command palette expose the same reachable action authority used by runtime. Settings is the plain product name for the former command-atlas surface; `Atlas` is not current user-facing vocabulary.
@@ -190,7 +201,7 @@ The default contextual routes are intentionally small:
 
 The former `main.balance_today` fallback, which could turn the Balance-day key into Detach on Main when Detach was unbound, is retired as misplaced interaction.
 
-Balance-specific physical keys (`t`, `w`, `m`, `r`, `l`) own historical interaction inside Balance. They are not hidden Main shortcuts. The command palette remains the deliberate universal launcher: **Log activity…**, **Custom range…**, and Balance period choices may be invoked from anywhere and explicitly enter Balance.
+Balance-specific physical keys (`t`, `w`, `m`, `r`, `l`) own historical interaction inside Balance. They are not hidden Main shortcuts. The command palette remains the deliberate universal launcher: **Log past activity…**, **Custom range…**, and Balance period choices may be invoked from anywhere and explicitly enter Balance.
 
 Disabled actions are removed from the command palette. Unbound actions remain available through deliberate palette invocation and are labeled `unbound`; palette selection is an explicit route rather than an invented physical binding. F1 and `?` remain ordinary configurable defaults for Settings because a plain-letter Settings key would conflict with Layer text entry. `?` remains literal text while Layer owns text input; F1 still opens Settings there.
 
