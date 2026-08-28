@@ -209,6 +209,7 @@ pub(crate) fn daily_contribution_from_slices(
         pending_grains: Vec::new(),
         pending_runs,
         active_avalanche_columns: Vec::new(),
+        mobilized_grains: Vec::new(),
     };
     Some(SedimentSnapshot::daily_contribution(
         operational_day.to_string(),
@@ -274,6 +275,7 @@ pub(crate) fn derived_preview_from_slices(
         pending_grains: Vec::new(),
         pending_runs,
         active_avalanche_columns: Vec::new(),
+        mobilized_grains: Vec::new(),
     };
     Some(SedimentSnapshot::derived_preview(
         operational_day.to_string(),
@@ -398,6 +400,7 @@ mod tests {
                 count: 5,
             }],
             active_avalanche_columns: Vec::new(),
+            mobilized_grains: Vec::new(),
         }
     }
 

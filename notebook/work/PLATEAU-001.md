@@ -266,6 +266,16 @@ Required native proof includes `0/2/0` long-run stability, `0/3/0` immediate yie
 
 Native closure: the authored candidate was transplanted onto real published main as `9da30c2`; rustfmt fallout and minimal missing boundary/invariant tests were committed as `26fe55d`, with no architecture-semantic changes. The full suite passed with 272 library tests and 23 integration tests. Focused H3 proofs passed for isolated 2-dot stability, isolated 3-dot yield through normal avalanche activity, one-sided and broad neighbor protection, visible-wall protection, mass conservation, settled-profile elimination of interior isolated height-three-or-greater needles, and continued legality of isolated 2-dot stacks. Corrected live cadence produced 446 events at 40x20 (median 8, p95 108, max 274, quiet buildup 9, 0% one-move) and 642 at 80x30 (median 8, p95 24, max 52, quiet buildup 10, 0% one-move), satisfying all qualitative guardrails. H1 rain, resize/visible basin, HISTORY, recovery, v4 migration/restart, and SQLite regressions remained green; H3 adds no serialized state or profile migration. The candidate is validated but not published or installed.
 
+#### H4 — Contact-supported grain-causal avalanches
+
+Status: **BEHAVIOR NATIVE-GREEN / V5 PERSISTENCE CANDIDATE AUTHORED**.
+
+Post-H3 daily-use evidence rejected narrow two-dot one-column peaks but retained the desire for steep one-sided slopes such as `0/6/5`. The accepted H4 model uses contact rather than an absolute peak cap: after vertical fall is blocked, a grain may settle with support below plus at least one lower diagonal or visible wall. Unsupported arrivals become exact mobilized grains. Dynamic movement retains relief `>1`; mobility travels with the grain, actual support loss wakes only exact dependents, and diagonal movement may pass mobility to the newly exposed grain on the same source slip face while that face still has a dynamic route. This preserves multi-grain cascades without regional activation, proximity inheritance, pressure/load state, or global terrain scans.
+
+Two rejected prototypes established the negative architecture: a global contact scan over-relaxed the surface, and event-driven contact coupled to regional `active_vertical` remained throughput-pathological. A first exact-grain prototype then proved clean causality but produced zero structural cascades. H4R2C added same-source slip lineage and passed native behavior validation at `579f3e1b652a2d90efcfcef65e1910d199e464ba`: 40x20 / 10,000 ingress yielded 621 structural cascades with 99 multi-lineage episodes; 80x30 yielded 1,070 with 152 multi-lineage episodes. Both runs conserved mass, completed without runaway/continuous motion, preserved broad/one-sided hills, and drained to interior prominence <=1.
+
+The production boundary now requires SandState v5. Current exact mobilized grain coordinates serialize in canonical row-major order. v5→v5 restore must reproduce grid, mobility, RNG, sweep, focus, pending mass, resize/hidden state, and subsequent gravity exactly. v1-v4 lack exact grain-causal mobility; migration therefore preserves their topology/category mass and deliberately does **not** translate v4 regional active columns into false per-grain causality. Instead restore performs one deterministic one-time scan of the pre-v5 bottom-connected canonical surface and marks only contact-unsupported surface grains mobilized; movement occurs later through ordinary H4 gravity. Once written as v5, this normalization never repeats.
+
 ### RHYTHM-001 — Focus/Pomodoro experiment (optional)
 
 Not a plateau blocker.
@@ -280,7 +290,7 @@ Preferred progression:
 
 ## Agent locator
 
-Current edge: **PLATEAU-001H H3 publication/cutover handoff**. H3 is native-green at `26fe55d` on top of published main `71363c694e4c6f6c425f30378e081ef27cebd635`; return the validated bundle to the architecture author for publication and later ordinary atomic binary replacement on the existing SandState v4 profile. Do not install yet.
+Current edge: **PLATEAU-001H H4 SandState v5 persistence/migration validation**. H4R2C behavior is native-green at `579f3e1b652a2d90efcfcef65e1910d199e464ba`; validate exact v5 mobility restart and deterministic pre-v5 normalization before publication or real-profile cutover.
 
 HISTORY-001A/B/C are native-green through `09412b703cf41016f889d725ba235a7a1e63ae6a`. HISTORY-001C established the completed-Idle split transaction, active-preview validation, atomic daily-contribution reconciliation, and Balance historical editor. HISTORY-001D now generalizes that safe primitive into arbitrary From/To activity assignment with explicit collision confirmation and protected live selection.
 

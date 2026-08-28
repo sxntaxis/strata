@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-08-28
 authority: working
-summary: PLATEAU-001H H3 isolated-spire hardening is native-green on top of published H2; publication and cutover remain pending.
-next: Return the validated H3 bundle to the architecture author for publication/cutover review; do not install yet.
+summary: PLATEAU-001H H4 grain-causal contact behavior is native-green; SandState v5 persistence/migration candidate is authored and awaiting native validation.
+next: Native-validate exact H4 v5 persistence/migration candidate on a disposable profile; do not publish or install before exact-restart and v4→v5 proof.
 ---
 
 # NOW — Strata
@@ -89,7 +89,9 @@ The required core path is now PLATEAU-001H product hardening. Pomodoro/RHYTHM-00
 
 PLATEAU-001H / H2 — metastable repose + local avalanches — is **COMPLETE / PUBLISHED / REAL-PROFILE GREEN** from native-green `f581de486a08547ea5fd74ef3ca2f2fb90e1eb34`, published main `71363c694e4c6f6c425f30378e081ef27cebd635`, and installed binary SHA256 `59f34237fab6348560141257c91cee6f6e4c4551a3915a5eef45fb4cc1ced9a`. Static supported relief 3 and dynamic active relief 1 replace the memoryless diagonal lottery; bottom-connected surface relief excludes airborne grains; radius-one local mobilization and one diagonal topple per gravity pass produce true buildup and bursty avalanches. Real-cadence validation corrected the earlier 1:1 overload false blocker: at normal 1000 ms ingress and 64 ms gravity cadence, 40x20 produced 449 events (median size 8, p95 82, quiet buildup 9) and 80x30 produced 658 events (median size 8, p95 20, quiet buildup 10), with 0% one-move events, conserved mass, no runaway, exact v4 restart continuation, all regressions green, 290 non-doc tests, and native gravity cost within the 2x target. The real profile has persisted SandState v4, normal restart and sqlite-doctor passed, and the matching H1 rollback binary plus pre-v4 backup remain retained.
 
-PLATEAU-001H / H3 — isolated-spire cap — is **COMPLETE / NATIVE-GREEN** at `26fe55d`: isolated one-column stacks three dots high are prevented while two-dot stacks remain stable. The bounded rule applies only when both immediate supported neighbors are empty; height three or more yields through existing H2 avalanche mechanics, and non-isolated hills keep H2 relief 3/1 unchanged. Full native validation passed with 272 library and 23 integration tests, corrected real-cadence guardrails, H1/H2/HISTORY/recovery/resize/v4 regressions, and disposable-profile runtime smoke. H3 adds no serialized state and no new profile migration/cutover boundary beyond existing v4. The validated candidate is not yet published or installed.
+PLATEAU-001H / H3 — isolated-spire cap — is **COMPLETE / PUBLISHED / REAL-PROFILE GREEN**. Its validated lineage was merged through main `f3590a7aeb69a4b88cef90862bb01eb7afd564ba` and installed as SHA256 `fc6f806ba174313b9e89a7aa9814cf6ccf9e76a4ff017c755775a92421dd0350`. H3 remains useful historical evidence, but subsequent daily use rejected two-dot one-column prominences as well, so its shape-specific rule is superseded by the H4 candidate.
+
+PLATEAU-001H / H4 — contact-supported grain-causal avalanches — has **BEHAVIOR NATIVE-GREEN** at `579f3e1b652a2d90efcfcef65e1910d199e464ba`. Static support is below plus at least one lower diagonal/wall; unsupported arrivals become exact mobilized grains; dynamic continuation remains relief `>1`; exact support loss and same-source slip-lineage propagate only causal mobility. Regional activity, `active_vertical`, static relief `3`, and isolated-spire heuristics are retired. At real cadence, 40x20 / 10k produced 621 slip-lineage cascades (99 multi-lineage) and 80x30 produced 1,070 (152 multi-lineage), with exact mass, no runaway/jitter, non-flat slopes, and settled prominence <=1. The current H4 edge is SandState v5 persistence/migration: exact mobilized coordinates on v5→v5 restart plus deterministic one-time pre-v5 unsupported-surface seeding without translating obsolete v4 regional activity.
 
 ## Completed post-migration units
 

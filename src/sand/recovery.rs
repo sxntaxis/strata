@@ -191,11 +191,16 @@ fn migrate_uninitialized_state(base_state: &SandState) -> Result<SandState, Stri
     if state.version == SandState::LEGACY_VERSION
         || state.version == SandState::COMPRESSED_PENDING_VERSION
         || state.version == SandState::ORGANIC_VERSION
+        || state.version == SandState::REGIONAL_AVALANCHE_VERSION
     {
         state.version = SandState::VERSION;
-        if base_state.version != SandState::ORGANIC_VERSION {
+        if base_state.version != SandState::ORGANIC_VERSION
+            && base_state.version != SandState::REGIONAL_AVALANCHE_VERSION
+        {
             state.ingress_focus_x = None;
         }
+        state.active_avalanche_columns.clear();
+        state.mobilized_grains.clear();
     }
     Ok(state)
 }
@@ -206,6 +211,7 @@ fn validate_sediment_state(
     canvas_policy: CanvasPolicy,
 ) -> Result<(), String> {
     if state.version != SandState::VERSION
+        && state.version != SandState::REGIONAL_AVALANCHE_VERSION
         && state.version != SandState::COMPRESSED_PENDING_VERSION
         && state.version != SandState::ORGANIC_VERSION
         && state.version != SandState::LEGACY_VERSION
@@ -227,6 +233,7 @@ fn validate_sediment_state(
         }
     }
     if (state.version == SandState::VERSION
+        || state.version == SandState::REGIONAL_AVALANCHE_VERSION
         || state.version == SandState::COMPRESSED_PENDING_VERSION)
         && !state.pending_grains.is_empty()
     {
@@ -236,6 +243,7 @@ fn validate_sediment_state(
         return Err("version 1 sediment state contains compressed pending runs".to_string());
     }
     if state.version != SandState::VERSION
+        && state.version != SandState::REGIONAL_AVALANCHE_VERSION
         && state.version != SandState::ORGANIC_VERSION
         && state.ingress_focus_x.is_some()
     {
@@ -249,8 +257,13 @@ fn validate_sediment_state(
             state.grid_width
         ));
     }
-    if state.version != SandState::VERSION && !state.active_avalanche_columns.is_empty() {
-        return Err("pre-v4 sediment state contains active avalanche columns".to_string());
+    if state.version != SandState::REGIONAL_AVALANCHE_VERSION
+        && !state.active_avalanche_columns.is_empty()
+    {
+        return Err("only v4 recovery state may contain active avalanche columns".to_string());
+    }
+    if state.version != SandState::VERSION && !state.mobilized_grains.is_empty() {
+        return Err("pre-v5 recovery state contains mobilized grain coordinates".to_string());
     }
     if state
         .active_avalanche_columns
@@ -262,6 +275,19 @@ fn validate_sediment_state(
             .any(|&x| x >= state.grid_width)
     {
         return Err("invalid active avalanche columns in recovery state".to_string());
+    }
+
+    if state.mobilized_grains.windows(2).any(|coordinates| {
+        (coordinates[0].y, coordinates[0].x) >= (coordinates[1].y, coordinates[1].x)
+    }) {
+        return Err("recovery mobilized grain coordinates must be strictly row-major sorted".to_string());
+    }
+    if state
+        .mobilized_grains
+        .iter()
+        .any(|coordinate| coordinate.x >= state.grid_width || coordinate.y >= state.grid_height)
+    {
+        return Err("recovery mobilized grain coordinate is outside the canonical grid".to_string());
     }
 
     let mut occupied = HashSet::with_capacity(state.grains.len());
@@ -285,6 +311,14 @@ fn validate_sediment_state(
                 grain.category_id
             ));
         }
+    }
+
+    if state
+        .mobilized_grains
+        .iter()
+        .any(|coordinate| !occupied.contains(&(coordinate.x, coordinate.y)))
+    {
+        return Err("recovery mobilized grain coordinate does not reference a placed grain".to_string());
     }
 
     for category_id in &state.pending_grains {
@@ -348,6 +382,7 @@ mod tests {
                 count: 3,
             }],
             active_avalanche_columns: Vec::new(),
+            mobilized_grains: Vec::new(),
         }
     }
 
@@ -439,6 +474,32 @@ mod tests {
     }
 
     #[test]
+    fn version_four_checkpoint_recovers_into_v5_without_regional_activity() {
+        let mut base = base_state();
+        base.version = SandState::REGIONAL_AVALANCHE_VERSION;
+        base.active_avalanche_columns = vec![1];
+
+        let recovered = recover_detached_sediment(
+            &base,
+            &categories(),
+            CategoryId::new(1),
+            RecoveryTiming {
+                elapsed: Duration::ZERO,
+                spawn_accumulator: Duration::ZERO,
+                physics_accumulator: Duration::ZERO,
+                spawn_period: Duration::from_secs(1),
+                physics_period: Duration::from_millis(50),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(recovered.state.version, SandState::VERSION);
+        assert!(recovered.state.active_avalanche_columns.is_empty());
+        assert_eq!(recovered.state.ingress_focus_x, base.ingress_focus_x);
+        assert_eq!(recovered.state.grains, base.grains);
+    }
+
+    #[test]
     fn version_two_checkpoint_recovers_into_current_organic_state() {
         let mut base = base_state();
         base.version = SandState::COMPRESSED_PENDING_VERSION;
@@ -510,6 +571,7 @@ mod tests {
             pending_grains: Vec::new(),
             pending_runs: Vec::new(),
             active_avalanche_columns: Vec::new(),
+            mobilized_grains: Vec::new(),
         };
         let timing = RecoveryTiming {
             elapsed: Duration::from_millis(100),

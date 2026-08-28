@@ -18,6 +18,12 @@ pub struct SandStateGrain {
     pub category_id: u64,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SandStateCoordinate {
+    pub x: usize,
+    pub y: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PendingGrainRun {
     pub category_id: u64,
@@ -43,12 +49,20 @@ pub struct SandState {
     pub pending_grains: Vec<u64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_runs: Vec<PendingGrainRun>,
+    /// Legacy v4 regional-avalanche evidence. Current v5 snapshots always emit
+    /// this empty; it remains readable only so the v4→v5 semantic migration can
+    /// reject malformed historical state without reviving regional runtime causality.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub active_avalanche_columns: Vec<usize>,
+    /// Exact transient dynamic state for the grain-causal H4 model. Coordinates
+    /// are canonical, row-major sorted, unique, and must reference placed grains.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mobilized_grains: Vec<SandStateCoordinate>,
 }
 
 impl SandState {
-    pub const VERSION: u8 = 4;
+    pub const VERSION: u8 = 5;
+    pub const REGIONAL_AVALANCHE_VERSION: u8 = 4;
     pub const ORGANIC_VERSION: u8 = 3;
     pub const COMPRESSED_PENDING_VERSION: u8 = 2;
     pub const LEGACY_VERSION: u8 = 1;
@@ -140,10 +154,7 @@ fn default_rng_state() -> u64 {
 
 const INGRESS_FOCUS_MOVE_ONE_IN: usize = 4;
 const INGRESS_FOCUS_BIAS_ONE_IN: usize = 4;
-const STATIC_REPOSE_RELIEF: usize = 3;
 const DYNAMIC_REPOSE_RELIEF: usize = 1;
-const AVALANCHE_ACTIVITY_RADIUS: usize = 1;
-const MAX_ISOLATED_SPIRE_HEIGHT: usize = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PendingRun {
@@ -170,7 +181,7 @@ pub struct SandEngine {
     rng_state: u64,
     ingress_focus_x: Option<usize>,
     pending_runs: VecDeque<PendingRun>,
-    avalanche_active: Vec<bool>,
+    mobilized: Vec<Vec<bool>>,
     supported_heights: Vec<usize>,
     #[cfg(test)]
     last_avalanche_motion: bool,
@@ -178,6 +189,18 @@ pub struct SandEngine {
     last_diagonal_topple: bool,
     #[cfg(test)]
     last_avalanche_span: usize,
+    #[cfg(test)]
+    last_landing_failure_mobilizations: usize,
+    #[cfg(test)]
+    last_slip_lineage_mobilizations: usize,
+    #[cfg(test)]
+    last_support_loss_mobilizations: usize,
+    #[cfg(test)]
+    last_ordinary_vertical_moves: usize,
+    #[cfg(test)]
+    last_mobilized_vertical_moves: usize,
+    #[cfg(test)]
+    last_mobilized_diagonal_moves: usize,
     pub grain_count: usize,
 }
 
@@ -197,7 +220,7 @@ impl SandEngine {
             rng_state: rand::random::<u64>() | 1,
             ingress_focus_x: None,
             pending_runs: VecDeque::new(),
-            avalanche_active: vec![false; grid_width_dots],
+            mobilized: vec![vec![false; grid_width_dots]; grid_height_dots],
             supported_heights: vec![0; grid_width_dots],
             #[cfg(test)]
             last_avalanche_motion: false,
@@ -205,6 +228,18 @@ impl SandEngine {
             last_diagonal_topple: false,
             #[cfg(test)]
             last_avalanche_span: 0,
+            #[cfg(test)]
+            last_landing_failure_mobilizations: 0,
+            #[cfg(test)]
+            last_slip_lineage_mobilizations: 0,
+            #[cfg(test)]
+            last_support_loss_mobilizations: 0,
+            #[cfg(test)]
+            last_ordinary_vertical_moves: 0,
+            #[cfg(test)]
+            last_mobilized_vertical_moves: 0,
+            #[cfg(test)]
+            last_mobilized_diagonal_moves: 0,
             grain_count: 0,
         }
     }
@@ -233,18 +268,20 @@ impl SandEngine {
             }
         }
         self.grid = expanded;
+        let mut expanded_mobilized = vec![vec![false; target_width]; target_height];
+        for (y, row) in self.mobilized.iter().enumerate() {
+            for (x, mobilized) in row.iter().copied().enumerate() {
+                if mobilized {
+                    expanded_mobilized[y + vertical_offset][x + horizontal_offset] = true;
+                }
+            }
+        }
+        self.mobilized = expanded_mobilized;
         self.ingress_focus_x = self
             .ingress_focus_x
             .map(|x| x.saturating_add(horizontal_offset));
         self.grid_width_dots = target_width;
         self.grid_height_dots = target_height;
-        let mut shifted_active = vec![false; target_width];
-        for (old_x, is_active) in self.avalanche_active.iter().copied().enumerate() {
-            if is_active {
-                shifted_active[old_x + horizontal_offset] = true;
-            }
-        }
-        self.avalanche_active = shifted_active;
         self.supported_heights.resize(target_width, 0);
     }
 
@@ -273,6 +310,20 @@ impl SandEngine {
             x_end: x_start + visible_width,
             y_start,
             y_end: y_start + visible_height,
+        })
+    }
+
+    fn canonical_bounds(&self) -> Option<ViewportBounds> {
+        let grid_height = self.grid.len();
+        let grid_width = self.grid.first().map_or(0, Vec::len);
+        if grid_width == 0 || grid_height == 0 {
+            return None;
+        }
+        Some(ViewportBounds {
+            x_start: 0,
+            x_end: grid_width,
+            y_start: 0,
+            y_end: grid_height,
         })
     }
 
@@ -369,6 +420,12 @@ impl SandEngine {
                 .expect("pending run exists")
                 .category_id;
             self.grid[ingress_y][x] = Some(category_id);
+            self.mobilized[ingress_y][x] = false;
+            if (ingress_y + 1 >= bounds.y_end || self.grid[ingress_y + 1][x].is_some())
+                && !self.grain_has_static_support(bounds, x, ingress_y)
+            {
+                self.mobilized[ingress_y][x] = true;
+            }
 
             let exhausted = {
                 let run = self.pending_runs.front_mut().expect("pending run exists");
@@ -455,18 +512,6 @@ impl SandEngine {
         }
     }
 
-    fn refresh_avalanche_activity(&mut self, bounds: ViewportBounds, x: usize) {
-        let start = x
-            .saturating_sub(AVALANCHE_ACTIVITY_RADIUS)
-            .max(bounds.x_start);
-        let end = x
-            .saturating_add(AVALANCHE_ACTIVITY_RADIUS + 1)
-            .min(bounds.x_end);
-        for column in start..end {
-            self.avalanche_active[column] = true;
-        }
-    }
-
     fn derive_supported_heights(&mut self, bounds: ViewportBounds) {
         self.supported_heights.fill(0);
         for x in bounds.x_start..bounds.x_end {
@@ -478,6 +523,145 @@ impl SandEngine {
                 height += 1;
             }
             self.supported_heights[x] = height;
+        }
+    }
+
+    fn grain_has_static_support(&self, bounds: ViewportBounds, x: usize, y: usize) -> bool {
+        if y + 1 >= bounds.y_end {
+            return true;
+        }
+        if self.grid[y + 1][x].is_none() {
+            return false;
+        }
+
+        let left_brace = x == bounds.x_start || self.grid[y + 1][x.saturating_sub(1)].is_some();
+        let right_brace = x + 1 == bounds.x_end || self.grid[y + 1][x + 1].is_some();
+        left_brace || right_brace
+    }
+
+    fn mobilize_dependents_after_vacancy(
+        &mut self,
+        bounds: ViewportBounds,
+        source_x: usize,
+        source_y: usize,
+    ) {
+        if source_y <= bounds.y_start {
+            return;
+        }
+        let dependent_y = source_y - 1;
+
+        if self.grid[dependent_y][source_x].is_some() {
+            self.mobilized[dependent_y][source_x] = true;
+            #[cfg(test)]
+            {
+                self.last_support_loss_mobilizations += 1;
+            }
+        }
+
+        for dependent_x in [source_x.checked_sub(1), source_x.checked_add(1)]
+            .into_iter()
+            .flatten()
+        {
+            if dependent_x < bounds.x_start || dependent_x >= bounds.x_end {
+                continue;
+            }
+            if self.grid[dependent_y][dependent_x].is_none() {
+                continue;
+            }
+            let exposed =
+                dependent_y == bounds.y_start || self.grid[dependent_y - 1][dependent_x].is_none();
+            if exposed && !self.grain_has_static_support(bounds, dependent_x, dependent_y) {
+                self.mobilized[dependent_y][dependent_x] = true;
+                #[cfg(test)]
+                {
+                    self.last_support_loss_mobilizations += 1;
+                }
+            }
+        }
+    }
+
+    fn move_vertical_grain(
+        &mut self,
+        bounds: ViewportBounds,
+        x: usize,
+        y: usize,
+        category: CategoryId,
+    ) {
+        let was_mobilized = self.mobilized[y][x];
+        self.grid[y][x] = None;
+        self.mobilized[y][x] = false;
+        self.grid[y + 1][x] = Some(category);
+        self.mobilized[y + 1][x] = was_mobilized;
+
+        if was_mobilized {
+            #[cfg(test)]
+            {
+                self.last_mobilized_vertical_moves += 1;
+            }
+            self.mobilize_dependents_after_vacancy(bounds, x, y);
+            #[cfg(test)]
+            {
+                self.last_avalanche_motion = true;
+            }
+        } else {
+            #[cfg(test)]
+            {
+                self.last_ordinary_vertical_moves += 1;
+            }
+            let landed = y + 2 >= bounds.y_end || self.grid[y + 2][x].is_some();
+            if landed && !self.grain_has_static_support(bounds, x, y + 1) {
+                self.mobilized[y + 1][x] = true;
+                #[cfg(test)]
+                {
+                    self.last_landing_failure_mobilizations += 1;
+                }
+            }
+        }
+    }
+
+    fn surface_has_reachable_relief(
+        &self,
+        bounds: ViewportBounds,
+        x: usize,
+        threshold: usize,
+    ) -> bool {
+        let source_height = self.supported_heights[x];
+        if source_height == 0 {
+            return false;
+        }
+        let source_y = bounds.y_end - source_height;
+        if source_y + 1 >= bounds.y_end || self.grid[source_y][x].is_none() {
+            return false;
+        }
+
+        [x.checked_sub(1), x.checked_add(1)]
+            .into_iter()
+            .flatten()
+            .any(|target_x| {
+                if target_x < bounds.x_start || target_x >= bounds.x_end {
+                    return false;
+                }
+                if self.grid[source_y + 1][target_x].is_some() {
+                    return false;
+                }
+                source_height.saturating_sub(self.supported_heights[target_x]) > threshold
+            })
+    }
+
+    fn mobilize_exposed_slip_surface(&mut self, bounds: ViewportBounds, x: usize) {
+        let source_height = self.supported_heights[x];
+        if source_height == 0 {
+            return;
+        }
+        let source_y = bounds.y_end - source_height;
+        if self.grid[source_y][x].is_some()
+            && self.surface_has_reachable_relief(bounds, x, DYNAMIC_REPOSE_RELIEF)
+        {
+            self.mobilized[source_y][x] = true;
+            #[cfg(test)]
+            {
+                self.last_slip_lineage_mobilizations += 1;
+            }
         }
     }
 
@@ -539,27 +723,17 @@ impl SandEngine {
         Some((source_y, target_x))
     }
 
-    fn diagonal_topple(
-        &mut self,
-        bounds: ViewportBounds,
-        threshold: usize,
-        active_only: bool,
-    ) -> bool {
-        if !self.sweep_left_to_right {
+    fn topple_one_mobilized_surface(&mut self, bounds: ViewportBounds) -> bool {
+        let left_to_right = !self.sweep_left_to_right;
+        if left_to_right {
             for x in bounds.x_start..bounds.x_end {
-                if active_only && !self.avalanche_active[x] {
-                    continue;
-                }
-                if self.topple_column_if_unstable(bounds, x, threshold) {
+                if self.topple_mobilized_column(bounds, x) {
                     return true;
                 }
             }
         } else {
             for x in (bounds.x_start..bounds.x_end).rev() {
-                if active_only && !self.avalanche_active[x] {
-                    continue;
-                }
-                if self.topple_column_if_unstable(bounds, x, threshold) {
+                if self.topple_mobilized_column(bounds, x) {
                     return true;
                 }
             }
@@ -567,47 +741,49 @@ impl SandEngine {
         false
     }
 
-    fn is_isolated_supported_spire(&self, bounds: ViewportBounds, x: usize) -> bool {
-        if x <= bounds.x_start || x + 1 >= bounds.x_end {
+    fn topple_mobilized_column(&mut self, bounds: ViewportBounds, x: usize) -> bool {
+        let source_height = self.supported_heights[x];
+        if source_height == 0 {
             return false;
         }
-        self.supported_heights[x] > MAX_ISOLATED_SPIRE_HEIGHT
-            && self.supported_heights[x - 1] == 0
-            && self.supported_heights[x + 1] == 0
-    }
+        let source_y = bounds.y_end - source_height;
+        if !self.mobilized[source_y][x] {
+            return false;
+        }
 
-    fn topple_column_if_unstable(
-        &mut self,
-        bounds: ViewportBounds,
-        x: usize,
-        threshold: usize,
-    ) -> bool {
-        // H2's ordinary static repose deliberately allows relief three. Daily-use
-        // evidence found one narrower artifact worth excluding: a bottom-supported
-        // single-column needle three dots high with completely empty immediate
-        // neighbors. Keep two-dot needles and all non-isolated shoulders on the
-        // normal 3/1 repose model; only the isolated static needle uses a cap of two.
-        let effective_threshold =
-            if threshold == STATIC_REPOSE_RELIEF && self.is_isolated_supported_spire(bounds, x) {
-                MAX_ISOLATED_SPIRE_HEIGHT
-            } else {
-                threshold
-            };
-        let Some((source_y, target_x)) =
-            self.diagonal_target_for_relief(bounds, x, effective_threshold)
+        let Some((_, target_x)) = self.diagonal_target_for_relief(bounds, x, DYNAMIC_REPOSE_RELIEF)
         else {
+            self.mobilized[source_y][x] = false;
             return false;
         };
+
         let target_y = source_y + 1;
-        let category = self.grid[source_y][x].take().expect("surface grain exists");
+        let target_height_before = self.supported_heights[target_x];
+        let category = self.grid[source_y][x]
+            .take()
+            .expect("mobilized surface grain exists");
+        self.mobilized[source_y][x] = false;
         self.grid[target_y][target_x] = Some(category);
-        self.refresh_avalanche_activity(bounds, x);
-        self.refresh_avalanche_activity(bounds, target_x);
+        self.mobilized[target_y][target_x] = true;
+        self.mobilize_dependents_after_vacancy(bounds, x, source_y);
+
+        // A diagonal topple exposes the next grain on the same slip face.
+        // Transfer dynamic mobility only down that exact source column, and only
+        // while the newly exposed surface still has a reachable dynamic route.
+        // This preserves multi-grain avalanche lineage without reviving a broad
+        // active radius or allowing unrelated rain to inherit mobility.
+        self.supported_heights[x] = source_height - 1;
+        if source_height.saturating_sub(target_height_before) == 2 {
+            self.supported_heights[target_x] = target_height_before + 1;
+        }
+        self.mobilize_exposed_slip_surface(bounds, x);
+
         #[cfg(test)]
         {
             self.last_diagonal_topple = true;
             self.last_avalanche_motion = true;
             self.last_avalanche_span = x.abs_diff(target_x) + 1;
+            self.last_mobilized_diagonal_moves += 1;
         }
         true
     }
@@ -618,6 +794,12 @@ impl SandEngine {
             self.last_avalanche_motion = false;
             self.last_diagonal_topple = false;
             self.last_avalanche_span = 0;
+            self.last_landing_failure_mobilizations = 0;
+            self.last_slip_lineage_mobilizations = 0;
+            self.last_support_loss_mobilizations = 0;
+            self.last_ordinary_vertical_moves = 0;
+            self.last_mobilized_vertical_moves = 0;
+            self.last_mobilized_diagonal_moves = 0;
         }
         let Some(bounds) = self.viewport_bounds() else {
             return;
@@ -629,7 +811,6 @@ impl SandEngine {
         let base_left_to_right = self.sweep_left_to_right;
         self.sweep_left_to_right = !self.sweep_left_to_right;
 
-        let mut active_vertical = false;
         for y in (bounds.y_start..bounds.y_end - 1).rev() {
             let left_to_right = if y.is_multiple_of(2) {
                 base_left_to_right
@@ -639,61 +820,40 @@ impl SandEngine {
 
             if left_to_right {
                 for x in bounds.x_start..bounds.x_end {
-                    if let Some(cat) = self.grid[y][x]
-                        && self.grid[y + 1][x].is_none()
-                    {
-                        self.grid[y + 1][x] = Some(cat);
-                        self.grid[y][x] = None;
-                        active_vertical |= self.avalanche_active[x]
-                            || self
-                                .avalanche_active
-                                .get(x.saturating_sub(1))
-                                .copied()
-                                .unwrap_or(false)
-                            || self.avalanche_active.get(x + 1).copied().unwrap_or(false);
-                        #[cfg(test)]
-                        if active_vertical {
-                            self.last_avalanche_motion = true;
+                    if let Some(category) = self.grid[y][x] {
+                        if self.grid[y + 1][x].is_none() {
+                            self.move_vertical_grain(bounds, x, y, category);
+                        } else if self.mobilized[y][x] {
+                            let buried = y > bounds.y_start && self.grid[y - 1][x].is_some();
+                            if buried {
+                                self.mobilized[y][x] = false;
+                            }
                         }
                     }
                 }
             } else {
                 for x in (bounds.x_start..bounds.x_end).rev() {
-                    if let Some(cat) = self.grid[y][x]
-                        && self.grid[y + 1][x].is_none()
-                    {
-                        self.grid[y + 1][x] = Some(cat);
-                        self.grid[y][x] = None;
-                        active_vertical |= self.avalanche_active[x]
-                            || self
-                                .avalanche_active
-                                .get(x.saturating_sub(1))
-                                .copied()
-                                .unwrap_or(false)
-                            || self.avalanche_active.get(x + 1).copied().unwrap_or(false);
-                        #[cfg(test)]
-                        if active_vertical {
-                            self.last_avalanche_motion = true;
+                    if let Some(category) = self.grid[y][x] {
+                        if self.grid[y + 1][x].is_none() {
+                            self.move_vertical_grain(bounds, x, y, category);
+                        } else if self.mobilized[y][x] {
+                            let buried = y > bounds.y_start && self.grid[y - 1][x].is_some();
+                            if buried {
+                                self.mobilized[y][x] = false;
+                            }
                         }
                     }
                 }
             }
         }
 
-        self.derive_supported_heights(bounds);
-        let active_visible = (bounds.x_start..bounds.x_end).any(|x| self.avalanche_active[x]);
-        if active_visible {
-            if self.diagonal_topple(bounds, DYNAMIC_REPOSE_RELIEF, true) {
-                return;
-            }
-            if active_vertical {
-                return;
-            }
-            for x in bounds.x_start..bounds.x_end {
-                self.avalanche_active[x] = false;
-            }
+        let floor_y = bounds.y_end - 1;
+        for x in bounds.x_start..bounds.x_end {
+            self.mobilized[floor_y][x] = false;
         }
-        let _ = self.diagonal_topple(bounds, STATIC_REPOSE_RELIEF, false);
+
+        self.derive_supported_heights(bounds);
+        let _ = self.topple_one_mobilized_surface(bounds);
     }
 
     pub fn update(&mut self) {
@@ -811,18 +971,27 @@ impl SandEngine {
         self.grid_width_dots = (self.cell_width as usize).saturating_mul(SAND_ENGINE.dot_width);
         self.grid_height_dots = (self.cell_height as usize).saturating_mul(SAND_ENGINE.dot_height);
         self.grid = vec![vec![None; self.grid_width_dots]; self.grid_height_dots];
+        self.mobilized = vec![vec![false; self.grid_width_dots]; self.grid_height_dots];
         self.pending_runs.clear();
         self.ingress_focus_x = None;
-        self.avalanche_active.fill(false);
         self.grain_count = 0;
     }
 
     pub fn clear_category(&mut self, category_id: CategoryId) {
-        for row in &mut self.grid {
-            for cell in row {
+        let mut removed = Vec::new();
+        for (y, row) in self.grid.iter_mut().enumerate() {
+            for (x, cell) in row.iter_mut().enumerate() {
                 if *cell == Some(category_id) {
                     *cell = None;
+                    self.mobilized[y][x] = false;
+                    removed.push((x, y));
                 }
+            }
+        }
+
+        if let Some(bounds) = self.canonical_bounds() {
+            for (x, y) in removed {
+                self.mobilize_dependents_after_vacancy(bounds, x, y);
             }
         }
 
@@ -837,20 +1006,29 @@ impl SandEngine {
         }
 
         let mut removed = 0usize;
-        for row in self.grid.iter_mut().rev() {
-            for cell in row.iter_mut() {
+        let mut removed_coordinates = Vec::new();
+        for y in (0..self.grid.len()).rev() {
+            for x in 0..self.grid[y].len() {
                 if removed >= count {
                     break;
                 }
 
-                if *cell == Some(category_id) {
-                    *cell = None;
+                if self.grid[y][x] == Some(category_id) {
+                    self.grid[y][x] = None;
+                    self.mobilized[y][x] = false;
+                    removed_coordinates.push((x, y));
                     removed += 1;
                 }
             }
 
             if removed >= count {
                 break;
+            }
+        }
+
+        if let Some(bounds) = self.canonical_bounds() {
+            for &(x, y) in &removed_coordinates {
+                self.mobilize_dependents_after_vacancy(bounds, x, y);
             }
         }
 
@@ -885,6 +1063,7 @@ impl SandEngine {
         let grid_height = self.grid.len();
         let grid_width = self.grid.first().map_or(0, |row| row.len());
         let mut grains = Vec::with_capacity(self.physical_grain_count());
+        let mut mobilized_grains = Vec::new();
 
         for (y, row) in self.grid.iter().enumerate() {
             for (x, cell) in row.iter().enumerate() {
@@ -894,6 +1073,14 @@ impl SandEngine {
                         y,
                         category_id: category_id.0,
                     });
+                    if self.mobilized[y][x] {
+                        mobilized_grains.push(SandStateCoordinate { x, y });
+                    }
+                } else {
+                    debug_assert!(
+                        !self.mobilized[y][x],
+                        "empty sand cell cannot carry mobilized state"
+                    );
                 }
             }
         }
@@ -916,12 +1103,35 @@ impl SandEngine {
                     count: run.count,
                 })
                 .collect(),
-            active_avalanche_columns: self
-                .avalanche_active
-                .iter()
-                .enumerate()
-                .filter_map(|(x, active)| active.then_some(x))
-                .collect(),
+            active_avalanche_columns: Vec::new(),
+            mobilized_grains,
+        }
+    }
+
+    fn seed_pre_v5_mobility(&mut self) {
+        let Some(bounds) = self.canonical_bounds() else {
+            return;
+        };
+        if bounds.y_end.saturating_sub(bounds.y_start) < 2 {
+            return;
+        }
+
+        // v1-v4 do not contain exact grain-causal dynamic state. Do not attempt
+        // to translate v4 regional activity into per-grain causality: that would
+        // preserve the obsolete approximation H4 deliberately retired. Instead,
+        // preserve topology exactly and deterministically seed only currently
+        // unsupported bottom-connected surface grains. The first ordinary v5
+        // gravity passes relax those grains through the new causal mechanics.
+        self.derive_supported_heights(bounds);
+        for x in bounds.x_start..bounds.x_end {
+            let height = self.supported_heights[x];
+            if height == 0 {
+                continue;
+            }
+            let y = bounds.y_end - height;
+            if !self.grain_has_static_support(bounds, x, y) {
+                self.mobilized[y][x] = true;
+            }
         }
     }
 
@@ -931,6 +1141,7 @@ impl SandEngine {
         valid_category_ids: &HashSet<CategoryId>,
     ) -> Result<(), String> {
         if state.version != SandState::VERSION
+            && state.version != SandState::REGIONAL_AVALANCHE_VERSION
             && state.version != SandState::COMPRESSED_PENDING_VERSION
             && state.version != SandState::ORGANIC_VERSION
             && state.version != SandState::LEGACY_VERSION
@@ -941,13 +1152,21 @@ impl SandEngine {
             return Err("zero-sized sand state cannot contain placed grains".to_string());
         }
         if state.version != SandState::VERSION
+            && state.version != SandState::REGIONAL_AVALANCHE_VERSION
             && state.version != SandState::ORGANIC_VERSION
             && state.ingress_focus_x.is_some()
         {
             return Err("pre-organic sand state contains an ingress focus".to_string());
         }
-        if state.version != SandState::VERSION && !state.active_avalanche_columns.is_empty() {
-            return Err("pre-v4 sand state contains active avalanche columns".to_string());
+        if state.version != SandState::REGIONAL_AVALANCHE_VERSION
+            && !state.active_avalanche_columns.is_empty()
+        {
+            return Err(
+                "only v4 sand state may contain legacy active avalanche columns".to_string(),
+            );
+        }
+        if state.version != SandState::VERSION && !state.mobilized_grains.is_empty() {
+            return Err("pre-v5 sand state contains mobilized grain coordinates".to_string());
         }
         if state
             .active_avalanche_columns
@@ -962,6 +1181,18 @@ impl SandEngine {
             .any(|&x| x >= state.grid_width)
         {
             return Err("sand active avalanche column is outside the canonical grid".to_string());
+        }
+        if state.mobilized_grains.windows(2).any(|coordinates| {
+            (coordinates[0].y, coordinates[0].x) >= (coordinates[1].y, coordinates[1].x)
+        }) {
+            return Err("sand mobilized grain coordinates must be strictly row-major sorted".to_string());
+        }
+        if state
+            .mobilized_grains
+            .iter()
+            .any(|coordinate| coordinate.x >= state.grid_width || coordinate.y >= state.grid_height)
+        {
+            return Err("sand mobilized grain coordinate is outside the canonical grid".to_string());
         }
         if let Some(focus_x) = state.ingress_focus_x
             && (state.grid_width == 0 || focus_x >= state.grid_width)
@@ -995,6 +1226,13 @@ impl SandEngine {
                 ));
             }
             restored[grain.y][grain.x] = Some(category_id);
+        }
+        if state
+            .mobilized_grains
+            .iter()
+            .any(|coordinate| !occupied.contains(&(coordinate.x, coordinate.y)))
+        {
+            return Err("sand mobilized grain coordinate does not reference a placed grain".to_string());
         }
 
         let mut pending_runs = VecDeque::new();
@@ -1050,6 +1288,12 @@ impl SandEngine {
             .ok_or_else(|| "logical sediment count exceeds the supported range".to_string())?;
 
         self.grid = restored;
+        self.mobilized = vec![vec![false; state.grid_width]; state.grid_height];
+        if state.version == SandState::VERSION {
+            for coordinate in &state.mobilized_grains {
+                self.mobilized[coordinate.y][coordinate.x] = true;
+            }
+        }
         self.grid_width_dots = state.grid_width;
         self.grid_height_dots = state.grid_height;
         self.pending_runs = pending_runs;
@@ -1062,18 +1306,18 @@ impl SandEngine {
             state.rng_state
         };
         self.ingress_focus_x =
-            if state.version == SandState::VERSION || state.version == SandState::ORGANIC_VERSION {
+            if state.version == SandState::VERSION
+                || state.version == SandState::REGIONAL_AVALANCHE_VERSION
+                || state.version == SandState::ORGANIC_VERSION
+            {
                 state.ingress_focus_x
             } else {
                 None
             };
-        self.avalanche_active = vec![false; state.grid_width];
-        if state.version == SandState::VERSION {
-            for &x in &state.active_avalanche_columns {
-                self.avalanche_active[x] = true;
-            }
-        }
         self.supported_heights = vec![0; state.grid_width];
+        if state.version != SandState::VERSION {
+            self.seed_pre_v5_mobility();
+        }
         self.expand_logical_canvas_to_viewport();
         Ok(())
     }
@@ -1170,6 +1414,7 @@ mod tests {
                 },
             ],
             active_avalanche_columns: Vec::new(),
+            mobilized_grains: Vec::new(),
         };
         let before_coordinates = state
             .grains
@@ -1253,6 +1498,7 @@ mod tests {
                 count: 4,
             }],
             active_avalanche_columns: Vec::new(),
+            mobilized_grains: Vec::new(),
         };
 
         let recolored =
@@ -1450,6 +1696,7 @@ mod tests {
             pending_grains: Vec::new(),
             pending_runs: Vec::new(),
             active_avalanche_columns: Vec::new(),
+            mobilized_grains: Vec::new(),
         };
 
         let mut restored = SandEngine::new(20, 20);
@@ -1608,8 +1855,22 @@ mod organic_formation_tests {
 
     use crate::{
         domain::CategoryId,
-        sand::{SandEngine, SandState, SandStateGrain},
+        sand::{SandEngine, SandState, SandStateCoordinate},
     };
+
+    fn set_supported_profile(engine: &mut SandEngine, x_start: usize, heights: &[usize]) {
+        engine.clear();
+        let bottom = engine.grid_height_dots;
+        let mut mass = 0usize;
+        for (offset, &height) in heights.iter().enumerate() {
+            let x = x_start + offset;
+            for y in bottom - height..bottom {
+                engine.grid[y][x] = Some(CategoryId::new(1));
+                mass += 1;
+            }
+        }
+        engine.grain_count = mass;
+    }
 
     #[test]
     fn gravity_down_open_remains_unconditional_and_consumes_no_rng() {
@@ -1626,132 +1887,102 @@ mod organic_formation_tests {
         assert_eq!(engine.grid[y][x], None);
         assert_eq!(engine.grid[y + 1][x], Some(CategoryId::new(1)));
         assert_eq!(engine.rng_state, 17);
-    }
-
-    fn supported_relief_fixture(relief: usize) -> (SandEngine, usize) {
-        let mut engine = SandEngine::new(4, 1);
-        engine.clear();
-        let source_x = 2;
-        for y in (engine.grid_height_dots - relief)..engine.grid_height_dots {
-            for x in source_x..engine.grid_width_dots {
-                engine.grid[y][x] = Some(CategoryId::new(if x == source_x { 1 } else { 2 }));
-            }
-        }
-        engine.grain_count = relief * (engine.grid_width_dots - source_x);
-        (engine, source_x)
+        assert!(!engine.mobilized[y + 1][x]);
     }
 
     #[test]
-    fn static_metastability_is_deterministic_for_ten_thousand_passes() {
-        let (mut engine, source_x) = supported_relief_fixture(3);
-        let before = engine.snapshot_state();
-
-        for _ in 0..10_000 {
-            engine.apply_gravity();
-        }
-
-        assert_eq!(engine.snapshot_state(), before);
-        assert!(engine.avalanche_active.iter().all(|active| !active));
-        assert_eq!(engine.rng_state, before.rng_state);
-        assert!(
-            engine.grid[engine.grid_height_dots - 3..]
-                .iter()
-                .all(|row| row[source_x].is_some())
-        );
-    }
-
-    #[test]
-    fn isolated_two_dot_spire_remains_allowed() {
-        let mut engine = SandEngine::new(4, 1);
-        engine.clear();
-        let x = engine.grid_width_dots / 2;
-        for y in engine.grid_height_dots - 2..engine.grid_height_dots {
-            engine.grid[y][x] = Some(CategoryId::new(1));
-        }
-        engine.grain_count = 2;
-        let before = engine.snapshot_state();
-
-        for _ in 0..10_000 {
-            engine.apply_gravity();
-        }
-
-        assert_eq!(engine.snapshot_state(), before);
-        assert!(engine.avalanche_active.iter().all(|active| !active));
-    }
-
-    #[test]
-    fn isolated_three_dot_spire_yields_on_next_static_pass() {
-        let mut engine = SandEngine::new(4, 1);
-        engine.clear();
-        let x = engine.grid_width_dots / 2;
-        for y in engine.grid_height_dots - 3..engine.grid_height_dots {
-            engine.grid[y][x] = Some(CategoryId::new(1));
-        }
-        engine.grain_count = 3;
-
-        engine.apply_gravity();
-
-        assert_eq!(engine.grid[engine.grid_height_dots - 3][x], None);
-        assert!(engine.avalanche_active.iter().any(|active| *active));
-        assert_eq!(engine.physical_grain_count(), 3);
-    }
-
-    #[test]
-    fn three_dot_peak_with_neighbor_support_keeps_normal_static_repose() {
-        let mut engine = SandEngine::new(4, 1);
-        engine.clear();
-        let x = engine.grid_width_dots / 2;
-        for y in engine.grid_height_dots - 3..engine.grid_height_dots {
-            engine.grid[y][x] = Some(CategoryId::new(1));
-        }
-        engine.grid[engine.grid_height_dots - 1][x - 1] = Some(CategoryId::new(2));
-        engine.grain_count = 4;
-        let before = engine.snapshot_state();
-
-        for _ in 0..10_000 {
-            engine.apply_gravity();
-        }
-
-        assert_eq!(engine.snapshot_state(), before);
-        assert!(engine.avalanche_active.iter().all(|active| !active));
-    }
-
-    #[test]
-    fn supported_neighbors_keep_three_dot_peak_on_normal_h2_repose() {
-        for (left, right) in [(0, 1), (1, 1), (2, 2)] {
-            let mut engine = SandEngine::new(4, 1);
-            engine.clear();
-            let x = engine.grid_width_dots / 2;
-            for y in engine.grid_height_dots - 3..engine.grid_height_dots {
-                engine.grid[y][x] = Some(CategoryId::new(1));
-            }
-            for (neighbor_x, height) in [(x - 1, left), (x + 1, right)] {
-                for y in engine.grid_height_dots - height..engine.grid_height_dots {
-                    engine.grid[y][neighbor_x] = Some(CategoryId::new(2));
-                }
-            }
-            engine.grain_count = 3 + left + right;
-            let before = engine.snapshot_state();
-
-            for _ in 0..10_000 {
-                engine.apply_gravity();
-            }
-
-            assert_eq!(engine.snapshot_state(), before);
-            assert!(engine.avalanche_active.iter().all(|active| !active));
-        }
-    }
-
-    #[test]
-    fn three_dot_spire_at_visible_wall_keeps_normal_static_repose() {
-        let mut engine = SandEngine::new(4, 1);
+    fn ordinary_ingress_starts_non_mobilized_while_airborne() {
+        let mut engine = SandEngine::new(8, 2);
         engine.clear();
         let bounds = engine.viewport_bounds().unwrap();
-        let x = bounds.x_start;
-        for y in engine.grid_height_dots - 3..engine.grid_height_dots {
+
+        engine.spawn(CategoryId::new(1));
+
+        let x = (bounds.x_start..bounds.x_end)
+            .find(|&x| engine.grid[bounds.y_start][x].is_some())
+            .unwrap();
+        assert!(!engine.mobilized[bounds.y_start][x]);
+    }
+
+    #[test]
+    fn newly_landed_two_dot_spire_cannot_remain_settled() {
+        let mut engine = SandEngine::new(4, 2);
+        engine.clear();
+        let x = engine.grid_width_dots / 2;
+        let bottom = engine.grid_height_dots - 1;
+        engine.grid[bottom][x] = Some(CategoryId::new(1));
+        engine.grid[bottom - 2][x] = Some(CategoryId::new(1));
+        engine.grain_count = 2;
+
+        engine.apply_gravity();
+
+        assert_eq!(engine.grid[bottom - 1][x], None);
+        assert!(engine.last_diagonal_topple);
+        assert_eq!(engine.physical_grain_count(), 2);
+    }
+
+    #[test]
+    fn newly_landed_zero_six_five_profile_is_contact_supported() {
+        let mut engine = SandEngine::new(5, 2);
+        engine.clear();
+        let x = engine.grid_width_dots / 2;
+        let bottom = engine.grid_height_dots - 1;
+        for y in bottom - 4..=bottom {
             engine.grid[y][x] = Some(CategoryId::new(1));
+            engine.grid[y][x + 1] = Some(CategoryId::new(2));
         }
-        engine.grain_count = 3;
+        engine.grid[bottom - 6][x] = Some(CategoryId::new(1));
+        engine.grain_count = 11;
+
+        engine.apply_gravity();
+
+        assert_eq!(engine.grid[bottom - 5][x], Some(CategoryId::new(1)));
+        assert!(!engine.mobilized[bottom - 5][x]);
+        assert!(!engine.last_diagonal_topple);
+        assert_eq!(engine.physical_grain_count(), 11);
+    }
+
+    #[test]
+    fn unrelated_vertical_rain_near_mobilized_grain_never_inherits_mobility() {
+        let mut engine = SandEngine::new(5, 3);
+        engine.clear();
+        let bounds = engine.viewport_bounds().unwrap();
+        let x = bounds.x_start + 3;
+        let y = bounds.y_start + 1;
+        engine.grid[y][x] = Some(CategoryId::new(1));
+        engine.grid[y][x + 1] = Some(CategoryId::new(2));
+        engine.mobilized[y][x] = true;
+        engine.grain_count = 2;
+
+        engine.apply_gravity();
+
+        assert!(engine.mobilized[y + 1][x]);
+        assert!(!engine.mobilized[y + 1][x + 1]);
+    }
+
+    #[test]
+    fn support_loss_wakes_only_exact_dependents_not_a_radius() {
+        let mut engine = SandEngine::new(6, 3);
+        engine.clear();
+        let bounds = engine.viewport_bounds().unwrap();
+        let x = bounds.x_start + 4;
+        let y = bounds.y_start + 5;
+
+        engine.grid[y - 1][x] = Some(CategoryId::new(1));
+        engine.grid[y - 1][x + 2] = Some(CategoryId::new(2));
+        engine.grain_count = 2;
+
+        engine.mobilize_dependents_after_vacancy(bounds, x, y);
+
+        assert!(engine.mobilized[y - 1][x]);
+        assert!(!engine.mobilized[y - 1][x + 2]);
+    }
+
+    #[test]
+    fn preexisting_unsupported_shape_is_metastable_without_causal_touch() {
+        let mut engine = SandEngine::new(4, 2);
+        let x = engine.grid_width_dots / 2;
+        set_supported_profile(&mut engine, x, &[2]);
         let before = engine.snapshot_state();
 
         for _ in 0..10_000 {
@@ -1759,33 +1990,85 @@ mod organic_formation_tests {
         }
 
         assert_eq!(engine.snapshot_state(), before);
-        assert!(engine.avalanche_active.iter().all(|active| !active));
+        assert!(engine.mobilized.iter().flatten().all(|mobile| !*mobile));
     }
 
     #[test]
-    fn relief_four_yields_without_random_waiting() {
-        let (mut engine, source_x) = supported_relief_fixture(4);
-        let before_rng = engine.rng_state;
+    fn dynamic_relief_one_stops_and_relief_two_yields() {
+        let mut stable = SandEngine::new(5, 2);
+        let x = stable.grid_width_dots / 2;
+        set_supported_profile(&mut stable, x - 1, &[1, 2, 1]);
+        stable.mobilized[stable.grid_height_dots - 2][x] = true;
+        stable.apply_gravity();
+        assert!(!stable.last_diagonal_topple);
+        assert!(!stable.mobilized[stable.grid_height_dots - 2][x]);
 
-        engine.apply_gravity();
-
-        assert_eq!(engine.rng_state, before_rng);
-        assert_eq!(engine.grid[engine.grid_height_dots - 4][source_x], None);
-        assert!(engine.avalanche_active.iter().any(|active| *active));
+        let mut yielding = SandEngine::new(5, 2);
+        let x = yielding.grid_width_dots / 2;
+        set_supported_profile(&mut yielding, x - 1, &[0, 2, 0]);
+        yielding.mobilized[yielding.grid_height_dots - 2][x] = true;
+        yielding.apply_gravity();
+        assert!(yielding.last_diagonal_topple);
     }
 
     #[test]
-    fn dynamic_threshold_two_yields_but_static_threshold_three_holds() {
-        let (mut engine, source_x) = supported_relief_fixture(2);
+    fn mobilized_topple_passes_mobility_to_exposed_dynamic_slip_surface() {
+        let mut engine = SandEngine::new(5, 2);
+        let x = engine.grid_width_dots / 2;
+        set_supported_profile(&mut engine, x - 1, &[0, 4, 0]);
+        let source_y = engine.grid_height_dots - 4;
+        engine.mobilized[source_y][x] = true;
+
         engine.apply_gravity();
+
+        assert!(engine.last_diagonal_topple);
+        let exposed_y = source_y + 1;
+        assert_eq!(engine.grid[exposed_y][x], Some(CategoryId::new(1)));
+        assert!(engine.mobilized[exposed_y][x]);
+        engine.apply_gravity();
+        assert!(engine.last_diagonal_topple);
+        assert_eq!(engine.physical_grain_count(), 4);
+    }
+
+    #[test]
+    fn two_dot_peak_does_not_overpropagate_slip_lineage() {
+        let mut engine = SandEngine::new(5, 2);
+        let x = engine.grid_width_dots / 2;
+        set_supported_profile(&mut engine, x - 1, &[0, 2, 0]);
+        let source_y = engine.grid_height_dots - 2;
+        engine.mobilized[source_y][x] = true;
+
+        engine.apply_gravity();
+
+        assert!(engine.last_diagonal_topple);
+        let exposed_y = source_y + 1;
+        assert_eq!(engine.grid[exposed_y][x], Some(CategoryId::new(1)));
+        assert!(!engine.mobilized[exposed_y][x]);
+        assert_eq!(engine.physical_grain_count(), 2);
+    }
+
+    #[test]
+    fn diagonal_topple_updates_supported_heights_without_airborne_inflation() {
+        let mut relief_two = SandEngine::new(5, 2);
+        let x = relief_two.grid_width_dots / 2;
+        set_supported_profile(&mut relief_two, x - 1, &[0, 2, 0]);
+        relief_two.derive_supported_heights(relief_two.viewport_bounds().unwrap());
+        relief_two.mobilized[relief_two.grid_height_dots - 2][x] = true;
+        relief_two.apply_gravity();
+        assert_eq!(relief_two.supported_heights[x], 1);
         assert_eq!(
-            engine.grid[engine.grid_height_dots - 2][source_x],
-            Some(CategoryId::new(1))
+            relief_two.supported_heights[x - 1].max(relief_two.supported_heights[x + 1]),
+            1
         );
 
-        engine.avalanche_active[source_x] = true;
-        engine.apply_gravity();
-        assert_eq!(engine.grid[engine.grid_height_dots - 2][source_x], None);
+        let mut relief_three = SandEngine::new(5, 2);
+        let x = relief_three.grid_width_dots / 2;
+        set_supported_profile(&mut relief_three, x - 1, &[0, 3, 0]);
+        relief_three.derive_supported_heights(relief_three.viewport_bounds().unwrap());
+        relief_three.mobilized[relief_three.grid_height_dots - 3][x] = true;
+        relief_three.apply_gravity();
+        assert_eq!(relief_three.supported_heights[x], 2);
+        assert_eq!(relief_three.supported_heights[x - 1], 0);
     }
 
     #[test]
@@ -1803,283 +2086,26 @@ mod organic_formation_tests {
     }
 
     #[test]
-    fn active_avalanche_columns_round_trip_sorted_and_shift_on_growth() {
-        let mut engine = SandEngine::new(4, 2);
-        engine.avalanche_active[1] = true;
-        engine.avalanche_active[5] = true;
-        let state = engine.snapshot_state();
-        assert_eq!(state.active_avalanche_columns, vec![1, 5]);
+    fn v5_snapshot_restore_preserves_exact_mobilized_grain_state() {
+        let mut source = SandEngine::new(5, 2);
+        let x = source.grid_width_dots / 2;
+        set_supported_profile(&mut source, x - 1, &[0, 4, 0]);
+        let source_y = source.grid_height_dots - 4;
+        source.mobilized[source_y][x] = true;
+        source.rng_state = 0x1234_5678;
 
-        let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
-        let mut restored = SandEngine::new(4, 2);
+        let state = source.snapshot_state();
+        assert_eq!(state.version, SandState::VERSION);
+        assert_eq!(
+            state.mobilized_grains,
+            vec![SandStateCoordinate { x, y: source_y }]
+        );
+        assert!(state.active_avalanche_columns.is_empty());
+
+        let valid = HashSet::from([CategoryId::new(1)]);
+        let mut restored = SandEngine::new(5, 2);
         restored.restore_state(&state, &valid).unwrap();
         assert_eq!(restored.snapshot_state(), state);
-
-        let old_width = restored.grid_width_dots;
-        restored.resize(8, 2);
-        let offset = (restored.grid_width_dots - old_width) / 2;
-        assert!(restored.avalanche_active[1 + offset]);
-        assert!(restored.avalanche_active[5 + offset]);
-    }
-
-    #[test]
-    fn malformed_active_avalanche_columns_fail_closed() {
-        let mut state = SandEngine::new(4, 2).snapshot_state();
-        state.active_avalanche_columns = vec![3, 3];
-        let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
-        let mut engine = SandEngine::new(4, 2);
-        assert!(engine.restore_state(&state, &valid).is_err());
-
-        state.active_avalanche_columns = vec![state.grid_width];
-        assert!(engine.restore_state(&state, &valid).is_err());
-    }
-
-    #[test]
-    fn ingress_focus_moves_slowly_and_never_more_than_one_dot() {
-        let mut engine = SandEngine::new(40, 2);
-        engine.clear();
-        let bounds = engine.viewport_bounds().expect("visible viewport");
-        engine.ingress_focus_x = Some((bounds.x_start + bounds.x_end) / 2);
-        engine.rng_state = 0x0A11_CE55;
-
-        let mut previous = engine.ingress_focus_x.unwrap();
-        let mut moved = 0usize;
-        let mut stayed = 0usize;
-        for _ in 0..64 {
-            let focus = engine.advance_ingress_focus(bounds);
-            assert!(focus.abs_diff(previous) <= 1);
-            if focus == previous {
-                stayed += 1;
-            } else {
-                moved += 1;
-            }
-            previous = focus;
-        }
-
-        assert!(moved > 0);
-        assert!(stayed > moved);
-    }
-
-    #[test]
-    fn ingress_rain_is_full_width_with_only_a_soft_focus_bias() {
-        let mut engine = SandEngine::new(40, 2);
-        engine.clear();
-        let bounds = engine.viewport_bounds().expect("visible viewport");
-        let visible_width = bounds.x_end - bounds.x_start;
-        let focus = (bounds.x_start + bounds.x_end) / 2;
-        engine.ingress_focus_x = Some(focus);
-        engine.rng_state = 0x0A11_CE55;
-
-        let samples = (0..1024)
-            .map(|_| engine.sample_ingress_target(bounds, focus))
-            .collect::<Vec<_>>();
-        let distinct = samples.iter().copied().collect::<HashSet<_>>().len();
-        let far = samples
-            .iter()
-            .filter(|&&x| x.abs_diff(focus) >= visible_width / 4)
-            .count();
-        let mean_distance =
-            samples.iter().map(|&x| x.abs_diff(focus)).sum::<usize>() as f64 / samples.len() as f64;
-        let uniform_mean_distance = visible_width as f64 / 4.0;
-
-        assert!(
-            distinct >= visible_width * 3 / 4,
-            "rain must cover most visible columns rather than expose a nozzle"
-        );
-        assert!(
-            far >= samples.len() / 3,
-            "far-away rain must remain common, not exceptional"
-        );
-        assert!(
-            mean_distance < uniform_mean_distance,
-            "the wandering focus must still create a measurable long-run bias"
-        );
-        assert!(
-            mean_distance > uniform_mean_distance * 0.75,
-            "the short-run bias must stay weak enough to preserve a rain-like fall"
-        );
-    }
-
-    #[test]
-    fn occupied_fallback_does_not_drag_the_slow_focus_to_the_placement() {
-        let mut engine = SandEngine::new(8, 2);
-        engine.clear();
-        let bounds = engine.viewport_bounds().expect("visible viewport");
-        let initial_focus = (bounds.x_start + bounds.x_end) / 2;
-        let only_free = bounds.x_end - 1;
-        engine.ingress_focus_x = Some(initial_focus);
-        engine.rng_state = 0x55AA_1234;
-
-        for x in bounds.x_start..bounds.x_end {
-            if x != only_free {
-                engine.grid[bounds.y_start][x] = Some(CategoryId::new(2));
-                engine.grain_count += 1;
-            }
-        }
-
-        engine.spawn(CategoryId::new(1));
-
-        assert_eq!(
-            engine.grid[bounds.y_start][only_free],
-            Some(CategoryId::new(1))
-        );
-        let focus = engine.ingress_focus_x.expect("persisted ingress focus");
-        assert!(focus.abs_diff(initial_focus) <= 1);
-        assert_ne!(focus, only_free);
-    }
-
-    #[test]
-    fn hidden_ingress_focus_is_clamped_back_into_the_visible_basin() {
-        let mut engine = SandEngine::new(8, 4);
-        engine.resize(12, 6);
-        engine.ingress_focus_x = Some(0);
-        engine.resize(4, 2);
-        let bounds = engine.viewport_bounds().expect("visible viewport");
-        assert!(engine.ingress_focus_x.unwrap() < bounds.x_start);
-
-        engine.spawn(CategoryId::new(1));
-
-        let focus = engine.ingress_focus_x.expect("spawned ingress focus");
-        assert!(bounds.x_start <= focus && focus < bounds.x_end);
-        let visible_spawn_count = (bounds.x_start..bounds.x_end)
-            .filter(|x| engine.grid[bounds.y_start][*x] == Some(CategoryId::new(1)))
-            .count();
-        assert_eq!(visible_spawn_count, 1);
-        assert!(
-            engine.grid[bounds.y_start][..bounds.x_start]
-                .iter()
-                .all(Option::is_none)
-        );
-        assert!(
-            engine.grid[bounds.y_start][bounds.x_end..]
-                .iter()
-                .all(Option::is_none)
-        );
-    }
-
-    #[test]
-    fn canvas_growth_shifts_ingress_focus_with_centered_topology() {
-        let mut engine = SandEngine::new(4, 2);
-        engine.clear();
-        let old_width = engine.grid_width_dots;
-        engine.ingress_focus_x = Some(2);
-
-        engine.resize(8, 2);
-
-        let horizontal_offset = (engine.grid_width_dots - old_width) / 2;
-        assert_eq!(engine.ingress_focus_x, Some(2 + horizontal_offset));
-    }
-
-    #[test]
-    fn full_clear_resets_ingress_focus_but_category_clear_preserves_it() {
-        let mut engine = SandEngine::new(8, 2);
-        engine.clear();
-        engine.ingress_focus_x = Some(5);
-        let bottom = engine.grid_height_dots - 1;
-        engine.grid[bottom][1] = Some(CategoryId::new(1));
-        engine.grain_count = 1;
-
-        engine.clear_category(CategoryId::new(1));
-        assert_eq!(engine.ingress_focus_x, Some(5));
-
-        engine.clear();
-        assert_eq!(engine.ingress_focus_x, None);
-    }
-
-    #[test]
-    fn snapshot_restore_continues_the_same_biased_rain_stream() {
-        let mut source = SandEngine::new(8, 2);
-        source.clear();
-        let bounds = source.viewport_bounds().expect("visible viewport");
-        source.ingress_focus_x = Some(bounds.x_start + 3);
-        source.rng_state = 0x55AA_1234_9876;
-        let state = source.snapshot_state();
-
-        let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
-        let mut restored = SandEngine::new(8, 2);
-        restored.restore_state(&state, &valid).unwrap();
-
-        source.add_logical_grains(CategoryId::new(1), 5).unwrap();
-        restored.add_logical_grains(CategoryId::new(1), 5).unwrap();
-
-        assert_eq!(restored.snapshot_state(), source.snapshot_state());
-    }
-
-    #[test]
-    fn serialized_version_two_state_defaults_missing_ingress_focus() {
-        let json = r#"{
-            "version":2,
-            "grid_width":2,
-            "grid_height":2,
-            "grains":[],
-            "frame_count":4,
-            "sweep_left_to_right":true,
-            "rng_state":9,
-            "pending_runs":[]
-        }"#;
-
-        let state: SandState = serde_json::from_str(json).unwrap();
-
-        assert_eq!(state.version, SandState::COMPRESSED_PENDING_VERSION);
-        assert_eq!(state.ingress_focus_x, None);
-    }
-
-    #[test]
-    fn version_two_state_restores_without_inventing_an_ingress_focus() {
-        let state = SandState {
-            version: SandState::COMPRESSED_PENDING_VERSION,
-            grid_width: 2,
-            grid_height: 2,
-            grains: vec![SandStateGrain {
-                x: 0,
-                y: 1,
-                category_id: 1,
-            }],
-            frame_count: 4,
-            sweep_left_to_right: true,
-            rng_state: 9,
-            ingress_focus_x: None,
-            pending_grains: Vec::new(),
-            pending_runs: Vec::new(),
-            active_avalanche_columns: Vec::new(),
-        };
-        let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
-        let mut engine = SandEngine::new(1, 1);
-
-        engine.restore_state(&state, &valid).unwrap();
-        let upgraded = engine.snapshot_state();
-
-        assert_eq!(upgraded.version, SandState::VERSION);
-        assert_eq!(upgraded.ingress_focus_x, None);
-    }
-
-    #[test]
-    fn version_three_state_migrates_focus_and_empty_activity_to_v4() {
-        let mut state = SandEngine::new(4, 2).snapshot_state();
-        state.version = SandState::ORGANIC_VERSION;
-        state.ingress_focus_x = Some(3);
-        let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
-        let mut engine = SandEngine::new(1, 1);
-
-        engine.restore_state(&state, &valid).unwrap();
-        let upgraded = engine.snapshot_state();
-
-        assert_eq!(upgraded.version, SandState::VERSION);
-        assert_eq!(upgraded.ingress_focus_x, Some(3));
-        assert!(upgraded.active_avalanche_columns.is_empty());
-    }
-
-    #[test]
-    fn snapshot_restore_continues_an_in_progress_avalanche_exactly() {
-        let mut source = SandEngine::new(8, 4);
-        source.avalanche_active[3] = true;
-        source.avalanche_active[4] = true;
-        source.rng_state = 0x1234_5678;
-        source.sweep_left_to_right = false;
-        let state = source.snapshot_state();
-        let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
-        let mut restored = SandEngine::new(8, 4);
-        restored.restore_state(&state, &valid).unwrap();
 
         for _ in 0..8 {
             source.apply_gravity();
@@ -2089,168 +2115,282 @@ mod organic_formation_tests {
     }
 
     #[test]
-    fn native_h2_statistics_cover_representative_viewports() {
-        use crate::constants::TIME_SETTINGS;
+    fn v4_migration_discards_regional_activity_and_seeds_only_unsupported_surface() {
+        let mut legacy = SandEngine::new(8, 2);
+        legacy.clear();
+        let bottom = legacy.grid_height_dots;
+        let stable_x = legacy.grid_width_dots / 2;
+        let unstable_x = stable_x - 4;
 
-        fn run(width: u16, height: u16) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>, usize) {
-            let mut engine = SandEngine::new(width, height);
-            engine.rng_state = 0xD15E_A5ED;
-            let mut sizes = Vec::new();
-            let mut quiet = Vec::new();
-            let mut spans = Vec::new();
-            let mut passes = Vec::new();
-            let mut event_size: usize = 0;
-            let mut quiet_since_event: usize = 0;
-            let mut event_quiet: usize = 0;
-            let mut event_span: usize = 0;
-            let mut event_passes: usize = 0;
-            let mut active_event = false;
-            let mut spawned = 0usize;
-            let mut next_spawn_ms = TIME_SETTINGS.tick_ms;
-            let mut next_physics_ms = TIME_SETTINGS.physics_ms;
-            while spawned < 10_000 || active_event {
-                let now_ms = next_spawn_ms.min(next_physics_ms);
-                if now_ms == next_spawn_ms && spawned < 10_000 {
-                    engine.spawn(CategoryId::new(1));
-                    spawned += 1;
-                    next_spawn_ms += TIME_SETTINGS.tick_ms;
-                    if !active_event {
-                        quiet_since_event += 1;
-                    }
-                }
-                if now_ms == next_physics_ms {
-                    engine.update();
-                    next_physics_ms += TIME_SETTINGS.physics_ms;
-                    if engine.last_avalanche_motion {
-                        if !active_event {
-                            active_event = true;
-                            event_size = 0;
-                            event_quiet = quiet_since_event;
-                            quiet_since_event = 0;
-                            event_span = 0;
-                            event_passes = 0;
-                        }
-                        event_size += usize::from(engine.last_diagonal_topple);
-                        event_passes += 1;
-                        event_span = event_span.max(engine.last_avalanche_span);
-                    } else if active_event {
-                        sizes.push(event_size);
-                        quiet.push(event_quiet);
-                        spans.push(event_span);
-                        passes.push(event_passes);
-                        active_event = false;
-                    }
-                }
-            }
-            if active_event {
-                sizes.push(event_size);
-                quiet.push(event_quiet);
-                spans.push(event_span);
-                passes.push(event_passes);
-            }
-            for x in 1..engine.grid_width_dots - 1 {
-                assert!(
-                    !(engine.supported_heights[x] >= 3
-                        && engine.supported_heights[x - 1] == 0
-                        && engine.supported_heights[x + 1] == 0)
-                );
-            }
-            sizes.sort_unstable();
-            quiet.sort_unstable();
-            spans.sort_unstable();
-            passes.sort_unstable();
-            (sizes, quiet, spans, passes, engine.grain_count)
+        for y in bottom - 6..bottom {
+            legacy.grid[y][stable_x] = Some(CategoryId::new(1));
         }
+        for y in bottom - 5..bottom {
+            legacy.grid[y][stable_x + 1] = Some(CategoryId::new(1));
+        }
+        for y in bottom - 2..bottom {
+            legacy.grid[y][unstable_x] = Some(CategoryId::new(1));
+        }
+        legacy.grain_count = 13;
 
-        for (width, height) in [(40, 20), (80, 30)] {
-            let (sizes, quiet, spans, passes, mass) = run(width, height);
-            assert_eq!(mass, 10_000);
-            assert!(!sizes.is_empty());
-            let median = sizes[sizes.len() / 2];
-            let p95 = sizes[(sizes.len() * 95 / 100).min(sizes.len() - 1)];
-            let max = sizes.iter().copied().max().unwrap();
-            let one_move = sizes.iter().filter(|&&size| size == 1).count() * 100 / sizes.len();
-            eprintln!(
-                "H2 live {width}x{height}: events={} median={} p95={} max={} quiet_median={} one_move_pct={} passes_median={} duration_ms={} span_median={}",
-                sizes.len(),
-                median,
-                p95,
-                max,
-                quiet[quiet.len() / 2],
-                one_move,
-                passes[passes.len() / 2],
-                passes[passes.len() / 2] * 64,
-                spans[spans.len() / 2]
-            );
-        }
-    }
+        let mut state = legacy.snapshot_state();
+        state.version = SandState::REGIONAL_AVALANCHE_VERSION;
+        state.active_avalanche_columns = vec![stable_x];
+        state.mobilized_grains.clear();
 
-    #[test]
-    fn continuous_ingress_overload_stress_is_non_acceptance_only() {
-        let mut engine = SandEngine::new(40, 20);
-        engine.rng_state = 0xD15E_A5ED;
-        for _ in 0..2_000 {
-            engine.spawn(CategoryId::new(1));
-            engine.apply_gravity();
-        }
-        assert_eq!(engine.grain_count, 2_000);
-        eprintln!(
-            "H2 overload: active_columns={} active_motion={}",
-            engine
-                .avalanche_active
-                .iter()
-                .filter(|active| **active)
-                .count(),
-            engine.last_avalanche_motion
+        let valid = HashSet::from([CategoryId::new(1)]);
+        let mut restored = SandEngine::new(8, 2);
+        restored.restore_state(&state, &valid).unwrap();
+
+        assert!(restored.mobilized[bottom - 2][unstable_x]);
+        assert!(
+            !restored.mobilized[bottom - 6][stable_x],
+            "obsolete v4 regional activity must not become false grain causality"
+        );
+
+        let migrated = restored.snapshot_state();
+        assert_eq!(migrated.version, SandState::VERSION);
+        assert!(migrated.active_avalanche_columns.is_empty());
+        assert_eq!(
+            migrated.mobilized_grains,
+            vec![SandStateCoordinate {
+                x: unstable_x,
+                y: bottom - 2,
+            }]
         );
     }
 
     #[test]
-    fn version_two_state_cannot_smuggle_an_ingress_focus() {
-        let state = SandState {
-            version: SandState::COMPRESSED_PENDING_VERSION,
-            grid_width: 2,
-            grid_height: 2,
-            grains: Vec::new(),
-            frame_count: 0,
-            sweep_left_to_right: true,
-            rng_state: 9,
-            ingress_focus_x: Some(0),
-            pending_grains: Vec::new(),
-            pending_runs: Vec::new(),
-            active_avalanche_columns: Vec::new(),
-        };
-        let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
-        let mut engine = SandEngine::new(1, 1);
+    fn v5_restore_rejects_malformed_mobilized_coordinates_without_mutation() {
+        let mut source = SandEngine::new(5, 2);
+        let x = source.grid_width_dots / 2;
+        set_supported_profile(&mut source, x, &[2]);
+        let mut state = source.snapshot_state();
+        state.mobilized_grains = vec![
+            SandStateCoordinate {
+                x,
+                y: source.grid_height_dots - 1,
+            },
+            SandStateCoordinate {
+                x,
+                y: source.grid_height_dots - 2,
+            },
+        ];
 
-        let error = engine.restore_state(&state, &valid).unwrap_err();
-
-        assert!(error.contains("pre-organic"));
+        let valid = HashSet::from([CategoryId::new(1)]);
+        let mut restored = SandEngine::new(5, 2);
+        let before = restored.snapshot_state();
+        assert!(restored.restore_state(&state, &valid).is_err());
+        assert_eq!(restored.snapshot_state(), before);
     }
 
     #[test]
-    fn invalid_persisted_ingress_focus_is_rejected_without_mutation() {
-        let state = SandState {
-            version: SandState::VERSION,
-            grid_width: 2,
-            grid_height: 2,
-            grains: Vec::new(),
-            frame_count: 0,
-            sweep_left_to_right: true,
-            rng_state: 9,
-            ingress_focus_x: Some(2),
-            pending_grains: Vec::new(),
-            pending_runs: Vec::new(),
-            active_avalanche_columns: Vec::new(),
-        };
-        let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
+    fn mobilized_coordinates_shift_with_canonical_growth() {
         let mut engine = SandEngine::new(4, 2);
-        let before = engine.snapshot_state();
+        engine.clear();
+        let old_width = engine.grid_width_dots;
+        engine.grid[3][2] = Some(CategoryId::new(1));
+        engine.mobilized[3][2] = true;
+        engine.grain_count = 1;
 
-        let error = engine.restore_state(&state, &valid).unwrap_err();
+        engine.resize(8, 4);
 
-        assert!(error.contains("ingress focus"));
-        assert_eq!(engine.snapshot_state(), before);
+        let x_offset = (engine.grid_width_dots - old_width) / 2;
+        let y_offset = engine.grid_height_dots - 8;
+        assert_eq!(
+            engine.grid[3 + y_offset][2 + x_offset],
+            Some(CategoryId::new(1))
+        );
+        assert!(engine.mobilized[3 + y_offset][2 + x_offset]);
+    }
+
+    #[test]
+    fn category_clear_propagates_only_from_removed_support_cells() {
+        let mut engine = SandEngine::new(5, 2);
+        engine.clear();
+        let bottom = engine.grid_height_dots - 1;
+        let x = engine.grid_width_dots / 2;
+        engine.grid[bottom][x] = Some(CategoryId::new(1));
+        engine.grid[bottom - 1][x] = Some(CategoryId::new(2));
+        engine.grid[bottom][x + 2] = Some(CategoryId::new(2));
+        engine.grain_count = 3;
+
+        engine.clear_category(CategoryId::new(1));
+
+        assert!(engine.mobilized[bottom - 1][x]);
+        assert!(!engine.mobilized[bottom][x + 2]);
+        assert_eq!(engine.grain_count, 2);
+    }
+
+    #[test]
+    #[ignore = "explicit H4R2C real-cadence behavior bench"]
+    fn h4r2c_real_cadence_bench_40x20_and_80x30() {
+        use std::time::Instant;
+
+        #[derive(Default)]
+        struct Episode {
+            diagonal_moves: usize,
+            lineage_mobilizations: usize,
+            support_loss_mobilizations: usize,
+        }
+
+        fn percentile(values: &mut [usize], numerator: usize, denominator: usize) -> usize {
+            if values.is_empty() {
+                return 0;
+            }
+            values.sort_unstable();
+            values[(values.len() - 1) * numerator / denominator]
+        }
+
+        fn run(width: u16, height: u16, ingress_count: usize) {
+            let started = Instant::now();
+            let mut engine = SandEngine::new(width, height);
+            engine.rng_state = 0xC0FF_EE00_0000_0001 ^ u64::from(width);
+            let mut episodes = Vec::new();
+            let mut current = None;
+            let mut quiet_between = Vec::new();
+            let mut structural_ingresses = Vec::new();
+            let mut quiet = 0;
+
+            for ingress in 0..ingress_count {
+                engine.spawn(CategoryId::new(1));
+                let mut structural_this_ingress = false;
+                let gravity_passes = if ingress % 8 < 5 { 15 } else { 16 };
+                for _ in 0..gravity_passes {
+                    engine.apply_gravity();
+                    structural_this_ingress |= engine.last_slip_lineage_mobilizations > 0
+                        || engine.last_support_loss_mobilizations > 0;
+                    if engine.last_avalanche_motion {
+                        let episode = current.get_or_insert_with(Episode::default);
+                        episode.diagonal_moves += engine.last_mobilized_diagonal_moves;
+                        episode.lineage_mobilizations += engine.last_slip_lineage_mobilizations;
+                        episode.support_loss_mobilizations +=
+                            engine.last_support_loss_mobilizations;
+                        quiet = 0;
+                    } else if let Some(episode) = current.take() {
+                        episodes.push(episode);
+                        quiet_between.push(quiet);
+                        quiet = 1;
+                    } else {
+                        quiet += 1;
+                    }
+                }
+                if structural_this_ingress {
+                    structural_ingresses.push(ingress);
+                }
+            }
+            if let Some(episode) = current.take() {
+                episodes.push(episode);
+            }
+
+            let settlement = episodes
+                .iter()
+                .filter(|episode| {
+                    episode.lineage_mobilizations == 0 && episode.support_loss_mobilizations == 0
+                })
+                .collect::<Vec<_>>();
+            let slip = episodes
+                .iter()
+                .filter(|episode| episode.lineage_mobilizations > 0)
+                .collect::<Vec<_>>();
+            let multi_lineage = slip
+                .iter()
+                .filter(|episode| episode.lineage_mobilizations >= 2)
+                .count();
+            let support = episodes
+                .iter()
+                .filter(|episode| episode.support_loss_mobilizations > 0)
+                .collect::<Vec<_>>();
+            let mut slip_lineage = slip
+                .iter()
+                .map(|episode| episode.lineage_mobilizations)
+                .collect::<Vec<_>>();
+            let mut slip_moves = slip
+                .iter()
+                .map(|episode| episode.diagonal_moves)
+                .collect::<Vec<_>>();
+            let mut settlement_moves = settlement
+                .iter()
+                .map(|episode| episode.diagonal_moves)
+                .collect::<Vec<_>>();
+            let mass = engine.physical_grain_count() + engine.pending_grain_count();
+            let total_lineage = slip
+                .iter()
+                .map(|episode| episode.lineage_mobilizations)
+                .sum::<usize>();
+            let total_support_loss = episodes
+                .iter()
+                .map(|episode| episode.support_loss_mobilizations)
+                .sum::<usize>();
+            let mut structural_quiet = structural_ingresses
+                .windows(2)
+                .map(|pair| pair[1].saturating_sub(pair[0]))
+                .collect::<Vec<_>>();
+            println!(
+                "H4R2C {width}x{height}: elapsed={:?} episodes={} settlement={} slip={} support={} slip_per_1000={:.3} total_lineage={} multi_lineage={} slip_lineage_median={} slip_lineage_p95={} slip_lineage_max={} slip_moves_median={} slip_moves_p95={} slip_moves_max={} settlement_moves_median={} settlement_moves_p95={} quiet_median={} structural_quiet_median={} support_loss_total={} mass={mass}/{ingress_count}",
+                started.elapsed(),
+                episodes.len(),
+                settlement.len(),
+                slip.len(),
+                support.len(),
+                slip.len() as f64 * 1000.0 / ingress_count.max(1) as f64,
+                total_lineage,
+                multi_lineage,
+                percentile(&mut slip_lineage, 1, 2),
+                percentile(&mut slip_lineage, 19, 20),
+                slip_lineage.iter().copied().max().unwrap_or(0),
+                percentile(&mut slip_moves, 1, 2),
+                percentile(&mut slip_moves, 19, 20),
+                slip_moves.iter().copied().max().unwrap_or(0),
+                percentile(&mut settlement_moves, 1, 2),
+                percentile(&mut settlement_moves, 19, 20),
+                percentile(&mut quiet_between, 1, 2),
+                percentile(&mut structural_quiet, 1, 2),
+                total_support_loss,
+            );
+            assert_eq!(mass, ingress_count);
+        }
+
+        let ingress_count = std::env::var("H4R2C_INGRESS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(10_000);
+        run(40, 20, ingress_count);
+        run(80, 30, ingress_count);
+    }
+
+    #[test]
+    fn drained_surface_preserves_supported_one_step_prominence() {
+        for (width, height) in [(40, 20), (80, 30)] {
+            let mut engine = SandEngine::new(width, height);
+            engine.rng_state = 0xC0FF_EE00_0000_0001 ^ u64::from(width);
+            for _ in 0..2_000 {
+                engine.spawn(CategoryId::new(1));
+                for _ in 0..15 {
+                    engine.apply_gravity();
+                }
+            }
+            for _ in 0..10_000 {
+                engine.apply_gravity();
+                if !engine.mobilized.iter().flatten().any(|mobile| *mobile) {
+                    break;
+                }
+            }
+            let bounds = engine.viewport_bounds().unwrap();
+            engine.derive_supported_heights(bounds);
+            for x in bounds.x_start + 1..bounds.x_end - 1 {
+                assert!(
+                    engine.supported_heights[x]
+                        <= engine.supported_heights[x - 1].max(engine.supported_heights[x + 1]) + 1
+                );
+            }
+            let excerpt = engine.supported_heights[bounds.x_start..bounds.x_end]
+                .iter()
+                .copied()
+                .take(24)
+                .collect::<Vec<_>>();
+            println!("H4R2C settled {width}x{height} supported-height excerpt: {excerpt:?}");
+        }
     }
 }
 
@@ -2416,6 +2556,7 @@ mod conservation_tests {
                 pending_grains: vec![2, 2, 1],
                 pending_runs: Vec::new(),
                 active_avalanche_columns: Vec::new(),
+                mobilized_grains: Vec::new(),
             };
             let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1), CategoryId::new(2)]);
             let mut engine = SandEngine::new(1, 1);
