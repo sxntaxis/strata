@@ -1,7 +1,7 @@
 # Strata accepted decision index
 
 Status: accepted authority
-Last reviewed: 2026-08-09
+Last reviewed: 2026-08-27
 
 Detailed rationale and unresolved implications live in `notebook/decisions/DECISION-REGISTER.md`. This file contains only decisions accepted strongly enough to constrain implementation.
 
@@ -48,7 +48,7 @@ Detailed rationale and unresolved implications live in `notebook/decisions/DECIS
 | STRATA-D039 | One context-aware resolver owns direct and contextual key routing. Ctrl-C Quit is the sole separate mandatory key, cannot be configured, and remains under persistence-recovery custody; F1 is an ordinary configurable default. | implemented and certified |
 | STRATA-D040 | The command atlas and palette must expose the same reachable action graph as runtime: no invented fallback keys, disabled actions are unavailable, aliases are named with conditions, and editable controls distinguish Disable from Unbind. | implemented and certified |
 | STRATA-D041 | A persisted session category reference must resolve to active or archived metadata. Malformed or unknown identities fail closed with the original value preserved; no authority may reinterpret an unresolved reference as intentional idle. | implemented and certified |
-| STRATA-D042 | Category retirement changes availability, not historical meaning. Stable ID, name, description, color, karma effect, tags, report visibility, and sediment meaning survive archive and restore in SQLite. | implemented and certified |
+| STRATA-D042 | Category retirement changes availability, not historical meaning. Stable ID, name, description, color, balance effect, tags, report visibility, and sediment meaning survive archive and restore in SQLite. | implemented and certified |
 | STRATA-D043 | An active-session transition and retirement of its prior checkpoint generation form one coherence boundary. SQLite switch, reset, and finish may retire only pending or committed evidence for the expected prior stable ID; incompatible evidence aborts the transaction before history changes. | implemented and certified |
 | STRATA-D044 | Checkpoint evidence must identify the authoritative active generation before recovery payload state is applied. Missing or mismatched identity is quarantined, and successful switch/reset/active-description changes publish current-generation evidence immediately at the semantic edge. | implemented and certified |
 | STRATA-D045 | A switch is a receipt-governed SQLite transaction. Whole-second ledger semantics, not exact subsecond wall-start equality, own the completed row. | implemented and certified |
@@ -60,8 +60,14 @@ Detailed rationale and unresolved implications live in `notebook/decisions/DECIS
 | STRATA-D051 | Checkpoint recovery owns one persisted target reused across retry. Successful recovery must visibly distinguish durable evidence, reconstructed time through that cutoff, and post-target provisional live time; emergency export projects the same structured statement. | implemented and certified |
 | STRATA-D052 | Category archive/restore is the supported retirement lifecycle. Speculative merge/permanent-delete machinery and retired-ID receipts are retired from the prerelease product. | implemented and certified |
 | STRATA-D053 | Live category authority is SQLite-only; no legacy multi-file category-lifecycle replay path remains. | implemented and certified |
-| STRATA-D054 | The active session owns one live subtitle/description independently from durable category metadata and reusable tags. The top-left frame title renders the active layer in bold plus that live subtitle in italics. The ordinary layer pop-up may start a layer with no subtitle; while the selected layer is active, typing, Backspace, or tag cycling updates the subtitle immediately in memory without Enter, and closing with Esc persists exactly the final value. Switching first persists the outgoing live subtitle. Category synchronization must never overwrite active-session text with layer metadata; durable metadata editing remains a distinct configurable action. | implemented; recertification pending |
+| STRATA-D054 | The active session owns one live subtitle/description independently from durable category metadata and reusable tags. The top-left frame title renders the active layer in bold plus that live subtitle in italics. The ordinary Layer surface may start a layer with no subtitle; while the selected layer is active, typing, Backspace, or tag cycling updates the subtitle immediately in memory without Enter, and closing with Esc persists exactly the final value. Switching first persists the outgoing live subtitle. Category synchronization must never overwrite active-session text with layer metadata; durable metadata editing remains a distinct configurable action. | implemented; recertification pending |
 | STRATA-D055 | One process-bound profile UUID owns the complete data, state, and configuration path set. Explicit `--profile`/`STRATA_PROFILE` selection occurs before database opening; copied mismatched artifacts and partial path redirection fail closed; changing profiles requires exit and a new invocation. | implemented and certified |
+| STRATA-D056 | The historical/report surface and directional accounting use **Balance** as current product vocabulary. The former `Karma` vocabulary is retired; the default main-view Balance opener is `b`. | implemented and validated |
+| STRATA-D057 | Retroactive history is expressed as an arbitrary past interval assignment: `From < To <= now` plus a target layer. Idle and same-layer overlap are non-conflicting; intersecting different explicit layers require confirmation. The operation is independent of existing session boundaries, never double-counts chronology, and never changes the current selected layer/description even when the active generation must be rebased around corrected past time. | implemented and certified |
+| STRATA-D058 | Historical correction reconciles the current canonical sediment only by deterministically recoloring retained source-category mass into the requested category. True-gap insertion and sediment already removed by clear operations do not fabricate replacement grains; unavailable source mass is an accepted visual shortfall. Recolor preserves coordinates/topology, pending order/count, total mass, canvas and simulation metadata, and publishes current sand/checkpoint atomically with the history mutation. Authentic first-write day-end snapshots remain immutable. | implemented and certified |
+
+| STRATA-D059 | Organic sediment formation remains ordinary falling sand but gains one tuned stochastic personality: straight-down motion is unconditional; diagonal motion passes a memoryless friction gate (initially one-quarter slide / three-quarters temporary hold), with left/right randomness only after a permitted slide when both diagonals are open. Ingress keeps a rain-like cadence by sampling a broad distribution around one slowly wandering persisted focus, with occasional whole-width drops; occupancy uses nearest-free visible fallback without moving the focus or losing mass. No terrain generator, pressure solver, post-processing, or user-facing randomness knobs are introduced. | implemented and certified |
+| STRATA-D060 | The former command Atlas is current-product **Settings**: one surface for configuration, keybindings, and action discoverability using human labels grouped as Main / Navigation / Layer / Balance / Settings. Balance physical keys remain scoped to Balance rather than acting as hidden Main shortcuts; the command palette is the deliberate universal launcher. Bound / Unbound / Disabled truth and mandatory Ctrl-C policy remain unchanged. | implemented and certified |
 
 ## Explicitly unresolved
 
@@ -69,8 +75,7 @@ The following are not accepted decisions:
 
 - final vertical chronology semantics beyond the accepted bottom-aligned viewport projection;
 - flat categories versus optional context or relationships;
-- final `Karma`/balance terminology;
-- clearing and formation lifecycle beyond placed/pending mass conservation;
+- clearing lifecycle and any future formation controls beyond the accepted organic local rules;
 - future zoom, compression, panning, or explicit canonical-canvas migration;
 - safe cross-authority replay of queued checkpoint mutations, if it is ever required;
 - configurable quantum migration rules;

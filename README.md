@@ -113,7 +113,7 @@ strata report --today --completed-only
 strata export --format json --completed-only
 ```
 
-JSON export schema version 3 includes stable event UIDs, authoritative UTC endpoints, category identity, and a `provisional` flag. ICS export uses those UTC endpoints and stable UIDs, emits CRLF-delimited RFC 5545 text with escaping and line folding, marks provisional events with `X-STRATA-PROVISIONAL:TRUE`, and excludes idle events. A session without authoritative absolute chronology fails closed for ICS rather than inventing timestamps.
+JSON export schema version 4 includes stable event UIDs, authoritative UTC endpoints, category identity, and a `provisional` flag. ICS export uses those UTC endpoints and stable UIDs, emits CRLF-delimited RFC 5545 text with escaping and line folding, marks provisional events with `X-STRATA-PROVISIONAL:TRUE`, and excludes idle events. A session without authoritative absolute chronology fails closed for ICS rather than inventing timestamps.
 
 Week reports follow the configured first day of week. The current week is week-to-date; prior week offsets in the TUI are complete calendar weeks. Month reports use calendar months: the current month is month-to-date and prior offsets are complete prior calendar months.
 
@@ -182,16 +182,18 @@ When an authoritative TUI write fails, Strata freezes normal mutation and displa
 
 The emergency JSON bundle is a custody artifact generated from current application state. It is not the same as the portable CSV bundle and is not a supported import format.
 
-## Keybindings
+## Settings and keybindings
 
-- Open the Command Atlas in TUI with `?` or `F1`.
+- Open Settings in TUI with `?` or `F1`. Settings contains the current configuration values, keybindings, and action guide.
 - Open the Command Palette with `Ctrl+P`.
-- Open Karma with `k`.
+- Open Balance with `b`.
 - In main view, `d` detaches Strata while tracking continues.
-- In Karma, `d` or `t` selects day range, `w` week, and `m` month.
+- In Balance, `d` or `t` selects day range, `w` week, and `m` month.
+- Press `r` in Balance for an explicit From/To range. Dates use `YYYY-MM-DD`; `Tab` switches fields, `Enter` applies, and `Esc` cancels.
+- Press `l` in Balance to log/correct arbitrary past activity. These Balance keys do not act as hidden Main shortcuts; use `b` or the command palette to enter historical work deliberately.
 - In layer text entry, `?` remains a normal character; use `F1` there.
 - Optional config file: `~/.config/strata/keymap.json`.
-- In Karma, `←` moves to older intervals and `→` moves toward current.
+- In Balance, `←` moves to older intervals and `→` moves toward current.
 
 Example:
 
@@ -204,8 +206,8 @@ Example:
   "first_day_of_week": "monday",
   "unbind_actions": ["open_layer_popup"],
   "keymap": {
-    "f": "open_karma_popup",
-    "k": null,
+    "f": "open_balance_popup",
+    "b": null,
     "ctrl-q": "quit"
   }
 }
@@ -220,8 +222,9 @@ Notes:
 - `day_start_mode` accepts only `fixed`. Existing `sunrise` values are migrated visibly to `fixed`; Strata never implemented solar sunrise calculation.
 - `first_day_of_week` accepts `monday` through `sunday`.
 - `toggle_command_palette` is the action name for rebinding palette open/close.
+- `toggle_settings`, `settings_top`, and `settings_bottom` are the canonical Settings action names; older Atlas names remain accepted only as config aliases.
 
-Karma interval notes:
+Balance interval notes:
 
 - `month` uses calendar months: current month-to-date, then complete prior calendar months.
 - Day, week, and month totals allocate canonical sessions by exact overlap with their persisted operational-day boundary policy.

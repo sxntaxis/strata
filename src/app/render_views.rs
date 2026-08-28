@@ -26,7 +26,7 @@ impl App {
         }
 
         let categories = self.time_tracker.categories_ordered();
-        let sand = if self.in_karma_modal() && self.should_use_report_snapshot() {
+        let sand = if self.in_balance_modal() && self.should_use_report_snapshot() {
             self.report_snapshot_lines(inner_width, inner_height, &categories)
                 .unwrap_or_else(|| self.sand_engine.render(&categories))
         } else if let Some(catchup_lines) =
@@ -67,15 +67,15 @@ impl App {
                 .get(self.selected_index)
                 .map(|category| category.name.as_str())
                 .unwrap_or(DRIFT_CATEGORY_CONFIG_NAME);
-            let karma_time = if cat_name == DRIFT_CATEGORY_CONFIG_NAME {
-                self.get_karma_adjusted_time()
+            let balance_time = if cat_name == DRIFT_CATEGORY_CONFIG_NAME {
+                self.get_balance_adjusted_time()
             } else {
-                self.get_category_karma_adjusted_time(cat_name)
+                self.get_category_balance_adjusted_time(cat_name)
             };
-            (karma_time != 0).then(|| self.format_signed_time(karma_time))
+            (balance_time != 0).then(|| self.format_signed_time(balance_time))
         } else if is_drift_category_id(active_category_id) {
-            let karma_time = self.get_karma_adjusted_time();
-            (karma_time != 0).then(|| self.format_signed_time(karma_time))
+            let balance_time = self.get_balance_adjusted_time();
+            (balance_time != 0).then(|| self.format_signed_time(balance_time))
         } else if let Some(idx) = active_index {
             let cat_name = categories
                 .get(idx)
@@ -128,12 +128,12 @@ impl App {
 
         if self.in_category_modal() {
             self.render_modal(f, size);
-        } else if self.in_karma_modal() {
+        } else if self.in_balance_modal() {
             self.render_report_modal(f, size);
         }
 
-        if self.show_keybindings_modal {
-            self.render_keybindings_modal(f, size);
+        if self.show_settings {
+            self.render_settings(f, size);
         }
 
         if self.show_command_palette {

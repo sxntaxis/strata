@@ -38,6 +38,7 @@ pub(super) enum PersistenceOperation {
     SessionSync,
     SessionEdit,
     SessionDelete,
+    SessionCorrection,
     SandStateSave,
     DailySnapshotSave,
     DailySnapshotDelete,
@@ -62,6 +63,7 @@ impl fmt::Display for PersistenceOperation {
             Self::SessionSync => "session synchronization",
             Self::SessionEdit => "session edit",
             Self::SessionDelete => "session deletion",
+            Self::SessionCorrection => "historical session correction",
             Self::SandStateSave => "sediment-state save",
             Self::DailySnapshotSave => "daily sediment snapshot save",
             Self::DailySnapshotDelete => "daily sediment snapshot deletion",
@@ -177,7 +179,7 @@ fn emergency_categories(
             name: category.name,
             description: category.description,
             color: format!("{:?}", category.color),
-            balance_effect: category.karma_effect,
+            balance_effect: category.balance_effect,
             archived: false,
         })
         .chain(
@@ -189,7 +191,7 @@ fn emergency_categories(
                     name: category.name,
                     description: category.description,
                     color: format!("{:?}", category.color),
-                    balance_effect: category.karma_effect,
+                    balance_effect: category.balance_effect,
                     archived: true,
                 }),
         )
@@ -828,7 +830,7 @@ mod tests {
                 crate::constants::COLORS[((id - 1) as usize) % crate::constants::COLORS.len()]
             },
             description: description.to_string(),
-            karma_effect: if id == 0 { 0 } else { 1 },
+            balance_effect: if id == 0 { 0 } else { 1 },
         }
     }
 
@@ -900,6 +902,7 @@ mod tests {
                 frame_count: 0,
                 sweep_left_to_right: true,
                 rng_state: 1,
+                ingress_focus_x: None,
                 pending_grains: Vec::new(),
                 pending_runs: Vec::new(),
             },

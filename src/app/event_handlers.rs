@@ -20,6 +20,32 @@ enum ReportEditKeyIntent {
     Ignore,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReportRangeEditKeyIntent {
+    Append(char),
+    Backspace,
+    NextField,
+    PreviousField,
+    Commit,
+    Cancel,
+    EmergencyQuit,
+    Ignore,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HistoricalActivityEditKeyIntent {
+    Append(char),
+    Backspace,
+    NextField,
+    PreviousField,
+    PreviousTarget,
+    NextTarget,
+    Commit,
+    Cancel,
+    EmergencyQuit,
+    Ignore,
+}
+
 fn direct_command_or_fuzzy_fallback(
     query: &str,
     has_fuzzy_result: bool,
@@ -59,6 +85,72 @@ fn resolve_report_edit_key(
     }
 }
 
+fn resolve_report_range_edit_key(
+    key: KeyEvent,
+    keymap: &crate::keybindings::Keymap,
+) -> ReportRangeEditKeyIntent {
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+    {
+        return if keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
+            ReportRangeEditKeyIntent::EmergencyQuit
+        } else {
+            ReportRangeEditKeyIntent::Ignore
+        };
+    }
+
+    match key.code {
+        KeyCode::Esc => ReportRangeEditKeyIntent::Cancel,
+        KeyCode::Enter => ReportRangeEditKeyIntent::Commit,
+        KeyCode::Backspace | KeyCode::Delete => ReportRangeEditKeyIntent::Backspace,
+        KeyCode::BackTab => ReportRangeEditKeyIntent::PreviousField,
+        KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            ReportRangeEditKeyIntent::PreviousField
+        }
+        KeyCode::Tab => ReportRangeEditKeyIntent::NextField,
+        KeyCode::Char(character) if character.is_ascii_digit() || character == '-' => {
+            ReportRangeEditKeyIntent::Append(character)
+        }
+        _ => ReportRangeEditKeyIntent::Ignore,
+    }
+}
+
+fn resolve_historical_activity_edit_key(
+    key: KeyEvent,
+    keymap: &crate::keybindings::Keymap,
+) -> HistoricalActivityEditKeyIntent {
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+    {
+        return if keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
+            HistoricalActivityEditKeyIntent::EmergencyQuit
+        } else {
+            HistoricalActivityEditKeyIntent::Ignore
+        };
+    }
+
+    match key.code {
+        KeyCode::Esc => HistoricalActivityEditKeyIntent::Cancel,
+        KeyCode::Enter => HistoricalActivityEditKeyIntent::Commit,
+        KeyCode::Backspace | KeyCode::Delete => HistoricalActivityEditKeyIntent::Backspace,
+        KeyCode::BackTab => HistoricalActivityEditKeyIntent::PreviousField,
+        KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            HistoricalActivityEditKeyIntent::PreviousField
+        }
+        KeyCode::Tab => HistoricalActivityEditKeyIntent::NextField,
+        KeyCode::Left => HistoricalActivityEditKeyIntent::PreviousTarget,
+        KeyCode::Right => HistoricalActivityEditKeyIntent::NextTarget,
+        KeyCode::Char(character)
+            if character.is_ascii_digit() || matches!(character, '-' | ':' | ' ') =>
+        {
+            HistoricalActivityEditKeyIntent::Append(character)
+        }
+        _ => HistoricalActivityEditKeyIntent::Ignore,
+    }
+}
+
 impl App {
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> bool {
         if key.kind == KeyEventKind::Release {
@@ -86,6 +178,14 @@ impl App {
             return true;
         }
 
+        if self.historical_activity_edit.is_some() {
+            return self.handle_historical_activity_edit_key(key);
+        }
+
+        if self.report_range_edit.is_some() {
+            return self.handle_report_range_edit_key(key);
+        }
+
         if self.report_log_edit.is_some() {
             return self.handle_report_log_edit_key(key);
         }
@@ -94,8 +194,8 @@ impl App {
             return self.handle_command_palette_key(key);
         }
 
-        if self.show_keybindings_modal && self.atlas_overlay.is_some() {
-            return self.handle_atlas_overlay_key(key);
+        if self.show_settings && self.settings_overlay.is_some() {
+            return self.handle_settings_overlay_key(key);
         }
 
         if let Some(action) = self.resolve_action(key) {
@@ -110,16 +210,14 @@ impl App {
     }
 
     fn resolve_action(&self, key: KeyEvent) -> Option<Action> {
-        if self.in_category_modal()
-            && !self.show_keybindings_modal
-            && matches!(key.code, KeyCode::Char('?'))
+        if self.in_category_modal() && !self.show_settings && matches!(key.code, KeyCode::Char('?'))
         {
             return None;
         }
 
-        let context = if self.in_karma_modal() {
+        let context = if self.in_balance_modal() {
             InputContext::Report
-        } else if self.in_category_modal() || self.show_keybindings_modal {
+        } else if self.in_category_modal() || self.show_settings {
             InputContext::Other
         } else {
             InputContext::Main
@@ -135,13 +233,13 @@ impl App {
             return false;
         }
 
-        if action == Action::ToggleKeybindingsHelp {
-            self.toggle_keybindings_modal();
+        if action == Action::ToggleSettings {
+            self.toggle_settings();
             return false;
         }
 
-        if self.show_keybindings_modal {
-            return self.handle_keybindings_modal_action(action);
+        if self.show_settings {
+            return self.handle_settings_action(action);
         }
 
         if self.in_category_modal() {
@@ -152,7 +250,7 @@ impl App {
             return false;
         }
 
-        if self.in_karma_modal() {
+        if self.in_balance_modal() {
             return self.handle_report_modal_action(action);
         }
 
@@ -326,11 +424,11 @@ impl App {
             CommandIntent::Status => self.command_status(),
             CommandIntent::Start { layer, tag } => self.command_start(layer, tag),
             CommandIntent::Stop { layer, tag } => self.command_stop(layer, tag),
-            CommandIntent::Karma {
+            CommandIntent::Balance {
                 selector,
                 layer,
                 tag,
-            } => self.command_karma(selector, layer, tag),
+            } => self.command_balance(selector, layer, tag),
             CommandIntent::DeleteLastSession { layer, tag } => {
                 self.command_delete_last_session(layer, tag)
             }
@@ -499,13 +597,13 @@ impl App {
         Ok(format!("Stopped layer '{active_name}'"))
     }
 
-    fn command_karma(
+    fn command_balance(
         &self,
-        selector: command::KarmaSelector,
+        selector: command::BalanceSelector,
         layer_filter: Option<String>,
         tag_filter: Option<String>,
     ) -> Result<String, String> {
-        let window = command::resolve_karma_window(
+        let window = command::resolve_balance_window(
             &selector,
             crate::domain::operational_day_key_now(),
             self.runtime_settings.first_day_of_week,
@@ -531,7 +629,7 @@ impl App {
                     .unwrap_or_else(|| value.to_string())
             });
         let mut total_elapsed = 0usize;
-        let mut total_karma = 0isize;
+        let mut total_balance = 0isize;
         for session in &self.time_tracker.sessions {
             let Ok(day) = NaiveDate::parse_from_str(&session.date, "%Y-%m-%d") else {
                 continue;
@@ -555,12 +653,12 @@ impl App {
                     if is_drift_category_id(category.id) {
                         0
                     } else {
-                        category.karma_effect
+                        category.balance_effect
                     }
                 })
                 .unwrap_or(0);
             total_elapsed = total_elapsed.saturating_add(session.elapsed_seconds);
-            total_karma = total_karma
+            total_balance = total_balance
                 .saturating_add((session.elapsed_seconds as isize).saturating_mul(effect as isize));
         }
         if let Some(start) = self.time_tracker.current_session_start {
@@ -581,13 +679,13 @@ impl App {
                         if is_drift_category_id(category.id) {
                             0
                         } else {
-                            category.karma_effect
+                            category.balance_effect
                         }
                     })
                     .unwrap_or(0);
                 total_elapsed = total_elapsed.saturating_add(elapsed);
-                total_karma =
-                    total_karma.saturating_add((elapsed as isize).saturating_mul(effect as isize));
+                total_balance = total_balance
+                    .saturating_add((elapsed as isize).saturating_mul(effect as isize));
             }
         }
         let mut scope = String::new();
@@ -601,10 +699,10 @@ impl App {
             scope.push_str(&format!(" tag '{tag}'"));
         }
         Ok(format!(
-            "Karma {}{}: {} (elapsed {})",
+            "Balance {}{}: {} (elapsed {})",
             window.label,
             scope,
-            command::format_signed_hms(total_karma),
+            command::format_signed_hms(total_balance),
             command::format_hms(total_elapsed)
         ))
     }
@@ -652,13 +750,27 @@ impl App {
 
         match command {
             PaletteCommand::Action(Action::ToggleCommandPalette) => false,
-            PaletteCommand::Action(Action::ToggleKeybindingsHelp) => {
-                self.toggle_keybindings_modal();
+            PaletteCommand::Action(Action::ToggleSettings) => {
+                self.toggle_settings();
+                false
+            }
+            PaletteCommand::Action(Action::ReportRange) => {
+                if !self.in_balance_modal() {
+                    self.open_report_modal();
+                }
+                self.begin_report_range_edit();
+                false
+            }
+            PaletteCommand::Action(Action::LogActivity) => {
+                if !self.in_balance_modal() {
+                    self.open_report_modal();
+                }
+                self.begin_historical_activity_edit();
                 false
             }
             PaletteCommand::Action(action) => self.handle_main_action(action),
             PaletteCommand::SetReportPeriod(period) => {
-                if !self.in_karma_modal() {
+                if !self.in_balance_modal() {
                     self.open_report_modal();
                 }
                 self.set_report_period(period);
@@ -679,14 +791,14 @@ impl App {
         });
     }
 
-    fn handle_keybindings_modal_action(&mut self, action: Action) -> bool {
+    fn handle_settings_action(&mut self, action: Action) -> bool {
         match action {
-            Action::Cancel => self.close_keybindings_modal(),
-            Action::Up | Action::Left => self.select_previous_keybinding_action(),
-            Action::Down | Action::Right => self.select_next_keybinding_action(),
-            Action::Confirm => self.open_atlas_editor_for_selection(),
-            Action::HelpTop => self.jump_keybindings_top(),
-            Action::HelpBottom => self.jump_keybindings_bottom(),
+            Action::Cancel => self.close_settings(),
+            Action::Up | Action::Left => self.select_previous_settings_item(),
+            Action::Down | Action::Right => self.select_next_settings_item(),
+            Action::Confirm => self.open_settings_editor_for_selection(),
+            Action::SettingsTop => self.jump_settings_top(),
+            Action::SettingsBottom => self.jump_settings_bottom(),
             Action::Quit => return true,
             _ => {}
         }
@@ -694,38 +806,38 @@ impl App {
         false
     }
 
-    fn handle_atlas_overlay_key(&mut self, key: KeyEvent) -> bool {
-        let Some(overlay) = self.atlas_overlay.clone() else {
+    fn handle_settings_overlay_key(&mut self, key: KeyEvent) -> bool {
+        let Some(overlay) = self.settings_overlay.clone() else {
             return false;
         };
 
         match overlay {
-            super::AtlasOverlay::CaptureKey { action } => {
-                self.handle_atlas_capture_key_input(action, key);
+            super::SettingsOverlay::CaptureKey { action } => {
+                self.handle_settings_capture_key_input(action, key);
             }
-            super::AtlasOverlay::SelectWeekStartDay { .. } => {
-                self.handle_atlas_week_start_dropdown(key);
+            super::SettingsOverlay::SelectWeekStartDay { .. } => {
+                self.handle_settings_week_start_dropdown(key);
             }
         }
 
         false
     }
 
-    fn handle_atlas_capture_key_input(&mut self, action: Action, key: KeyEvent) {
+    fn handle_settings_capture_key_input(&mut self, action: Action, key: KeyEvent) {
         match key.code {
             KeyCode::Esc => {
-                self.close_atlas_overlay();
+                self.close_settings_overlay();
             }
             KeyCode::Backspace => {
                 let keymap_path = crate::storage::get_keymap_path();
                 match crate::keybindings::set_action_binding(&keymap_path, action, None) {
                     Ok(loaded) => {
                         self.apply_loaded_keybindings(loaded);
-                        self.close_atlas_overlay();
+                        self.close_settings_overlay();
                     }
                     Err(err) => {
                         self.keymap_error = Some(err);
-                        self.close_atlas_overlay();
+                        self.close_settings_overlay();
                     }
                 }
             }
@@ -734,11 +846,11 @@ impl App {
                 match crate::keybindings::set_action_unbound(&keymap_path, action) {
                     Ok(loaded) => {
                         self.apply_loaded_keybindings(loaded);
-                        self.close_atlas_overlay();
+                        self.close_settings_overlay();
                     }
                     Err(err) => {
                         self.keymap_error = Some(err);
-                        self.close_atlas_overlay();
+                        self.close_settings_overlay();
                     }
                 }
             }
@@ -752,11 +864,11 @@ impl App {
                     ) {
                         Ok(loaded) => {
                             self.apply_loaded_keybindings(loaded);
-                            self.close_atlas_overlay();
+                            self.close_settings_overlay();
                         }
                         Err(err) => {
                             self.keymap_error = Some(err);
-                            self.close_atlas_overlay();
+                            self.close_settings_overlay();
                         }
                     }
                 }
@@ -764,9 +876,9 @@ impl App {
         }
     }
 
-    fn handle_atlas_week_start_dropdown(&mut self, key: KeyEvent) {
-        let Some(super::AtlasOverlay::SelectWeekStartDay { mut selected }) =
-            self.atlas_overlay.take()
+    fn handle_settings_week_start_dropdown(&mut self, key: KeyEvent) {
+        let Some(super::SettingsOverlay::SelectWeekStartDay { mut selected }) =
+            self.settings_overlay.take()
         else {
             return;
         };
@@ -774,7 +886,7 @@ impl App {
         let options = Self::week_start_options();
         match key.code {
             KeyCode::Esc => {
-                self.close_atlas_overlay();
+                self.close_settings_overlay();
                 return;
             }
             KeyCode::Up | KeyCode::Left => {
@@ -793,11 +905,11 @@ impl App {
                 match crate::keybindings::set_first_day_of_week(&keymap_path, week_start) {
                     Ok(loaded) => {
                         self.apply_loaded_keybindings(loaded);
-                        self.close_atlas_overlay();
+                        self.close_settings_overlay();
                     }
                     Err(err) => {
                         self.keymap_error = Some(err);
-                        self.close_atlas_overlay();
+                        self.close_settings_overlay();
                     }
                 }
                 return;
@@ -805,7 +917,7 @@ impl App {
             _ => {}
         }
 
-        self.atlas_overlay = Some(super::AtlasOverlay::SelectWeekStartDay { selected });
+        self.settings_overlay = Some(super::SettingsOverlay::SelectWeekStartDay { selected });
         self.render_needed = true;
     }
 
@@ -961,24 +1073,24 @@ impl App {
                     self.delete_category();
                 }
             }
-            Action::IncreaseKarma => {
+            Action::IncreaseBalance => {
                 if !self.is_on_insert_space()
                     && self.selected_index > 0
                     && self.selected_index < self.time_tracker.category_count()
                     && self
                         .time_tracker
-                        .set_category_karma_by_index(self.selected_index, 1)
+                        .set_category_balance_by_index(self.selected_index, 1)
                 {
                     self.persist_categories();
                 }
             }
-            Action::DecreaseKarma => {
+            Action::DecreaseBalance => {
                 if !self.is_on_insert_space()
                     && self.selected_index > 0
                     && self.selected_index < self.time_tracker.category_count()
                     && self
                         .time_tracker
-                        .set_category_karma_by_index(self.selected_index, -1)
+                        .set_category_balance_by_index(self.selected_index, -1)
                 {
                     self.persist_categories();
                 }
@@ -1082,10 +1194,18 @@ impl App {
                 self.shift_report_interval_newer();
             }
             Action::ShiftLeft => {
-                self.set_report_period(ui_helpers::report_period_prev(self.report_period));
+                if self.report_range_is_custom() {
+                    self.set_report_period(ReportPeriod::Month);
+                } else {
+                    self.set_report_period(ui_helpers::report_period_prev(self.report_period));
+                }
             }
             Action::ShiftRight => {
-                self.set_report_period(ui_helpers::report_period_next(self.report_period));
+                if self.report_range_is_custom() {
+                    self.set_report_period(ReportPeriod::Today);
+                } else {
+                    self.set_report_period(ui_helpers::report_period_next(self.report_period));
+                }
             }
             Action::ReportToday => {
                 self.set_report_period(ReportPeriod::Today);
@@ -1095,6 +1215,12 @@ impl App {
             }
             Action::ReportMonth => {
                 self.set_report_period(ReportPeriod::Month);
+            }
+            Action::ReportRange => {
+                self.begin_report_range_edit();
+            }
+            Action::LogActivity => {
+                handled = self.begin_historical_activity_edit();
             }
             Action::DeleteCategory => {
                 if in_logs_view {
@@ -1145,13 +1271,115 @@ impl App {
                 true
             }
             Action::Cancel => false,
-            Action::ReportToday => {
-                self.open_report_modal();
-                self.set_report_period(ReportPeriod::Today);
-                false
-            }
             _ => false,
         }
+    }
+
+    fn handle_historical_activity_edit_key(&mut self, key: KeyEvent) -> bool {
+        let intent = resolve_historical_activity_edit_key(key, &self.keymap);
+        if self
+            .historical_activity_edit
+            .as_ref()
+            .is_some_and(|edit| edit.confirmation.is_some())
+        {
+            match intent {
+                HistoricalActivityEditKeyIntent::Commit => {
+                    self.commit_historical_activity_edit();
+                }
+                HistoricalActivityEditKeyIntent::Cancel => {
+                    self.dismiss_historical_activity_confirmation();
+                }
+                HistoricalActivityEditKeyIntent::EmergencyQuit => return true,
+                _ => {}
+            }
+            return false;
+        }
+
+        match intent {
+            HistoricalActivityEditKeyIntent::Append(character) => {
+                if let Some(edit) = self.historical_activity_edit.as_mut() {
+                    edit.append(character);
+                    self.render_needed = true;
+                }
+            }
+            HistoricalActivityEditKeyIntent::Backspace => {
+                if let Some(edit) = self.historical_activity_edit.as_mut() {
+                    edit.backspace();
+                    self.render_needed = true;
+                }
+            }
+            HistoricalActivityEditKeyIntent::NextField => {
+                if let Some(edit) = self.historical_activity_edit.as_mut() {
+                    edit.next_field();
+                    self.render_needed = true;
+                }
+            }
+            HistoricalActivityEditKeyIntent::PreviousField => {
+                if let Some(edit) = self.historical_activity_edit.as_mut() {
+                    edit.previous_field();
+                    self.render_needed = true;
+                }
+            }
+            HistoricalActivityEditKeyIntent::PreviousTarget => {
+                if self
+                    .historical_activity_edit
+                    .as_ref()
+                    .is_some_and(|edit| edit.active_field == super::HistoricalActivityField::Layer)
+                {
+                    self.cycle_historical_activity_target(-1);
+                }
+            }
+            HistoricalActivityEditKeyIntent::NextTarget => {
+                if self
+                    .historical_activity_edit
+                    .as_ref()
+                    .is_some_and(|edit| edit.active_field == super::HistoricalActivityField::Layer)
+                {
+                    self.cycle_historical_activity_target(1);
+                }
+            }
+            HistoricalActivityEditKeyIntent::Commit => {
+                self.commit_historical_activity_edit();
+            }
+            HistoricalActivityEditKeyIntent::Cancel => {
+                self.cancel_historical_activity_edit();
+            }
+            HistoricalActivityEditKeyIntent::EmergencyQuit => return true,
+            HistoricalActivityEditKeyIntent::Ignore => {}
+        }
+        false
+    }
+
+    fn handle_report_range_edit_key(&mut self, key: KeyEvent) -> bool {
+        match resolve_report_range_edit_key(key, &self.keymap) {
+            ReportRangeEditKeyIntent::Append(character) => {
+                if let Some(edit) = self.report_range_edit.as_mut() {
+                    edit.append(character);
+                    self.render_needed = true;
+                }
+            }
+            ReportRangeEditKeyIntent::Backspace => {
+                if let Some(edit) = self.report_range_edit.as_mut() {
+                    edit.backspace();
+                    self.render_needed = true;
+                }
+            }
+            ReportRangeEditKeyIntent::NextField | ReportRangeEditKeyIntent::PreviousField => {
+                if let Some(edit) = self.report_range_edit.as_mut() {
+                    edit.switch_field();
+                    self.render_needed = true;
+                }
+            }
+            ReportRangeEditKeyIntent::Commit => {
+                self.commit_report_range_edit();
+            }
+            ReportRangeEditKeyIntent::Cancel => {
+                self.cancel_report_range_edit();
+            }
+            ReportRangeEditKeyIntent::EmergencyQuit => return true,
+            ReportRangeEditKeyIntent::Ignore => {}
+        }
+        false
     }
 
     fn handle_report_log_edit_key(&mut self, key: KeyEvent) -> bool {
@@ -1183,9 +1411,89 @@ impl App {
 
 #[cfg(test)]
 mod report_edit_tests {
-    use super::{ReportEditKeyIntent, direct_command_or_fuzzy_fallback, resolve_report_edit_key};
+    use super::{
+        HistoricalActivityEditKeyIntent, ReportEditKeyIntent, ReportRangeEditKeyIntent,
+        direct_command_or_fuzzy_fallback, resolve_historical_activity_edit_key,
+        resolve_report_edit_key, resolve_report_range_edit_key,
+    };
     use crate::keybindings::default_keymap;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    #[test]
+    fn range_edit_accepts_iso_date_input_and_owns_plain_range_keys() {
+        let keymap = default_keymap();
+        for character in ['2', '0', '2', '6', '-', '0', '8'] {
+            assert_eq!(
+                resolve_report_range_edit_key(
+                    KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
+                    &keymap,
+                ),
+                ReportRangeEditKeyIntent::Append(character)
+            );
+        }
+        assert_eq!(
+            resolve_report_range_edit_key(
+                KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
+                &keymap,
+            ),
+            ReportRangeEditKeyIntent::Ignore
+        );
+        assert_eq!(
+            resolve_report_range_edit_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), &keymap),
+            ReportRangeEditKeyIntent::NextField
+        );
+        assert_eq!(
+            resolve_report_range_edit_key(
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                &keymap
+            ),
+            ReportRangeEditKeyIntent::Commit
+        );
+    }
+
+    #[test]
+    fn historical_activity_editor_owns_timestamp_input_and_layer_navigation() {
+        let keymap = default_keymap();
+        for character in [
+            '2', '0', '2', '6', '-', '0', '8', ' ', '1', '2', ':', '3', '0',
+        ] {
+            assert_eq!(
+                resolve_historical_activity_edit_key(
+                    KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
+                    &keymap,
+                ),
+                HistoricalActivityEditKeyIntent::Append(character)
+            );
+        }
+        assert_eq!(
+            resolve_historical_activity_edit_key(
+                KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
+                &keymap,
+            ),
+            HistoricalActivityEditKeyIntent::PreviousTarget
+        );
+        assert_eq!(
+            resolve_historical_activity_edit_key(
+                KeyEvent::new(KeyCode::Right, KeyModifiers::NONE),
+                &keymap,
+            ),
+            HistoricalActivityEditKeyIntent::NextTarget
+        );
+        assert_eq!(
+            resolve_historical_activity_edit_key(
+                KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE),
+                &keymap,
+            ),
+            HistoricalActivityEditKeyIntent::Ignore
+        );
+        assert_eq!(
+            resolve_historical_activity_edit_key(
+                KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+                &keymap,
+            ),
+            HistoricalActivityEditKeyIntent::EmergencyQuit
+        );
+    }
 
     #[test]
     fn plain_command_letters_are_text_only_in_edit_mode() {

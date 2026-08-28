@@ -1,7 +1,7 @@
 # Strata product authority
 
 Status: accepted product direction
-Last reviewed: 2026-08-20
+Last reviewed: 2026-08-27
 
 ## Purpose
 
@@ -43,7 +43,7 @@ The logical sand canvas may expand when a terminal grows but does not shrink mer
 
 ## Balance
 
-Layers may carry a positive, negative, or neutral directional value. The current term `Karma` remains under terminology review; no rename is accepted here.
+Layers may carry a positive, negative, or neutral directional value. **Balance** is the accepted product vocabulary for the historical/report surface and this directional accounting. The former `Karma` name is retired from current product vocabulary. The default main-view opener is `b`.
 
 ## Persistence and live control
 
@@ -58,5 +58,4 @@ Portable CSV remains interchange only. Doctor, backup, restore, recovery, checkp
 - final vertical chronology semantics beyond the accepted bottom-aligned viewport projection;
 - whether layers remain flat or gain optional context/relationships;
 - durable artistic semantics for clearing, hiding, compacting, or beginning a new formation;
-- final naming/presentation of the balance system;
 - configurable temporal quantum for existing formations.

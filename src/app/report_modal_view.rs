@@ -9,8 +9,9 @@ use ratatui::{
 
 use crate::constants::REPORT_MODAL_SETTINGS;
 use crate::domain::{
-    CategoryId, CategoryLogEntry, DRIFT_CATEGORY_ID, KarmaReportSummary, ReportPeriod,
+    BalanceReportSummary, CategoryId, CategoryLogEntry, DRIFT_CATEGORY_ID, ReportPeriod,
 };
+use crate::keybindings::Action;
 
 use super::{App, ui_helpers, view_style};
 
@@ -25,8 +26,15 @@ impl App {
             .as_ref()
             .map_or(summary.entries.len(), |logs| logs.len());
 
-        let preferred_inner_width =
-            self.preferred_report_inner_width(&summary, logs_for_view.as_deref());
+        let preferred_inner_width = self
+            .preferred_report_inner_width(&summary, logs_for_view.as_deref())
+            .max(if self.historical_activity_edit.is_some() {
+                REPORT_MODAL_SETTINGS.historical_activity_editor_min_width
+            } else if self.report_range_edit.is_some() {
+                REPORT_MODAL_SETTINGS.range_editor_min_width
+            } else {
+                0
+            });
 
         let modal_rect = self.report_modal_rect(
             terminal_size,
@@ -38,7 +46,6 @@ impl App {
         } else {
             Some(self.report_selected_index.min(summary.entries.len() - 1))
         };
-
         let interval_label = ui_helpers::format_report_interval_label(&summary.date);
 
         let border_color = if let Some(category_id) = self.report_logs_category_id {
@@ -57,7 +64,7 @@ impl App {
         .alignment(Alignment::Left);
 
         let center_title = Line::from(Span::styled(
-            "Karma",
+            "Balance",
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
@@ -65,20 +72,29 @@ impl App {
         .alignment(Alignment::Center);
 
         let total_title = Line::from(Span::styled(
-            self.format_karma_time(summary.total_karma_seconds),
-            Style::default().fg(view_style::karma_color(summary.total_karma_seconds)),
+            self.format_balance_time(summary.total_balance_seconds),
+            Style::default().fg(view_style::balance_color(summary.total_balance_seconds)),
         ))
         .alignment(Alignment::Right);
 
+        let custom_range_active = self.report_range_is_custom() || self.report_range_edit.is_some();
         let period_bottom_title = Line::from(vec![
-            view_style::report_period_label_span("day", self.report_period == ReportPeriod::Today),
+            view_style::report_period_label_span(
+                "day",
+                !custom_range_active && self.report_period == ReportPeriod::Today,
+            ),
             Span::styled("·", Style::default().fg(Color::DarkGray)),
-            view_style::report_period_label_span("week", self.report_period == ReportPeriod::Week),
+            view_style::report_period_label_span(
+                "week",
+                !custom_range_active && self.report_period == ReportPeriod::Week,
+            ),
             Span::styled("·", Style::default().fg(Color::DarkGray)),
             view_style::report_period_label_span(
                 "month",
-                self.report_period == ReportPeriod::Month,
+                !custom_range_active && self.report_period == ReportPeriod::Month,
             ),
+            Span::styled("·", Style::default().fg(Color::DarkGray)),
+            view_style::report_period_label_span("range", custom_range_active),
         ])
         .alignment(Alignment::Center);
         let snapshot_bottom_title = Line::from(Span::styled(
@@ -86,18 +102,165 @@ impl App {
             Style::default().fg(Color::DarkGray),
         ))
         .alignment(Alignment::Left);
-        let interaction_bottom_title = if self.report_logs_category_id.is_some() {
-            let label = if self.report_log_edit.is_some() {
-                "edit · Enter commit · Esc cancel"
+        let interaction_bottom_title = if let Some(edit) = self.historical_activity_edit.as_ref() {
+            if edit.confirmation.is_some() {
+                let labels = self.historical_activity_conflict_labels();
+                let preview = if labels.is_empty() {
+                    "recorded activity".to_string()
+                } else {
+                    let remaining = labels.len().saturating_sub(3);
+                    let mut preview = labels.into_iter().take(3).collect::<Vec<_>>().join("; ");
+                    if remaining > 0 {
+                        preview.push_str(&format!("; +{remaining} more"));
+                    }
+                    preview
+                };
+                let mut spans = vec![
+                    Span::styled("collision · ", Style::default().fg(Color::Yellow)),
+                    Span::styled(preview, Style::default().fg(Color::White)),
+                ];
+                if edit.confirmation.as_ref().is_some_and(|confirmation| {
+                    confirmation.conflicts.iter().any(|item| item.active)
+                }) {
+                    let active_name = self
+                        .time_tracker
+                        .category_by_id(self.time_tracker.active_category_id())
+                        .map(|category| self.display_layer_name(&category.name))
+                        .unwrap_or_else(|| "current layer".to_string());
+                    spans.push(Span::styled(
+                        format!(" · current stays {active_name}"),
+                        Style::default().fg(Color::Gray),
+                    ));
+                }
+                spans.push(Span::styled(
+                    " · Enter replace · Esc back",
+                    Style::default().fg(Color::Gray),
+                ));
+                Some(Line::from(spans).alignment(Alignment::Right))
             } else {
-                "view · Enter edit · Esc back"
+                let active_style = Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+                let inactive_style = Style::default().fg(Color::White);
+                let target = self
+                    .historical_activity_target_name()
+                    .unwrap_or_else(|| "unavailable".to_string());
+                let mut spans = vec![
+                    Span::styled("log activity · layer ", Style::default().fg(Color::Gray)),
+                    Span::styled(
+                        target,
+                        if edit.active_field == super::HistoricalActivityField::Layer {
+                            active_style
+                        } else {
+                            inactive_style
+                        },
+                    ),
+                    Span::styled(" · from ", Style::default().fg(Color::Gray)),
+                    Span::styled(
+                        edit.from.clone(),
+                        if edit.active_field == super::HistoricalActivityField::From {
+                            active_style
+                        } else {
+                            inactive_style
+                        },
+                    ),
+                    Span::styled(" · to ", Style::default().fg(Color::Gray)),
+                    Span::styled(
+                        edit.to.clone(),
+                        if edit.active_field == super::HistoricalActivityField::To {
+                            active_style
+                        } else {
+                            inactive_style
+                        },
+                    ),
+                ];
+                if let Some(error) = edit.error.as_ref() {
+                    spans.push(Span::styled(
+                        format!(" · {error}"),
+                        Style::default().fg(Color::Red),
+                    ));
+                    spans.push(Span::styled(
+                        " · Enter retry · Esc cancel",
+                        Style::default().fg(Color::Gray),
+                    ));
+                } else {
+                    spans.push(Span::styled(
+                        " · ←/→ layer · Tab field · Enter log · Esc cancel",
+                        Style::default().fg(Color::Gray),
+                    ));
+                }
+                Some(Line::from(spans).alignment(Alignment::Right))
+            }
+        } else if let Some(edit) = self.report_range_edit.as_ref() {
+            let active_style = Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+            let inactive_style = Style::default().fg(Color::White);
+            let mut spans = vec![
+                Span::styled("from ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    edit.from.clone(),
+                    if edit.active_field == super::ReportRangeField::From {
+                        active_style
+                    } else {
+                        inactive_style
+                    },
+                ),
+                Span::styled(" · to ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    edit.to.clone(),
+                    if edit.active_field == super::ReportRangeField::To {
+                        active_style
+                    } else {
+                        inactive_style
+                    },
+                ),
+            ];
+            if let Some(error) = edit.error.as_ref() {
+                spans.push(Span::styled(
+                    format!(" · {error}"),
+                    Style::default().fg(Color::Red),
+                ));
+                spans.push(Span::styled(
+                    " · Enter retry · Esc cancel",
+                    Style::default().fg(Color::Gray),
+                ));
+            } else {
+                spans.push(Span::styled(
+                    " · Tab field · Enter apply · Esc cancel",
+                    Style::default().fg(Color::Gray),
+                ));
+            }
+            Some(Line::from(spans).alignment(Alignment::Right))
+        } else if self.report_logs_category_id.is_some() {
+            let log_key = self
+                .keymap
+                .keys_for_action(Action::LogActivity)
+                .first()
+                .map(ToString::to_string);
+            let label = if self.report_log_edit.is_some() {
+                "edit · Enter commit · Esc cancel".to_string()
+            } else {
+                log_key.map_or_else(
+                    || "view · Enter edit · Esc back".to_string(),
+                    |key| format!("view · {key} log activity · Enter edit · Esc back"),
+                )
             };
             Some(
                 Line::from(Span::styled(label, Style::default().fg(Color::Gray)))
                     .alignment(Alignment::Right),
             )
         } else {
-            None
+            self.keymap
+                .keys_for_action(Action::LogActivity)
+                .first()
+                .map(|key| {
+                    Line::from(Span::styled(
+                        format!("{key} log activity"),
+                        Style::default().fg(Color::Gray),
+                    ))
+                    .alignment(Alignment::Right)
+                })
         };
 
         let mut frame_block = Block::default()
@@ -135,7 +298,7 @@ impl App {
 
     fn preferred_report_inner_width(
         &self,
-        summary: &KarmaReportSummary,
+        summary: &BalanceReportSummary,
         logs_for_view: Option<&[CategoryLogEntry]>,
     ) -> usize {
         if let Some(logs) = logs_for_view {
@@ -175,7 +338,7 @@ impl App {
     }
 
     fn render_report_navigation_arrows(&self, f: &mut Frame, modal_rect: Rect) {
-        if modal_rect.width <= 2 || modal_rect.height <= 2 {
+        if self.report_range_edit.is_some() || modal_rect.width <= 2 || modal_rect.height <= 2 {
             return;
         }
 
@@ -186,7 +349,7 @@ impl App {
         )));
         let right_arrow = Paragraph::new(Line::from(Span::styled(
             "→",
-            if self.report_period_offset == 0 {
+            if !self.can_shift_report_interval_newer() {
                 Style::default()
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::DIM)
@@ -228,7 +391,8 @@ impl App {
         } else {
             REPORT_MODAL_SETTINGS.detail_metric_width_default
         };
-        let show_date_column = self.report_period != ReportPeriod::Today;
+        let window = self.current_report_window();
+        let show_date_column = window.start != window.end;
         let date_width = if show_date_column {
             REPORT_MODAL_SETTINGS.detail_date_width
         } else {
@@ -285,25 +449,25 @@ impl App {
 
                 let metric_value = if is_none_category {
                     self.format_time(row.elapsed_seconds)
-                } else if row.karma_seconds == 0 && row.karma_effect < 0 {
+                } else if row.balance_seconds == 0 && row.balance_effect < 0 {
                     "-00:00:00".to_string()
                 } else {
-                    self.format_karma_time(row.karma_seconds)
+                    self.format_balance_time(row.balance_seconds)
                 };
                 let metric_cell = format!("{metric_value:>width$}", width = metric_width);
 
                 let metric_color = if is_none_category {
                     Color::Gray
-                } else if row.karma_seconds == 0 {
-                    if row.karma_effect < 0 {
+                } else if row.balance_seconds == 0 {
+                    if row.balance_effect < 0 {
                         Color::Red
-                    } else if row.karma_effect > 0 {
+                    } else if row.balance_effect > 0 {
                         Color::Green
                     } else {
                         Color::Gray
                     }
                 } else {
-                    view_style::karma_color(row.karma_seconds)
+                    view_style::balance_color(row.balance_seconds)
                 };
 
                 if is_selected {
@@ -357,7 +521,7 @@ impl App {
         &self,
         f: &mut Frame,
         list_area: Rect,
-        summary: &KarmaReportSummary,
+        summary: &BalanceReportSummary,
         selected_summary_index: Option<usize>,
     ) {
         let row_width = list_area.width as usize;
@@ -373,9 +537,9 @@ impl App {
             .enumerate()
             .map(|(idx, entry)| {
                 let is_selected = selected_summary_index == Some(idx);
-                let dot = if entry.karma_effect < 0 {
+                let dot = if entry.balance_effect < 0 {
                     "◯ "
-                } else if entry.karma_effect == 0 {
+                } else if entry.balance_effect == 0 {
                     "· "
                 } else {
                     "● "
@@ -386,23 +550,23 @@ impl App {
                 let is_none_row = entry.category_id == DRIFT_CATEGORY_ID;
                 let metric_value = if is_none_row {
                     self.format_time(entry.elapsed_seconds)
-                } else if entry.karma_seconds == 0 && entry.karma_effect < 0 {
+                } else if entry.balance_seconds == 0 && entry.balance_effect < 0 {
                     "-00:00:00".to_string()
                 } else {
-                    self.format_karma_time(entry.karma_seconds)
+                    self.format_balance_time(entry.balance_seconds)
                 };
                 let metric_color = if is_none_row {
                     Color::Gray
-                } else if entry.karma_seconds == 0 {
-                    if entry.karma_effect < 0 {
+                } else if entry.balance_seconds == 0 {
+                    if entry.balance_effect < 0 {
                         Color::Red
-                    } else if entry.karma_effect > 0 {
+                    } else if entry.balance_effect > 0 {
                         Color::Green
                     } else {
                         Color::Gray
                     }
                 } else {
-                    view_style::karma_color(entry.karma_seconds)
+                    view_style::balance_color(entry.balance_seconds)
                 };
 
                 if is_selected {
@@ -445,6 +609,9 @@ impl App {
     }
 
     fn format_log_date_label(&self, date: &str) -> String {
+        if self.report_range_is_custom() {
+            return ui_helpers::format_report_interval_label(date);
+        }
         match self.report_period {
             ReportPeriod::Today => String::new(),
             ReportPeriod::Week => NaiveDate::parse_from_str(date, "%Y-%m-%d")

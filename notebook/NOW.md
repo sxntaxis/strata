@@ -3,10 +3,10 @@ id: NOW-001
 kind: status
 state: active
 created: 2026-08-01
-updated: 2026-08-25
+updated: 2026-08-27
 authority: working
-summary: v0.7.7 direct interaction and visible-basin sediment are certified; authentic day-end Karma visual snapshots are implemented and awaiting native certification.
-next: Native-certify authentic day-end Karma snapshots, canvas-size independence, and reconstructed fallback behavior without changing the implementation semantics.
+summary: HISTORY-001A/B/C/D/E, SEDIMENT-002, and INTERACTION-002 are natively green; PLATEAU-001H product hardening is the current edge.
+next: Cut over the validated build to the owner installation, then use PLATEAU-001H daily-use friction as the admission gate for further core changes.
 ---
 
 # NOW — Strata
@@ -30,12 +30,12 @@ canvas to the current viewport; uppercase `C` preserves extent and non-Idle mass
 SQLite persistence; restore into a larger live viewport expands monotonically; zero-viewport recovery
 restore remains exact; the idle tamagotchi is removed; and zero effective counters are hidden.
 
-Karma visual-memory correction is implemented on top of that baseline and awaits native certification. A
-live operational-day cutoff now stages the exact cumulative canonical `SandState` as a first-write-wins
-`daily` checkpoint, including its original canvas dimensions and topology. Historical Karma prefers that
-authentic photo for the selected interval end day; `DailyContribution` is now dimension-independent
-ledger mass only, and the deterministic row-major `DerivedPreview` remains fallback for cutoffs that were
-not observed by live physics. No historical photo is fabricated during bounded recovery.
+The day-end visual-memory behavior is now accepted as working baseline product behavior. A live operational-day
+cutoff stages the exact cumulative canonical `SandState` as a first-write-wins `daily` checkpoint, including its
+original canvas dimensions and topology. Historical Balance prefers that authentic photo for the selected interval
+end day; `DailyContribution` is dimension-independent ledger mass only, and the deterministic row-major
+`DerivedPreview` remains fallback for cutoffs that were not observed by live physics. No historical photo is
+fabricated during bounded recovery.
 
 The certified system includes:
 
@@ -45,7 +45,7 @@ The certified system includes:
 - conserved sediment, bounded recovery, immutable historical artifacts, and revision-matched daily contributions;
 - receipt-governed switch/finish/reset transitions plus atomic receipt-free clear-all;
 - active/archived category integrity with stable archive/restore identity;
-- explicit report editing, truthful keymap/palette/atlas routing, and exactly-once terminal restoration;
+- explicit report editing, truthful keymap/palette/Settings routing, and exactly-once terminal restoration;
 - session-owned active description drafts separated from durable category metadata and reusable tags;
 - one process-bound profile UUID owning complete data, state, configuration, recovery, and SQLite paths;
 - profile-scoped live CLI-to-TUI control with short-path and long-path socket publication recovery;
@@ -61,6 +61,29 @@ The independent `project` axis and speculative category merge/permanent-delete l
 Clear-all is receipt-free and atomic. Switch, finish, and reset receipts remain only for their real
 runtime/checkpoint failure boundary. Final native validation passed formatting, strict Clippy, the full
 test suite, build, help smoke, diff hygiene, and the long-profile dangling-symlink runtime proof.
+
+## Current plateau program
+
+`notebook/work/PLATEAU-001.md` is the durable roadmap for the remaining core-development arc. The owner has accepted the existing day-end snapshot behavior as baseline and does not want an artificial re-certification gate before continuing.
+
+HISTORY-001B is now **COMPLETE / NATIVE-GREEN** at `ce9dd7281d3fb064302099e7cb274800c4f0ca9c`: formatter, strict Clippy, 238 tests, help smoke, targeted custom-range interaction proof, preset regression, provisional-live routing, and historical-sediment end-day selection all pass. The final delta over the authored candidate was rustfmt-only.
+
+HISTORY-001C is now **COMPLETE / NATIVE-GREEN** at `09412b703cf41016f889d725ba235a7a1e63ae6a`: formatting, strict Clippy, 245 tests, focused editor/transaction proofs, isolated startup smoke, and validator profile-custody proof all pass. Its completed-Idle split transaction, active-preview validation, atomic daily-contribution replacement, rollback proof, and post-commit memory reload are retained as the safe foundation for generalized historical editing.
+
+HISTORY-001D is now **COMPLETE / NATIVE-GREEN** at `bfaa8bf29f8019c25fe4f2ee8b1d60c554e5e988`: formatting, strict Clippy, 258 tests, 18 focused generalized transaction tests, Balance/report regression, isolated startup, and bubblewrap profile-custody proof all pass. Arbitrary `From < To <= now` assignment, gap insertion, collision confirmation, active-generation rebasing with protected live selection, daily-contribution reconciliation, rollback, and sediment/snapshot non-mutation are certified.
+
+HISTORY-001E is now **COMPLETE / NATIVE-GREEN** at `d67c8e382708dbbf3f71bf2a67d7daa81b2e36b8`: formatting, strict Clippy, 263 tests, pure recolor and historical-sediment transaction proofs, HISTORY-001D and sediment regression, isolated startup/detach/restart, and bubblewrap profile-custody proof all pass. Retained source-category mass recolors deterministically in place; true historical gaps and cleared-away mass never fabricate current grains; authentic first-write day-end snapshots remain immutable.
+
+SEDIMENT-002 is **COMPLETE / NATIVE-GREEN** at `4059e28df2ebf82bd31453ee208093eef57a4511`: formatting, strict Clippy, 280 tests, focused friction/biased-rain/recovery proofs, visible-basin and HISTORY-001E regression, isolated startup/detach/restart, and bubblewrap profile-custody proof all pass.
+
+INTERACTION-002 is **COMPLETE / NATIVE-GREEN** at `b0f60eb3c6d76d1afee8d46737baab8ed220b01b`: formatting, strict Clippy, 283 tests, Settings/keymap and INTERACTION-001 regression, Balance/HISTORY and SEDIMENT-002 regression, isolated TUI startup, and bubblewrap profile-custody proof all pass. The former Atlas is now plain Settings; human action labels and Main / Navigation / Layer / Balance / Settings grouping are authoritative; the misplaced Main `t → Detach` fallback is retired; historical physical keys remain scoped to Balance while the command palette is the deliberate universal launcher.
+
+The active edge is **PLATEAU-001H — product hardening**. Further core work is admitted from concrete daily-use friction, defects, or evidence-backed hardening needs rather than roadmap feature seeking.
+
+The stale dirty adaptive-resize branch remains preserved as custody evidence and is superseded by the current-main
+visible-basin, resize/restore, and atomic clear-all authority. No adaptive code was ported.
+
+The required core path is now PLATEAU-001H product hardening. Pomodoro/RHYTHM-001 remains optional and must not block plateau.
 
 ## Completed post-migration units
 
@@ -98,10 +121,10 @@ test suite, build, help smoke, diff hygiene, and the long-profile dangling-symli
 
 ## Known non-blocking questions
 
-The accepted implementation does not settle every possible future product direction. Remaining design questions include vertical chronology, optional category relationships, final Karma terminology, future sediment clearing/formation semantics, zoom/compression/panning, configurable quantum migration, possible IANA timezone support, and any future stable identity for queued cross-authority mutation replay.
+The accepted implementation does not settle every possible future product direction. Remaining design questions include vertical chronology, optional category relationships, future sediment clear semantics and formation controls beyond SEDIMENT-002, zoom/compression/panning, configurable quantum migration, possible IANA timezone support, and any future stable identity for queued cross-authority mutation replay.
 
 These are not open implementation defects. They require new evidence and an explicit future unit before constraining the current system.
 
 ## Next
 
-Promote the bounded-catch-up and clear-all conservation head as the next baseline; future work must preserve bounded settlement, exact boundary allocation, and fail-closed queued-evidence handling.
+Freeze and natively validate the HISTORY-001D generalized historical-assignment candidate. Prove arbitrary gap insertion, transparent Idle/same-layer overlap, multi-session collision preview plus exact-plan confirmation, future rejection, corrupted-overlap refusal, active-generation correction with protected live layer/description, same-layer active backdating including exact-boundary touch, whole-second/fractional conservation, atomic checkpoint and daily-contribution publication, rollback, post-commit in-memory reload, and unchanged current sediment/authentic day-end snapshots. Fix only HISTORY-001D fallout.

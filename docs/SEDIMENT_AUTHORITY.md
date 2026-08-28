@@ -1,10 +1,10 @@
 # Sediment authority
 
-Status: implemented and certified
-Program: SEDIMENT-001
-Current completed unit: SEDIMENT-001D2
+Status: certified baseline; SEDIMENT-002 native validation pending
+Program: SEDIMENT-002
+Current completed unit: HISTORY-001E; SEDIMENT-002 implemented / native validation pending
 Issues completed: #6, #7, #16, #18, #26
-Last reviewed: 2026-08-02
+Last reviewed: 2026-08-27
 
 ## Purpose
 
@@ -39,13 +39,44 @@ The current viewport is the active live-physics basin. New live grains enter at 
 
 ## SandState persistence
 
-`SandState` schema version 2 stores ordered pending runs.
+`SandState` schema version 3 stores ordered pending runs plus the optional canonical ingress focus used by organic formation.
 
 - Version 1 `pending_grains` vectors migrate deterministically into adjacent runs.
-- Older JSON with no pending field loads as an empty reservoir.
-- Empty pending collections are omitted during serialization.
+- Version 2 compressed-pending states remain readable and upgrade to version 3 with no invented ingress focus.
+- Older JSON with no pending or focus field loads those components empty/uninitialized.
+- Empty pending collections and an uninitialized focus are omitted during serialization.
+- The existing persisted RNG state seeds the first ingress focus after a v1/v2 migration; later v3 checkpoints preserve both RNG and focus for deterministic restart continuity.
 - `SandState` stores canonical grid dimensions explicitly; recovery through a zero viewport restores them exactly, while an ordinary larger live viewport may monotonically expand the restored canvas.
 - Ordinary restore normalizes unavailable category identities to idle; checkpoint recovery is stricter and refuses unavailable identities.
+
+## Organic live formation
+
+Live formation remains an ordinary falling-sand process; SEDIMENT-002 changes local stochastic personality, not sediment meaning or mass authority.
+
+For each visible grain during a gravity pass:
+
+1. fall straight down whenever that cell is open;
+2. if down is blocked and at least one lower diagonal is open, pass a small stochastic-friction gate;
+3. the default personality slides on one of four such opportunities and temporarily holds on three of four;
+4. after the friction gate permits a slide, take the sole open diagonal when there is only one, or randomize left/right when both are open;
+5. if neither diagonal is open, remain in place without consuming a friction/lateral choice.
+
+The temporary hold is deliberately memoryless: no per-grain friction age, pressure, or slope field exists. Repeated gravity passes therefore let steep local stacks survive briefly and then yield into small avalanches, while straight-down motion remains unconditional. The one-quarter slide ratio is an internal physical-personality constant for this unit, not a user-facing tuning control. The existing alternating horizontal sweep remains an ordering/fairness mechanism.
+
+New physical ingress keeps the rain-like cadence while introducing long-term spatial preference. One persisted **ingress focus** wanders slowly across the visible top edge, but individual grains do not all spawn at that focus. For each physical ingress:
+
+1. initialize the focus from the persisted RNG when no focus exists;
+2. otherwise move the focus by at most one canonical dot only on an occasional focus-update event, so it changes on a slower timescale than individual grains;
+3. usually sample a broad triangular probability cloud around the focus, making nearby columns more likely without turning the source into a nozzle;
+4. occasionally sample the whole visible width, retaining visibly rain-like outliers away from the favored region;
+5. if the sampled top cell is occupied, choose the nearest currently free visible ingress column, randomizing only an equal-distance tie;
+6. if no visible top column is free, leave the logical mass pending exactly as before.
+
+The initial SEDIMENT-002 physical personality uses an occasional one-in-four focus move, a one-in-five whole-width rain sample, and a local cloud radius of roughly one-sixth of the visible width with a small minimum radius. These are private implementation constants chosen to establish one coherent default personality; Settings do not expose them in this unit.
+
+The ingress focus is small stochastic engine state, not grain provenance. Actual grain placement does not overwrite the focus when occupancy forces a farther fallback. The focus shifts by the same horizontal offset when the canonical canvas expands around its center. A shrink does not mutate hidden canonical topology; when the focus lies outside the smaller visible basin, the next physical ingress clamps it into that basin without placing outside it. Re-expansion exposes the retained topology normally. Full clear resets the focus along with the pile, while the RNG stream continues; category-specific clear leaves the focus intact.
+
+No terrain generator, mountain template, post-settlement sculpting, temporal grain provenance, pressure solver, or user-facing randomness controls are part of this authority.
 
 ## Bounded runtime recovery
 
@@ -94,7 +125,7 @@ These kinds are not interchangeable. Historical bare daily payloads are cumulati
 
 ## Authentic day-end visual memory
 
-Karma historical background is visual memory, not a synthetic chart. While the live simulation crosses an operational-day cutoff, Strata captures the exact cumulative canonical `SandState` after processing events due through that boundary. For a fixed 06:00 day start, the artifact for a day is therefore the canonical canvas photo taken at the following 06:00 cutoff.
+Balance historical background is visual memory, not a synthetic chart. While the live simulation crosses an operational-day cutoff, Strata captures the exact cumulative canonical `SandState` after processing events due through that boundary. For a fixed 06:00 day start, the artifact for a day is therefore the canonical canvas photo taken at the following 06:00 cutoff.
 
 The day-end artifact is first-write-wins evidence:
 
@@ -103,13 +134,13 @@ The day-end artifact is first-write-wins evidence:
 - each operational day may therefore own a different canonical canvas size;
 - `snapshot_kind = 'daily'` stores this cumulative visual checkpoint, while `daily-contribution` remains a separate accounting artifact.
 
-If Strata did not observe a boundary through the ordinary live simulation path—for example because it was closed, detached through the cutoff, or bounded recovery deliberately skipped historical physics—it does not fabricate an authentic photo. Karma may then show a `DerivedPreview`, explicitly marked reconstructed.
+If Strata did not observe a boundary through the ordinary live simulation path—for example because it was closed, detached through the cutoff, or bounded recovery deliberately skipped historical physics—it does not fabricate an authentic photo. Balance may then show a `DerivedPreview`, explicitly marked reconstructed.
 
 ## Immutable historical viewing
 
 Historical viewing is projection-only:
 
-- Karma prefers the authentic day-end checkpoint for the selected interval end day;
+- Balance prefers the authentic day-end checkpoint for the selected interval end day;
 - the snapshot envelope and `SandState` remain immutable;
 - rendering restores a clone into a fresh viewport engine;
 - a smaller current viewport crops the historical canvas around horizontal center and bottom baseline;
@@ -120,7 +151,7 @@ Historical viewing is projection-only:
 - the report UI exposes kind, reconstruction status, and idle policy;
 - viewing never writes or deletes persistence.
 
-Day, week, and month Karma use the visual artifact for the selected interval's end day. The numerical report rows remain ledger-derived for the selected period. If no authentic photo exists, an in-memory `DerivedPreview` is the visual fallback and never becomes authority merely by being viewed.
+Day, week, and month Balance use the visual artifact for the selected interval's end day. The numerical report rows remain ledger-derived for the selected period. If no authentic photo exists, an in-memory `DerivedPreview` is the visual fallback and never becomes authority merely by being viewed.
 
 ## Authoritative daily contributions
 
@@ -136,6 +167,23 @@ The builder:
 - calculates a source revision from day, quantum, idle policy, category identity, elapsed seconds, slice endpoints, and session identity.
 
 Description text and canvas dimensions are deliberately absent from the contribution revision because neither changes sediment mass or chronology. Consequently, resizing or clearing the visual canvas today cannot make an old accounting contribution stale. Persisted contribution reconciliation remains ledger-driven and separate from the immutable day-end visual artifact.
+
+## Historical correction and retained current sediment
+
+Retroactive ledger correction does not replay historical physics and does not make the current pile a complete ledger chart. The live canonical `SandState` may have lost earlier mass through full clear or category-specific clear, while arbitrary historical assignment may also fill a true chronological gap that never emitted sand.
+
+When a historical assignment changes already-classified canonical seconds from one category to another, Strata derives a category-transfer count from those changed seconds. The current pile then applies that transfer only against source-category mass that is still retained:
+
+- placed source grains are recolored deterministically in canonical serialized order before pending mass;
+- pending mass is recolored without changing FIFO order or total count;
+- grain coordinates, topology, canvas dimensions, frame count, sweep direction, RNG state, and total logical mass do not change;
+- true-gap seconds have no source transfer and therefore create no current grains;
+- if prior clears leave fewer source-category grains than the transfer requests, only the retained amount is recolored; unrelated categories are never consumed to make the pile numerically match corrected ledger history;
+- because grains intentionally carry no temporal/session provenance, the deterministic category-only choice does not claim that a particular recolored grain physically originated in the corrected interval.
+
+The resulting current `SandState`, runtime checkpoint, canonical history rewrite, and affected `DailyContribution` rows publish coherently in one SQLite transaction. The application installs that exact committed `SandState` after the receipt returns. This operation adds no per-grain timestamp or session identity.
+
+Authentic first-write day-end `daily` checkpoints remain immutable visual evidence and are never recolored by later history correction. Ledger-derived `DailyContribution` and in-memory `DerivedPreview` continue to reflect corrected chronology under their existing authority.
 
 ## Mutation and recovery reconciliation
 
@@ -154,7 +202,7 @@ A historical bare `daily` payload that is a valid `SandState` remains cumulative
 
 ## Certification
 
-The authentic day-end visual-memory correction described above is implemented after the last certified baseline and is awaiting native certification. The counts below describe the previously certified SEDIMENT-001 baseline.
+HISTORY-001E retained-current-sediment recolor is native-green at `d67c8e382708dbbf3f71bf2a67d7daa81b2e36b8` with 263 tests plus isolated runtime/restart proof. SEDIMENT-002 organic formation is implemented after that certified frontier and is awaiting native certification. The historical counts below remain the earlier SEDIMENT-001 baseline evidence.
 
 SEDIMENT-001 is certified through PRs #50–#55.
 

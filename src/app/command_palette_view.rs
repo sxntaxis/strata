@@ -147,13 +147,13 @@ impl App {
         let mut entries = vec![
             self.palette_action_entry(
                 Action::OpenCategoryModal,
-                "Open layer pop-up",
-                &["layers", "strata", "edit", "popup"],
+                "Open Layer",
+                &["layer", "layers", "current", "activity", "classification"],
             ),
             self.palette_action_entry(
                 Action::OpenReportModal,
-                "Open karma pop-up",
-                &["karma", "report", "popup"],
+                "Open Balance",
+                &["balance", "history", "report", "past"],
             ),
             self.palette_action_entry(
                 Action::Detach,
@@ -161,21 +161,53 @@ impl App {
                 &["detach", "detached", "dettached", "headless", "background"],
             ),
             self.palette_action_entry(
-                Action::ToggleKeybindingsHelp,
-                "Open command atlas",
-                &["atlas", "help", "keybindings", "commands"],
+                Action::ToggleSettings,
+                "Open Settings",
+                &[
+                    "settings",
+                    "keybindings",
+                    "bindings",
+                    "keys",
+                    "help",
+                    "commands",
+                ],
             ),
             self.palette_action_entry(
                 Action::SwitchToNone,
                 "Switch layer: idle",
                 &["drift", "idle", "none", "neutral"],
             ),
-            self.palette_period_entry(ReportPeriod::Today, Action::ReportToday, "Karma range: day"),
-            self.palette_period_entry(ReportPeriod::Week, Action::ReportWeek, "Karma range: week"),
+            self.palette_period_entry(
+                ReportPeriod::Today,
+                Action::ReportToday,
+                "Balance range: day",
+            ),
+            self.palette_period_entry(
+                ReportPeriod::Week,
+                Action::ReportWeek,
+                "Balance range: week",
+            ),
             self.palette_period_entry(
                 ReportPeriod::Month,
                 Action::ReportMonth,
-                "Karma range: month",
+                "Balance range: month",
+            ),
+            self.palette_action_entry(
+                Action::ReportRange,
+                "Balance range: custom…",
+                &["range", "from", "to", "dates", "custom"],
+            ),
+            self.palette_action_entry(
+                Action::LogActivity,
+                "Log activity…",
+                &[
+                    "history",
+                    "retroactive",
+                    "from",
+                    "to",
+                    "correct",
+                    "activity",
+                ],
             ),
             self.palette_action_entry(
                 Action::ClearAllSand,
@@ -253,7 +285,7 @@ impl App {
     ) -> PaletteEntry {
         let hint = self.palette_hint_for_action(hint_action);
         let search_text = format!(
-            "{} karma report {}",
+            "{} balance report {}",
             title.to_ascii_lowercase(),
             period_search_label(period)
         );
@@ -513,13 +545,13 @@ mod tests {
 
     #[test]
     fn test_palette_match_score_handles_empty_query() {
-        assert_eq!(palette_match_score("", "open layer pop-up"), Some(0));
+        assert_eq!(palette_match_score("", "open layer"), Some(0));
     }
 
     #[test]
     fn test_palette_token_score_prefers_prefix_over_contains() {
-        let prefix = palette_token_score("open", "open layer pop-up").expect("prefix match");
-        let contains = palette_token_score("layer", "open layer pop-up").expect("contains");
+        let prefix = palette_token_score("open", "open layer").expect("prefix match");
+        let contains = palette_token_score("layer", "open layer").expect("contains");
 
         assert!(prefix < contains);
     }
@@ -531,14 +563,14 @@ mod tests {
 
     #[test]
     fn test_palette_token_score_accepts_small_typos() {
-        let exact = palette_token_score("karma", "karma range day").expect("exact match");
-        let typo = palette_token_score("karmma", "karma range day").expect("typo match");
+        let exact = palette_token_score("balance", "balance range day").expect("exact match");
+        let typo = palette_token_score("balnce", "balance range day").expect("typo match");
 
         assert!(exact < typo);
     }
 
     #[test]
     fn test_levenshtein_distance_limit_rejects_large_typos() {
-        assert_eq!(levenshtein_distance_with_limit("karma", "krmzz", 2), None);
+        assert_eq!(levenshtein_distance_with_limit("balance", "krmzz", 2), None);
     }
 }

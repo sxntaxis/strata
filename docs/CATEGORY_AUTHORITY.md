@@ -1,7 +1,7 @@
 # Category authority
 
 Status: accepted and certified
-Last reviewed: 2026-08-20
+Last reviewed: 2026-08-27
 
 ## Purpose
 
@@ -14,7 +14,7 @@ A category is identified by one stable numeric `CategoryId`. Durable category st
 - name;
 - description/metadata;
 - palette color index;
-- karma effect;
+- balance effect;
 - active or archived state;
 - reusable tags attached to the stable ID.
 
