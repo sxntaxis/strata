@@ -43,10 +43,13 @@ pub struct SandState {
     pub pending_grains: Vec<u64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_runs: Vec<PendingGrainRun>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub active_avalanche_columns: Vec<usize>,
 }
 
 impl SandState {
-    pub const VERSION: u8 = 3;
+    pub const VERSION: u8 = 4;
+    pub const ORGANIC_VERSION: u8 = 3;
     pub const COMPRESSED_PENDING_VERSION: u8 = 2;
     pub const LEGACY_VERSION: u8 = 1;
 }
@@ -135,10 +138,11 @@ fn default_rng_state() -> u64 {
     0x9E37_79B9_7F4A_7C15
 }
 
-const DIAGONAL_SLIDE_CHANCE_NUMERATOR: usize = 1;
-const DIAGONAL_SLIDE_CHANCE_DENOMINATOR: usize = 4;
 const INGRESS_FOCUS_MOVE_ONE_IN: usize = 4;
 const INGRESS_FOCUS_BIAS_ONE_IN: usize = 4;
+const STATIC_REPOSE_RELIEF: usize = 3;
+const DYNAMIC_REPOSE_RELIEF: usize = 1;
+const AVALANCHE_ACTIVITY_RADIUS: usize = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PendingRun {
@@ -165,6 +169,14 @@ pub struct SandEngine {
     rng_state: u64,
     ingress_focus_x: Option<usize>,
     pending_runs: VecDeque<PendingRun>,
+    avalanche_active: Vec<bool>,
+    supported_heights: Vec<usize>,
+    #[cfg(test)]
+    last_avalanche_motion: bool,
+    #[cfg(test)]
+    last_diagonal_topple: bool,
+    #[cfg(test)]
+    last_avalanche_span: usize,
     pub grain_count: usize,
 }
 
@@ -184,6 +196,14 @@ impl SandEngine {
             rng_state: rand::random::<u64>() | 1,
             ingress_focus_x: None,
             pending_runs: VecDeque::new(),
+            avalanche_active: vec![false; grid_width_dots],
+            supported_heights: vec![0; grid_width_dots],
+            #[cfg(test)]
+            last_avalanche_motion: false,
+            #[cfg(test)]
+            last_diagonal_topple: false,
+            #[cfg(test)]
+            last_avalanche_span: 0,
             grain_count: 0,
         }
     }
@@ -217,6 +237,14 @@ impl SandEngine {
             .map(|x| x.saturating_add(horizontal_offset));
         self.grid_width_dots = target_width;
         self.grid_height_dots = target_height;
+        let mut shifted_active = vec![false; target_width];
+        for (old_x, is_active) in self.avalanche_active.iter().copied().enumerate() {
+            if is_active {
+                shifted_active[old_x + horizontal_offset] = true;
+            }
+        }
+        self.avalanche_active = shifted_active;
+        self.supported_heights.resize(target_width, 0);
     }
 
     fn capacity(&self) -> usize {
@@ -426,27 +454,149 @@ impl SandEngine {
         }
     }
 
-    fn diagonal_target(&mut self, x: usize, left_open: bool, right_open: bool) -> Option<usize> {
-        if !left_open && !right_open {
-            return None;
-        }
-
-        // A small stochastic friction gate lets steep local stacks survive for a
-        // few passes before yielding. Repeated gravity passes eventually allow
-        // avalanches without adding per-grain memory or a slope solver.
-        if self.random_index(DIAGONAL_SLIDE_CHANCE_DENOMINATOR) >= DIAGONAL_SLIDE_CHANCE_NUMERATOR {
-            return None;
-        }
-
-        match (left_open, right_open) {
-            (true, false) => Some(x - 1),
-            (false, true) => Some(x + 1),
-            (true, true) => Some(if self.random_bool() { x + 1 } else { x - 1 }),
-            (false, false) => None,
+    fn refresh_avalanche_activity(&mut self, bounds: ViewportBounds, x: usize) {
+        let start = x
+            .saturating_sub(AVALANCHE_ACTIVITY_RADIUS)
+            .max(bounds.x_start);
+        let end = x
+            .saturating_add(AVALANCHE_ACTIVITY_RADIUS + 1)
+            .min(bounds.x_end);
+        for column in start..end {
+            self.avalanche_active[column] = true;
         }
     }
 
+    fn derive_supported_heights(&mut self, bounds: ViewportBounds) {
+        self.supported_heights.fill(0);
+        for x in bounds.x_start..bounds.x_end {
+            let mut height = 0;
+            for y in (bounds.y_start..bounds.y_end).rev() {
+                if self.grid[y][x].is_none() {
+                    break;
+                }
+                height += 1;
+            }
+            self.supported_heights[x] = height;
+        }
+    }
+
+    fn diagonal_target_for_relief(
+        &mut self,
+        bounds: ViewportBounds,
+        x: usize,
+        threshold: usize,
+    ) -> Option<(usize, usize)> {
+        let source_height = self.supported_heights[x];
+        if source_height == 0 {
+            return None;
+        }
+        let source_y = bounds.y_end - source_height;
+        if source_y + 1 >= bounds.y_end || self.grid[source_y][x].is_none() {
+            return None;
+        }
+
+        let mut greatest_relief = 0;
+        let mut preferred_target = None;
+        let mut equal_relief = false;
+        for target_x in [x.checked_sub(1), x.checked_add(1)].into_iter().flatten() {
+            if target_x < bounds.x_start || target_x >= bounds.x_end {
+                continue;
+            }
+            if self.grid[source_y + 1][target_x].is_some() {
+                continue;
+            }
+            let target_height = self.supported_heights[target_x];
+            if source_height <= target_height {
+                continue;
+            }
+            let relief = source_height - target_height;
+            if relief <= threshold {
+                continue;
+            }
+            if relief > greatest_relief {
+                greatest_relief = relief;
+                preferred_target = Some(target_x);
+                equal_relief = false;
+            } else if relief == greatest_relief {
+                equal_relief = true;
+            }
+        }
+        let preferred_target = preferred_target?;
+        let target_x = if equal_relief {
+            if self.random_bool() {
+                if Some(preferred_target) == x.checked_sub(1) {
+                    x.checked_add(1).unwrap()
+                } else {
+                    x.checked_sub(1).unwrap()
+                }
+            } else {
+                preferred_target
+            }
+        } else {
+            preferred_target
+        };
+        Some((source_y, target_x))
+    }
+
+    fn diagonal_topple(
+        &mut self,
+        bounds: ViewportBounds,
+        threshold: usize,
+        active_only: bool,
+    ) -> bool {
+        if !self.sweep_left_to_right {
+            for x in bounds.x_start..bounds.x_end {
+                if active_only && !self.avalanche_active[x] {
+                    continue;
+                }
+                if self.topple_column_if_unstable(bounds, x, threshold) {
+                    return true;
+                }
+            }
+        } else {
+            for x in (bounds.x_start..bounds.x_end).rev() {
+                if active_only && !self.avalanche_active[x] {
+                    continue;
+                }
+                if self.topple_column_if_unstable(bounds, x, threshold) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn topple_column_if_unstable(
+        &mut self,
+        bounds: ViewportBounds,
+        x: usize,
+        threshold: usize,
+    ) -> bool {
+        let Some((source_y, target_x)) = self.diagonal_target_for_relief(bounds, x, threshold)
+        else {
+            return false;
+        };
+        let target_y = source_y + 1;
+        let category = self.grid[source_y][x].take().expect("surface grain exists");
+        self.grid[target_y][target_x] = Some(category);
+        self.refresh_avalanche_activity(bounds, x);
+        self.refresh_avalanche_activity(bounds, target_x);
+        #[cfg(test)]
+        {
+            self.last_diagonal_topple = true;
+            self.last_avalanche_motion = true;
+            self.last_avalanche_span = x.abs_diff(target_x) + 1;
+        }
+        true
+    }
+
     fn apply_gravity(&mut self) {
+        #[cfg(test)]
+        {
+            self.last_avalanche_motion = false;
+            self.last_diagonal_topple = false;
+            self.last_avalanche_span = 0;
+        }
         let Some(bounds) = self.viewport_bounds() else {
             return;
         };
@@ -457,6 +607,7 @@ impl SandEngine {
         let base_left_to_right = self.sweep_left_to_right;
         self.sweep_left_to_right = !self.sweep_left_to_right;
 
+        let mut active_vertical = false;
         for y in (bounds.y_start..bounds.y_end - 1).rev() {
             let left_to_right = if y.is_multiple_of(2) {
                 base_left_to_right
@@ -466,44 +617,61 @@ impl SandEngine {
 
             if left_to_right {
                 for x in bounds.x_start..bounds.x_end {
-                    if let Some(cat) = self.grid[y][x] {
-                        if self.grid[y + 1][x].is_none() {
-                            self.grid[y + 1][x] = Some(cat);
-                            self.grid[y][x] = None;
-                        } else {
-                            let left_open = x > bounds.x_start && self.grid[y + 1][x - 1].is_none();
-                            let right_open =
-                                x + 1 < bounds.x_end && self.grid[y + 1][x + 1].is_none();
-                            let target_x = self.diagonal_target(x, left_open, right_open);
-
-                            if let Some(nx) = target_x {
-                                self.grid[y + 1][nx] = Some(cat);
-                                self.grid[y][x] = None;
-                            }
+                    if let Some(cat) = self.grid[y][x]
+                        && self.grid[y + 1][x].is_none()
+                    {
+                        self.grid[y + 1][x] = Some(cat);
+                        self.grid[y][x] = None;
+                        active_vertical |= self.avalanche_active[x]
+                            || self
+                                .avalanche_active
+                                .get(x.saturating_sub(1))
+                                .copied()
+                                .unwrap_or(false)
+                            || self.avalanche_active.get(x + 1).copied().unwrap_or(false);
+                        #[cfg(test)]
+                        if active_vertical {
+                            self.last_avalanche_motion = true;
                         }
                     }
                 }
             } else {
                 for x in (bounds.x_start..bounds.x_end).rev() {
-                    if let Some(cat) = self.grid[y][x] {
-                        if self.grid[y + 1][x].is_none() {
-                            self.grid[y + 1][x] = Some(cat);
-                            self.grid[y][x] = None;
-                        } else {
-                            let left_open = x > bounds.x_start && self.grid[y + 1][x - 1].is_none();
-                            let right_open =
-                                x + 1 < bounds.x_end && self.grid[y + 1][x + 1].is_none();
-                            let target_x = self.diagonal_target(x, left_open, right_open);
-
-                            if let Some(nx) = target_x {
-                                self.grid[y + 1][nx] = Some(cat);
-                                self.grid[y][x] = None;
-                            }
+                    if let Some(cat) = self.grid[y][x]
+                        && self.grid[y + 1][x].is_none()
+                    {
+                        self.grid[y + 1][x] = Some(cat);
+                        self.grid[y][x] = None;
+                        active_vertical |= self.avalanche_active[x]
+                            || self
+                                .avalanche_active
+                                .get(x.saturating_sub(1))
+                                .copied()
+                                .unwrap_or(false)
+                            || self.avalanche_active.get(x + 1).copied().unwrap_or(false);
+                        #[cfg(test)]
+                        if active_vertical {
+                            self.last_avalanche_motion = true;
                         }
                     }
                 }
             }
         }
+
+        self.derive_supported_heights(bounds);
+        let active_visible = (bounds.x_start..bounds.x_end).any(|x| self.avalanche_active[x]);
+        if active_visible {
+            if self.diagonal_topple(bounds, DYNAMIC_REPOSE_RELIEF, true) {
+                return;
+            }
+            if active_vertical {
+                return;
+            }
+            for x in bounds.x_start..bounds.x_end {
+                self.avalanche_active[x] = false;
+            }
+        }
+        let _ = self.diagonal_topple(bounds, STATIC_REPOSE_RELIEF, false);
     }
 
     pub fn update(&mut self) {
@@ -623,6 +791,7 @@ impl SandEngine {
         self.grid = vec![vec![None; self.grid_width_dots]; self.grid_height_dots];
         self.pending_runs.clear();
         self.ingress_focus_x = None;
+        self.avalanche_active.fill(false);
         self.grain_count = 0;
     }
 
@@ -725,6 +894,12 @@ impl SandEngine {
                     count: run.count,
                 })
                 .collect(),
+            active_avalanche_columns: self
+                .avalanche_active
+                .iter()
+                .enumerate()
+                .filter_map(|(x, active)| active.then_some(x))
+                .collect(),
         }
     }
 
@@ -735,6 +910,7 @@ impl SandEngine {
     ) -> Result<(), String> {
         if state.version != SandState::VERSION
             && state.version != SandState::COMPRESSED_PENDING_VERSION
+            && state.version != SandState::ORGANIC_VERSION
             && state.version != SandState::LEGACY_VERSION
         {
             return Err(format!("unsupported sand state version {}", state.version));
@@ -742,8 +918,28 @@ impl SandEngine {
         if (state.grid_width == 0 || state.grid_height == 0) && !state.grains.is_empty() {
             return Err("zero-sized sand state cannot contain placed grains".to_string());
         }
-        if state.version != SandState::VERSION && state.ingress_focus_x.is_some() {
+        if state.version != SandState::VERSION
+            && state.version != SandState::ORGANIC_VERSION
+            && state.ingress_focus_x.is_some()
+        {
             return Err("pre-organic sand state contains an ingress focus".to_string());
+        }
+        if state.version != SandState::VERSION && !state.active_avalanche_columns.is_empty() {
+            return Err("pre-v4 sand state contains active avalanche columns".to_string());
+        }
+        if state
+            .active_avalanche_columns
+            .windows(2)
+            .any(|columns| columns[0] >= columns[1])
+        {
+            return Err("sand active avalanche columns must be strictly sorted".to_string());
+        }
+        if state
+            .active_avalanche_columns
+            .iter()
+            .any(|&x| x >= state.grid_width)
+        {
+            return Err("sand active avalanche column is outside the canonical grid".to_string());
         }
         if let Some(focus_x) = state.ingress_focus_x
             && (state.grid_width == 0 || focus_x >= state.grid_width)
@@ -843,11 +1039,19 @@ impl SandEngine {
         } else {
             state.rng_state
         };
-        self.ingress_focus_x = if state.version == SandState::VERSION {
-            state.ingress_focus_x
-        } else {
-            None
-        };
+        self.ingress_focus_x =
+            if state.version == SandState::VERSION || state.version == SandState::ORGANIC_VERSION {
+                state.ingress_focus_x
+            } else {
+                None
+            };
+        self.avalanche_active = vec![false; state.grid_width];
+        if state.version == SandState::VERSION {
+            for &x in &state.active_avalanche_columns {
+                self.avalanche_active[x] = true;
+            }
+        }
+        self.supported_heights = vec![0; state.grid_width];
         self.expand_logical_canvas_to_viewport();
         Ok(())
     }
@@ -943,6 +1147,7 @@ mod tests {
                     count: 2,
                 },
             ],
+            active_avalanche_columns: Vec::new(),
         };
         let before_coordinates = state
             .grains
@@ -1025,6 +1230,7 @@ mod tests {
                 category_id: 2,
                 count: 4,
             }],
+            active_avalanche_columns: Vec::new(),
         };
 
         let recolored =
@@ -1221,6 +1427,7 @@ mod tests {
             ingress_focus_x: None,
             pending_grains: Vec::new(),
             pending_runs: Vec::new(),
+            active_avalanche_columns: Vec::new(),
         };
 
         let mut restored = SandEngine::new(20, 20);
@@ -1382,28 +1589,6 @@ mod organic_formation_tests {
         sand::{SandEngine, SandState, SandStateGrain},
     };
 
-    fn gravity_fixture(
-        block_left: bool,
-        block_right: bool,
-        rng_state: u64,
-    ) -> (SandEngine, usize, usize) {
-        let mut engine = SandEngine::new(3, 1);
-        engine.clear();
-        let y = engine.grid_height_dots - 2;
-        let x = engine.grid_width_dots / 2;
-        engine.grid[y][x] = Some(CategoryId::new(1));
-        engine.grid[y + 1][x] = Some(CategoryId::new(2));
-        if block_left {
-            engine.grid[y + 1][x - 1] = Some(CategoryId::new(2));
-        }
-        if block_right {
-            engine.grid[y + 1][x + 1] = Some(CategoryId::new(2));
-        }
-        engine.grain_count = 2 + if block_left { 1 } else { 0 } + if block_right { 1 } else { 0 };
-        engine.rng_state = rng_state;
-        (engine, x, y)
-    }
-
     #[test]
     fn gravity_down_open_remains_unconditional_and_consumes_no_rng() {
         let mut engine = SandEngine::new(3, 2);
@@ -1421,54 +1606,108 @@ mod organic_formation_tests {
         assert_eq!(engine.rng_state, 17);
     }
 
-    #[test]
-    fn gravity_friction_can_hold_then_release_a_sole_left_diagonal() {
-        let (mut engine, x, y) = gravity_fixture(false, true, 7);
-        let initial_rng = engine.rng_state;
-
-        engine.apply_gravity();
-        assert_eq!(engine.grid[y][x], Some(CategoryId::new(1)));
-        assert_ne!(engine.rng_state, initial_rng);
-
-        engine.apply_gravity();
-        assert_eq!(engine.grid[y][x], None);
-        assert_eq!(engine.grid[y + 1][x - 1], Some(CategoryId::new(1)));
+    fn supported_relief_fixture(relief: usize) -> (SandEngine, usize) {
+        let mut engine = SandEngine::new(4, 1);
+        engine.clear();
+        let source_x = 2;
+        for y in (engine.grid_height_dots - relief)..engine.grid_height_dots {
+            for x in source_x..engine.grid_width_dots {
+                engine.grid[y][x] = Some(CategoryId::new(if x == source_x { 1 } else { 2 }));
+            }
+        }
+        engine.grain_count = relief * (engine.grid_width_dots - source_x);
+        (engine, source_x)
     }
 
     #[test]
-    fn gravity_friction_can_hold_then_release_a_sole_right_diagonal() {
-        let (mut engine, x, y) = gravity_fixture(true, false, 7);
+    fn static_metastability_is_deterministic_for_ten_thousand_passes() {
+        let (mut engine, source_x) = supported_relief_fixture(3);
+        let before = engine.snapshot_state();
 
-        engine.apply_gravity();
-        assert_eq!(engine.grid[y][x], Some(CategoryId::new(1)));
+        for _ in 0..10_000 {
+            engine.apply_gravity();
+        }
 
-        engine.apply_gravity();
-        assert_eq!(engine.grid[y][x], None);
-        assert_eq!(engine.grid[y + 1][x + 1], Some(CategoryId::new(1)));
+        assert_eq!(engine.snapshot_state(), before);
+        assert!(engine.avalanche_active.iter().all(|active| !active));
+        assert_eq!(engine.rng_state, before.rng_state);
+        assert!(
+            engine.grid[engine.grid_height_dots - 3..]
+                .iter()
+                .all(|row| row[source_x].is_some())
+        );
     }
 
     #[test]
-    fn gravity_both_open_can_hold_or_slide_left_and_right() {
-        let (mut held, x, y) = gravity_fixture(false, false, 1);
-        held.apply_gravity();
-        assert_eq!(held.grid[y][x], Some(CategoryId::new(1)));
+    fn relief_four_yields_without_random_waiting() {
+        let (mut engine, source_x) = supported_relief_fixture(4);
+        let before_rng = engine.rng_state;
 
-        let (mut right_engine, x, y) = gravity_fixture(false, false, 129);
-        right_engine.apply_gravity();
-        assert_eq!(right_engine.grid[y + 1][x + 1], Some(CategoryId::new(1)));
+        engine.apply_gravity();
 
-        let (mut left_engine, x, y) = gravity_fixture(false, false, 4);
-        left_engine.apply_gravity();
-        assert_eq!(left_engine.grid[y + 1][x - 1], Some(CategoryId::new(1)));
+        assert_eq!(engine.rng_state, before_rng);
+        assert_eq!(engine.grid[engine.grid_height_dots - 4][source_x], None);
+        assert!(engine.avalanche_active.iter().any(|active| *active));
     }
 
     #[test]
-    fn gravity_stays_when_down_and_both_diagonals_are_blocked_without_rng() {
-        let (mut engine, x, y) = gravity_fixture(true, true, 1);
+    fn dynamic_threshold_two_yields_but_static_threshold_three_holds() {
+        let (mut engine, source_x) = supported_relief_fixture(2);
         engine.apply_gravity();
+        assert_eq!(
+            engine.grid[engine.grid_height_dots - 2][source_x],
+            Some(CategoryId::new(1))
+        );
 
-        assert_eq!(engine.grid[y][x], Some(CategoryId::new(1)));
-        assert_eq!(engine.rng_state, 1);
+        engine.avalanche_active[source_x] = true;
+        engine.apply_gravity();
+        assert_eq!(engine.grid[engine.grid_height_dots - 2][source_x], None);
+    }
+
+    #[test]
+    fn airborne_grains_do_not_inflate_supported_surface_height() {
+        let mut engine = SandEngine::new(4, 2);
+        engine.clear();
+        let bounds = engine.viewport_bounds().unwrap();
+        let x = bounds.x_start + 2;
+        engine.grid[bounds.y_end - 1][x] = Some(CategoryId::new(1));
+        engine.grid[bounds.y_start][x] = Some(CategoryId::new(2));
+
+        engine.derive_supported_heights(bounds);
+
+        assert_eq!(engine.supported_heights[x], 1);
+    }
+
+    #[test]
+    fn active_avalanche_columns_round_trip_sorted_and_shift_on_growth() {
+        let mut engine = SandEngine::new(4, 2);
+        engine.avalanche_active[1] = true;
+        engine.avalanche_active[5] = true;
+        let state = engine.snapshot_state();
+        assert_eq!(state.active_avalanche_columns, vec![1, 5]);
+
+        let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
+        let mut restored = SandEngine::new(4, 2);
+        restored.restore_state(&state, &valid).unwrap();
+        assert_eq!(restored.snapshot_state(), state);
+
+        let old_width = restored.grid_width_dots;
+        restored.resize(8, 2);
+        let offset = (restored.grid_width_dots - old_width) / 2;
+        assert!(restored.avalanche_active[1 + offset]);
+        assert!(restored.avalanche_active[5 + offset]);
+    }
+
+    #[test]
+    fn malformed_active_avalanche_columns_fail_closed() {
+        let mut state = SandEngine::new(4, 2).snapshot_state();
+        state.active_avalanche_columns = vec![3, 3];
+        let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
+        let mut engine = SandEngine::new(4, 2);
+        assert!(engine.restore_state(&state, &valid).is_err());
+
+        state.active_avalanche_columns = vec![state.grid_width];
+        assert!(engine.restore_state(&state, &valid).is_err());
     }
 
     #[test]
@@ -1678,6 +1917,7 @@ mod organic_formation_tests {
             ingress_focus_x: None,
             pending_grains: Vec::new(),
             pending_runs: Vec::new(),
+            active_avalanche_columns: Vec::new(),
         };
         let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
         let mut engine = SandEngine::new(1, 1);
@@ -1687,6 +1927,105 @@ mod organic_formation_tests {
 
         assert_eq!(upgraded.version, SandState::VERSION);
         assert_eq!(upgraded.ingress_focus_x, None);
+    }
+
+    #[test]
+    fn version_three_state_migrates_focus_and_empty_activity_to_v4() {
+        let mut state = SandEngine::new(4, 2).snapshot_state();
+        state.version = SandState::ORGANIC_VERSION;
+        state.ingress_focus_x = Some(3);
+        let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
+        let mut engine = SandEngine::new(1, 1);
+
+        engine.restore_state(&state, &valid).unwrap();
+        let upgraded = engine.snapshot_state();
+
+        assert_eq!(upgraded.version, SandState::VERSION);
+        assert_eq!(upgraded.ingress_focus_x, Some(3));
+        assert!(upgraded.active_avalanche_columns.is_empty());
+    }
+
+    #[test]
+    fn snapshot_restore_continues_an_in_progress_avalanche_exactly() {
+        let mut source = SandEngine::new(8, 4);
+        source.avalanche_active[3] = true;
+        source.avalanche_active[4] = true;
+        source.rng_state = 0x1234_5678;
+        source.sweep_left_to_right = false;
+        let state = source.snapshot_state();
+        let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
+        let mut restored = SandEngine::new(8, 4);
+        restored.restore_state(&state, &valid).unwrap();
+
+        for _ in 0..8 {
+            source.apply_gravity();
+            restored.apply_gravity();
+            assert_eq!(restored.snapshot_state(), source.snapshot_state());
+        }
+    }
+
+    #[test]
+    fn native_h2_statistics_cover_representative_viewports() {
+        fn run(width: u16, height: u16) -> (Vec<usize>, Vec<usize>, Vec<usize>, usize) {
+            let mut engine = SandEngine::new(width, height);
+            engine.rng_state = 0xD15E_A5ED;
+            let mut sizes = Vec::new();
+            let mut quiet = Vec::new();
+            let mut spans = Vec::new();
+            let mut event_size: usize = 0;
+            let mut event_quiet: usize = 0;
+            let mut event_span: usize = 0;
+            let mut active_event = false;
+            for _ in 0..10_000 {
+                engine.spawn(CategoryId::new(1));
+                engine.apply_gravity();
+                if engine.last_avalanche_motion {
+                    if !active_event {
+                        active_event = true;
+                        event_size = 0;
+                        event_quiet = 0;
+                        event_span = 0;
+                    }
+                    event_size += usize::from(engine.last_diagonal_topple);
+                    event_span = event_span.max(engine.last_avalanche_span);
+                } else {
+                    event_quiet += 1;
+                    if active_event {
+                        sizes.push(event_size);
+                        quiet.push(event_quiet.saturating_sub(1));
+                        spans.push(event_span);
+                        active_event = false;
+                    }
+                }
+            }
+            if active_event {
+                sizes.push(event_size);
+                quiet.push(event_quiet);
+                spans.push(event_span);
+            }
+            sizes.sort_unstable();
+            quiet.sort_unstable();
+            spans.sort_unstable();
+            (sizes, quiet, spans, engine.grain_count)
+        }
+
+        for (width, height) in [(40, 20), (80, 30)] {
+            let (sizes, quiet, spans, mass) = run(width, height);
+            assert_eq!(mass, 10_000);
+            assert!(!sizes.is_empty());
+            let median = sizes[sizes.len() / 2];
+            let max = sizes.iter().copied().max().unwrap();
+            let one_move = sizes.iter().filter(|&&size| size == 1).count() * 100 / sizes.len();
+            eprintln!(
+                "H2 {width}x{height}: events={} median={} max={} quiet_median={} one_move_pct={} span_median={}",
+                sizes.len(),
+                median,
+                max,
+                quiet[quiet.len() / 2],
+                one_move,
+                spans[spans.len() / 2]
+            );
+        }
     }
 
     #[test]
@@ -1702,6 +2041,7 @@ mod organic_formation_tests {
             ingress_focus_x: Some(0),
             pending_grains: Vec::new(),
             pending_runs: Vec::new(),
+            active_avalanche_columns: Vec::new(),
         };
         let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
         let mut engine = SandEngine::new(1, 1);
@@ -1724,6 +2064,7 @@ mod organic_formation_tests {
             ingress_focus_x: Some(2),
             pending_grains: Vec::new(),
             pending_runs: Vec::new(),
+            active_avalanche_columns: Vec::new(),
         };
         let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
         let mut engine = SandEngine::new(4, 2);
@@ -1897,6 +2238,7 @@ mod conservation_tests {
                 ingress_focus_x: None,
                 pending_grains: vec![2, 2, 1],
                 pending_runs: Vec::new(),
+                active_avalanche_columns: Vec::new(),
             };
             let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1), CategoryId::new(2)]);
             let mut engine = SandEngine::new(1, 1);

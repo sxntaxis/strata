@@ -1,8 +1,8 @@
 # Sediment authority
 
-Status: implemented and certified
+Status: H2 implemented; native validation pending
 Program: SEDIMENT-002 + PLATEAU-001H hardening
-Current completed unit: SEDIMENT-002; PLATEAU-001H H1 ingress hardening certified
+Current completed unit: SEDIMENT-002; PLATEAU-001H H1 ingress hardening certified; H2 candidate implemented
 Issues completed: #6, #7, #16, #18, #26
 Last reviewed: 2026-08-27
 
@@ -39,7 +39,8 @@ The current viewport is the active live-physics basin. New live grains enter at 
 
 ## SandState persistence
 
-`SandState` schema version 3 stores ordered pending runs plus the optional canonical ingress focus used by organic formation.
+`SandState` schema version 4 stores ordered pending runs, the optional canonical ingress focus, and sorted active avalanche
+columns. Version 3 remains readable and migrates with empty active activity.
 
 - Version 1 `pending_grains` vectors migrate deterministically into adjacent runs.
 - Version 2 compressed-pending states remain readable and upgrade to version 3 with no invented ingress focus.
@@ -49,6 +50,19 @@ The current viewport is the active live-physics basin. New live grains enter at 
 - `SandState` stores canonical grid dimensions explicitly; recovery through a zero viewport restores them exactly, while an ordinary larger live viewport may monotonically expand the restored canvas.
 - Ordinary restore normalizes unavailable category identities to idle; checkpoint recovery is stricter and refuses unavailable identities.
 
+## Metastable repose and local avalanches
+
+H2 replaces the memoryless diagonal lottery with deterministic local repose. The canonical dot grid remains the geometry
+authority. Supported height counts consecutive occupied cells upward from the visible bottom baseline and stops at the first
+gap, so airborne grains do not inflate relief. Supported relief `<= 3` is statically stable; relief `> 3` starts a yield.
+Active radius-one regions use dynamic relief `> 1`. One diagonal topple occurs per gravity pass, support-changing movement
+refreshes local activity, and active straight-down free fall keeps activity alive. An active region settles only after a
+pass has neither dynamic toppling nor active-region straight-down movement. Equal-relief side selection may consume RNG;
+unstable-source selection follows deterministic persisted sweep order. This is a coarse supported-relief proxy, not a
+literal pressure, force, or angle solver. H1 rain, pending mass, visible-basin custody, and HISTORY remain unchanged.
+
+Native validation of this candidate is pending.
+
 ## Organic live formation
 
 Live formation remains an ordinary falling-sand process; SEDIMENT-002 changes local stochastic personality, not sediment meaning or mass authority.
@@ -56,12 +70,13 @@ Live formation remains an ordinary falling-sand process; SEDIMENT-002 changes lo
 For each visible grain during a gravity pass:
 
 1. fall straight down whenever that cell is open;
-2. if down is blocked and at least one lower diagonal is open, pass a small stochastic-friction gate;
-3. the default personality slides on one of four such opportunities and temporarily holds on three of four;
-4. after the friction gate permits a slide, take the sole open diagonal when there is only one, or randomize left/right when both are open;
+2. if down is blocked, evaluate supported local repose and active-avalanche state;
+3. static failure uses relief greater than three and active continuation uses relief greater than one;
+4. after a deterministic yield, take the preferred reachable diagonal, randomizing only an equal-relief tie;
 5. if neither diagonal is open, remain in place without consuming a friction/lateral choice.
 
-The temporary hold is deliberately memoryless: no per-grain friction age, pressure, or slope field exists. Repeated gravity passes therefore let steep local stacks survive briefly and then yield into small avalanches, while straight-down motion remains unconditional. The one-quarter slide ratio is an internal physical-personality constant for this unit, not a user-facing tuning control. The existing alternating horizontal sweep remains an ordering/fairness mechanism.
+The former one-quarter slide personality is retired by H2. No per-grain friction age, pressure, or slope field exists. The
+existing alternating horizontal sweep remains an ordering/fairness mechanism.
 
 New physical ingress keeps the rain-like cadence while introducing only a weak long-term spatial preference. One persisted **ingress focus** wanders slowly across the visible top edge, but it must not be visually traceable as a nozzle from a handful of falling grains. For each physical ingress:
 

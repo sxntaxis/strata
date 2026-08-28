@@ -6,7 +6,7 @@ created: 2026-08-01
 updated: 2026-08-28
 authority: working
 summary: The validated plateau is installed on the real profile; PLATEAU-001H H1 is native-green and ready to cut over, after weakening nozzle-like ingress and simplifying Balance footer guidance from first daily-use evidence.
-next: Publish and cut over native-green H1, then resume real-profile daily use and admit further PLATEAU-001H changes only from concrete product friction.
+next: Complete native validation of PLATEAU-001H H2 v4 active-avalanche continuity, then return the validated candidate to the architecture author before publication or real-profile cutover.
 ---
 
 # NOW — Strata
@@ -86,6 +86,9 @@ The stale dirty adaptive-resize branch remains preserved as custody evidence and
 visible-basin, resize/restore, and atomic clear-all authority. No adaptive code was ported.
 
 The required core path is now PLATEAU-001H product hardening. Pomodoro/RHYTHM-001 remains optional and must not block plateau.
+
+PLATEAU-001H H2 is implemented in a disposable candidate checkout and awaits native validation. Its bench-selected
+constants are static supported relief 3 and dynamic active relief 1; the real profile and installed binary remain on H1.
 
 ## Completed post-migration units
 

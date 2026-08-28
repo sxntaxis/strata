@@ -2957,6 +2957,7 @@ mod tests {
             ingress_focus_x: None,
             pending_grains: Vec::new(),
             pending_runs: Vec::new(),
+            active_avalanche_columns: Vec::new(),
         };
         save_sand_state(&path, &state).unwrap();
         let daily = SedimentSnapshot::daily_contribution(
@@ -3150,6 +3151,7 @@ mod clear_all_transaction_tests {
             ingress_focus_x: None,
             pending_grains: Vec::new(),
             pending_runs: Vec::new(),
+            active_avalanche_columns: Vec::new(),
         }
     }
 
@@ -3213,6 +3215,7 @@ mod clear_all_transaction_tests {
             ingress_focus_x: None,
             pending_grains: Vec::new(),
             pending_runs: Vec::new(),
+            active_avalanche_columns: Vec::new(),
         };
         let snapshot =
             SedimentSnapshot::day_end_checkpoint("2026-08-01".to_string(), state.clone());
@@ -3253,6 +3256,7 @@ mod clear_all_transaction_tests {
             ingress_focus_x: None,
             pending_grains: Vec::new(),
             pending_runs: Vec::new(),
+            active_avalanche_columns: Vec::new(),
         };
         let payload = serde_json::to_string(&state).unwrap();
         let repository = open_cli_repository(&path).unwrap();
@@ -3418,6 +3422,7 @@ mod clear_all_additional_transaction_tests {
             ingress_focus_x: None,
             pending_grains: Vec::new(),
             pending_runs: Vec::new(),
+            active_avalanche_columns: Vec::new(),
         }
     }
 
@@ -3729,6 +3734,7 @@ mod clear_all_additional_transaction_tests {
                     count: *count,
                 })
                 .collect(),
+            active_avalanche_columns: Vec::new(),
         }
     }
 

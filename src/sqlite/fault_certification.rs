@@ -136,6 +136,7 @@ fn sand_state(frame_count: usize) -> SandState {
         ingress_focus_x: None,
         pending_grains: Vec::new(),
         pending_runs: Vec::new(),
+        active_avalanche_columns: Vec::new(),
     }
 }
 

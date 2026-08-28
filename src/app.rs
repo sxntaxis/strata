@@ -1874,6 +1874,7 @@ impl App {
             frame_count: state.frame_count,
             pending_grains: state.pending_grains.clone(),
             pending_runs: state.pending_runs.clone(),
+            active_avalanche_columns: state.active_avalanche_columns.clone(),
             sweep_left_to_right: state.sweep_left_to_right,
             rng_state: state.rng_state,
             ingress_focus_x: state.ingress_focus_x,
@@ -2617,6 +2618,7 @@ mod recovery_statement_tests {
                 ingress_focus_x: None,
                 pending_grains: Vec::new(),
                 pending_runs: Vec::new(),
+                active_avalanche_columns: Vec::new(),
             },
             pending_mutations: Vec::new(),
             recovery_target_utc: None,
@@ -2755,6 +2757,7 @@ mod transition_edge_tests {
             ingress_focus_x: None,
             pending_grains: Vec::new(),
             pending_runs: Vec::new(),
+            active_avalanche_columns: Vec::new(),
         }
     }
 
@@ -2959,6 +2962,7 @@ mod day_end_snapshot_tests {
                 category_id: 0,
                 count: 2,
             }],
+            active_avalanche_columns: Vec::new(),
         }
     }
 

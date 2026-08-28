@@ -233,6 +233,19 @@ This pack is bounded hardening. It introduces no new feature surface, SQLite mig
 
 Native evidence: formatting, strict Clippy, 284 tests, organic-formation and friction regression, deterministic full-width-rain coverage and weak-focus-bias proof, Balance rendering, HISTORY/recovery/schema regression, isolated bubblewrapped TUI smoke, and validator profile custody all pass. Native fallout was limited to one candidate test iterator correction plus rustfmt in `src/app/report_modal_view.rs` and `src/sand/engine.rs`; architecture semantics did not change.
 
+#### H2 — Metastable repose + local avalanches
+
+Status: **IMPLEMENTED / NATIVE VALIDATION PENDING**.
+
+The design bench selected static/dynamic supported relief `3/1`. The implementation retires the memoryless 25% diagonal
+lottery, derives bottom-connected supported surface height from the canonical grid, performs one deterministic diagonal
+topple per gravity pass, refreshes a radius-one local active region, and persists sorted active canonical columns in
+SandState v4. H1 ingress, pending mass, visible-basin custody, resize, and HISTORY semantics are unchanged.
+
+Design-bench evidence: selected 3/1 produced median event sizes 3–4, p95 7–11, median quiet buildup 11.5–13 grains,
+0% one-move events, and no runaway in the synthetic long run. Native completion requires migration, restart, resize,
+regression, runtime-custody, and performance lanes.
+
 ### RHYTHM-001 — Focus/Pomodoro experiment (optional)
 
 Not a plateau blocker.
