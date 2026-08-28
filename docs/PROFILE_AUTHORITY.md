@@ -66,7 +66,7 @@ Profile switching is process-bound close/open behavior.
 
 - There is no live switch command.
 - There is no `time_log_path` hot redirect.
-- The command atlas cannot edit one authority path independently.
+- Settings cannot edit one authority path independently.
 - Runtime configuration reload may update supported key/time settings but cannot change profile identity or owned paths.
 - To use another profile, exit Strata and invoke it again with `--profile <directory>`.
 - No active session, pending mutation, checkpoint, or in-memory ledger is transferred implicitly.

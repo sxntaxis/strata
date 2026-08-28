@@ -182,14 +182,15 @@ When an authoritative TUI write fails, Strata freezes normal mutation and displa
 
 The emergency JSON bundle is a custody artifact generated from current application state. It is not the same as the portable CSV bundle and is not a supported import format.
 
-## Keybindings
+## Settings and keybindings
 
-- Open the Command Atlas in TUI with `?` or `F1`.
+- Open Settings in TUI with `?` or `F1`. Settings contains the current configuration values, keybindings, and action guide.
 - Open the Command Palette with `Ctrl+P`.
 - Open Balance with `b`.
 - In main view, `d` detaches Strata while tracking continues.
 - In Balance, `d` or `t` selects day range, `w` week, and `m` month.
 - Press `r` in Balance for an explicit From/To range. Dates use `YYYY-MM-DD`; `Tab` switches fields, `Enter` applies, and `Esc` cancels.
+- Press `l` in Balance to log/correct arbitrary past activity. These Balance keys do not act as hidden Main shortcuts; use `b` or the command palette to enter historical work deliberately.
 - In layer text entry, `?` remains a normal character; use `F1` there.
 - Optional config file: `~/.config/strata/keymap.json`.
 - In Balance, `←` moves to older intervals and `→` moves toward current.
@@ -221,6 +222,7 @@ Notes:
 - `day_start_mode` accepts only `fixed`. Existing `sunrise` values are migrated visibly to `fixed`; Strata never implemented solar sunrise calculation.
 - `first_day_of_week` accepts `monday` through `sunday`.
 - `toggle_command_palette` is the action name for rebinding palette open/close.
+- `toggle_settings`, `settings_top`, and `settings_bottom` are the canonical Settings action names; older Atlas names remain accepted only as config aliases.
 
 Balance interval notes:
 

@@ -148,7 +148,7 @@ Deliverables:
 
 ### SEDIMENT-002 — Organic formation
 
-Status: **IMPLEMENTED / NATIVE VALIDATION PENDING**.
+Status: **COMPLETE / NATIVE-GREEN** at `4059e28df2ebf82bd31453ee208093eef57a4511`.
 
 Goal: make emergent shapes less white-noise-like while preserving ordinary falling-sand semantics and all certified mass/topology/recovery invariants.
 
@@ -166,12 +166,14 @@ Native proof must cover straight-down priority, friction hold and later slide fo
 
 ### INTERACTION-002 — Menus, Settings, and vocabulary convergence
 
+Status: **IMPLEMENTED / NATIVE VALIDATION PENDING**.
+
 Goal: polish action placement after historical operations exist, rather than polishing an incomplete menu graph.
 
 Expected ownership:
 
 - Main view: what is happening now.
-- Layer pop-up: current classification, tags, layer management.
+- Layer: current classification, tags, layer management.
 - Balance: past time, reports, inspection, historical correction.
 - Command palette: universal deliberate launcher/direct commands.
 - Settings: configuration, bindings, and discoverability/guide material.
@@ -184,6 +186,15 @@ Deliverables:
 - Revisit key bindings after Balance/custom-range/historical-edit actions exist.
 - Preserve configured Bound / Unbound / Disabled truth and mandatory `Ctrl-C` policy.
 - Keep command palette, visible menus, settings, and runtime routing in agreement.
+
+Accepted implementation:
+
+- The former Atlas becomes **Settings** everywhere current users see or current source names the surface. Existing Atlas config spellings remain parser-only aliases so the current real profile is not broken by the vocabulary cutover.
+- Settings keeps the established F1 / `?` defaults; a plain-letter Settings key is deliberately avoided because Layer owns ordinary text input.
+- Settings rows use human action names rather than config identifiers and are grouped as Main / Navigation / Layer / Balance / Settings. Bound / Unbound / Disabled and mandatory Ctrl-C remain exactly the underlying keymap truth.
+- Default contextual routing is reduced to Main Confirm→Layer when Layer is otherwise unbound, Main Cancel→Idle when Idle switch is otherwise unbound, and Balance Detach→Day. The old conditional Main Balance-day→Detach route is retired.
+- Balance physical keys `t/w/m/r/l` do not act as hidden Main shortcuts. The command palette remains the explicit universal launcher for Balance periods, custom range, and Log activity.
+- No new menu framework or Settings tab architecture is introduced in this unit; the existing surface is converged rather than replaced.
 
 ### PLATEAU-001H — Product hardening
 
@@ -216,7 +227,7 @@ Preferred progression:
 
 ## Agent locator
 
-Current edge: **HISTORY-001D — arbitrary retroactive activity**.
+Current edge: **INTERACTION-002 — Settings and vocabulary convergence**. SEDIMENT-002 is native-green at `4059e28df2ebf82bd31453ee208093eef57a4511`; interaction work now converges the existing truthful keymap/palette surface onto plain Settings vocabulary and removes misplaced historical-key shortcuts without creating a new menu framework.
 
 HISTORY-001A/B/C are native-green through `09412b703cf41016f889d725ba235a7a1e63ae6a`. HISTORY-001C established the completed-Idle split transaction, active-preview validation, atomic daily-contribution reconciliation, and Balance historical editor. HISTORY-001D now generalizes that safe primitive into arbitrary From/To activity assignment with explicit collision confirmation and protected live selection.
 

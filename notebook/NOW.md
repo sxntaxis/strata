@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-08-27
 authority: working
-summary: HISTORY-001A/B/C/D/E are natively green; SEDIMENT-002 organic formation is the current edge.
-next: Native-validate SEDIMENT-002 stochastic friction and biased-rain wandering focus, then proceed to INTERACTION-002.
+summary: HISTORY-001A/B/C/D/E and SEDIMENT-002 are natively green; INTERACTION-002 Settings/vocabulary convergence is the current edge.
+next: Native-validate INTERACTION-002 Settings/vocabulary convergence, then enter PLATEAU-001H product hardening.
 ---
 
 # NOW — Strata
@@ -45,7 +45,7 @@ The certified system includes:
 - conserved sediment, bounded recovery, immutable historical artifacts, and revision-matched daily contributions;
 - receipt-governed switch/finish/reset transitions plus atomic receipt-free clear-all;
 - active/archived category integrity with stable archive/restore identity;
-- explicit report editing, truthful keymap/palette/atlas routing, and exactly-once terminal restoration;
+- explicit report editing, truthful keymap/palette/Settings routing, and exactly-once terminal restoration;
 - session-owned active description drafts separated from durable category metadata and reusable tags;
 - one process-bound profile UUID owning complete data, state, configuration, recovery, and SQLite paths;
 - profile-scoped live CLI-to-TUI control with short-path and long-path socket publication recovery;
@@ -74,12 +74,12 @@ HISTORY-001D is now **COMPLETE / NATIVE-GREEN** at `bfaa8bf29f8019c25fe4f2ee8b1d
 
 HISTORY-001E is now **COMPLETE / NATIVE-GREEN** at `d67c8e382708dbbf3f71bf2a67d7daa81b2e36b8`: formatting, strict Clippy, 263 tests, pure recolor and historical-sediment transaction proofs, HISTORY-001D and sediment regression, isolated startup/detach/restart, and bubblewrap profile-custody proof all pass. Retained source-category mass recolors deterministically in place; true historical gaps and cleared-away mass never fabricate current grains; authentic first-write day-end snapshots remain immutable.
 
-The active edge is **SEDIMENT-002 — organic formation**. Falling sand keeps exact conserved mass and the visible-basin topology model. Straight-down motion stays unconditional, while diagonal opportunities now pass a tuned memoryless friction gate (one-quarter slide / three-quarters temporary hold) so steep local stacks can briefly persist and then avalanche. Top-edge ingress keeps a rain-like cadence: one persisted focus wanders slowly, most grains sample a broad triangular cloud around it, and occasional whole-width drops prevent nozzle-like concentration. The focus remains inside the visible physics basin when used, shifts with canonical canvas growth, and survives checkpoint/restart through `SandState` v3; v1/v2 remain readable. No terrain generator, pressure solver, pile sculpting, or user-facing randomness controls are part of this unit.
+The active edge is **INTERACTION-002 — Settings and vocabulary convergence**. SEDIMENT-002 is native-green at `4059e28df2ebf82bd31453ee208093eef57a4511`. The current pass keeps the existing truthful keymap authority but renames the former Atlas surface to plain Settings, replaces machine action identifiers with human labels grouped by Main / Navigation / Layer / Balance / Settings, retires the misplaced Main `t → Detach` fallback, and scopes historical physical keys to Balance while keeping the command palette as the deliberate universal launcher.
 
 The stale dirty adaptive-resize branch remains preserved as custody evidence and is superseded by the current-main
 visible-basin, resize/restore, and atomic clear-all authority. No adaptive code was ported.
 
-Later required order is SEDIMENT-002 organic formation, then INTERACTION-002 menu/Settings convergence and product hardening. Pomodoro/RHYTHM-001 remains optional and must not block plateau.
+After INTERACTION-002 native validation, the required core path enters PLATEAU-001H product hardening. Pomodoro/RHYTHM-001 remains optional and must not block plateau.
 
 ## Completed post-migration units
 

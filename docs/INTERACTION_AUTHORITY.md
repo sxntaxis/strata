@@ -1,8 +1,8 @@
 # Interaction authority
 
-Status: implemented and certified
-Program: INTERACTION-001
-Current completed unit: INTERACTION-001C
+Status: implemented; INTERACTION-002 native validation pending
+Program: INTERACTION-001 + INTERACTION-002 convergence
+Current completed unit: INTERACTION-001C; INTERACTION-002 source candidate active
 Issues completed: #19, #20, #24
 Last reviewed: 2026-08-27
 
@@ -85,7 +85,7 @@ It is separate from configurable bindings, cannot be rebound or disabled, and re
 
 Mandatory Quit remains under persistence-recovery custody. When recovery is active, Ctrl-C first exports the current recovery package and requests the established recovery exit rather than bypassing evidence custody or merely restarting the recovery loop.
 
-F1 is not mandatory. It is an ordinary configurable default for `toggle_keybindings_help`; removing or disabling the action removes F1 behavior.
+F1 is not mandatory. It is an ordinary configurable default for `toggle_settings`; removing or disabling the action removes F1 behavior. `?` is the second default Settings binding except while Layer explicitly owns text input.
 
 ## Contextual action policy
 
@@ -93,10 +93,11 @@ One resolver accepts an explicit input context and returns a mandatory, direct, 
 
 Accepted inherited aliases are:
 
-- `main.confirm → open_layer_popup` when the target is Unbound;
-- `main.cancel → switch_to_drift` when the target is Unbound;
-- `main.balance_today → detach` when the target is Unbound;
-- `report.detach → balance_today` always when the target is not Disabled.
+- `main.open_layer`: Confirm/open → Open Layer when the target is Unbound;
+- `main.switch_idle`: Cancel/close → Switch to Idle when the target is Unbound;
+- `balance.day`: Detach → Balance Day always when the target is not Disabled.
+
+The former inherited `main.balance_today → detach` route is retired. Its behavior was misplaced: changing whether Detach had a direct binding could repurpose a historical-range key on Main. Older explicit alias spellings (`main.confirm`, `main.cancel`, `report.detach`) remain parser compatibility names for the current routes, and an explicitly configured legacy `main.balance_today` rule remains readable rather than silently reinterpreted.
 
 Aliases are named configuration policy, not handler inspection. A disabled target is never reached. Removing an alias leaves the source action unchanged. Event handlers execute the resolver result without inspecting whether some other action has direct keys.
 
@@ -164,21 +165,34 @@ The current HISTORY-001D editor does not expose a historical Tag field. Newly in
 use an empty description instead of borrowing the current live tag. If the active generation is rebased, its
 persisted live description is preserved.
 
-## Command atlas and palette truth
+## Settings and palette truth
 
-The command atlas displays the same reachable graph used by runtime:
+Settings and the command palette expose the same reachable action authority used by runtime. Settings is the plain product name for the former command-atlas surface; `Atlas` is not current user-facing vocabulary.
 
+Settings displays:
+
+- current configuration values that are editable in-app, beginning with **First day of week**;
 - direct keys for Bound actions;
 - `(unbound)` for Unbound actions;
 - `(disabled)` for Disabled actions;
 - mandatory Ctrl-C separately on Quit;
-- contextual alias names, targets, and activation conditions;
+- contextual routes in human vocabulary rather than machine config identifiers;
 - close, movement, and jump hints derived from current configured bindings;
-- Backspace as Disable and Delete as Unbind in action editing.
+- Backspace as **Disable action** and Delete as **Unbind** in binding capture.
 
-The atlas does not synthesize contextual aliases as direct keys. F1 and `?` are shown as close controls only when their configured actions actually provide those routes.
+The visible action sections are **Main**, **Navigation**, **Layer**, **Balance**, and **Settings**. Machine config names remain persistence/API vocabulary and are not used as the Settings action labels.
 
-Disabled actions are removed from the command palette. Unbound actions remain available through deliberate palette invocation and are labeled `unbound`; palette selection is an explicit route rather than an invented physical binding.
+The default contextual routes are intentionally small:
+
+- Main `Confirm / open` → **Open Layer** when Open Layer has no direct binding;
+- Main `Cancel / close` → **Switch to Idle** when Switch to Idle has no direct binding;
+- Balance `Detach` → **Day** always, preserving the established `d`/`t` day-range convenience.
+
+The former `main.balance_today` fallback, which could turn the Balance-day key into Detach on Main when Detach was unbound, is retired as misplaced interaction.
+
+Balance-specific physical keys (`t`, `w`, `m`, `r`, `l`) own historical interaction inside Balance. They are not hidden Main shortcuts. The command palette remains the deliberate universal launcher: **Log activity…**, **Custom range…**, and Balance period choices may be invoked from anywhere and explicitly enter Balance.
+
+Disabled actions are removed from the command palette. Unbound actions remain available through deliberate palette invocation and are labeled `unbound`; palette selection is an explicit route rather than an invented physical binding. F1 and `?` remain ordinary configurable defaults for Settings because a plain-letter Settings key would conflict with Layer text entry. `?` remains literal text while Layer owns text input; F1 still opens Settings there.
 
 ## Terminal lifecycle ownership
 
@@ -249,7 +263,7 @@ INTERACTION-001A through 001C pass:
 - 2 temporal-authority tests;
 - 3 terminal-lifecycle PTY process tests covering six lifecycle paths.
 
-Focused proofs cover explicit view/edit ownership, stable-ID draft persistence, idempotent restoration, primary-error preservation, termios restoration, emergency checkpoint publication, panic cleanup without false persistence claims, distinct Bound/Unbound/Disabled state, fail-closed configuration contradictions, mandatory-key protection, contextual alias conditions, disabled-route exclusion, and atlas/palette/runtime parity.
+Focused proofs cover explicit view/edit ownership, stable-ID draft persistence, idempotent restoration, primary-error preservation, termios restoration, emergency checkpoint publication, panic cleanup without false persistence claims, distinct Bound/Unbound/Disabled state, fail-closed configuration contradictions, mandatory-key protection, contextual alias conditions, disabled-route exclusion, and Settings/palette/runtime parity.
 
 ## Closure
 
