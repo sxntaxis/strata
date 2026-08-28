@@ -54,9 +54,11 @@ coordinates. Versions 1 through 4 remain readable; the v4 regional activity fiel
 
 Native v5 validation is complete at `2c0be59`. The exact snapshot/restore, hidden-mobility resize/restart continuation,
 v4 migration, malformed-state fail-closed, recovery, recolor, and legacy regression proofs pass. The full validation run
-passed formatting, all-target check, strict Clippy, 269 library tests (one explicit real-cadence bench ignored), 23
-integration tests, doc tests, and help smoke. SQLite `user_version`, tables, and columns are unchanged; H4R2C runtime
-behavior was not retuned. The validated candidate is not yet published or installed.
+passed formatting, all-target check, strict Clippy, 269 library tests, 23 integration tests, doc tests, and help smoke.
+The explicit real-cadence H4R2C regression also passed: 40x20 produced 621 slip-lineage cascades with 99 multi-lineage
+episodes and 80x30 produced 1,070 with 152 multi-lineage episodes; both conserved 10,000/10,000 mass with no runaway.
+SQLite `user_version`, tables, and columns are unchanged; H4R2C runtime behavior was not retuned. The validated
+candidate is not yet published or installed.
 
 ## Metastable repose and local avalanches
 
