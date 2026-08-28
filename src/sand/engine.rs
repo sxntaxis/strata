@@ -587,13 +587,12 @@ impl SandEngine {
         // single-column needle three dots high with completely empty immediate
         // neighbors. Keep two-dot needles and all non-isolated shoulders on the
         // normal 3/1 repose model; only the isolated static needle uses a cap of two.
-        let effective_threshold = if threshold == STATIC_REPOSE_RELIEF
-            && self.is_isolated_supported_spire(bounds, x)
-        {
-            MAX_ISOLATED_SPIRE_HEIGHT
-        } else {
-            threshold
-        };
+        let effective_threshold =
+            if threshold == STATIC_REPOSE_RELIEF && self.is_isolated_supported_spire(bounds, x) {
+                MAX_ISOLATED_SPIRE_HEIGHT
+            } else {
+                threshold
+            };
         let Some((source_y, target_x)) =
             self.diagonal_target_for_relief(bounds, x, effective_threshold)
         else {
@@ -1718,6 +1717,32 @@ mod organic_formation_tests {
     }
 
     #[test]
+    fn supported_neighbors_keep_three_dot_peak_on_normal_h2_repose() {
+        for (left, right) in [(0, 1), (1, 1), (2, 2)] {
+            let mut engine = SandEngine::new(4, 1);
+            engine.clear();
+            let x = engine.grid_width_dots / 2;
+            for y in engine.grid_height_dots - 3..engine.grid_height_dots {
+                engine.grid[y][x] = Some(CategoryId::new(1));
+            }
+            for (neighbor_x, height) in [(x - 1, left), (x + 1, right)] {
+                for y in engine.grid_height_dots - height..engine.grid_height_dots {
+                    engine.grid[y][neighbor_x] = Some(CategoryId::new(2));
+                }
+            }
+            engine.grain_count = 3 + left + right;
+            let before = engine.snapshot_state();
+
+            for _ in 0..10_000 {
+                engine.apply_gravity();
+            }
+
+            assert_eq!(engine.snapshot_state(), before);
+            assert!(engine.avalanche_active.iter().all(|active| !active));
+        }
+    }
+
+    #[test]
     fn three_dot_spire_at_visible_wall_keeps_normal_static_repose() {
         let mut engine = SandEngine::new(4, 1);
         engine.clear();
@@ -2122,6 +2147,13 @@ mod organic_formation_tests {
                 quiet.push(event_quiet);
                 spans.push(event_span);
                 passes.push(event_passes);
+            }
+            for x in 1..engine.grid_width_dots - 1 {
+                assert!(
+                    !(engine.supported_heights[x] >= 3
+                        && engine.supported_heights[x - 1] == 0
+                        && engine.supported_heights[x + 1] == 0)
+                );
             }
             sizes.sort_unstable();
             quiet.sort_unstable();
