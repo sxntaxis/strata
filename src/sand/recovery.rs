@@ -416,7 +416,6 @@ mod tests {
         assert_eq!(after_mass, before_mass + 3);
     }
 
-
     #[test]
     fn version_two_checkpoint_recovers_into_current_organic_state() {
         let mut base = base_state();
@@ -439,7 +438,9 @@ mod tests {
 
         assert_eq!(recovered.state.version, SandState::VERSION);
         assert_eq!(recovered.state.ingress_focus_x, None);
-        assert_eq!(recovered.state.grains, base.grains);
+        let mut expected_grains = base.grains.clone();
+        expected_grains.sort_by_key(|grain| (grain.y, grain.x));
+        assert_eq!(recovered.state.grains, expected_grains);
         assert_eq!(recovered.state.pending_runs, base.pending_runs);
     }
 

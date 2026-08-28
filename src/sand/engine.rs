@@ -430,12 +430,7 @@ impl SandEngine {
             .clamp(bounds.x_start, bounds.x_end - 1)
     }
 
-    fn diagonal_target(
-        &mut self,
-        x: usize,
-        left_open: bool,
-        right_open: bool,
-    ) -> Option<usize> {
+    fn diagonal_target(&mut self, x: usize, left_open: bool, right_open: bool) -> Option<usize> {
         if !left_open && !right_open {
             return None;
         }
@@ -443,9 +438,7 @@ impl SandEngine {
         // A small stochastic friction gate lets steep local stacks survive for a
         // few passes before yielding. Repeated gravity passes eventually allow
         // avalanches without adding per-grain memory or a slope solver.
-        if self.random_index(DIAGONAL_SLIDE_CHANCE_DENOMINATOR)
-            >= DIAGONAL_SLIDE_CHANCE_NUMERATOR
-        {
+        if self.random_index(DIAGONAL_SLIDE_CHANCE_DENOMINATOR) >= DIAGONAL_SLIDE_CHANCE_NUMERATOR {
             return None;
         }
 
@@ -1412,8 +1405,7 @@ mod organic_formation_tests {
         if block_right {
             engine.grid[y + 1][x + 1] = Some(CategoryId::new(2));
         }
-        engine.grain_count =
-            2 + if block_left { 1 } else { 0 } + if block_right { 1 } else { 0 };
+        engine.grain_count = 2 + if block_left { 1 } else { 0 } + if block_right { 1 } else { 0 };
         engine.rng_state = rng_state;
         (engine, x, y)
     }
@@ -1491,7 +1483,7 @@ mod organic_formation_tests {
         engine.clear();
         let bounds = engine.viewport_bounds().expect("visible viewport");
         engine.ingress_focus_x = Some((bounds.x_start + bounds.x_end) / 2);
-        engine.rng_state = 0xA11C_E55;
+        engine.rng_state = 0x0A11_CE55;
 
         let mut previous = engine.ingress_focus_x.unwrap();
         let mut moved = 0usize;
@@ -1522,7 +1514,7 @@ mod organic_formation_tests {
             .max(INGRESS_LOCAL_RADIUS_MIN)
             .min(visible_width - 1);
         engine.ingress_focus_x = Some(focus);
-        engine.rng_state = 0xA11C_E55;
+        engine.rng_state = 0x0A11_CE55;
 
         let samples = (0..256)
             .map(|_| engine.sample_ingress_target(bounds, focus))
@@ -1536,7 +1528,10 @@ mod organic_formation_tests {
 
         assert!(near >= samples.len() * 3 / 4);
         assert!(far > 0, "whole-width rain must produce outliers");
-        assert!(distinct > visible_width / 2, "rain must remain visibly broad");
+        assert!(
+            distinct > visible_width / 2,
+            "rain must remain visibly broad"
+        );
     }
 
     #[test]
@@ -1558,7 +1553,10 @@ mod organic_formation_tests {
 
         engine.spawn(CategoryId::new(1));
 
-        assert_eq!(engine.grid[bounds.y_start][only_free], Some(CategoryId::new(1)));
+        assert_eq!(
+            engine.grid[bounds.y_start][only_free],
+            Some(CategoryId::new(1))
+        );
         let focus = engine.ingress_focus_x.expect("persisted ingress focus");
         assert!(focus.abs_diff(initial_focus) <= 1);
         assert_ne!(focus, only_free);
@@ -1581,12 +1579,16 @@ mod organic_formation_tests {
             .filter(|x| engine.grid[bounds.y_start][*x] == Some(CategoryId::new(1)))
             .count();
         assert_eq!(visible_spawn_count, 1);
-        assert!(engine.grid[bounds.y_start][..bounds.x_start]
-            .iter()
-            .all(Option::is_none));
-        assert!(engine.grid[bounds.y_start][bounds.x_end..]
-            .iter()
-            .all(Option::is_none));
+        assert!(
+            engine.grid[bounds.y_start][..bounds.x_start]
+                .iter()
+                .all(Option::is_none)
+        );
+        assert!(
+            engine.grid[bounds.y_start][bounds.x_end..]
+                .iter()
+                .all(Option::is_none)
+        );
     }
 
     #[test]
