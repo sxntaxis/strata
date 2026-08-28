@@ -268,7 +268,7 @@ Native closure: the authored candidate was transplanted onto real published main
 
 #### H4 — Contact-supported grain-causal avalanches
 
-Status: **COMPLETE / NATIVE-GREEN / NOT PUBLISHED**.
+Status: **COMPLETE / PUBLISHED / REAL-PROFILE GREEN**.
 
 Post-H3 daily-use evidence rejected narrow two-dot one-column peaks but retained the desire for steep one-sided slopes such as `0/6/5`. The accepted H4 model uses contact rather than an absolute peak cap: after vertical fall is blocked, a grain may settle with support below plus at least one lower diagonal or visible wall. Unsupported arrivals become exact mobilized grains. Dynamic movement retains relief `>1`; mobility travels with the grain, actual support loss wakes only exact dependents, and diagonal movement may pass mobility to the newly exposed grain on the same source slip face while that face still has a dynamic route. This preserves multi-grain cascades without regional activation, proximity inheritance, pressure/load state, or global terrain scans.
 
@@ -276,7 +276,7 @@ Two rejected prototypes established the negative architecture: a global contact 
 
 The production boundary now requires SandState v5. Current exact mobilized grain coordinates serialize in canonical row-major order. v5→v5 restore must reproduce grid, mobility, RNG, sweep, focus, pending mass, resize/hidden state, and subsequent gravity exactly. v1-v4 lack exact grain-causal mobility; migration therefore preserves their topology/category mass and deliberately does **not** translate v4 regional active columns into false per-grain causality. Instead restore performs one deterministic one-time scan of the pre-v5 bottom-connected canonical surface and marks only contact-unsupported surface grains mobilized; movement occurs later through ordinary H4 gravity. Once written as v5, this normalization never repeats.
 
-Native validation is complete at `2c0be59`: exact v5 snapshot/restart and multi-pass continuation, hidden-mobility resize custody, v4 semantic migration, malformed restore/recovery rejection, recolor, recovery, v1-v3 regressions, and SQLite schema invariance passed. The complete run passed with 269 library tests plus 23 integration tests, one explicit real-cadence bench ignored, doc tests, strict Clippy, and help smoke. No physics retuning, publication, installation, owner-process signaling, or real-profile access occurred.
+Native validation is complete at `f00b628bd37c42a9b27b2abb4b73b1068c74f551`: exact v5 snapshot/restart and multi-pass continuation, hidden-mobility resize custody, v4 semantic migration, malformed restore/recovery rejection, recolor, recovery, v1-v3 regressions, and SQLite schema invariance passed. PR #89 published main `67ffd84d3c5c924211ac9a14b52b5749fb07ed8b` with installed binary SHA256 `b6f3af5247ce633b4c01c6232c1f1be057f7f9af562b6a5114f424b5f3559f93`. Real profile `95446134-3681-4390-84d7-8d900ebbb892` completed the first v4→v5 owner smoke and second v5→v5 owner restart; persisted state is v5 and sqlite-doctor passed. The pre-v5 backup and H3 rollback pair remain retained; the pre-v4 rollback pair remains retained. No production source or schema changed during closure.
 
 ### RHYTHM-001 — Focus/Pomodoro experiment (optional)
 
@@ -292,7 +292,7 @@ Preferred progression:
 
 ## Agent locator
 
-Current edge: **controlled PLATEAU-001H H4 SandState v5 publication/cutover**. H4R2C behavior is native-green at `579f3e1b652a2d90efcfcef65e1910d199e464ba`, and v5 validation is native-green at `2c0be59`; publish and cut over only with a quiescent pre-v5 backup and the required forward-boundary checks.
+Current edge: **PLATEAU-001H evidence-driven daily use**. H4R2C behavior is native-green at `579f3e1b652a2d90efcfcef65e1910d199e464ba`, v5 validation is native-green at `f00b628bd37c42a9b27b2abb4b73b1068c74f551`, and real-profile cutover is green through published main `67ffd84d3c5c924211ac9a14b52b5749fb07ed8b`. Do not invent H5; admit another hardening unit only from concrete daily-use friction.
 
 HISTORY-001A/B/C are native-green through `09412b703cf41016f889d725ba235a7a1e63ae6a`. HISTORY-001C established the completed-Idle split transaction, active-preview validation, atomic daily-contribution reconciliation, and Balance historical editor. HISTORY-001D now generalizes that safe primitive into arbitrary From/To activity assignment with explicit collision confirmation and protected live selection.
 

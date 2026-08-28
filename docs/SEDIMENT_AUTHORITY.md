@@ -2,7 +2,7 @@
 
 Status: implemented and certified
 Program: SEDIMENT-002 + PLATEAU-001H hardening
-Current completed unit: PLATEAU-001H H4 grain-causal contact + SandState v5 native validation; not yet published or installed
+Current completed unit: PLATEAU-001H H4 grain-causal contact + SandState v5 published and real-profile green
 Issues completed: #6, #7, #16, #18, #26
 Last reviewed: 2026-08-28
 
@@ -52,13 +52,13 @@ coordinates. Versions 1 through 4 remain readable; the v4 regional activity fiel
 - v5 coordinates are canonical row-major, unique, in bounds, and must reference occupied cells; v5 rejects legacy active columns and pre-v5 states reject non-empty mobility.
 - v5-to-v5 restore preserves exact mobility without normalization. v1-v4 migration validates and discards regional activity, then seeds only unsupported bottom-connected surface grains once without moving them.
 
-Native v5 validation is complete at `2c0be59`. The exact snapshot/restore, hidden-mobility resize/restart continuation,
-v4 migration, malformed-state fail-closed, recovery, recolor, and legacy regression proofs pass. The full validation run
-passed formatting, all-target check, strict Clippy, 269 library tests, 23 integration tests, doc tests, and help smoke.
-The explicit real-cadence H4R2C regression also passed: 40x20 produced 621 slip-lineage cascades with 99 multi-lineage
-episodes and 80x30 produced 1,070 with 152 multi-lineage episodes; both conserved 10,000/10,000 mass with no runaway.
-SQLite `user_version`, tables, and columns are unchanged; H4R2C runtime behavior was not retuned. The validated
-candidate is not yet published or installed.
+Native v5 validation is complete at `f00b628bd37c42a9b27b2abb4b73b1068c74f551`. The exact snapshot/restore,
+hidden-mobility resize/restart continuation, v4 migration, malformed-state fail-closed, recovery, recolor, and legacy
+regression proofs pass. PR #89 published main `67ffd84d3c5c924211ac9a14b52b5749fb07ed8b`; the installed H4 binary is
+SHA256 `b6f3af5247ce633b4c01c6232c1f1be057f7f9af562b6a5114f424b5f3559f93`. Real profile
+`95446134-3681-4390-84d7-8d900ebbb892` completed the first v4→v5 owner smoke and second v5→v5 restart; persisted
+SandState is v5 and sqlite-doctor passes. SQLite `user_version`, tables, and columns are unchanged; H4R2C runtime
+behavior was not retuned.
 
 ## Metastable repose and local avalanches
 
@@ -81,7 +81,7 @@ H3 was subsequently published through main `f3590a7aeb69a4b88cef90862bb01eb7afd5
 
 H4 candidate authority replaces static relief/spire exceptions with contact support. An ordinary grain that reaches support may settle when the cell below plus at least one lower diagonal (or visible wall) is solid; an unsupported landing becomes an exact mobilized grain. Mobilized grains retain dynamic relief `1`, mobility travels with the exact grain through vertical/diagonal motion, real support loss wakes only exact dependents, and a diagonal topple may continue a cascade down the newly exposed same-column slip face only while that surface still has a dynamic route. Regional avalanche radii, proximity-based `active_vertical`, global static scans, and peak-height heuristics are absent.
 
-The H4R2C behavior candidate is native-green at `579f3e1b652a2d90efcfcef65e1910d199e464ba`: 40x20 / 10,000 ingress produced 621 slip-lineage cascades including 99 multi-lineage episodes; 80x30 produced 1,070 cascades including 152 multi-lineage episodes. Both conserved 10,000/10,000 mass, completed without runaway or continuous motion, preserved `0/6/5`-like slopes and broad hills, and settled with interior one-column prominence at most one dot. The remaining production boundary is persistence: SandState v5 must persist sorted canonical mobilized-grain coordinates and provide a one-time pre-v5 semantic migration without reviving obsolete regional causality.
+The H4R2C behavior candidate is native-green at `579f3e1b652a2d90efcfcef65e1910d199e464ba`: 40x20 / 10,000 ingress produced 621 slip-lineage cascades including 99 multi-lineage episodes; 80x30 produced 1,070 cascades including 152 multi-lineage episodes. Both conserved 10,000/10,000 mass, completed without runaway or continuous motion, preserved `0/6/5`-like slopes and broad hills, and settled with interior one-column prominence at most one dot. SandState v5 persistence and the one-time pre-v5 semantic migration are now published and real-profile green. The retained pre-v5 backup and H3 rollback binary pair the forward boundary; the pre-v4 rollback pair remains retained.
 
 ## Organic live formation
 

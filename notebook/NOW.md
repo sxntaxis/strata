@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-08-28
 authority: working
-summary: PLATEAU-001H H4 grain-causal contact behavior and SandState v5 persistence/migration are native-green; publication and cutover remain controlled next edges.
-next: Return the validated H4 v5 bundle for controlled publication/cutover; do not install until a quiescent pre-v5 backup and forward-boundary checks are complete.
+summary: PLATEAU-001H H4 grain-causal contact behavior and SandState v5 persistence/migration are published and real-profile green; the program returns to evidence-driven daily use.
+next: Resume evidence-driven PLATEAU-001H daily use. Admit another hardening unit only from concrete friction; do not invent H5.
 ---
 
 # NOW — Strata
@@ -91,7 +91,7 @@ PLATEAU-001H / H2 — metastable repose + local avalanches — is **COMPLETE / P
 
 PLATEAU-001H / H3 — isolated-spire cap — is **COMPLETE / PUBLISHED / REAL-PROFILE GREEN**. Its validated lineage was merged through main `f3590a7aeb69a4b88cef90862bb01eb7afd564ba` and installed as SHA256 `fc6f806ba174313b9e89a7aa9814cf6ccf9e76a4ff017c755775a92421dd0350`. H3 remains useful historical evidence, but subsequent daily use rejected two-dot one-column prominences as well, so its shape-specific rule is superseded by the H4 candidate.
 
-PLATEAU-001H / H4 — contact-supported grain-causal avalanches + SandState v5 — is **COMPLETE / NATIVE-GREEN / NOT PUBLISHED**. Behavior remains native-green at `579f3e1b652a2d90efcfcef65e1910d199e464ba`; exact mobilized coordinates, v5 restart/continuation, hidden resize custody, deterministic v4 migration, malformed fail-closed validation, recovery, recolor, and SQLite schema invariance pass at `2c0be59`. Regional activity, `active_vertical`, static relief `3`, and isolated-spire heuristics remain retired. No publication, installation, real-profile access, or owner-process signaling occurred.
+PLATEAU-001H / H4 — contact-supported grain-causal avalanches + SandState v5 — is **COMPLETE / PUBLISHED / REAL-PROFILE GREEN**. Behavior remains native-green at `579f3e1b652a2d90efcfcef65e1910d199e464ba`; exact mobilized coordinates, v5 restart/continuation, hidden resize custody, deterministic v4 migration, malformed fail-closed validation, recovery, recolor, and SQLite schema invariance passed at `f00b628bd37c42a9b27b2abb4b73b1068c74f551`. PR #89 published main `67ffd84d3c5c924211ac9a14b52b5749fb07ed8b`, and the installed binary is SHA256 `b6f3af5247ce633b4c01c6232c1f1be057f7f9af562b6a5114f424b5f3559f93`. Real profile `95446134-3681-4390-84d7-8d900ebbb892` crossed v4→v5 successfully and passed a second v5→v5 restart plus sqlite-doctor; the pre-v5 backup and H3 rollback pair remain retained. Regional activity, `active_vertical`, static relief `3`, and isolated-spire heuristics remain retired.
 
 ## Completed post-migration units
 
