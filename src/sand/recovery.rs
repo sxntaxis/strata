@@ -280,14 +280,18 @@ fn validate_sediment_state(
     if state.mobilized_grains.windows(2).any(|coordinates| {
         (coordinates[0].y, coordinates[0].x) >= (coordinates[1].y, coordinates[1].x)
     }) {
-        return Err("recovery mobilized grain coordinates must be strictly row-major sorted".to_string());
+        return Err(
+            "recovery mobilized grain coordinates must be strictly row-major sorted".to_string(),
+        );
     }
     if state
         .mobilized_grains
         .iter()
         .any(|coordinate| coordinate.x >= state.grid_width || coordinate.y >= state.grid_height)
     {
-        return Err("recovery mobilized grain coordinate is outside the canonical grid".to_string());
+        return Err(
+            "recovery mobilized grain coordinate is outside the canonical grid".to_string(),
+        );
     }
 
     let mut occupied = HashSet::with_capacity(state.grains.len());
@@ -318,7 +322,9 @@ fn validate_sediment_state(
         .iter()
         .any(|coordinate| !occupied.contains(&(coordinate.x, coordinate.y)))
     {
-        return Err("recovery mobilized grain coordinate does not reference a placed grain".to_string());
+        return Err(
+            "recovery mobilized grain coordinate does not reference a placed grain".to_string(),
+        );
     }
 
     for category_id in &state.pending_grains {
@@ -342,8 +348,8 @@ fn validate_sediment_state(
 #[cfg(test)]
 mod tests {
     use super::{
-        PeriodicAdvance, RecoveryTiming, advance_periodic, recover_detached_sediment,
-        settle_transition_sediment,
+        CanvasPolicy, PeriodicAdvance, RecoveryTiming, advance_periodic, recover_detached_sediment,
+        settle_transition_sediment, validate_sediment_state,
     };
     use crate::{
         domain::CategoryId,
@@ -496,7 +502,49 @@ mod tests {
         assert_eq!(recovered.state.version, SandState::VERSION);
         assert!(recovered.state.active_avalanche_columns.is_empty());
         assert_eq!(recovered.state.ingress_focus_x, base.ingress_focus_x);
-        assert_eq!(recovered.state.grains, base.grains);
+        let mut expected_grains = base.grains.clone();
+        expected_grains.sort_by_key(|grain| (grain.y, grain.x));
+        assert_eq!(recovered.state.grains, expected_grains);
+    }
+
+    #[test]
+    fn malformed_mobility_is_rejected_before_recovery_installation() {
+        let base = base_state();
+        let cases = [
+            {
+                let mut state = base.clone();
+                state.mobilized_grains = vec![
+                    super::super::SandStateCoordinate { x: 0, y: 3 },
+                    super::super::SandStateCoordinate { x: 2, y: 2 },
+                ];
+                state
+            },
+            {
+                let mut state = base.clone();
+                state.mobilized_grains = vec![
+                    super::super::SandStateCoordinate { x: 0, y: 3 },
+                    super::super::SandStateCoordinate { x: 0, y: 3 },
+                ];
+                state
+            },
+            {
+                let mut state = base.clone();
+                state.mobilized_grains = vec![super::super::SandStateCoordinate { x: 4, y: 0 }];
+                state
+            },
+            {
+                let mut state = base.clone();
+                state.mobilized_grains = vec![super::super::SandStateCoordinate { x: 1, y: 1 }];
+                state
+            },
+        ];
+        for (index, state) in cases.into_iter().enumerate() {
+            assert!(
+                validate_sediment_state(&state, &categories(), CanvasPolicy::RequireInitialized)
+                    .is_err(),
+                "malformed mobility case {index} was accepted"
+            );
+        }
     }
 
     #[test]

@@ -1185,14 +1185,18 @@ impl SandEngine {
         if state.mobilized_grains.windows(2).any(|coordinates| {
             (coordinates[0].y, coordinates[0].x) >= (coordinates[1].y, coordinates[1].x)
         }) {
-            return Err("sand mobilized grain coordinates must be strictly row-major sorted".to_string());
+            return Err(
+                "sand mobilized grain coordinates must be strictly row-major sorted".to_string(),
+            );
         }
         if state
             .mobilized_grains
             .iter()
             .any(|coordinate| coordinate.x >= state.grid_width || coordinate.y >= state.grid_height)
         {
-            return Err("sand mobilized grain coordinate is outside the canonical grid".to_string());
+            return Err(
+                "sand mobilized grain coordinate is outside the canonical grid".to_string(),
+            );
         }
         if let Some(focus_x) = state.ingress_focus_x
             && (state.grid_width == 0 || focus_x >= state.grid_width)
@@ -1232,7 +1236,9 @@ impl SandEngine {
             .iter()
             .any(|coordinate| !occupied.contains(&(coordinate.x, coordinate.y)))
         {
-            return Err("sand mobilized grain coordinate does not reference a placed grain".to_string());
+            return Err(
+                "sand mobilized grain coordinate does not reference a placed grain".to_string(),
+            );
         }
 
         let mut pending_runs = VecDeque::new();
@@ -1305,15 +1311,14 @@ impl SandEngine {
         } else {
             state.rng_state
         };
-        self.ingress_focus_x =
-            if state.version == SandState::VERSION
-                || state.version == SandState::REGIONAL_AVALANCHE_VERSION
-                || state.version == SandState::ORGANIC_VERSION
-            {
-                state.ingress_focus_x
-            } else {
-                None
-            };
+        self.ingress_focus_x = if state.version == SandState::VERSION
+            || state.version == SandState::REGIONAL_AVALANCHE_VERSION
+            || state.version == SandState::ORGANIC_VERSION
+        {
+            state.ingress_focus_x
+        } else {
+            None
+        };
         self.supported_heights = vec![0; state.grid_width];
         if state.version != SandState::VERSION {
             self.seed_pre_v5_mobility();
@@ -2220,6 +2225,120 @@ mod organic_formation_tests {
         assert!(engine.mobilized[bottom - 1][x]);
         assert!(!engine.mobilized[bottom][x + 2]);
         assert_eq!(engine.grain_count, 2);
+    }
+
+    #[test]
+    fn v5_restart_preserves_hidden_mobility_and_continuation_exactly() {
+        let mut source = SandEngine::new(8, 4);
+        source.clear();
+        let x = source.grid_width_dots / 2;
+        let y = source.grid_height_dots - 3;
+        source.grid[y][x] = Some(CategoryId::new(1));
+        source.grid[y + 1][x] = Some(CategoryId::new(1));
+        source.mobilized[y][x] = true;
+        source.grain_count = 2;
+        source.add_logical_grains(CategoryId::new(2), 3).unwrap();
+        source.frame_count = 7;
+        source.sweep_left_to_right = false;
+        source.rng_state = 0x1234_5678;
+        source.ingress_focus_x = Some(x);
+
+        let state = source.snapshot_state();
+        let valid = HashSet::from([CategoryId::new(1), CategoryId::new(2)]);
+        let mut restored = SandEngine::new(2, 2);
+        restored.restore_state(&state, &valid).unwrap();
+        assert_eq!(restored.snapshot_state(), state);
+
+        source.resize(2, 2);
+        restored.resize(2, 2);
+        assert_eq!(restored.snapshot_state(), source.snapshot_state());
+        source.resize(8, 4);
+        restored.resize(8, 4);
+        for _ in 0..8 {
+            source.apply_gravity();
+            restored.apply_gravity();
+            assert_eq!(restored.snapshot_state(), source.snapshot_state());
+        }
+    }
+
+    #[test]
+    fn v5_restore_rejects_each_mobility_invariant_without_mutation() {
+        let mut source = SandEngine::new(4, 4);
+        source.clear();
+        source.grid[1][1] = Some(CategoryId::new(1));
+        source.grid[2][2] = Some(CategoryId::new(1));
+        source.mobilized[1][1] = true;
+        source.grain_count = 2;
+        let valid = HashSet::from([CategoryId::new(1)]);
+        let base = source.snapshot_state();
+
+        let mut malformed_states = Vec::new();
+        let mut unsorted = base.clone();
+        unsorted.mobilized_grains = vec![
+            SandStateCoordinate { x: 1, y: 2 },
+            SandStateCoordinate { x: 1, y: 1 },
+        ];
+        malformed_states.push(unsorted);
+        let mut duplicate = base.clone();
+        duplicate.mobilized_grains = vec![
+            SandStateCoordinate { x: 1, y: 1 },
+            SandStateCoordinate { x: 1, y: 1 },
+        ];
+        malformed_states.push(duplicate);
+        let mut out_of_bounds = base.clone();
+        out_of_bounds.mobilized_grains = vec![SandStateCoordinate { x: 4, y: 1 }];
+        malformed_states.push(out_of_bounds);
+        let mut empty = base.clone();
+        empty.mobilized_grains = vec![SandStateCoordinate { x: 0, y: 0 }];
+        malformed_states.push(empty);
+        let mut legacy_conflict = base.clone();
+        legacy_conflict.active_avalanche_columns = vec![1];
+        malformed_states.push(legacy_conflict);
+        let mut pre_v5_conflict = base.clone();
+        pre_v5_conflict.version = SandState::REGIONAL_AVALANCHE_VERSION;
+        malformed_states.push(pre_v5_conflict);
+
+        for malformed in malformed_states {
+            let mut target = SandEngine::new(4, 4);
+            let before = target.snapshot_state();
+            assert!(target.restore_state(&malformed, &valid).is_err());
+            assert_eq!(target.snapshot_state(), before);
+        }
+    }
+
+    #[test]
+    fn v5_restore_does_not_normalize_empty_mobility() {
+        let mut source = SandEngine::new(4, 2);
+        let x = source.grid_width_dots / 2;
+        set_supported_profile(&mut source, x, &[2]);
+        let state = source.snapshot_state();
+        let mut restored = SandEngine::new(4, 2);
+        restored
+            .restore_state(&state, &HashSet::from([CategoryId::new(1)]))
+            .unwrap();
+        assert!(restored.mobilized.iter().flatten().all(|mobile| !*mobile));
+    }
+
+    #[test]
+    fn recolor_preserves_non_empty_mobility_coordinates() {
+        let mut engine = SandEngine::new(4, 2);
+        engine.clear();
+        engine.grid[2][2] = Some(CategoryId::new(1));
+        engine.mobilized[2][2] = true;
+        engine.grain_count = 1;
+        let before = engine.snapshot_state();
+        let mut recolored = before.clone();
+        super::recolor_state_category_mass(
+            &mut recolored,
+            CategoryId::new(1),
+            CategoryId::new(2),
+            1,
+        );
+        assert_eq!(recolored.mobilized_grains, before.mobilized_grains);
+        assert_eq!(
+            recolored.mobilized_grains,
+            vec![SandStateCoordinate { x: 2, y: 2 }]
+        );
     }
 
     #[test]
