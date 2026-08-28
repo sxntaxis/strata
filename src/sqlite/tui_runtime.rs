@@ -2954,6 +2954,7 @@ mod tests {
             frame_count: 3,
             sweep_left_to_right: true,
             rng_state: 9,
+            ingress_focus_x: None,
             pending_grains: Vec::new(),
             pending_runs: Vec::new(),
         };
@@ -3146,6 +3147,7 @@ mod clear_all_transaction_tests {
             frame_count: 3,
             sweep_left_to_right: true,
             rng_state: 9,
+            ingress_focus_x: None,
             pending_grains: Vec::new(),
             pending_runs: Vec::new(),
         }
@@ -3208,6 +3210,7 @@ mod clear_all_transaction_tests {
             frame_count: 19,
             sweep_left_to_right: false,
             rng_state: 77,
+            ingress_focus_x: None,
             pending_grains: Vec::new(),
             pending_runs: Vec::new(),
         };
@@ -3247,6 +3250,7 @@ mod clear_all_transaction_tests {
             frame_count: 4,
             sweep_left_to_right: true,
             rng_state: 5,
+            ingress_focus_x: None,
             pending_grains: Vec::new(),
             pending_runs: Vec::new(),
         };
@@ -3411,6 +3415,7 @@ mod clear_all_additional_transaction_tests {
             frame_count: 3,
             sweep_left_to_right: true,
             rng_state: 9,
+            ingress_focus_x: None,
             pending_grains: Vec::new(),
             pending_runs: Vec::new(),
         }
@@ -3715,6 +3720,7 @@ mod clear_all_additional_transaction_tests {
             frame_count: 17,
             sweep_left_to_right: false,
             rng_state: 99,
+            ingress_focus_x: None,
             pending_grains: Vec::new(),
             pending_runs: runs
                 .iter()

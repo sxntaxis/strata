@@ -205,6 +205,7 @@ pub(crate) fn daily_contribution_from_slices(
         frame_count: 0,
         sweep_left_to_right: true,
         rng_state: 0,
+        ingress_focus_x: None,
         pending_grains: Vec::new(),
         pending_runs,
     };
@@ -268,6 +269,7 @@ pub(crate) fn derived_preview_from_slices(
         frame_count: 0,
         sweep_left_to_right: true,
         rng_state: 0,
+        ingress_focus_x: None,
         pending_grains: Vec::new(),
         pending_runs,
     };
@@ -387,6 +389,7 @@ mod tests {
             frame_count: 13,
             sweep_left_to_right: false,
             rng_state: 77,
+            ingress_focus_x: None,
             pending_grains: Vec::new(),
             pending_runs: vec![PendingGrainRun {
                 category_id: 0,

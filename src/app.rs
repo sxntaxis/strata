@@ -1876,6 +1876,7 @@ impl App {
             pending_runs: state.pending_runs.clone(),
             sweep_left_to_right: state.sweep_left_to_right,
             rng_state: state.rng_state,
+            ingress_focus_x: state.ingress_focus_x,
         }
     }
 
@@ -2613,6 +2614,7 @@ mod recovery_statement_tests {
                 frame_count: 0,
                 sweep_left_to_right: true,
                 rng_state: 1,
+                ingress_focus_x: None,
                 pending_grains: Vec::new(),
                 pending_runs: Vec::new(),
             },
@@ -2750,6 +2752,7 @@ mod transition_edge_tests {
             frame_count: 7,
             sweep_left_to_right: true,
             rng_state: 11,
+            ingress_focus_x: None,
             pending_grains: Vec::new(),
             pending_runs: Vec::new(),
         }
@@ -2950,6 +2953,7 @@ mod day_end_snapshot_tests {
             frame_count: 41,
             sweep_left_to_right: false,
             rng_state: 12345,
+            ingress_focus_x: None,
             pending_grains: Vec::new(),
             pending_runs: vec![PendingGrainRun {
                 category_id: 0,

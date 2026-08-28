@@ -902,6 +902,7 @@ mod tests {
                 frame_count: 0,
                 sweep_left_to_right: true,
                 rng_state: 1,
+                ingress_focus_x: None,
                 pending_grains: Vec::new(),
                 pending_runs: Vec::new(),
             },

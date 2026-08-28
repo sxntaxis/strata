@@ -36,6 +36,9 @@ pub struct SandState {
     pub sweep_left_to_right: bool,
     #[serde(default = "default_rng_state")]
     pub rng_state: u64,
+    /// Canonical dot column for the slowly wandering visible-top rain focus.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ingress_focus_x: Option<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_grains: Vec<u64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -43,7 +46,8 @@ pub struct SandState {
 }
 
 impl SandState {
-    pub const VERSION: u8 = 2;
+    pub const VERSION: u8 = 3;
+    pub const COMPRESSED_PENDING_VERSION: u8 = 2;
     pub const LEGACY_VERSION: u8 = 1;
 }
 
@@ -131,6 +135,13 @@ fn default_rng_state() -> u64 {
     0x9E37_79B9_7F4A_7C15
 }
 
+const DIAGONAL_SLIDE_CHANCE_NUMERATOR: usize = 1;
+const DIAGONAL_SLIDE_CHANCE_DENOMINATOR: usize = 4;
+const INGRESS_FOCUS_MOVE_ONE_IN: usize = 4;
+const INGRESS_GLOBAL_RAIN_ONE_IN: usize = 5;
+const INGRESS_LOCAL_RADIUS_DIVISOR: usize = 6;
+const INGRESS_LOCAL_RADIUS_MIN: usize = 2;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PendingRun {
     category_id: CategoryId,
@@ -154,6 +165,7 @@ pub struct SandEngine {
     frame_count: usize,
     sweep_left_to_right: bool,
     rng_state: u64,
+    ingress_focus_x: Option<usize>,
     pending_runs: VecDeque<PendingRun>,
     pub grain_count: usize,
 }
@@ -172,6 +184,7 @@ impl SandEngine {
             frame_count: 0,
             sweep_left_to_right: true,
             rng_state: rand::random::<u64>() | 1,
+            ingress_focus_x: None,
             pending_runs: VecDeque::new(),
             grain_count: 0,
         }
@@ -201,6 +214,9 @@ impl SandEngine {
             }
         }
         self.grid = expanded;
+        self.ingress_focus_x = self
+            .ingress_focus_x
+            .map(|x| x.saturating_add(horizontal_offset));
         self.grid_width_dots = target_width;
         self.grid_height_dots = target_height;
     }
@@ -318,7 +334,7 @@ impl SandEngine {
             .collect::<Vec<_>>();
 
         while !free_columns.is_empty() && !self.pending_runs.is_empty() {
-            let free_index = self.random_index(free_columns.len());
+            let free_index = self.choose_ingress_free_index(bounds, &free_columns);
             let x = free_columns.swap_remove(free_index);
             let category_id = self
                 .pending_runs
@@ -335,6 +351,109 @@ impl SandEngine {
             if exhausted {
                 self.pending_runs.pop_front();
             }
+        }
+    }
+
+    fn choose_ingress_free_index(
+        &mut self,
+        bounds: ViewportBounds,
+        free_columns: &[usize],
+    ) -> usize {
+        debug_assert!(!free_columns.is_empty());
+        let visible_width = bounds.x_end.saturating_sub(bounds.x_start);
+        debug_assert!(visible_width > 0);
+
+        // The slow focus is persistent engine state. Individual grains are rain:
+        // most land in a broad triangular cloud around that focus, while an
+        // occasional whole-width sample keeps the visible fall from becoming a
+        // narrow nozzle. Occupancy may force the actual placement to the nearest
+        // free top cell, but never outside the visible basin and never by dropping
+        // pending mass.
+        let focus = self.advance_ingress_focus(bounds);
+        let target = self.sample_ingress_target(bounds, focus);
+
+        let mut best_index = 0usize;
+        let mut best_distance = free_columns[0].abs_diff(target);
+        for (index, x) in free_columns.iter().copied().enumerate().skip(1) {
+            let distance = x.abs_diff(target);
+            if distance < best_distance || (distance == best_distance && self.random_bool()) {
+                best_index = index;
+                best_distance = distance;
+            }
+        }
+        best_index
+    }
+
+    fn advance_ingress_focus(&mut self, bounds: ViewportBounds) -> usize {
+        let visible_width = bounds.x_end.saturating_sub(bounds.x_start);
+        debug_assert!(visible_width > 0);
+
+        let mut focus = match self.ingress_focus_x {
+            Some(focus) => focus.clamp(bounds.x_start, bounds.x_end - 1),
+            None => bounds.x_start + self.random_index(visible_width),
+        };
+
+        if self.ingress_focus_x.is_some() && self.random_index(INGRESS_FOCUS_MOVE_ONE_IN) == 0 {
+            let step = if self.random_bool() { 1isize } else { -1isize };
+            focus = focus
+                .saturating_add_signed(step)
+                .clamp(bounds.x_start, bounds.x_end - 1);
+        }
+
+        self.ingress_focus_x = Some(focus);
+        focus
+    }
+
+    fn sample_ingress_target(&mut self, bounds: ViewportBounds, focus: usize) -> usize {
+        let visible_width = bounds.x_end.saturating_sub(bounds.x_start);
+        debug_assert!(visible_width > 0);
+
+        if self.random_index(INGRESS_GLOBAL_RAIN_ONE_IN) == 0 {
+            return bounds.x_start + self.random_index(visible_width);
+        }
+
+        let max_radius = visible_width.saturating_sub(1);
+        let radius = (visible_width / INGRESS_LOCAL_RADIUS_DIVISOR)
+            .max(INGRESS_LOCAL_RADIUS_MIN)
+            .min(max_radius);
+        if radius == 0 {
+            return focus;
+        }
+
+        let span = radius.saturating_mul(2).saturating_add(1);
+        let sample_a = self.random_index(span);
+        let sample_b = self.random_index(span);
+        let centered = ((sample_a + sample_b) / 2) as isize - radius as isize;
+
+        focus
+            .saturating_add_signed(centered)
+            .clamp(bounds.x_start, bounds.x_end - 1)
+    }
+
+    fn diagonal_target(
+        &mut self,
+        x: usize,
+        left_open: bool,
+        right_open: bool,
+    ) -> Option<usize> {
+        if !left_open && !right_open {
+            return None;
+        }
+
+        // A small stochastic friction gate lets steep local stacks survive for a
+        // few passes before yielding. Repeated gravity passes eventually allow
+        // avalanches without adding per-grain memory or a slope solver.
+        if self.random_index(DIAGONAL_SLIDE_CHANCE_DENOMINATOR)
+            >= DIAGONAL_SLIDE_CHANCE_NUMERATOR
+        {
+            return None;
+        }
+
+        match (left_open, right_open) {
+            (true, false) => Some(x - 1),
+            (false, true) => Some(x + 1),
+            (true, true) => Some(if self.random_bool() { x + 1 } else { x - 1 }),
+            (false, false) => None,
         }
     }
 
@@ -363,14 +482,13 @@ impl SandEngine {
                             self.grid[y + 1][x] = Some(cat);
                             self.grid[y][x] = None;
                         } else {
-                            let dir: isize = if self.random_bool() { 1 } else { -1 };
-                            let nx = (x as isize) + dir;
+                            let left_open = x > bounds.x_start && self.grid[y + 1][x - 1].is_none();
+                            let right_open =
+                                x + 1 < bounds.x_end && self.grid[y + 1][x + 1].is_none();
+                            let target_x = self.diagonal_target(x, left_open, right_open);
 
-                            if nx >= bounds.x_start as isize
-                                && (nx as usize) < bounds.x_end
-                                && self.grid[y + 1][nx as usize].is_none()
-                            {
-                                self.grid[y + 1][nx as usize] = Some(cat);
+                            if let Some(nx) = target_x {
+                                self.grid[y + 1][nx] = Some(cat);
                                 self.grid[y][x] = None;
                             }
                         }
@@ -383,14 +501,13 @@ impl SandEngine {
                             self.grid[y + 1][x] = Some(cat);
                             self.grid[y][x] = None;
                         } else {
-                            let dir: isize = if self.random_bool() { 1 } else { -1 };
-                            let nx = (x as isize) + dir;
+                            let left_open = x > bounds.x_start && self.grid[y + 1][x - 1].is_none();
+                            let right_open =
+                                x + 1 < bounds.x_end && self.grid[y + 1][x + 1].is_none();
+                            let target_x = self.diagonal_target(x, left_open, right_open);
 
-                            if nx >= bounds.x_start as isize
-                                && (nx as usize) < bounds.x_end
-                                && self.grid[y + 1][nx as usize].is_none()
-                            {
-                                self.grid[y + 1][nx as usize] = Some(cat);
+                            if let Some(nx) = target_x {
+                                self.grid[y + 1][nx] = Some(cat);
                                 self.grid[y][x] = None;
                             }
                         }
@@ -516,6 +633,7 @@ impl SandEngine {
         self.grid_height_dots = (self.cell_height as usize).saturating_mul(SAND_ENGINE.dot_height);
         self.grid = vec![vec![None; self.grid_width_dots]; self.grid_height_dots];
         self.pending_runs.clear();
+        self.ingress_focus_x = None;
         self.grain_count = 0;
     }
 
@@ -608,6 +726,7 @@ impl SandEngine {
             frame_count: self.frame_count,
             sweep_left_to_right: self.sweep_left_to_right,
             rng_state: self.rng_state,
+            ingress_focus_x: self.ingress_focus_x,
             pending_grains: Vec::new(),
             pending_runs: self
                 .pending_runs
@@ -625,11 +744,25 @@ impl SandEngine {
         state: &SandState,
         valid_category_ids: &HashSet<CategoryId>,
     ) -> Result<(), String> {
-        if state.version != SandState::VERSION && state.version != SandState::LEGACY_VERSION {
+        if state.version != SandState::VERSION
+            && state.version != SandState::COMPRESSED_PENDING_VERSION
+            && state.version != SandState::LEGACY_VERSION
+        {
             return Err(format!("unsupported sand state version {}", state.version));
         }
         if (state.grid_width == 0 || state.grid_height == 0) && !state.grains.is_empty() {
             return Err("zero-sized sand state cannot contain placed grains".to_string());
+        }
+        if state.version != SandState::VERSION && state.ingress_focus_x.is_some() {
+            return Err("pre-organic sand state contains an ingress focus".to_string());
+        }
+        if let Some(focus_x) = state.ingress_focus_x
+            && (state.grid_width == 0 || focus_x >= state.grid_width)
+        {
+            return Err(format!(
+                "sand ingress focus {focus_x} is outside the {}-column canonical grid",
+                state.grid_width
+            ));
         }
 
         let mut restored = vec![vec![None; state.grid_width]; state.grid_height];
@@ -676,7 +809,7 @@ impl SandEngine {
 
         if state.version == SandState::LEGACY_VERSION {
             if !state.pending_runs.is_empty() {
-                return Err("legacy sand state cannot contain version-two pending runs".to_string());
+                return Err("legacy sand state cannot contain compressed pending runs".to_string());
             }
             for category_id in &state.pending_grains {
                 append_serialized_run(*category_id, 1)?;
@@ -720,6 +853,11 @@ impl SandEngine {
             default_rng_state()
         } else {
             state.rng_state
+        };
+        self.ingress_focus_x = if state.version == SandState::VERSION {
+            state.ingress_focus_x
+        } else {
+            None
         };
         self.expand_logical_canvas_to_viewport();
         Ok(())
@@ -804,6 +942,7 @@ mod tests {
             frame_count: 77,
             sweep_left_to_right: false,
             rng_state: 12345,
+            ingress_focus_x: Some(2),
             pending_grains: Vec::new(),
             pending_runs: vec![
                 PendingGrainRun {
@@ -872,6 +1011,7 @@ mod tests {
         assert_eq!(state.frame_count, 77);
         assert!(!state.sweep_left_to_right);
         assert_eq!(state.rng_state, 12345);
+        assert_eq!(state.ingress_focus_x, Some(2));
         assert_eq!(state.grid_width, 4);
         assert_eq!(state.grid_height, 3);
     }
@@ -890,6 +1030,7 @@ mod tests {
             frame_count: 0,
             sweep_left_to_right: true,
             rng_state: 7,
+            ingress_focus_x: None,
             pending_grains: Vec::new(),
             pending_runs: vec![PendingGrainRun {
                 category_id: 2,
@@ -1088,6 +1229,7 @@ mod tests {
             frame_count: 0,
             sweep_left_to_right: true,
             rng_state: 1,
+            ingress_focus_x: None,
             pending_grains: Vec::new(),
             pending_runs: Vec::new(),
         };
@@ -1108,6 +1250,7 @@ mod tests {
         source.grid[2][2] = Some(CategoryId::new(1));
         source.grid[20][20] = Some(CategoryId::new(2));
         source.grain_count = 2;
+        source.ingress_focus_x = Some(3);
         let state = source.snapshot_state();
 
         let mut restored = SandEngine::new(40, 40);
@@ -1125,6 +1268,8 @@ mod tests {
             40 * crate::constants::SAND_ENGINE.dot_height
         );
         assert_eq!(restored.grain_count, 2);
+        let horizontal_offset = (restored.grid_width_dots - state.grid_width) / 2;
+        assert_eq!(restored.ingress_focus_x, Some(3 + horizontal_offset));
         assert_eq!(category_mass(&restored, CategoryId::new(1)), 1);
         assert_eq!(category_mass(&restored, CategoryId::new(2)), 1);
     }
@@ -1236,6 +1381,353 @@ mod tests {
 
         assert_ne!(after_first, initial);
         assert_eq!(after_second, initial);
+    }
+}
+
+#[cfg(test)]
+mod organic_formation_tests {
+    use std::collections::HashSet;
+
+    use crate::{
+        domain::CategoryId,
+        sand::{SandEngine, SandState, SandStateGrain},
+    };
+
+    use super::{INGRESS_LOCAL_RADIUS_DIVISOR, INGRESS_LOCAL_RADIUS_MIN};
+
+    fn gravity_fixture(
+        block_left: bool,
+        block_right: bool,
+        rng_state: u64,
+    ) -> (SandEngine, usize, usize) {
+        let mut engine = SandEngine::new(3, 1);
+        engine.clear();
+        let y = engine.grid_height_dots - 2;
+        let x = engine.grid_width_dots / 2;
+        engine.grid[y][x] = Some(CategoryId::new(1));
+        engine.grid[y + 1][x] = Some(CategoryId::new(2));
+        if block_left {
+            engine.grid[y + 1][x - 1] = Some(CategoryId::new(2));
+        }
+        if block_right {
+            engine.grid[y + 1][x + 1] = Some(CategoryId::new(2));
+        }
+        engine.grain_count =
+            2 + if block_left { 1 } else { 0 } + if block_right { 1 } else { 0 };
+        engine.rng_state = rng_state;
+        (engine, x, y)
+    }
+
+    #[test]
+    fn gravity_down_open_remains_unconditional_and_consumes_no_rng() {
+        let mut engine = SandEngine::new(3, 2);
+        engine.clear();
+        let y = engine.grid_height_dots - 3;
+        let x = engine.grid_width_dots / 2;
+        engine.grid[y][x] = Some(CategoryId::new(1));
+        engine.grain_count = 1;
+        engine.rng_state = 17;
+
+        engine.apply_gravity();
+
+        assert_eq!(engine.grid[y][x], None);
+        assert_eq!(engine.grid[y + 1][x], Some(CategoryId::new(1)));
+        assert_eq!(engine.rng_state, 17);
+    }
+
+    #[test]
+    fn gravity_friction_can_hold_then_release_a_sole_left_diagonal() {
+        let (mut engine, x, y) = gravity_fixture(false, true, 7);
+        let initial_rng = engine.rng_state;
+
+        engine.apply_gravity();
+        assert_eq!(engine.grid[y][x], Some(CategoryId::new(1)));
+        assert_ne!(engine.rng_state, initial_rng);
+
+        engine.apply_gravity();
+        assert_eq!(engine.grid[y][x], None);
+        assert_eq!(engine.grid[y + 1][x - 1], Some(CategoryId::new(1)));
+    }
+
+    #[test]
+    fn gravity_friction_can_hold_then_release_a_sole_right_diagonal() {
+        let (mut engine, x, y) = gravity_fixture(true, false, 7);
+
+        engine.apply_gravity();
+        assert_eq!(engine.grid[y][x], Some(CategoryId::new(1)));
+
+        engine.apply_gravity();
+        assert_eq!(engine.grid[y][x], None);
+        assert_eq!(engine.grid[y + 1][x + 1], Some(CategoryId::new(1)));
+    }
+
+    #[test]
+    fn gravity_both_open_can_hold_or_slide_left_and_right() {
+        let (mut held, x, y) = gravity_fixture(false, false, 1);
+        held.apply_gravity();
+        assert_eq!(held.grid[y][x], Some(CategoryId::new(1)));
+
+        let (mut right_engine, x, y) = gravity_fixture(false, false, 129);
+        right_engine.apply_gravity();
+        assert_eq!(right_engine.grid[y + 1][x + 1], Some(CategoryId::new(1)));
+
+        let (mut left_engine, x, y) = gravity_fixture(false, false, 4);
+        left_engine.apply_gravity();
+        assert_eq!(left_engine.grid[y + 1][x - 1], Some(CategoryId::new(1)));
+    }
+
+    #[test]
+    fn gravity_stays_when_down_and_both_diagonals_are_blocked_without_rng() {
+        let (mut engine, x, y) = gravity_fixture(true, true, 1);
+        engine.apply_gravity();
+
+        assert_eq!(engine.grid[y][x], Some(CategoryId::new(1)));
+        assert_eq!(engine.rng_state, 1);
+    }
+
+    #[test]
+    fn ingress_focus_moves_slowly_and_never_more_than_one_dot() {
+        let mut engine = SandEngine::new(40, 2);
+        engine.clear();
+        let bounds = engine.viewport_bounds().expect("visible viewport");
+        engine.ingress_focus_x = Some((bounds.x_start + bounds.x_end) / 2);
+        engine.rng_state = 0xA11C_E55;
+
+        let mut previous = engine.ingress_focus_x.unwrap();
+        let mut moved = 0usize;
+        let mut stayed = 0usize;
+        for _ in 0..64 {
+            let focus = engine.advance_ingress_focus(bounds);
+            assert!(focus.abs_diff(previous) <= 1);
+            if focus == previous {
+                stayed += 1;
+            } else {
+                moved += 1;
+            }
+            previous = focus;
+        }
+
+        assert!(moved > 0);
+        assert!(stayed > moved);
+    }
+
+    #[test]
+    fn ingress_rain_is_broad_but_biased_around_the_focus() {
+        let mut engine = SandEngine::new(40, 2);
+        engine.clear();
+        let bounds = engine.viewport_bounds().expect("visible viewport");
+        let visible_width = bounds.x_end - bounds.x_start;
+        let focus = (bounds.x_start + bounds.x_end) / 2;
+        let radius = (visible_width / INGRESS_LOCAL_RADIUS_DIVISOR)
+            .max(INGRESS_LOCAL_RADIUS_MIN)
+            .min(visible_width - 1);
+        engine.ingress_focus_x = Some(focus);
+        engine.rng_state = 0xA11C_E55;
+
+        let samples = (0..256)
+            .map(|_| engine.sample_ingress_target(bounds, focus))
+            .collect::<Vec<_>>();
+        let near = samples
+            .iter()
+            .filter(|&&x| x.abs_diff(focus) <= radius)
+            .count();
+        let far = samples.len() - near;
+        let distinct = samples.iter().copied().collect::<HashSet<_>>().len();
+
+        assert!(near >= samples.len() * 3 / 4);
+        assert!(far > 0, "whole-width rain must produce outliers");
+        assert!(distinct > visible_width / 2, "rain must remain visibly broad");
+    }
+
+    #[test]
+    fn occupied_fallback_does_not_drag_the_slow_focus_to_the_placement() {
+        let mut engine = SandEngine::new(8, 2);
+        engine.clear();
+        let bounds = engine.viewport_bounds().expect("visible viewport");
+        let initial_focus = (bounds.x_start + bounds.x_end) / 2;
+        let only_free = bounds.x_end - 1;
+        engine.ingress_focus_x = Some(initial_focus);
+        engine.rng_state = 0x55AA_1234;
+
+        for x in bounds.x_start..bounds.x_end {
+            if x != only_free {
+                engine.grid[bounds.y_start][x] = Some(CategoryId::new(2));
+                engine.grain_count += 1;
+            }
+        }
+
+        engine.spawn(CategoryId::new(1));
+
+        assert_eq!(engine.grid[bounds.y_start][only_free], Some(CategoryId::new(1)));
+        let focus = engine.ingress_focus_x.expect("persisted ingress focus");
+        assert!(focus.abs_diff(initial_focus) <= 1);
+        assert_ne!(focus, only_free);
+    }
+
+    #[test]
+    fn hidden_ingress_focus_is_clamped_back_into_the_visible_basin() {
+        let mut engine = SandEngine::new(8, 4);
+        engine.resize(12, 6);
+        engine.ingress_focus_x = Some(0);
+        engine.resize(4, 2);
+        let bounds = engine.viewport_bounds().expect("visible viewport");
+        assert!(engine.ingress_focus_x.unwrap() < bounds.x_start);
+
+        engine.spawn(CategoryId::new(1));
+
+        let focus = engine.ingress_focus_x.expect("spawned ingress focus");
+        assert!(bounds.x_start <= focus && focus < bounds.x_end);
+        let visible_spawn_count = (bounds.x_start..bounds.x_end)
+            .filter(|x| engine.grid[bounds.y_start][*x] == Some(CategoryId::new(1)))
+            .count();
+        assert_eq!(visible_spawn_count, 1);
+        assert!(engine.grid[bounds.y_start][..bounds.x_start]
+            .iter()
+            .all(Option::is_none));
+        assert!(engine.grid[bounds.y_start][bounds.x_end..]
+            .iter()
+            .all(Option::is_none));
+    }
+
+    #[test]
+    fn canvas_growth_shifts_ingress_focus_with_centered_topology() {
+        let mut engine = SandEngine::new(4, 2);
+        engine.clear();
+        let old_width = engine.grid_width_dots;
+        engine.ingress_focus_x = Some(2);
+
+        engine.resize(8, 2);
+
+        let horizontal_offset = (engine.grid_width_dots - old_width) / 2;
+        assert_eq!(engine.ingress_focus_x, Some(2 + horizontal_offset));
+    }
+
+    #[test]
+    fn full_clear_resets_ingress_focus_but_category_clear_preserves_it() {
+        let mut engine = SandEngine::new(8, 2);
+        engine.clear();
+        engine.ingress_focus_x = Some(5);
+        let bottom = engine.grid_height_dots - 1;
+        engine.grid[bottom][1] = Some(CategoryId::new(1));
+        engine.grain_count = 1;
+
+        engine.clear_category(CategoryId::new(1));
+        assert_eq!(engine.ingress_focus_x, Some(5));
+
+        engine.clear();
+        assert_eq!(engine.ingress_focus_x, None);
+    }
+
+    #[test]
+    fn snapshot_restore_continues_the_same_biased_rain_stream() {
+        let mut source = SandEngine::new(8, 2);
+        source.clear();
+        let bounds = source.viewport_bounds().expect("visible viewport");
+        source.ingress_focus_x = Some(bounds.x_start + 3);
+        source.rng_state = 0x55AA_1234_9876;
+        let state = source.snapshot_state();
+
+        let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
+        let mut restored = SandEngine::new(8, 2);
+        restored.restore_state(&state, &valid).unwrap();
+
+        source.add_logical_grains(CategoryId::new(1), 5).unwrap();
+        restored.add_logical_grains(CategoryId::new(1), 5).unwrap();
+
+        assert_eq!(restored.snapshot_state(), source.snapshot_state());
+    }
+
+    #[test]
+    fn serialized_version_two_state_defaults_missing_ingress_focus() {
+        let json = r#"{
+            "version":2,
+            "grid_width":2,
+            "grid_height":2,
+            "grains":[],
+            "frame_count":4,
+            "sweep_left_to_right":true,
+            "rng_state":9,
+            "pending_runs":[]
+        }"#;
+
+        let state: SandState = serde_json::from_str(json).unwrap();
+
+        assert_eq!(state.version, SandState::COMPRESSED_PENDING_VERSION);
+        assert_eq!(state.ingress_focus_x, None);
+    }
+
+    #[test]
+    fn version_two_state_restores_without_inventing_an_ingress_focus() {
+        let state = SandState {
+            version: SandState::COMPRESSED_PENDING_VERSION,
+            grid_width: 2,
+            grid_height: 2,
+            grains: vec![SandStateGrain {
+                x: 0,
+                y: 1,
+                category_id: 1,
+            }],
+            frame_count: 4,
+            sweep_left_to_right: true,
+            rng_state: 9,
+            ingress_focus_x: None,
+            pending_grains: Vec::new(),
+            pending_runs: Vec::new(),
+        };
+        let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
+        let mut engine = SandEngine::new(1, 1);
+
+        engine.restore_state(&state, &valid).unwrap();
+        let upgraded = engine.snapshot_state();
+
+        assert_eq!(upgraded.version, SandState::VERSION);
+        assert_eq!(upgraded.ingress_focus_x, None);
+    }
+
+    #[test]
+    fn version_two_state_cannot_smuggle_an_ingress_focus() {
+        let state = SandState {
+            version: SandState::COMPRESSED_PENDING_VERSION,
+            grid_width: 2,
+            grid_height: 2,
+            grains: Vec::new(),
+            frame_count: 0,
+            sweep_left_to_right: true,
+            rng_state: 9,
+            ingress_focus_x: Some(0),
+            pending_grains: Vec::new(),
+            pending_runs: Vec::new(),
+        };
+        let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
+        let mut engine = SandEngine::new(1, 1);
+
+        let error = engine.restore_state(&state, &valid).unwrap_err();
+
+        assert!(error.contains("pre-organic"));
+    }
+
+    #[test]
+    fn invalid_persisted_ingress_focus_is_rejected_without_mutation() {
+        let state = SandState {
+            version: SandState::VERSION,
+            grid_width: 2,
+            grid_height: 2,
+            grains: Vec::new(),
+            frame_count: 0,
+            sweep_left_to_right: true,
+            rng_state: 9,
+            ingress_focus_x: Some(2),
+            pending_grains: Vec::new(),
+            pending_runs: Vec::new(),
+        };
+        let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
+        let mut engine = SandEngine::new(4, 2);
+        let before = engine.snapshot_state();
+
+        let error = engine.restore_state(&state, &valid).unwrap_err();
+
+        assert!(error.contains("ingress focus"));
+        assert_eq!(engine.snapshot_state(), before);
     }
 }
 
@@ -1397,6 +1889,7 @@ mod conservation_tests {
                 frame_count: 4,
                 sweep_left_to_right: true,
                 rng_state: 9,
+                ingress_focus_x: None,
                 pending_grains: vec![2, 2, 1],
                 pending_runs: Vec::new(),
             };

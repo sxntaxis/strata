@@ -187,7 +187,12 @@ fn migrate_uninitialized_state(base_state: &SandState) -> Result<SandState, Stri
             }
         }
         state.pending_runs = runs;
+    }
+    if state.version == SandState::LEGACY_VERSION
+        || state.version == SandState::COMPRESSED_PENDING_VERSION
+    {
         state.version = SandState::VERSION;
+        state.ingress_focus_x = None;
     }
     Ok(state)
 }
@@ -197,7 +202,10 @@ fn validate_sediment_state(
     valid_category_ids: &HashSet<CategoryId>,
     canvas_policy: CanvasPolicy,
 ) -> Result<(), String> {
-    if state.version != SandState::VERSION && state.version != SandState::LEGACY_VERSION {
+    if state.version != SandState::VERSION
+        && state.version != SandState::COMPRESSED_PENDING_VERSION
+        && state.version != SandState::LEGACY_VERSION
+    {
         return Err(format!(
             "unsupported sediment state schema {}",
             state.version
@@ -214,11 +222,25 @@ fn validate_sediment_state(
             return Err("uninitialized sediment canvas contains placed grains".to_string());
         }
     }
-    if state.version == SandState::VERSION && !state.pending_grains.is_empty() {
-        return Err("version 2 sediment state contains legacy pending grains".to_string());
+    if (state.version == SandState::VERSION
+        || state.version == SandState::COMPRESSED_PENDING_VERSION)
+        && !state.pending_grains.is_empty()
+    {
+        return Err("compressed sediment state contains legacy pending grains".to_string());
     }
     if state.version == SandState::LEGACY_VERSION && !state.pending_runs.is_empty() {
-        return Err("version 1 sediment state contains version 2 pending runs".to_string());
+        return Err("version 1 sediment state contains compressed pending runs".to_string());
+    }
+    if state.version != SandState::VERSION && state.ingress_focus_x.is_some() {
+        return Err("pre-organic sediment state contains an ingress focus".to_string());
+    }
+    if let Some(focus_x) = state.ingress_focus_x
+        && (state.grid_width == 0 || focus_x >= state.grid_width)
+    {
+        return Err(format!(
+            "recovery ingress focus {focus_x} is outside {}-column canvas",
+            state.grid_width
+        ));
     }
 
     let mut occupied = HashSet::with_capacity(state.grains.len());
@@ -298,6 +320,7 @@ mod tests {
             frame_count: 19,
             sweep_left_to_right: false,
             rng_state: 77,
+            ingress_focus_x: Some(1),
             pending_grains: Vec::new(),
             pending_runs: vec![PendingGrainRun {
                 category_id: 1,
@@ -381,6 +404,7 @@ mod tests {
             base.sweep_left_to_right
         );
         assert_eq!(recovered.state.rng_state, base.rng_state);
+        assert_eq!(recovered.state.ingress_focus_x, base.ingress_focus_x);
         let before_mass = base.grains.len() + 3;
         let after_mass = recovered.state.grains.len()
             + recovered
@@ -390,6 +414,33 @@ mod tests {
                 .map(|run| run.count)
                 .sum::<usize>();
         assert_eq!(after_mass, before_mass + 3);
+    }
+
+
+    #[test]
+    fn version_two_checkpoint_recovers_into_current_organic_state() {
+        let mut base = base_state();
+        base.version = SandState::COMPRESSED_PENDING_VERSION;
+        base.ingress_focus_x = None;
+
+        let recovered = recover_detached_sediment(
+            &base,
+            &categories(),
+            CategoryId::new(1),
+            RecoveryTiming {
+                elapsed: Duration::ZERO,
+                spawn_accumulator: Duration::ZERO,
+                physics_accumulator: Duration::ZERO,
+                spawn_period: Duration::from_secs(1),
+                physics_period: Duration::from_millis(50),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(recovered.state.version, SandState::VERSION);
+        assert_eq!(recovered.state.ingress_focus_x, None);
+        assert_eq!(recovered.state.grains, base.grains);
+        assert_eq!(recovered.state.pending_runs, base.pending_runs);
     }
 
     #[test]
@@ -432,6 +483,7 @@ mod tests {
             frame_count: 0,
             sweep_left_to_right: true,
             rng_state: 1,
+            ingress_focus_x: None,
             pending_grains: Vec::new(),
             pending_runs: Vec::new(),
         };
