@@ -2,9 +2,9 @@
 
 Status: implemented and certified
 Program: SEDIMENT-002 + PLATEAU-001H hardening
-Current completed unit: PLATEAU-001H H3 isolated-spire hardening certified
+Current completed unit: PLATEAU-001H H4 grain-causal contact + SandState v5 native validation; not yet published or installed
 Issues completed: #6, #7, #16, #18, #26
-Last reviewed: 2026-08-27
+Last reviewed: 2026-08-28
 
 ## Purpose
 
@@ -39,8 +39,8 @@ The current viewport is the active live-physics basin. New live grains enter at 
 
 ## SandState persistence
 
-`SandState` schema version 4 stores ordered pending runs, the optional canonical ingress focus, and sorted active avalanche
-columns. Version 3 remains readable and migrates with empty active activity.
+`SandState` schema version 5 stores ordered pending runs, the optional canonical ingress focus, and exact mobilized grain
+coordinates. Versions 1 through 4 remain readable; the v4 regional activity field is legacy migration input only.
 
 - Version 1 `pending_grains` vectors migrate deterministically into adjacent runs.
 - Version 2 compressed-pending states remain readable and upgrade to version 3 with no invented ingress focus.
@@ -49,6 +49,16 @@ columns. Version 3 remains readable and migrates with empty active activity.
 - The existing persisted RNG state seeds the first ingress focus after a v1/v2 migration; later v3 checkpoints preserve both RNG and focus for deterministic restart continuity.
 - `SandState` stores canonical grid dimensions explicitly; recovery through a zero viewport restores them exactly, while an ordinary larger live viewport may monotonically expand the restored canvas.
 - Ordinary restore normalizes unavailable category identities to idle; checkpoint recovery is stricter and refuses unavailable identities.
+- v5 coordinates are canonical row-major, unique, in bounds, and must reference occupied cells; v5 rejects legacy active columns and pre-v5 states reject non-empty mobility.
+- v5-to-v5 restore preserves exact mobility without normalization. v1-v4 migration validates and discards regional activity, then seeds only unsupported bottom-connected surface grains once without moving them.
+
+Native v5 validation is complete at `2c0be59`. The exact snapshot/restore, hidden-mobility resize/restart continuation,
+v4 migration, malformed-state fail-closed, recovery, recolor, and legacy regression proofs pass. The full validation run
+passed formatting, all-target check, strict Clippy, 269 library tests, 23 integration tests, doc tests, and help smoke.
+The explicit real-cadence H4R2C regression also passed: 40x20 produced 621 slip-lineage cascades with 99 multi-lineage
+episodes and 80x30 produced 1,070 with 152 multi-lineage episodes; both conserved 10,000/10,000 mass with no runaway.
+SQLite `user_version`, tables, and columns are unchanged; H4R2C runtime behavior was not retuned. The validated
+candidate is not yet published or installed.
 
 ## Metastable repose and local avalanches
 
@@ -66,6 +76,12 @@ Native validation is complete at `f581de486a08547ea5fd74ef3ca2f2fb90e1eb34`. Rea
 Daily-use H3 evidence adds one deliberately narrower shape invariant without retuning H2: a bottom-supported column whose two immediate visible neighbors both have supported height zero may stand two dots high, but a third supported dot is not allowed to remain as an isolated one-column needle. At height three or more, that source uses an effective static cap of two and yields through the ordinary H2 diagonal-topple/avalanche path. A peak with support on either immediate side is not an isolated spire and continues to use normal static relief `3`; dynamic relief remains `1`. This is geometry hardening only: no rain, RNG policy, avalanche state, persistence schema, resize custody, or HISTORY semantics change.
 
 H3 native validation is complete at `VALIDATED_HEAD` `26fe55d`. The full suite passed with 272 library tests and 23 integration tests; focused boundary proofs cover isolated 2-dot stability, isolated 3-dot yield, one-sided/broad neighbor protection, visible-wall protection, mass conservation, and the settled-profile invariant. Corrected live cadence produced 446 events at 40x20 (median 8, p95 108, max 274, quiet buildup 9, 0% one-move) and 642 events at 80x30 (median 8, p95 24, max 52, quiet buildup 10, 0% one-move), with mass conserved, events of at least 10 moves, and no runaway. H3 adds no serialized field and requires no SandState or profile migration beyond existing v4.
+
+H3 was subsequently published through main `f3590a7aeb69a4b88cef90862bb01eb7afd564ba` and installed on the real profile as binary SHA256 `fc6f806ba174313b9e89a7aa9814cf6ccf9e76a4ff017c755775a92421dd0350`. Daily-use evidence then rejected both two-dot and three-dot one-column prominences while preserving sloped walls and one-sided support, so H3 is historical evidence rather than the final formation rule.
+
+H4 candidate authority replaces static relief/spire exceptions with contact support. An ordinary grain that reaches support may settle when the cell below plus at least one lower diagonal (or visible wall) is solid; an unsupported landing becomes an exact mobilized grain. Mobilized grains retain dynamic relief `1`, mobility travels with the exact grain through vertical/diagonal motion, real support loss wakes only exact dependents, and a diagonal topple may continue a cascade down the newly exposed same-column slip face only while that surface still has a dynamic route. Regional avalanche radii, proximity-based `active_vertical`, global static scans, and peak-height heuristics are absent.
+
+The H4R2C behavior candidate is native-green at `579f3e1b652a2d90efcfcef65e1910d199e464ba`: 40x20 / 10,000 ingress produced 621 slip-lineage cascades including 99 multi-lineage episodes; 80x30 produced 1,070 cascades including 152 multi-lineage episodes. Both conserved 10,000/10,000 mass, completed without runaway or continuous motion, preserved `0/6/5`-like slopes and broad hills, and settled with interior one-column prominence at most one dot. The remaining production boundary is persistence: SandState v5 must persist sorted canonical mobilized-grain coordinates and provide a one-time pre-v5 semantic migration without reviving obsolete regional causality.
 
 ## Organic live formation
 

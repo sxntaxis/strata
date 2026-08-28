@@ -906,6 +906,7 @@ mod tests {
                 pending_grains: Vec::new(),
                 pending_runs: Vec::new(),
                 active_avalanche_columns: Vec::new(),
+                mobilized_grains: Vec::new(),
             },
             simulation_time_utc: captured.to_rfc3339(),
             pending_mutations: Vec::new(),
