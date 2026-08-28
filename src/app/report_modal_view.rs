@@ -255,12 +255,7 @@ impl App {
             } else {
                 log_key.map_or_else(
                     || "Enter edit · Esc back".to_string(),
-                    |key| {
-                        format!(
-                            "{} Log past · Enter edit · Esc back",
-                            balance_key_hint(key)
-                        )
-                    },
+                    |key| format!("{} Log past · Enter edit · Esc back", balance_key_hint(key)),
                 )
             };
             Some(
@@ -646,7 +641,6 @@ impl App {
         }
     }
 }
-
 
 #[cfg(test)]
 mod hardening_tests {

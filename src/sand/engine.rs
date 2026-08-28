@@ -417,7 +417,11 @@ impl SandEngine {
             std::cmp::Ordering::Less => first,
             std::cmp::Ordering::Greater => second,
             std::cmp::Ordering::Equal => {
-                if self.random_bool() { second } else { first }
+                if self.random_bool() {
+                    second
+                } else {
+                    first
+                }
             }
         }
     }
@@ -1378,7 +1382,6 @@ mod organic_formation_tests {
         sand::{SandEngine, SandState, SandStateGrain},
     };
 
-
     fn gravity_fixture(
         block_left: bool,
         block_right: bool,
@@ -1512,11 +1515,8 @@ mod organic_formation_tests {
             .iter()
             .filter(|&&x| x.abs_diff(focus) >= visible_width / 4)
             .count();
-        let mean_distance = samples
-            .iter()
-            .map(|&&x| x.abs_diff(focus))
-            .sum::<usize>() as f64
-            / samples.len() as f64;
+        let mean_distance =
+            samples.iter().map(|&x| x.abs_diff(focus)).sum::<usize>() as f64 / samples.len() as f64;
         let uniform_mean_distance = visible_width as f64 / 4.0;
 
         assert!(
