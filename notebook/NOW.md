@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-08-28
 authority: working
-summary: PLATEAU-001H H2 is published and real-profile green on SandState v4; H3 isolated-spire hardening is the current evidence-driven candidate.
-next: Native-validate the bounded H3 rule that permits isolated two-dot stacks but topples isolated supported spires at height three or more, without retuning H2 or changing SandState v4.
+summary: PLATEAU-001H H3 isolated-spire hardening is native-green on top of published H2; publication and cutover remain pending.
+next: Return the validated H3 bundle to the architecture author for publication/cutover review; do not install yet.
 ---
 
 # NOW — Strata
@@ -89,7 +89,7 @@ The required core path is now PLATEAU-001H product hardening. Pomodoro/RHYTHM-00
 
 PLATEAU-001H / H2 — metastable repose + local avalanches — is **COMPLETE / PUBLISHED / REAL-PROFILE GREEN** from native-green `f581de486a08547ea5fd74ef3ca2f2fb90e1eb34`, published main `71363c694e4c6f6c425f30378e081ef27cebd635`, and installed binary SHA256 `59f34237fab6348560141257c91cee6f6e4c4551a3915a5eef45fb4cc1ced9a`. Static supported relief 3 and dynamic active relief 1 replace the memoryless diagonal lottery; bottom-connected surface relief excludes airborne grains; radius-one local mobilization and one diagonal topple per gravity pass produce true buildup and bursty avalanches. Real-cadence validation corrected the earlier 1:1 overload false blocker: at normal 1000 ms ingress and 64 ms gravity cadence, 40x20 produced 449 events (median size 8, p95 82, quiet buildup 9) and 80x30 produced 658 events (median size 8, p95 20, quiet buildup 10), with 0% one-move events, conserved mass, no runaway, exact v4 restart continuation, all regressions green, 290 non-doc tests, and native gravity cost within the 2x target. The real profile has persisted SandState v4, normal restart and sqlite-doctor passed, and the matching H1 rollback binary plus pre-v4 backup remain retained.
 
-PLATEAU-001H / H3 — isolated-spire cap — is **ADMITTED / SOURCE CANDIDATE** from real-profile visual evidence: isolated one-column stacks three dots high are visually undesirable while two-dot stacks are acceptable. The bounded rule applies only when both immediate supported neighbors are empty; height two remains stable, height three or more yields through existing H2 avalanche mechanics, and non-isolated hills keep H2 relief 3/1 unchanged. Native validation is pending.
+PLATEAU-001H / H3 — isolated-spire cap — is **COMPLETE / NATIVE-GREEN** at `26fe55d`: isolated one-column stacks three dots high are prevented while two-dot stacks remain stable. The bounded rule applies only when both immediate supported neighbors are empty; height three or more yields through existing H2 avalanche mechanics, and non-isolated hills keep H2 relief 3/1 unchanged. Full native validation passed with 272 library and 23 integration tests, corrected real-cadence guardrails, H1/H2/HISTORY/recovery/resize/v4 regressions, and disposable-profile runtime smoke. H3 adds no serialized state and no new profile migration/cutover boundary beyond existing v4. The validated candidate is not yet published or installed.
 
 ## Completed post-migration units
 

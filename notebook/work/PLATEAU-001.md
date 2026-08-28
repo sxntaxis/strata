@@ -249,7 +249,7 @@ Native evidence: formatting, strict Clippy, 267 library + 23 integration tests (
 
 #### H3 — Isolated-spire cap
 
-Status: **ADMITTED / SOURCE CANDIDATE; NATIVE VALIDATION PENDING**.
+Status: **COMPLETE / NATIVE-GREEN** at `26fe55d`.
 
 Admitted from direct real-profile visual evidence after H2 cutover. H2's ordinary static threshold intentionally leaves relief three stable, which permits a narrow artifact: a fully isolated bottom-supported stack of exactly three dots can remain as a one-column needle with empty space on both sides. The owner accepts the same isolated shape at height two but not height three or more.
 
@@ -263,6 +263,8 @@ Accepted bounded rule:
 - dynamic relief remains `1`; H1 rain, SandState v4, active avalanche persistence, resize custody, mass, and HISTORY semantics remain unchanged.
 
 Required native proof includes `0/2/0` long-run stability, `0/3/0` immediate yield, one-sided/broad supported peaks retaining ordinary H2 repose, existing 3/1 metastability and real-cadence avalanche statistics, H1 rain, resize/side-wall, restart/v4, HISTORY/recovery, full suite, and runtime smoke.
+
+Native closure: the authored candidate was transplanted onto real published main as `9da30c2`; rustfmt fallout and minimal missing boundary/invariant tests were committed as `26fe55d`, with no architecture-semantic changes. The full suite passed with 272 library tests and 23 integration tests. Focused H3 proofs passed for isolated 2-dot stability, isolated 3-dot yield through normal avalanche activity, one-sided and broad neighbor protection, visible-wall protection, mass conservation, settled-profile elimination of interior isolated height-three-or-greater needles, and continued legality of isolated 2-dot stacks. Corrected live cadence produced 446 events at 40x20 (median 8, p95 108, max 274, quiet buildup 9, 0% one-move) and 642 at 80x30 (median 8, p95 24, max 52, quiet buildup 10, 0% one-move), satisfying all qualitative guardrails. H1 rain, resize/visible basin, HISTORY, recovery, v4 migration/restart, and SQLite regressions remained green; H3 adds no serialized state or profile migration. The candidate is validated but not published or installed.
 
 ### RHYTHM-001 — Focus/Pomodoro experiment (optional)
 
@@ -278,7 +280,7 @@ Preferred progression:
 
 ## Agent locator
 
-Current edge: **PLATEAU-001H H3 isolated-spire hardening**. H2 is published and real-profile green on SandState v4. H3 is admitted from concrete visual friction only: preserve isolated two-dot stacks, but prevent fully isolated supported needles from remaining three dots or taller. Native validation is the next gate; do not retune H2 or change persistence unless evidence forces it.
+Current edge: **PLATEAU-001H H3 publication/cutover handoff**. H3 is native-green at `26fe55d` on top of published main `71363c694e4c6f6c425f30378e081ef27cebd635`; return the validated bundle to the architecture author for publication and later ordinary atomic binary replacement on the existing SandState v4 profile. Do not install yet.
 
 HISTORY-001A/B/C are native-green through `09412b703cf41016f889d725ba235a7a1e63ae6a`. HISTORY-001C established the completed-Idle split transaction, active-preview validation, atomic daily-contribution reconciliation, and Balance historical editor. HISTORY-001D now generalizes that safe primitive into arbitrary From/To activity assignment with explicit collision confirmation and protected live selection.
 
