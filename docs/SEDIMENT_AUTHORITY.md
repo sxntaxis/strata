@@ -2,7 +2,7 @@
 
 Status: implemented and certified
 Program: SEDIMENT-002 + PLATEAU-001H hardening
-Current completed unit: PLATEAU-001H H2 metastable repose + local avalanches certified
+Current completed unit: PLATEAU-001H H3 isolated-spire hardening certified
 Issues completed: #6, #7, #16, #18, #26
 Last reviewed: 2026-08-27
 
@@ -62,6 +62,10 @@ unstable-source selection follows deterministic persisted sweep order. This is a
 literal pressure, force, or angle solver. H1 rain, pending mass, visible-basin custody, and HISTORY remain unchanged.
 
 Native validation is complete at `f581de486a08547ea5fd74ef3ca2f2fb90e1eb34`. Real-cadence proof uses the product's 1000 ms ingress, 32 ms engine update, and every-second-update gravity ordering: 40x20 produced 449 avalanche events with median size 8, p95 82, and median quiet buildup 9 grains; 80x30 produced 658 events with median size 8, p95 20, and median quiet buildup 10 grains. Both runs conserved mass, produced no runaway event, and retained 0% one-move avalanche events. The former one-ingress-per-gravity harness is retained only as bounded overload stress because it feeds roughly 15.6 times faster than normal live cadence.
+
+Daily-use H3 evidence adds one deliberately narrower shape invariant without retuning H2: a bottom-supported column whose two immediate visible neighbors both have supported height zero may stand two dots high, but a third supported dot is not allowed to remain as an isolated one-column needle. At height three or more, that source uses an effective static cap of two and yields through the ordinary H2 diagonal-topple/avalanche path. A peak with support on either immediate side is not an isolated spire and continues to use normal static relief `3`; dynamic relief remains `1`. This is geometry hardening only: no rain, RNG policy, avalanche state, persistence schema, resize custody, or HISTORY semantics change.
+
+H3 native validation is complete at `VALIDATED_HEAD` `26fe55d`. The full suite passed with 272 library tests and 23 integration tests; focused boundary proofs cover isolated 2-dot stability, isolated 3-dot yield, one-sided/broad neighbor protection, visible-wall protection, mass conservation, and the settled-profile invariant. Corrected live cadence produced 446 events at 40x20 (median 8, p95 108, max 274, quiet buildup 9, 0% one-move) and 642 events at 80x30 (median 8, p95 24, max 52, quiet buildup 10, 0% one-move), with mass conserved, events of at least 10 moves, and no runaway. H3 adds no serialized field and requires no SandState or profile migration beyond existing v4.
 
 ## Organic live formation
 
