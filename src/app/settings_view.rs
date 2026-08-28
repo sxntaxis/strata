@@ -31,7 +31,8 @@ impl App {
             &[Action::Up, Action::Down, Action::Left, Action::Right],
             "move",
         );
-        let jump_hint = self.settings_control_hint(&[Action::SettingsTop, Action::SettingsBottom], "jump");
+        let jump_hint =
+            self.settings_control_hint(&[Action::SettingsTop, Action::SettingsBottom], "jump");
 
         let modal_rect = self.modal_rect_ratio(terminal_size, 5, 6);
         let title = Line::from(Span::styled(
@@ -288,7 +289,12 @@ impl App {
         }
     }
 
-    fn render_settings_overlay(&self, f: &mut Frame, terminal_size: Rect, overlay: &SettingsOverlay) {
+    fn render_settings_overlay(
+        &self,
+        f: &mut Frame,
+        terminal_size: Rect,
+        overlay: &SettingsOverlay,
+    ) {
         match overlay {
             SettingsOverlay::CaptureKey { action } => {
                 let rect = self.modal_rect_ratio(terminal_size, 1, 2);
@@ -334,7 +340,8 @@ impl App {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .border_style(
-                        Style::default().fg(self.settings_item_color(SettingsSelectable::WeekStartDay)),
+                        Style::default()
+                            .fg(self.settings_item_color(SettingsSelectable::WeekStartDay)),
                     );
 
                 let options = Self::week_start_options();

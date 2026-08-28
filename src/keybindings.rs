@@ -173,7 +173,7 @@ impl Action {
             "clear_drift_sand" | "clear_none_sand" => Some(Self::ClearNoneSand),
             "toggle_settings" | "toggle_command_atlas" | "toggle_keybindings_help" => {
                 Some(Self::ToggleSettings)
-            },
+            }
 
             "up" => Some(Self::Up),
             "down" => Some(Self::Down),
@@ -1398,7 +1398,7 @@ mod tests {
         );
         assert_eq!(
             Action::DeleteCategory.description(),
-            "Archive selected layer / delete selected report session"
+            "Archive selected Layer / delete selected Balance log"
         );
     }
 
@@ -1458,7 +1458,10 @@ mod tests {
             Action::from_config_name("toggle_command_atlas"),
             Some(Action::ToggleSettings)
         );
-        assert_eq!(Action::from_config_name("atlas_top"), Some(Action::SettingsTop));
+        assert_eq!(
+            Action::from_config_name("atlas_top"),
+            Some(Action::SettingsTop)
+        );
         assert_eq!(
             Action::from_config_name("atlas_bottom"),
             Some(Action::SettingsBottom)
@@ -1471,7 +1474,10 @@ mod tests {
         let f1 = KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE);
         let question = KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE);
         assert_eq!(
-            keymap.resolve_key_event(InputContext::Main, f1).unwrap().action,
+            keymap
+                .resolve_key_event(InputContext::Main, f1)
+                .unwrap()
+                .action,
             Action::ToggleSettings
         );
         assert_eq!(

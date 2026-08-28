@@ -210,9 +210,7 @@ impl App {
     }
 
     fn resolve_action(&self, key: KeyEvent) -> Option<Action> {
-        if self.in_category_modal()
-            && !self.show_settings
-            && matches!(key.code, KeyCode::Char('?'))
+        if self.in_category_modal() && !self.show_settings && matches!(key.code, KeyCode::Char('?'))
         {
             return None;
         }

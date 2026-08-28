@@ -163,7 +163,14 @@ impl App {
             self.palette_action_entry(
                 Action::ToggleSettings,
                 "Open Settings",
-                &["settings", "keybindings", "bindings", "keys", "help", "commands"],
+                &[
+                    "settings",
+                    "keybindings",
+                    "bindings",
+                    "keys",
+                    "help",
+                    "commands",
+                ],
             ),
             self.palette_action_entry(
                 Action::SwitchToNone,
