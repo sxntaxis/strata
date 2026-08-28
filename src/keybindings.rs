@@ -280,7 +280,7 @@ impl Action {
             Action::ReportWeek => "Week",
             Action::ReportMonth => "Month",
             Action::ReportRange => "Custom range",
-            Action::LogActivity => "Log activity…",
+            Action::LogActivity => "Log past activity…",
 
             Action::SettingsTop => "Jump to top",
             Action::SettingsBottom => "Jump to bottom",

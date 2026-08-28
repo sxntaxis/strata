@@ -3,10 +3,10 @@ id: NOW-001
 kind: status
 state: active
 created: 2026-08-01
-updated: 2026-08-27
+updated: 2026-08-28
 authority: working
-summary: HISTORY-001A/B/C/D/E, SEDIMENT-002, and INTERACTION-002 are natively green; PLATEAU-001H product hardening is the current edge.
-next: Cut over the validated build to the owner installation, then use PLATEAU-001H daily-use friction as the admission gate for further core changes.
+summary: The validated plateau is installed on the real profile; PLATEAU-001H H1 is native-green and ready to cut over, after weakening nozzle-like ingress and simplifying Balance footer guidance from first daily-use evidence.
+next: Publish and cut over native-green H1, then resume real-profile daily use and admit further PLATEAU-001H changes only from concrete product friction.
 ---
 
 # NOW — Strata
@@ -78,7 +78,9 @@ SEDIMENT-002 is **COMPLETE / NATIVE-GREEN** at `4059e28df2ebf82bd31453ee208093ee
 
 INTERACTION-002 is **COMPLETE / NATIVE-GREEN** at `b0f60eb3c6d76d1afee8d46737baab8ed220b01b`: formatting, strict Clippy, 283 tests, Settings/keymap and INTERACTION-001 regression, Balance/HISTORY and SEDIMENT-002 regression, isolated TUI startup, and bubblewrap profile-custody proof all pass. The former Atlas is now plain Settings; human action labels and Main / Navigation / Layer / Balance / Settings grouping are authoritative; the misplaced Main `t → Detach` fallback is retired; historical physical keys remain scoped to Balance while the command palette is the deliberate universal launcher.
 
-The active edge is **PLATEAU-001H — product hardening**. Further core work is admitted from concrete daily-use friction, defects, or evidence-backed hardening needs rather than roadmap feature seeking.
+The plateau cutover is **COMPLETE / REAL-PROFILE GREEN** from published main `3062e115de1bdf16985275ff1476ba22f213f744`: the new binary started on the real profile, v1/v2 sediment restored and persisted as SandState v3 with a valid ingress focus, Settings and Balance were visible, normal restart passed, and the pre-v3 backup was retained.
+
+PLATEAU-001H / H1 — de-nozzle rain + contextual Balance footer — is **COMPLETE / NATIVE-GREEN** at `744b9f11a5341b0948178b932b23dd1d7e59662b`. The first owner screenshots after cutover exposed two bounded daily-use defects: falling grains still revealed the persisted ingress focus too clearly, and the Balance bottom border stacked technical status/period/action hints such that the bare `l` was not understandable. H1 keeps full-width support on every drop with only occasional soft focus preference; hides current `live sediment` footer noise; keeps period hints on the default summary; makes detail/editor footers contextual; and presents the visible retroactive action as **Log past activity…** while preserving `balance_log_activity` as the stable config/API name. Native validation passed formatting, strict Clippy, 284 tests, deterministic broad-rain/weak-bias proof, Balance render proof, HISTORY/recovery regressions, isolated TUI smoke, and profile custody.
 
 The stale dirty adaptive-resize branch remains preserved as custody evidence and is superseded by the current-main
 visible-basin, resize/restore, and atomic clear-all authority. No adaptive code was ported.

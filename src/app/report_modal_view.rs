@@ -15,6 +15,16 @@ use crate::keybindings::Action;
 
 use super::{App, ui_helpers, view_style};
 
+fn balance_key_hint(key: impl ToString) -> String {
+    let raw = key.to_string();
+    let label = if raw.chars().count() == 1 {
+        raw.to_uppercase()
+    } else {
+        raw
+    };
+    format!("[{label}]")
+}
+
 impl App {
     pub(super) fn render_report_modal(&self, f: &mut Frame, terminal_size: Rect) {
         let summary = self.report_rows();
@@ -80,28 +90,30 @@ impl App {
         let custom_range_active = self.report_range_is_custom() || self.report_range_edit.is_some();
         let period_bottom_title = Line::from(vec![
             view_style::report_period_label_span(
-                "day",
+                "Day",
                 !custom_range_active && self.report_period == ReportPeriod::Today,
             ),
-            Span::styled("·", Style::default().fg(Color::DarkGray)),
+            Span::styled("  ", Style::default().fg(Color::DarkGray)),
             view_style::report_period_label_span(
-                "week",
+                "Week",
                 !custom_range_active && self.report_period == ReportPeriod::Week,
             ),
-            Span::styled("·", Style::default().fg(Color::DarkGray)),
+            Span::styled("  ", Style::default().fg(Color::DarkGray)),
             view_style::report_period_label_span(
-                "month",
+                "Month",
                 !custom_range_active && self.report_period == ReportPeriod::Month,
             ),
-            Span::styled("·", Style::default().fg(Color::DarkGray)),
-            view_style::report_period_label_span("range", custom_range_active),
+            Span::styled("  ", Style::default().fg(Color::DarkGray)),
+            view_style::report_period_label_span("Range", custom_range_active),
         ])
         .alignment(Alignment::Center);
-        let snapshot_bottom_title = Line::from(Span::styled(
-            self.report_snapshot_status_label(),
-            Style::default().fg(Color::DarkGray),
-        ))
-        .alignment(Alignment::Left);
+        let snapshot_bottom_title = self.should_use_report_snapshot().then(|| {
+            Line::from(Span::styled(
+                self.report_snapshot_status_label(),
+                Style::default().fg(Color::DarkGray),
+            ))
+            .alignment(Alignment::Left)
+        });
         let interaction_bottom_title = if let Some(edit) = self.historical_activity_edit.as_ref() {
             if edit.confirmation.is_some() {
                 let labels = self.historical_activity_conflict_labels();
@@ -146,7 +158,7 @@ impl App {
                     .historical_activity_target_name()
                     .unwrap_or_else(|| "unavailable".to_string());
                 let mut spans = vec![
-                    Span::styled("log activity · layer ", Style::default().fg(Color::Gray)),
+                    Span::styled("log past · layer ", Style::default().fg(Color::Gray)),
                     Span::styled(
                         target,
                         if edit.active_field == super::HistoricalActivityField::Layer {
@@ -185,7 +197,7 @@ impl App {
                     ));
                 } else {
                     spans.push(Span::styled(
-                        " · ←/→ layer · Tab field · Enter log · Esc cancel",
+                        " · ←/→ layer · Tab next · Enter save · Esc cancel",
                         Style::default().fg(Color::Gray),
                     ));
                 }
@@ -227,7 +239,7 @@ impl App {
                 ));
             } else {
                 spans.push(Span::styled(
-                    " · Tab field · Enter apply · Esc cancel",
+                    " · Tab next · Enter apply · Esc cancel",
                     Style::default().fg(Color::Gray),
                 ));
             }
@@ -239,11 +251,11 @@ impl App {
                 .first()
                 .map(ToString::to_string);
             let label = if self.report_log_edit.is_some() {
-                "edit · Enter commit · Esc cancel".to_string()
+                "Enter save · Esc cancel".to_string()
             } else {
                 log_key.map_or_else(
-                    || "view · Enter edit · Esc back".to_string(),
-                    |key| format!("view · {key} log activity · Enter edit · Esc back"),
+                    || "Enter edit · Esc back".to_string(),
+                    |key| format!("{} Log past · Enter edit · Esc back", balance_key_hint(key)),
                 )
             };
             Some(
@@ -256,7 +268,7 @@ impl App {
                 .first()
                 .map(|key| {
                     Line::from(Span::styled(
-                        format!("{key} log activity"),
+                        format!("{} Log past", balance_key_hint(key)),
                         Style::default().fg(Color::Gray),
                     ))
                     .alignment(Alignment::Right)
@@ -267,11 +279,19 @@ impl App {
             .title(interval_title)
             .title(center_title)
             .title(total_title)
-            .title_bottom(snapshot_bottom_title)
-            .title_bottom(period_bottom_title)
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(border_color));
+
+        let default_summary = self.report_logs_category_id.is_none()
+            && self.historical_activity_edit.is_none()
+            && self.report_range_edit.is_none();
+        if default_summary {
+            if let Some(snapshot_bottom_title) = snapshot_bottom_title {
+                frame_block = frame_block.title_bottom(snapshot_bottom_title);
+            }
+            frame_block = frame_block.title_bottom(period_bottom_title);
+        }
         if let Some(interaction_bottom_title) = interaction_bottom_title {
             frame_block = frame_block.title_bottom(interaction_bottom_title);
         }
@@ -619,5 +639,16 @@ impl App {
                 .unwrap_or_else(|_| date.to_string()),
             ReportPeriod::Month => ui_helpers::format_report_interval_label(date),
         }
+    }
+}
+
+#[cfg(test)]
+mod hardening_tests {
+    use super::balance_key_hint;
+
+    #[test]
+    fn balance_key_hint_makes_single_letter_actions_legible() {
+        assert_eq!(balance_key_hint("l"), "[L]");
+        assert_eq!(balance_key_hint("Ctrl+L"), "[Ctrl+L]");
     }
 }

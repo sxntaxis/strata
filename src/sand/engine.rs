@@ -138,9 +138,7 @@ fn default_rng_state() -> u64 {
 const DIAGONAL_SLIDE_CHANCE_NUMERATOR: usize = 1;
 const DIAGONAL_SLIDE_CHANCE_DENOMINATOR: usize = 4;
 const INGRESS_FOCUS_MOVE_ONE_IN: usize = 4;
-const INGRESS_GLOBAL_RAIN_ONE_IN: usize = 5;
-const INGRESS_LOCAL_RADIUS_DIVISOR: usize = 6;
-const INGRESS_LOCAL_RADIUS_MIN: usize = 2;
+const INGRESS_FOCUS_BIAS_ONE_IN: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PendingRun {
@@ -363,12 +361,13 @@ impl SandEngine {
         let visible_width = bounds.x_end.saturating_sub(bounds.x_start);
         debug_assert!(visible_width > 0);
 
-        // The slow focus is persistent engine state. Individual grains are rain:
-        // most land in a broad triangular cloud around that focus, while an
-        // occasional whole-width sample keeps the visible fall from becoming a
-        // narrow nozzle. Occupancy may force the actual placement to the nearest
-        // free top cell, but never outside the visible basin and never by dropping
-        // pending mass.
+        // The slow focus is persistent engine state, but it must not read as a
+        // visible nozzle. Every grain starts as a full-width rain sample. A small
+        // fraction gets one second full-width candidate and softly favors whichever
+        // candidate is closer to the focus. That keeps short-term fall broad while
+        // allowing a long-lived focus to accumulate a statistical hill over time.
+        // Occupancy may force actual placement to the nearest free top cell, but
+        // never outside the visible basin and never by dropping pending mass.
         let focus = self.advance_ingress_focus(bounds);
         let target = self.sample_ingress_target(bounds, focus);
 
@@ -408,26 +407,23 @@ impl SandEngine {
         let visible_width = bounds.x_end.saturating_sub(bounds.x_start);
         debug_assert!(visible_width > 0);
 
-        if self.random_index(INGRESS_GLOBAL_RAIN_ONE_IN) == 0 {
-            return bounds.x_start + self.random_index(visible_width);
+        let first = bounds.x_start + self.random_index(visible_width);
+        if visible_width == 1 || self.random_index(INGRESS_FOCUS_BIAS_ONE_IN) != 0 {
+            return first;
         }
 
-        let max_radius = visible_width.saturating_sub(1);
-        let radius = (visible_width / INGRESS_LOCAL_RADIUS_DIVISOR)
-            .max(INGRESS_LOCAL_RADIUS_MIN)
-            .min(max_radius);
-        if radius == 0 {
-            return focus;
+        let second = bounds.x_start + self.random_index(visible_width);
+        match first.abs_diff(focus).cmp(&second.abs_diff(focus)) {
+            std::cmp::Ordering::Less => first,
+            std::cmp::Ordering::Greater => second,
+            std::cmp::Ordering::Equal => {
+                if self.random_bool() {
+                    second
+                } else {
+                    first
+                }
+            }
         }
-
-        let span = radius.saturating_mul(2).saturating_add(1);
-        let sample_a = self.random_index(span);
-        let sample_b = self.random_index(span);
-        let centered = ((sample_a + sample_b) / 2) as isize - radius as isize;
-
-        focus
-            .saturating_add_signed(centered)
-            .clamp(bounds.x_start, bounds.x_end - 1)
     }
 
     fn diagonal_target(&mut self, x: usize, left_open: bool, right_open: bool) -> Option<usize> {
@@ -1386,8 +1382,6 @@ mod organic_formation_tests {
         sand::{SandEngine, SandState, SandStateGrain},
     };
 
-    use super::{INGRESS_LOCAL_RADIUS_DIVISOR, INGRESS_LOCAL_RADIUS_MIN};
-
     fn gravity_fixture(
         block_left: bool,
         block_right: bool,
@@ -1504,33 +1498,42 @@ mod organic_formation_tests {
     }
 
     #[test]
-    fn ingress_rain_is_broad_but_biased_around_the_focus() {
+    fn ingress_rain_is_full_width_with_only_a_soft_focus_bias() {
         let mut engine = SandEngine::new(40, 2);
         engine.clear();
         let bounds = engine.viewport_bounds().expect("visible viewport");
         let visible_width = bounds.x_end - bounds.x_start;
         let focus = (bounds.x_start + bounds.x_end) / 2;
-        let radius = (visible_width / INGRESS_LOCAL_RADIUS_DIVISOR)
-            .max(INGRESS_LOCAL_RADIUS_MIN)
-            .min(visible_width - 1);
         engine.ingress_focus_x = Some(focus);
         engine.rng_state = 0x0A11_CE55;
 
-        let samples = (0..256)
+        let samples = (0..1024)
             .map(|_| engine.sample_ingress_target(bounds, focus))
             .collect::<Vec<_>>();
-        let near = samples
-            .iter()
-            .filter(|&&x| x.abs_diff(focus) <= radius)
-            .count();
-        let far = samples.len() - near;
         let distinct = samples.iter().copied().collect::<HashSet<_>>().len();
+        let far = samples
+            .iter()
+            .filter(|&&x| x.abs_diff(focus) >= visible_width / 4)
+            .count();
+        let mean_distance =
+            samples.iter().map(|&x| x.abs_diff(focus)).sum::<usize>() as f64 / samples.len() as f64;
+        let uniform_mean_distance = visible_width as f64 / 4.0;
 
-        assert!(near >= samples.len() * 3 / 4);
-        assert!(far > 0, "whole-width rain must produce outliers");
         assert!(
-            distinct > visible_width / 2,
-            "rain must remain visibly broad"
+            distinct >= visible_width * 3 / 4,
+            "rain must cover most visible columns rather than expose a nozzle"
+        );
+        assert!(
+            far >= samples.len() / 3,
+            "far-away rain must remain common, not exceptional"
+        );
+        assert!(
+            mean_distance < uniform_mean_distance,
+            "the wandering focus must still create a measurable long-run bias"
+        );
+        assert!(
+            mean_distance > uniform_mean_distance * 0.75,
+            "the short-run bias must stay weak enough to preserve a rain-like fall"
         );
     }
 
