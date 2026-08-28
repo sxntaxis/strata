@@ -1,8 +1,8 @@
 # Sediment authority
 
-Status: H2 implemented; native validation pending
+Status: implemented and certified
 Program: SEDIMENT-002 + PLATEAU-001H hardening
-Current completed unit: SEDIMENT-002; PLATEAU-001H H1 ingress hardening certified; H2 candidate implemented
+Current completed unit: PLATEAU-001H H2 metastable repose + local avalanches certified
 Issues completed: #6, #7, #16, #18, #26
 Last reviewed: 2026-08-27
 
@@ -61,7 +61,7 @@ pass has neither dynamic toppling nor active-region straight-down movement. Equa
 unstable-source selection follows deterministic persisted sweep order. This is a coarse supported-relief proxy, not a
 literal pressure, force, or angle solver. H1 rain, pending mass, visible-basin custody, and HISTORY remain unchanged.
 
-Native validation of this candidate is pending.
+Native validation is complete at `f581de486a08547ea5fd74ef3ca2f2fb90e1eb34`. Real-cadence proof uses the product's 1000 ms ingress, 32 ms engine update, and every-second-update gravity ordering: 40x20 produced 449 avalanche events with median size 8, p95 82, and median quiet buildup 9 grains; 80x30 produced 658 events with median size 8, p95 20, and median quiet buildup 10 grains. Both runs conserved mass, produced no runaway event, and retained 0% one-move avalanche events. The former one-ingress-per-gravity harness is retained only as bounded overload stress because it feeds roughly 15.6 times faster than normal live cadence.
 
 ## Organic live formation
 

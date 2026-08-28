@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-08-28
 authority: working
-summary: The validated plateau is installed on the real profile; PLATEAU-001H H1 is native-green and ready to cut over, after weakening nozzle-like ingress and simplifying Balance footer guidance from first daily-use evidence.
-next: Complete native validation of PLATEAU-001H H2 v4 active-avalanche continuity, then return the validated candidate to the architecture author before publication or real-profile cutover.
+summary: PLATEAU-001H H1 is published and running on the real profile; H2 metastable repose + local avalanches is native-green at f581de486a08547ea5fd74ef3ca2f2fb90e1eb34 and ready for controlled SandState v4 cutover.
+next: Publish and cut over exact native-green H2 with a pre-v4 real-profile backup and strict forward binary/profile pairing, then resume daily-use hardening with no pre-invented H3.
 ---
 
 # NOW — Strata
@@ -80,15 +80,14 @@ INTERACTION-002 is **COMPLETE / NATIVE-GREEN** at `b0f60eb3c6d76d1afee8d46737baa
 
 The plateau cutover is **COMPLETE / REAL-PROFILE GREEN** from published main `3062e115de1bdf16985275ff1476ba22f213f744`: the new binary started on the real profile, v1/v2 sediment restored and persisted as SandState v3 with a valid ingress focus, Settings and Balance were visible, normal restart passed, and the pre-v3 backup was retained.
 
-PLATEAU-001H / H1 — de-nozzle rain + contextual Balance footer — is **COMPLETE / NATIVE-GREEN** at `744b9f11a5341b0948178b932b23dd1d7e59662b`. The first owner screenshots after cutover exposed two bounded daily-use defects: falling grains still revealed the persisted ingress focus too clearly, and the Balance bottom border stacked technical status/period/action hints such that the bare `l` was not understandable. H1 keeps full-width support on every drop with only occasional soft focus preference; hides current `live sediment` footer noise; keeps period hints on the default summary; makes detail/editor footers contextual; and presents the visible retroactive action as **Log past activity…** while preserving `balance_log_activity` as the stable config/API name. Native validation passed formatting, strict Clippy, 284 tests, deterministic broad-rain/weak-bias proof, Balance render proof, HISTORY/recovery regressions, isolated TUI smoke, and profile custody.
+PLATEAU-001H / H1 — de-nozzle rain + contextual Balance footer — is **COMPLETE / PUBLISHED / REAL-PROFILE GREEN**. Runtime source `744b9f11a5341b0948178b932b23dd1d7e59662b` was published through main `d34e2eaae825c78b5754f8efa8b45b3f35e69bf1`, installed atomically, and restarted on the real profile. Daily use confirms that short-term ingress reads as rain rather than a visible nozzle.
 
 The stale dirty adaptive-resize branch remains preserved as custody evidence and is superseded by the current-main
 visible-basin, resize/restore, and atomic clear-all authority. No adaptive code was ported.
 
 The required core path is now PLATEAU-001H product hardening. Pomodoro/RHYTHM-001 remains optional and must not block plateau.
 
-PLATEAU-001H H2 is implemented in a disposable candidate checkout and awaits native validation. Its bench-selected
-constants are static supported relief 3 and dynamic active relief 1; the real profile and installed binary remain on H1.
+PLATEAU-001H / H2 — metastable repose + local avalanches — is **COMPLETE / NATIVE-GREEN** at `f581de486a08547ea5fd74ef3ca2f2fb90e1eb34`. Static supported relief 3 and dynamic active relief 1 replace the memoryless diagonal lottery; bottom-connected surface relief excludes airborne grains; radius-one local mobilization and one diagonal topple per gravity pass produce true buildup and bursty avalanches. Real-cadence validation corrected the earlier 1:1 overload false blocker: at normal 1000 ms ingress and 64 ms gravity cadence, 40x20 produced 449 events (median size 8, p95 82, quiet buildup 9) and 80x30 produced 658 events (median size 8, p95 20, quiet buildup 10), with 0% one-move events, conserved mass, no runaway, exact v4 restart continuation, all regressions green, 290 non-doc tests, and native gravity cost within the 2x target. The real profile and installed binary remain on H1 until controlled v4 cutover.
 
 ## Completed post-migration units
 
