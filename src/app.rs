@@ -30,7 +30,7 @@ mod category_modal_view;
 mod category_state;
 mod command_palette_view;
 mod event_handlers;
-mod keybindings_modal_view;
+mod settings_view;
 mod persistence_recovery;
 mod recovery_statement;
 mod render_views;
@@ -58,13 +58,13 @@ enum SessionClockMode {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AtlasSelectable {
+enum SettingsSelectable {
     WeekStartDay,
     Action(keybindings::Action),
 }
 
 #[derive(Clone, Debug)]
-enum AtlasOverlay {
+enum SettingsOverlay {
     CaptureKey { action: keybindings::Action },
     SelectWeekStartDay { selected: usize },
 }
@@ -551,10 +551,10 @@ struct App {
     command_palette_feedback: Option<String>,
     command_palette_selected_index: usize,
     command_palette_scroll: usize,
-    show_keybindings_modal: bool,
-    keybindings_scroll: usize,
-    atlas_selected_index: usize,
-    atlas_overlay: Option<AtlasOverlay>,
+    show_settings: bool,
+    settings_scroll: usize,
+    settings_selected_index: usize,
+    settings_overlay: Option<SettingsOverlay>,
     keymap_last_modified: Option<SystemTime>,
     keymap_last_poll: Instant,
     render_needed: bool,
@@ -656,10 +656,10 @@ impl App {
             command_palette_feedback: None,
             command_palette_selected_index: 0,
             command_palette_scroll: 0,
-            show_keybindings_modal: false,
-            keybindings_scroll: 0,
-            atlas_selected_index: 0,
-            atlas_overlay: None,
+            show_settings: false,
+            settings_scroll: 0,
+            settings_selected_index: 0,
+            settings_overlay: None,
             keymap_last_modified,
             keymap_last_poll: Instant::now(),
             render_needed: true,
@@ -900,27 +900,27 @@ impl App {
         }
     }
 
-    fn atlas_items(&self) -> Vec<AtlasSelectable> {
-        let mut items = vec![AtlasSelectable::WeekStartDay];
+    fn settings_items(&self) -> Vec<SettingsSelectable> {
+        let mut items = vec![SettingsSelectable::WeekStartDay];
         items.extend(
             keybindings::Action::all()
                 .iter()
                 .copied()
-                .map(AtlasSelectable::Action),
+                .map(SettingsSelectable::Action),
         );
         items
     }
 
-    fn selected_atlas_item(&self) -> AtlasSelectable {
-        let items = self.atlas_items();
+    fn selected_settings_item(&self) -> SettingsSelectable {
+        let items = self.settings_items();
         items
-            .get(self.atlas_selected_index)
+            .get(self.settings_selected_index)
             .copied()
-            .unwrap_or(AtlasSelectable::Action(keybindings::Action::all()[0]))
+            .unwrap_or(SettingsSelectable::Action(keybindings::Action::all()[0]))
     }
 
-    fn total_atlas_items(&self) -> usize {
-        self.atlas_items().len()
+    fn total_settings_items(&self) -> usize {
+        self.settings_items().len()
     }
 
     pub(super) fn effective_keys_for_action(&self, action: Action) -> Vec<KeyBinding> {
@@ -942,26 +942,26 @@ impl App {
             .map(|alias| alias.display_label())
             .collect()
     }
-    fn atlas_item_description(&self, item: AtlasSelectable) -> String {
+    fn settings_item_description(&self, item: SettingsSelectable) -> String {
         match item {
-            AtlasSelectable::WeekStartDay => {
-                "First weekday used by Week range in Balance pop-up.".to_string()
+            SettingsSelectable::WeekStartDay => {
+                "First weekday used by the Week range in Balance.".to_string()
             }
-            AtlasSelectable::Action(action) => action.description().to_string(),
+            SettingsSelectable::Action(action) => action.description().to_string(),
         }
     }
 
-    fn atlas_item_color(&self, item: AtlasSelectable) -> ratatui::style::Color {
+    fn settings_item_color(&self, item: SettingsSelectable) -> ratatui::style::Color {
         use ratatui::style::Color;
 
         match item {
-            AtlasSelectable::WeekStartDay => Color::Green,
-            AtlasSelectable::Action(action) => match action.category() {
+            SettingsSelectable::WeekStartDay => Color::Green,
+            SettingsSelectable::Action(action) => match action.category() {
                 keybindings::ActionCategory::Global => Color::Cyan,
                 keybindings::ActionCategory::Navigation => Color::Yellow,
                 keybindings::ActionCategory::CategoryModal => Color::Green,
                 keybindings::ActionCategory::ReportModal => Color::Magenta,
-                keybindings::ActionCategory::HelpModal => Color::Blue,
+                keybindings::ActionCategory::Settings => Color::Blue,
             },
         }
     }
@@ -988,20 +988,20 @@ impl App {
         format!("{}{}", first.to_ascii_uppercase(), chars.as_str())
     }
 
-    fn toggle_keybindings_modal(&mut self) {
-        self.show_keybindings_modal = !self.show_keybindings_modal;
-        if self.show_keybindings_modal {
-            self.atlas_selected_index = 0;
-            self.keybindings_scroll = 0;
-            self.atlas_overlay = None;
+    fn toggle_settings(&mut self) {
+        self.show_settings = !self.show_settings;
+        if self.show_settings {
+            self.settings_selected_index = 0;
+            self.settings_scroll = 0;
+            self.settings_overlay = None;
             self.close_command_palette();
         }
         self.render_needed = true;
     }
 
-    fn close_keybindings_modal(&mut self) {
-        self.show_keybindings_modal = false;
-        self.atlas_overlay = None;
+    fn close_settings(&mut self) {
+        self.show_settings = false;
+        self.settings_overlay = None;
         self.render_needed = true;
     }
 
@@ -1012,7 +1012,7 @@ impl App {
             self.command_palette_feedback = None;
             self.command_palette_selected_index = 0;
             self.command_palette_scroll = 0;
-            self.close_keybindings_modal();
+            self.close_settings();
         }
         self.render_needed = true;
     }
@@ -1034,58 +1034,58 @@ impl App {
         }
     }
 
-    fn select_previous_keybinding_action(&mut self) {
-        let total = self.total_atlas_items();
+    fn select_previous_settings_item(&mut self) {
+        let total = self.total_settings_items();
         if total == 0 {
             return;
         }
-        self.atlas_selected_index = (self.atlas_selected_index + total - 1) % total;
+        self.settings_selected_index = (self.settings_selected_index + total - 1) % total;
         self.render_needed = true;
     }
 
-    fn select_next_keybinding_action(&mut self) {
-        let total = self.total_atlas_items();
+    fn select_next_settings_item(&mut self) {
+        let total = self.total_settings_items();
         if total == 0 {
             return;
         }
-        self.atlas_selected_index = (self.atlas_selected_index + 1) % total;
+        self.settings_selected_index = (self.settings_selected_index + 1) % total;
         self.render_needed = true;
     }
 
-    fn jump_keybindings_top(&mut self) {
-        self.atlas_selected_index = 0;
-        self.keybindings_scroll = 0;
+    fn jump_settings_top(&mut self) {
+        self.settings_selected_index = 0;
+        self.settings_scroll = 0;
         self.render_needed = true;
     }
 
-    fn jump_keybindings_bottom(&mut self) {
-        let total = self.total_atlas_items();
+    fn jump_settings_bottom(&mut self) {
+        let total = self.total_settings_items();
         if total == 0 {
             return;
         }
-        self.atlas_selected_index = total - 1;
+        self.settings_selected_index = total - 1;
         self.render_needed = true;
     }
 
-    fn open_atlas_editor_for_selection(&mut self) {
-        match self.selected_atlas_item() {
-            AtlasSelectable::Action(action) => {
-                self.atlas_overlay = Some(AtlasOverlay::CaptureKey { action });
+    fn open_settings_editor_for_selection(&mut self) {
+        match self.selected_settings_item() {
+            SettingsSelectable::Action(action) => {
+                self.settings_overlay = Some(SettingsOverlay::CaptureKey { action });
             }
-            AtlasSelectable::WeekStartDay => {
+            SettingsSelectable::WeekStartDay => {
                 let selected = Self::week_start_options()
                     .iter()
                     .position(|day| *day == self.runtime_settings.first_day_of_week)
                     .unwrap_or(0);
-                self.atlas_overlay = Some(AtlasOverlay::SelectWeekStartDay { selected });
+                self.settings_overlay = Some(SettingsOverlay::SelectWeekStartDay { selected });
             }
         }
 
         self.render_needed = true;
     }
 
-    fn close_atlas_overlay(&mut self) {
-        self.atlas_overlay = None;
+    fn close_settings_overlay(&mut self) {
+        self.settings_overlay = None;
         self.render_needed = true;
     }
 

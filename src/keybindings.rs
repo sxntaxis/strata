@@ -16,7 +16,7 @@ pub(crate) enum ActionCategory {
     Navigation,
     CategoryModal,
     ReportModal,
-    HelpModal,
+    Settings,
 }
 
 impl ActionCategory {
@@ -26,17 +26,17 @@ impl ActionCategory {
             Self::Navigation,
             Self::CategoryModal,
             Self::ReportModal,
-            Self::HelpModal,
+            Self::Settings,
         ]
     }
 
     pub(crate) const fn title(self) -> &'static str {
         match self {
-            Self::Global => "Core Commands",
-            Self::Navigation => "Flow Controls",
-            Self::CategoryModal => "Layer Pop-up",
-            Self::ReportModal => "Balance Pop-up",
-            Self::HelpModal => "Command Atlas",
+            Self::Global => "Main",
+            Self::Navigation => "Navigation",
+            Self::CategoryModal => "Layer",
+            Self::ReportModal => "Balance",
+            Self::Settings => "Settings",
         }
     }
 }
@@ -51,7 +51,7 @@ pub(crate) enum Action {
     SwitchToNone,
     ClearAllSand,
     ClearNoneSand,
-    ToggleKeybindingsHelp,
+    ToggleSettings,
 
     Up,
     Down,
@@ -76,8 +76,8 @@ pub(crate) enum Action {
     ReportRange,
     LogActivity,
 
-    HelpTop,
-    HelpBottom,
+    SettingsTop,
+    SettingsBottom,
 }
 
 impl Action {
@@ -90,7 +90,7 @@ impl Action {
         Action::SwitchToNone,
         Action::ClearAllSand,
         Action::ClearNoneSand,
-        Action::ToggleKeybindingsHelp,
+        Action::ToggleSettings,
         Action::Up,
         Action::Down,
         Action::Left,
@@ -111,8 +111,8 @@ impl Action {
         Action::ReportMonth,
         Action::ReportRange,
         Action::LogActivity,
-        Action::HelpTop,
-        Action::HelpBottom,
+        Action::SettingsTop,
+        Action::SettingsBottom,
     ];
 
     pub(crate) fn all() -> &'static [Action] {
@@ -129,7 +129,7 @@ impl Action {
             Action::SwitchToNone => "switch_to_drift",
             Action::ClearAllSand => "clear_all_sand",
             Action::ClearNoneSand => "clear_drift_sand",
-            Action::ToggleKeybindingsHelp => "toggle_command_atlas",
+            Action::ToggleSettings => "toggle_settings",
 
             Action::Up => "up",
             Action::Down => "down",
@@ -154,8 +154,8 @@ impl Action {
             Action::ReportRange => "balance_range",
             Action::LogActivity => "balance_log_activity",
 
-            Action::HelpTop => "atlas_top",
-            Action::HelpBottom => "atlas_bottom",
+            Action::SettingsTop => "settings_top",
+            Action::SettingsBottom => "settings_bottom",
         }
     }
 
@@ -171,7 +171,9 @@ impl Action {
 
             "clear_all_sand" => Some(Self::ClearAllSand),
             "clear_drift_sand" | "clear_none_sand" => Some(Self::ClearNoneSand),
-            "toggle_command_atlas" | "toggle_keybindings_help" => Some(Self::ToggleKeybindingsHelp),
+            "toggle_settings" | "toggle_command_atlas" | "toggle_keybindings_help" => {
+                Some(Self::ToggleSettings)
+            },
 
             "up" => Some(Self::Up),
             "down" => Some(Self::Down),
@@ -198,8 +200,8 @@ impl Action {
             "balance_range" | "report_range" => Some(Self::ReportRange),
             "balance_log_activity" | "report_log_activity" => Some(Self::LogActivity),
 
-            "atlas_top" | "help_top" => Some(Self::HelpTop),
-            "atlas_bottom" | "help_bottom" => Some(Self::HelpBottom),
+            "settings_top" | "atlas_top" | "help_top" => Some(Self::SettingsTop),
+            "settings_bottom" | "atlas_bottom" | "help_bottom" => Some(Self::SettingsBottom),
 
             _ => None,
         }
@@ -209,13 +211,13 @@ impl Action {
         match self {
             Action::Quit => "Exit Strata",
             Action::ToggleCommandPalette => "Open/close command palette",
-            Action::OpenCategoryModal => "Open layer pop-up from main view",
-            Action::OpenReportModal => "Open balance pop-up from main view",
-            Action::Detach => "Detach from main view (in balance pop-up: day range)",
+            Action::OpenCategoryModal => "Open Layer from Main",
+            Action::OpenReportModal => "Open Balance from Main",
+            Action::Detach => "Detach from Main (in Balance: select day range)",
             Action::SwitchToNone => "Switch active layer to idle",
             Action::ClearAllSand => "Clear all sand and reset idle timer",
             Action::ClearNoneSand => "Clear only idle sand",
-            Action::ToggleKeybindingsHelp => "Open/close command atlas",
+            Action::ToggleSettings => "Open/close Settings",
 
             Action::Up => "Move up / previous item",
             Action::Down => "Move down / next item",
@@ -228,20 +230,60 @@ impl Action {
             Action::Confirm => "Confirm / open",
             Action::Cancel => "Cancel / close",
 
-            Action::DeleteCategory => "Archive selected layer / delete selected report session",
+            Action::DeleteCategory => "Archive selected Layer / delete selected Balance log",
             Action::EditCategoryDescription => "Toggle durable layer-metadata editing",
             Action::IncreaseBalance => "Set selected layer balance to +1",
             Action::DecreaseBalance => "Set selected layer balance to -1",
-            Action::Backspace => "Delete one typed character in layer pop-up",
+            Action::Backspace => "Delete one typed character in Layer",
 
-            Action::ReportToday => "Set balance pop-up range to day",
-            Action::ReportWeek => "Set balance pop-up range to week",
-            Action::ReportMonth => "Set balance pop-up range to month",
+            Action::ReportToday => "Set Balance range to day",
+            Action::ReportWeek => "Set Balance range to week",
+            Action::ReportMonth => "Set Balance range to month",
             Action::ReportRange => "Edit an explicit From/To balance range",
             Action::LogActivity => "Log or correct an arbitrary past activity interval",
 
-            Action::HelpTop => "Jump command atlas to top",
-            Action::HelpBottom => "Jump command atlas to bottom",
+            Action::SettingsTop => "Jump Settings to top",
+            Action::SettingsBottom => "Jump Settings to bottom",
+        }
+    }
+
+    pub(crate) fn settings_label(self) -> &'static str {
+        match self {
+            Action::Quit => "Quit",
+            Action::ToggleCommandPalette => "Command palette",
+            Action::OpenCategoryModal => "Open Layer",
+            Action::OpenReportModal => "Open Balance",
+            Action::Detach => "Detach",
+            Action::SwitchToNone => "Switch to Idle",
+            Action::ClearAllSand => "Clear all sand",
+            Action::ClearNoneSand => "Clear Idle sand",
+            Action::ToggleSettings => "Settings",
+
+            Action::Up => "Move up",
+            Action::Down => "Move down",
+            Action::Left => "Move / older",
+            Action::Right => "Move / newer",
+            Action::ShiftUp => "Shift up",
+            Action::ShiftDown => "Shift down",
+            Action::ShiftLeft => "Shift left",
+            Action::ShiftRight => "Shift right",
+            Action::Confirm => "Confirm / open",
+            Action::Cancel => "Cancel / close",
+
+            Action::DeleteCategory => "Archive layer / delete log",
+            Action::EditCategoryDescription => "Edit layer metadata",
+            Action::IncreaseBalance => "Balance +1",
+            Action::DecreaseBalance => "Balance -1",
+            Action::Backspace => "Backspace",
+
+            Action::ReportToday => "Day",
+            Action::ReportWeek => "Week",
+            Action::ReportMonth => "Month",
+            Action::ReportRange => "Custom range",
+            Action::LogActivity => "Log activity…",
+
+            Action::SettingsTop => "Jump to top",
+            Action::SettingsBottom => "Jump to bottom",
         }
     }
 
@@ -255,7 +297,7 @@ impl Action {
             | Action::SwitchToNone
             | Action::ClearAllSand
             | Action::ClearNoneSand
-            | Action::ToggleKeybindingsHelp => ActionCategory::Global,
+            | Action::ToggleSettings => ActionCategory::Global,
 
             Action::Up
             | Action::Down
@@ -280,7 +322,7 @@ impl Action {
             | Action::ReportRange
             | Action::LogActivity => ActionCategory::ReportModal,
 
-            Action::HelpTop | Action::HelpBottom => ActionCategory::HelpModal,
+            Action::SettingsTop | Action::SettingsBottom => ActionCategory::Settings,
         }
     }
 }
@@ -322,7 +364,7 @@ impl AliasCondition {
     const fn label(self) -> &'static str {
         match self {
             Self::Always => "always",
-            Self::TargetUnbound => "when target unbound",
+            Self::TargetUnbound => "when target is unbound",
         }
     }
 }
@@ -338,10 +380,15 @@ pub(crate) struct ContextualAlias {
 
 impl ContextualAlias {
     pub(crate) fn display_label(&self) -> String {
+        let context = match self.context {
+            InputContext::Main => "Main",
+            InputContext::Report => "Balance",
+            InputContext::Other => "Other",
+        };
         format!(
-            "{} → {} ({})",
-            self.name,
-            self.target.config_name(),
+            "{context}: {} → {} ({})",
+            self.source.settings_label(),
+            self.target.settings_label(),
             self.condition.label()
         )
     }
@@ -815,8 +862,8 @@ const DEFAULT_BINDINGS: [(&str, Action); 33] = [
     ("d", Action::Detach),
     ("c", Action::ClearAllSand),
     ("shift-c", Action::ClearNoneSand),
-    ("f1", Action::ToggleKeybindingsHelp),
-    ("?", Action::ToggleKeybindingsHelp),
+    ("f1", Action::ToggleSettings),
+    ("?", Action::ToggleSettings),
     ("up", Action::Up),
     ("down", Action::Down),
     ("left", Action::Left),
@@ -837,9 +884,9 @@ const DEFAULT_BINDINGS: [(&str, Action); 33] = [
     ("m", Action::ReportMonth),
     ("r", Action::ReportRange),
     ("l", Action::LogActivity),
-    ("home", Action::HelpTop),
-    ("g", Action::HelpTop),
-    ("end", Action::HelpBottom),
+    ("home", Action::SettingsTop),
+    ("g", Action::SettingsTop),
+    ("end", Action::SettingsBottom),
 ];
 
 #[derive(Debug, Clone, Copy)]
@@ -851,30 +898,23 @@ struct ContextualAliasDefinition {
     condition: AliasCondition,
 }
 
-const DEFAULT_CONTEXTUAL_ALIASES: [ContextualAliasDefinition; 4] = [
+const DEFAULT_CONTEXTUAL_ALIASES: [ContextualAliasDefinition; 3] = [
     ContextualAliasDefinition {
-        name: "main.confirm",
+        name: "main.open_layer",
         context: InputContext::Main,
         source: Action::Confirm,
         target: Action::OpenCategoryModal,
         condition: AliasCondition::TargetUnbound,
     },
     ContextualAliasDefinition {
-        name: "main.cancel",
+        name: "main.switch_idle",
         context: InputContext::Main,
         source: Action::Cancel,
         target: Action::SwitchToNone,
         condition: AliasCondition::TargetUnbound,
     },
     ContextualAliasDefinition {
-        name: "main.balance_today",
-        context: InputContext::Main,
-        source: Action::ReportToday,
-        target: Action::Detach,
-        condition: AliasCondition::TargetUnbound,
-    },
-    ContextualAliasDefinition {
-        name: "report.detach",
+        name: "balance.day",
         context: InputContext::Report,
         source: Action::Detach,
         target: Action::ReportToday,
@@ -883,10 +923,26 @@ const DEFAULT_CONTEXTUAL_ALIASES: [ContextualAliasDefinition; 4] = [
 ];
 
 fn contextual_alias_definition(name: &str) -> Option<ContextualAliasDefinition> {
+    if name == "main.balance_today" {
+        return Some(ContextualAliasDefinition {
+            name: "main.balance_today",
+            context: InputContext::Main,
+            source: Action::ReportToday,
+            target: Action::Detach,
+            condition: AliasCondition::TargetUnbound,
+        });
+    }
+
+    let canonical = match name {
+        "main.confirm" => "main.open_layer",
+        "main.cancel" => "main.switch_idle",
+        "report.detach" => "balance.day",
+        other => other,
+    };
     DEFAULT_CONTEXTUAL_ALIASES
         .iter()
         .copied()
-        .find(|definition| definition.name == name)
+        .find(|definition| definition.name == canonical)
 }
 
 fn default_contextual_aliases() -> Vec<ContextualAlias> {
@@ -925,7 +981,7 @@ fn parse_contextual_aliases(
                 path.display()
             )
         })?;
-        aliases.retain(|alias| alias.name != *name);
+        aliases.retain(|alias| alias.name != definition.name);
         let Some(target_name) = configured_target else {
             continue;
         };
@@ -938,7 +994,7 @@ fn parse_contextual_aliases(
             )
         })?;
         aliases.push(ContextualAlias {
-            name: name.clone(),
+            name: definition.name.to_string(),
             context: definition.context,
             source: definition.source,
             target,
@@ -1392,6 +1448,42 @@ mod tests {
     }
 
     #[test]
+    fn settings_uses_plain_canonical_action_names_with_old_aliases_readable() {
+        assert_eq!(Action::ToggleSettings.config_name(), "toggle_settings");
+        assert_eq!(Action::SettingsTop.config_name(), "settings_top");
+        assert_eq!(Action::SettingsBottom.config_name(), "settings_bottom");
+        assert_eq!(Action::ToggleSettings.settings_label(), "Settings");
+
+        assert_eq!(
+            Action::from_config_name("toggle_command_atlas"),
+            Some(Action::ToggleSettings)
+        );
+        assert_eq!(Action::from_config_name("atlas_top"), Some(Action::SettingsTop));
+        assert_eq!(
+            Action::from_config_name("atlas_bottom"),
+            Some(Action::SettingsBottom)
+        );
+    }
+
+    #[test]
+    fn default_settings_bindings_remain_f1_and_question_mark() {
+        let keymap = default_keymap();
+        let f1 = KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE);
+        let question = KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE);
+        assert_eq!(
+            keymap.resolve_key_event(InputContext::Main, f1).unwrap().action,
+            Action::ToggleSettings
+        );
+        assert_eq!(
+            keymap
+                .resolve_key_event(InputContext::Main, question)
+                .unwrap()
+                .action,
+            Action::ToggleSettings
+        );
+    }
+
+    #[test]
     fn test_load_keymap_inherit_replaces_default_action_bindings() {
         let path = unique_path("strata_keymap_override");
         let raw = r#"{
@@ -1603,7 +1695,7 @@ mod tests {
     }
 
     #[test]
-    fn atlas_writer_rejects_mandatory_ctrl_c_before_persisting() {
+    fn settings_writer_rejects_mandatory_ctrl_c_before_persisting() {
         let path = unique_path("strata_keymap_mandatory_writer");
         let ctrl_c = KeyBinding::parse("ctrl-c").unwrap();
         let error = set_action_binding(&path, Action::OpenReportModal, Some(ctrl_c)).unwrap_err();
@@ -1647,7 +1739,7 @@ mod tests {
         fs::write(&path, r#"{"keymap":{"f1":null,"?":null}}"#).unwrap();
         let keymap = load_keymap_for_test(&path).unwrap();
         assert_eq!(
-            keymap.action_state(Action::ToggleKeybindingsHelp),
+            keymap.action_state(Action::ToggleSettings),
             ActionBindingState::Unbound
         );
         let f1 = KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE);
@@ -1667,6 +1759,18 @@ mod tests {
         let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
         let resolved = keymap.resolve_key_event(InputContext::Main, enter).unwrap();
         assert_eq!(resolved.action, Action::Confirm);
+        assert_eq!(resolved.source, ResolvedActionSource::Direct);
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn unbound_detach_does_not_turn_balance_day_key_into_main_detach() {
+        let path = unique_path("strata_no_main_today_detach_alias");
+        fs::write(&path, r#"{"keymap":{"d":null}}"#).unwrap();
+        let keymap = load_keymap_for_test(&path).unwrap();
+        let today = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE);
+        let resolved = keymap.resolve_key_event(InputContext::Main, today).unwrap();
+        assert_eq!(resolved.action, Action::ReportToday);
         assert_eq!(resolved.source, ResolvedActionSource::Direct);
         fs::remove_file(path).ok();
     }
@@ -1699,7 +1803,7 @@ mod tests {
                 .unwrap()
                 .action,
             Action::ReportToday,
-            "detach is directly bound, so target-unbound alias must not apply"
+            "Balance day remains its own direct action on Main; runtime ownership decides whether it acts"
         );
         assert_eq!(
             keymap
@@ -1744,8 +1848,8 @@ mod tests {
     }
 
     #[test]
-    fn atlas_unbind_and_disable_persist_distinct_states() {
-        let path = unique_path("strata_keymap_atlas_states");
+    fn settings_unbind_and_disable_persist_distinct_states() {
+        let path = unique_path("strata_keymap_settings_states");
         let unbound = set_action_unbound(&path, Action::OpenReportModal).unwrap();
         assert_eq!(
             unbound.keymap.action_state(Action::OpenReportModal),

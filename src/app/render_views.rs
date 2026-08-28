@@ -132,8 +132,8 @@ impl App {
             self.render_report_modal(f, size);
         }
 
-        if self.show_keybindings_modal {
-            self.render_keybindings_modal(f, size);
+        if self.show_settings {
+            self.render_settings(f, size);
         }
 
         if self.show_command_palette {

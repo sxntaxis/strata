@@ -86,7 +86,7 @@ pub const REPORT_MODAL_SETTINGS: ReportModalSettings = ReportModalSettings {
     historical_activity_editor_min_width: 96,
 };
 
-pub const ATLAS_LAYOUT_SETTINGS: AtlasLayoutSettings = AtlasLayoutSettings {
+pub const SETTINGS_LAYOUT: SettingsLayoutSettings = SettingsLayoutSettings {
     value_col_width: 30,
     action_col_width: 24,
 };
@@ -166,7 +166,7 @@ pub struct ReportModalSettings {
     pub historical_activity_editor_min_width: usize,
 }
 
-pub struct AtlasLayoutSettings {
+pub struct SettingsLayoutSettings {
     pub value_col_width: usize,
     pub action_col_width: usize,
 }

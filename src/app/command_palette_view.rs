@@ -147,13 +147,13 @@ impl App {
         let mut entries = vec![
             self.palette_action_entry(
                 Action::OpenCategoryModal,
-                "Open layer pop-up",
-                &["layers", "strata", "edit", "popup"],
+                "Open Layer",
+                &["layer", "layers", "current", "activity", "classification"],
             ),
             self.palette_action_entry(
                 Action::OpenReportModal,
-                "Open balance pop-up",
-                &["balance", "report", "popup"],
+                "Open Balance",
+                &["balance", "history", "report", "past"],
             ),
             self.palette_action_entry(
                 Action::Detach,
@@ -161,9 +161,9 @@ impl App {
                 &["detach", "detached", "dettached", "headless", "background"],
             ),
             self.palette_action_entry(
-                Action::ToggleKeybindingsHelp,
-                "Open command atlas",
-                &["atlas", "help", "keybindings", "commands"],
+                Action::ToggleSettings,
+                "Open Settings",
+                &["settings", "keybindings", "bindings", "keys", "help", "commands"],
             ),
             self.palette_action_entry(
                 Action::SwitchToNone,
@@ -538,13 +538,13 @@ mod tests {
 
     #[test]
     fn test_palette_match_score_handles_empty_query() {
-        assert_eq!(palette_match_score("", "open layer pop-up"), Some(0));
+        assert_eq!(palette_match_score("", "open layer"), Some(0));
     }
 
     #[test]
     fn test_palette_token_score_prefers_prefix_over_contains() {
-        let prefix = palette_token_score("open", "open layer pop-up").expect("prefix match");
-        let contains = palette_token_score("layer", "open layer pop-up").expect("contains");
+        let prefix = palette_token_score("open", "open layer").expect("prefix match");
+        let contains = palette_token_score("layer", "open layer").expect("contains");
 
         assert!(prefix < contains);
     }

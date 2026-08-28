@@ -194,8 +194,8 @@ impl App {
             return self.handle_command_palette_key(key);
         }
 
-        if self.show_keybindings_modal && self.atlas_overlay.is_some() {
-            return self.handle_atlas_overlay_key(key);
+        if self.show_settings && self.settings_overlay.is_some() {
+            return self.handle_settings_overlay_key(key);
         }
 
         if let Some(action) = self.resolve_action(key) {
@@ -211,7 +211,7 @@ impl App {
 
     fn resolve_action(&self, key: KeyEvent) -> Option<Action> {
         if self.in_category_modal()
-            && !self.show_keybindings_modal
+            && !self.show_settings
             && matches!(key.code, KeyCode::Char('?'))
         {
             return None;
@@ -219,7 +219,7 @@ impl App {
 
         let context = if self.in_balance_modal() {
             InputContext::Report
-        } else if self.in_category_modal() || self.show_keybindings_modal {
+        } else if self.in_category_modal() || self.show_settings {
             InputContext::Other
         } else {
             InputContext::Main
@@ -235,13 +235,13 @@ impl App {
             return false;
         }
 
-        if action == Action::ToggleKeybindingsHelp {
-            self.toggle_keybindings_modal();
+        if action == Action::ToggleSettings {
+            self.toggle_settings();
             return false;
         }
 
-        if self.show_keybindings_modal {
-            return self.handle_keybindings_modal_action(action);
+        if self.show_settings {
+            return self.handle_settings_action(action);
         }
 
         if self.in_category_modal() {
@@ -752,8 +752,22 @@ impl App {
 
         match command {
             PaletteCommand::Action(Action::ToggleCommandPalette) => false,
-            PaletteCommand::Action(Action::ToggleKeybindingsHelp) => {
-                self.toggle_keybindings_modal();
+            PaletteCommand::Action(Action::ToggleSettings) => {
+                self.toggle_settings();
+                false
+            }
+            PaletteCommand::Action(Action::ReportRange) => {
+                if !self.in_balance_modal() {
+                    self.open_report_modal();
+                }
+                self.begin_report_range_edit();
+                false
+            }
+            PaletteCommand::Action(Action::LogActivity) => {
+                if !self.in_balance_modal() {
+                    self.open_report_modal();
+                }
+                self.begin_historical_activity_edit();
                 false
             }
             PaletteCommand::Action(action) => self.handle_main_action(action),
@@ -779,14 +793,14 @@ impl App {
         });
     }
 
-    fn handle_keybindings_modal_action(&mut self, action: Action) -> bool {
+    fn handle_settings_action(&mut self, action: Action) -> bool {
         match action {
-            Action::Cancel => self.close_keybindings_modal(),
-            Action::Up | Action::Left => self.select_previous_keybinding_action(),
-            Action::Down | Action::Right => self.select_next_keybinding_action(),
-            Action::Confirm => self.open_atlas_editor_for_selection(),
-            Action::HelpTop => self.jump_keybindings_top(),
-            Action::HelpBottom => self.jump_keybindings_bottom(),
+            Action::Cancel => self.close_settings(),
+            Action::Up | Action::Left => self.select_previous_settings_item(),
+            Action::Down | Action::Right => self.select_next_settings_item(),
+            Action::Confirm => self.open_settings_editor_for_selection(),
+            Action::SettingsTop => self.jump_settings_top(),
+            Action::SettingsBottom => self.jump_settings_bottom(),
             Action::Quit => return true,
             _ => {}
         }
@@ -794,38 +808,38 @@ impl App {
         false
     }
 
-    fn handle_atlas_overlay_key(&mut self, key: KeyEvent) -> bool {
-        let Some(overlay) = self.atlas_overlay.clone() else {
+    fn handle_settings_overlay_key(&mut self, key: KeyEvent) -> bool {
+        let Some(overlay) = self.settings_overlay.clone() else {
             return false;
         };
 
         match overlay {
-            super::AtlasOverlay::CaptureKey { action } => {
-                self.handle_atlas_capture_key_input(action, key);
+            super::SettingsOverlay::CaptureKey { action } => {
+                self.handle_settings_capture_key_input(action, key);
             }
-            super::AtlasOverlay::SelectWeekStartDay { .. } => {
-                self.handle_atlas_week_start_dropdown(key);
+            super::SettingsOverlay::SelectWeekStartDay { .. } => {
+                self.handle_settings_week_start_dropdown(key);
             }
         }
 
         false
     }
 
-    fn handle_atlas_capture_key_input(&mut self, action: Action, key: KeyEvent) {
+    fn handle_settings_capture_key_input(&mut self, action: Action, key: KeyEvent) {
         match key.code {
             KeyCode::Esc => {
-                self.close_atlas_overlay();
+                self.close_settings_overlay();
             }
             KeyCode::Backspace => {
                 let keymap_path = crate::storage::get_keymap_path();
                 match crate::keybindings::set_action_binding(&keymap_path, action, None) {
                     Ok(loaded) => {
                         self.apply_loaded_keybindings(loaded);
-                        self.close_atlas_overlay();
+                        self.close_settings_overlay();
                     }
                     Err(err) => {
                         self.keymap_error = Some(err);
-                        self.close_atlas_overlay();
+                        self.close_settings_overlay();
                     }
                 }
             }
@@ -834,11 +848,11 @@ impl App {
                 match crate::keybindings::set_action_unbound(&keymap_path, action) {
                     Ok(loaded) => {
                         self.apply_loaded_keybindings(loaded);
-                        self.close_atlas_overlay();
+                        self.close_settings_overlay();
                     }
                     Err(err) => {
                         self.keymap_error = Some(err);
-                        self.close_atlas_overlay();
+                        self.close_settings_overlay();
                     }
                 }
             }
@@ -852,11 +866,11 @@ impl App {
                     ) {
                         Ok(loaded) => {
                             self.apply_loaded_keybindings(loaded);
-                            self.close_atlas_overlay();
+                            self.close_settings_overlay();
                         }
                         Err(err) => {
                             self.keymap_error = Some(err);
-                            self.close_atlas_overlay();
+                            self.close_settings_overlay();
                         }
                     }
                 }
@@ -864,9 +878,9 @@ impl App {
         }
     }
 
-    fn handle_atlas_week_start_dropdown(&mut self, key: KeyEvent) {
-        let Some(super::AtlasOverlay::SelectWeekStartDay { mut selected }) =
-            self.atlas_overlay.take()
+    fn handle_settings_week_start_dropdown(&mut self, key: KeyEvent) {
+        let Some(super::SettingsOverlay::SelectWeekStartDay { mut selected }) =
+            self.settings_overlay.take()
         else {
             return;
         };
@@ -874,7 +888,7 @@ impl App {
         let options = Self::week_start_options();
         match key.code {
             KeyCode::Esc => {
-                self.close_atlas_overlay();
+                self.close_settings_overlay();
                 return;
             }
             KeyCode::Up | KeyCode::Left => {
@@ -893,11 +907,11 @@ impl App {
                 match crate::keybindings::set_first_day_of_week(&keymap_path, week_start) {
                     Ok(loaded) => {
                         self.apply_loaded_keybindings(loaded);
-                        self.close_atlas_overlay();
+                        self.close_settings_overlay();
                     }
                     Err(err) => {
                         self.keymap_error = Some(err);
-                        self.close_atlas_overlay();
+                        self.close_settings_overlay();
                     }
                 }
                 return;
@@ -905,7 +919,7 @@ impl App {
             _ => {}
         }
 
-        self.atlas_overlay = Some(super::AtlasOverlay::SelectWeekStartDay { selected });
+        self.settings_overlay = Some(super::SettingsOverlay::SelectWeekStartDay { selected });
         self.render_needed = true;
     }
 
@@ -1259,21 +1273,6 @@ impl App {
                 true
             }
             Action::Cancel => false,
-            Action::ReportToday => {
-                self.open_report_modal();
-                self.set_report_period(ReportPeriod::Today);
-                false
-            }
-            Action::ReportRange => {
-                self.open_report_modal();
-                self.begin_report_range_edit();
-                false
-            }
-            Action::LogActivity => {
-                self.open_report_modal();
-                self.begin_historical_activity_edit();
-                false
-            }
             _ => false,
         }
     }
