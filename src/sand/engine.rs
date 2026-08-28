@@ -1966,34 +1966,54 @@ mod organic_formation_tests {
 
     #[test]
     fn native_h2_statistics_cover_representative_viewports() {
-        fn run(width: u16, height: u16) -> (Vec<usize>, Vec<usize>, Vec<usize>, usize) {
+        use crate::constants::TIME_SETTINGS;
+
+        fn run(width: u16, height: u16) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>, usize) {
             let mut engine = SandEngine::new(width, height);
             engine.rng_state = 0xD15E_A5ED;
             let mut sizes = Vec::new();
             let mut quiet = Vec::new();
             let mut spans = Vec::new();
+            let mut passes = Vec::new();
             let mut event_size: usize = 0;
+            let mut quiet_since_event: usize = 0;
             let mut event_quiet: usize = 0;
             let mut event_span: usize = 0;
+            let mut event_passes: usize = 0;
             let mut active_event = false;
-            for _ in 0..10_000 {
-                engine.spawn(CategoryId::new(1));
-                engine.apply_gravity();
-                if engine.last_avalanche_motion {
+            let mut spawned = 0usize;
+            let mut next_spawn_ms = TIME_SETTINGS.tick_ms;
+            let mut next_physics_ms = TIME_SETTINGS.physics_ms;
+            while spawned < 10_000 || active_event {
+                let now_ms = next_spawn_ms.min(next_physics_ms);
+                if now_ms == next_spawn_ms && spawned < 10_000 {
+                    engine.spawn(CategoryId::new(1));
+                    spawned += 1;
+                    next_spawn_ms += TIME_SETTINGS.tick_ms;
                     if !active_event {
-                        active_event = true;
-                        event_size = 0;
-                        event_quiet = 0;
-                        event_span = 0;
+                        quiet_since_event += 1;
                     }
-                    event_size += usize::from(engine.last_diagonal_topple);
-                    event_span = event_span.max(engine.last_avalanche_span);
-                } else {
-                    event_quiet += 1;
-                    if active_event {
+                }
+                if now_ms == next_physics_ms {
+                    engine.update();
+                    next_physics_ms += TIME_SETTINGS.physics_ms;
+                    if engine.last_avalanche_motion {
+                        if !active_event {
+                            active_event = true;
+                            event_size = 0;
+                            event_quiet = quiet_since_event;
+                            quiet_since_event = 0;
+                            event_span = 0;
+                            event_passes = 0;
+                        }
+                        event_size += usize::from(engine.last_diagonal_topple);
+                        event_passes += 1;
+                        event_span = event_span.max(engine.last_avalanche_span);
+                    } else if active_event {
                         sizes.push(event_size);
-                        quiet.push(event_quiet.saturating_sub(1));
+                        quiet.push(event_quiet);
                         spans.push(event_span);
+                        passes.push(event_passes);
                         active_event = false;
                     }
                 }
@@ -2002,30 +2022,56 @@ mod organic_formation_tests {
                 sizes.push(event_size);
                 quiet.push(event_quiet);
                 spans.push(event_span);
+                passes.push(event_passes);
             }
             sizes.sort_unstable();
             quiet.sort_unstable();
             spans.sort_unstable();
-            (sizes, quiet, spans, engine.grain_count)
+            passes.sort_unstable();
+            (sizes, quiet, spans, passes, engine.grain_count)
         }
 
         for (width, height) in [(40, 20), (80, 30)] {
-            let (sizes, quiet, spans, mass) = run(width, height);
+            let (sizes, quiet, spans, passes, mass) = run(width, height);
             assert_eq!(mass, 10_000);
             assert!(!sizes.is_empty());
             let median = sizes[sizes.len() / 2];
+            let p95 = sizes[(sizes.len() * 95 / 100).min(sizes.len() - 1)];
             let max = sizes.iter().copied().max().unwrap();
             let one_move = sizes.iter().filter(|&&size| size == 1).count() * 100 / sizes.len();
             eprintln!(
-                "H2 {width}x{height}: events={} median={} max={} quiet_median={} one_move_pct={} span_median={}",
+                "H2 live {width}x{height}: events={} median={} p95={} max={} quiet_median={} one_move_pct={} passes_median={} duration_ms={} span_median={}",
                 sizes.len(),
                 median,
+                p95,
                 max,
                 quiet[quiet.len() / 2],
                 one_move,
+                passes[passes.len() / 2],
+                passes[passes.len() / 2] * 64,
                 spans[spans.len() / 2]
             );
         }
+    }
+
+    #[test]
+    fn continuous_ingress_overload_stress_is_non_acceptance_only() {
+        let mut engine = SandEngine::new(40, 20);
+        engine.rng_state = 0xD15E_A5ED;
+        for _ in 0..2_000 {
+            engine.spawn(CategoryId::new(1));
+            engine.apply_gravity();
+        }
+        assert_eq!(engine.grain_count, 2_000);
+        eprintln!(
+            "H2 overload: active_columns={} active_motion={}",
+            engine
+                .avalanche_active
+                .iter()
+                .filter(|active| **active)
+                .count(),
+            engine.last_avalanche_motion
+        );
     }
 
     #[test]
