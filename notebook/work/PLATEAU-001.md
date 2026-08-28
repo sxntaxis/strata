@@ -129,7 +129,7 @@ Deliverables:
 
 #### HISTORY-001E — Retained current-sediment recolor after correction (nice to have)
 
-Status: **ACTIVE**.
+Status: **COMPLETE / NATIVE-GREEN** at `d67c8e382708dbbf3f71bf2a67d7daa81b2e36b8`.
 
 Product decision: current canonical sediment is retained visual mass, not a complete replayable ledger. A historical assignment can fill a true gap, and prior full/category clears can remove sediment that once corresponded to corrected chronology. HISTORY-001E therefore reconciles only source-category mass that is still retained in the current canonical `SandState`.
 
@@ -148,17 +148,21 @@ Deliverables:
 
 ### SEDIMENT-002 — Organic formation
 
-Goal: make emergent shapes less white-noise-like while preserving falling-sand semantics.
+Status: **IMPLEMENTED / NATIVE VALIDATION PENDING**.
 
-Deliverables:
+Goal: make emergent shapes less white-noise-like while preserving ordinary falling-sand semantics and all certified mass/topology/recovery invariants.
 
-- If only one diagonal is open, move there deterministically; random choice belongs only where both paths are valid.
-- Replace independent uniform top-edge ingress with a spatially correlated/wandering source or an equivalently
-  simple correlated process.
-- Persist any additional small stochastic state required for deterministic restart continuity.
-- Keep new ingress inside the visible physics basin and preserve existing shrink/freeze/re-expand behavior.
-- Do not add mountain generators, terrain post-processing, or user-facing randomness knobs until a behavior is
-  demonstrated to be worth controlling.
+Accepted implementation:
+
+- Down remains unconditional. When down is blocked and at least one diagonal is open, apply a memoryless stochastic-friction gate: initially one-quarter slide and three-quarters temporary hold. After a permitted slide, take the sole open diagonal or randomize left/right when both are open. No-route grains stay put without a friction/lateral choice.
+- Replace independent uniform top-edge ingress with biased rain around one slowly wandering focus. The focus moves by at most one dot only on occasional focus-update events; most grains sample a broad triangular cloud around it and occasional grains sample the whole visible width. Occupancy chooses the nearest free visible ingress column without moving the focus.
+- The ingress focus is canonical dot-grid state, constrained to the active visible basin when used and shifted with the existing horizontal-center canvas expansion so growth does not teleport the favored rain region relative to retained topology.
+- Persist the focus in `SandState` v3 beside the existing RNG state. v1 legacy pending vectors and v2 compressed-pending states remain readable and migrate to v3 with no invented focus; the existing RNG state deterministically seeds the first post-migration ingress.
+- Full clear removes all mass and resets the ingress focus while retaining the RNG stream; category-specific clear preserves the formation focus.
+- Keep ingress inside the visible physics basin and preserve shrink/freeze/re-expand semantics, pending FIFO mass, exact category identity, bounded recovery, and immutable historical snapshots.
+- Do not add mountain generators, terrain post-processing, momentum fields, or user-facing randomness knobs in this unit.
+
+Native proof must cover straight-down priority, friction hold and later slide for sole/both-diagonal cases, left/right choice after a permitted both-open slide, broad-but-biased rain sampling with slow focus motion and whole-width outliers, nearest-free fallback, blocked-ingress mass conservation, focus shift/clamp across resize, snapshot/restart continuity, v1/v2 compatibility, bounded recovery continuity, and all visible-basin/clear/history regressions.
 
 ### INTERACTION-002 — Menus, Settings, and vocabulary convergence
 

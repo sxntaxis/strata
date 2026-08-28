@@ -64,7 +64,9 @@ Detailed rationale and unresolved implications live in `notebook/decisions/DECIS
 | STRATA-D055 | One process-bound profile UUID owns the complete data, state, and configuration path set. Explicit `--profile`/`STRATA_PROFILE` selection occurs before database opening; copied mismatched artifacts and partial path redirection fail closed; changing profiles requires exit and a new invocation. | implemented and certified |
 | STRATA-D056 | The historical/report surface and directional accounting use **Balance** as current product vocabulary. The former `Karma` vocabulary is retired; the default main-view Balance opener is `b`. | implemented and validated |
 | STRATA-D057 | Retroactive history is expressed as an arbitrary past interval assignment: `From < To <= now` plus a target layer. Idle and same-layer overlap are non-conflicting; intersecting different explicit layers require confirmation. The operation is independent of existing session boundaries, never double-counts chronology, and never changes the current selected layer/description even when the active generation must be rebased around corrected past time. | implemented and certified |
-| STRATA-D058 | Historical correction reconciles the current canonical sediment only by deterministically recoloring retained source-category mass into the requested category. True-gap insertion and sediment already removed by clear operations do not fabricate replacement grains; unavailable source mass is an accepted visual shortfall. Recolor preserves coordinates/topology, pending order/count, total mass, canvas and simulation metadata, and publishes current sand/checkpoint atomically with the history mutation. Authentic first-write day-end snapshots remain immutable. | accepted for HISTORY-001E |
+| STRATA-D058 | Historical correction reconciles the current canonical sediment only by deterministically recoloring retained source-category mass into the requested category. True-gap insertion and sediment already removed by clear operations do not fabricate replacement grains; unavailable source mass is an accepted visual shortfall. Recolor preserves coordinates/topology, pending order/count, total mass, canvas and simulation metadata, and publishes current sand/checkpoint atomically with the history mutation. Authentic first-write day-end snapshots remain immutable. | implemented and certified |
+
+| STRATA-D059 | Organic sediment formation remains ordinary falling sand but gains one tuned stochastic personality: straight-down motion is unconditional; diagonal motion passes a memoryless friction gate (initially one-quarter slide / three-quarters temporary hold), with left/right randomness only after a permitted slide when both diagonals are open. Ingress keeps a rain-like cadence by sampling a broad distribution around one slowly wandering persisted focus, with occasional whole-width drops; occupancy uses nearest-free visible fallback without moving the focus or losing mass. No terrain generator, pressure solver, post-processing, or user-facing randomness knobs are introduced. | accepted for SEDIMENT-002 |
 
 ## Explicitly unresolved
 
@@ -72,7 +74,7 @@ The following are not accepted decisions:
 
 - final vertical chronology semantics beyond the accepted bottom-aligned viewport projection;
 - flat categories versus optional context or relationships;
-- clearing and formation lifecycle beyond placed/pending mass conservation;
+- clearing lifecycle and any future formation controls beyond the accepted organic local rules;
 - future zoom, compression, panning, or explicit canonical-canvas migration;
 - safe cross-authority replay of queued checkpoint mutations, if it is ever required;
 - configurable quantum migration rules;

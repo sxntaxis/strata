@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-08-27
 authority: working
-summary: HISTORY-001A/B/C/D are natively green; HISTORY-001E retained current-sediment recolor is the current edge.
-next: Implement HISTORY-001E as deterministic in-place recolor of retained source-category mass without rewriting authentic historical snapshots.
+summary: HISTORY-001A/B/C/D/E are natively green; SEDIMENT-002 organic formation is the current edge.
+next: Native-validate SEDIMENT-002 stochastic friction and biased-rain wandering focus, then proceed to INTERACTION-002.
 ---
 
 # NOW — Strata
@@ -72,12 +72,14 @@ HISTORY-001C is now **COMPLETE / NATIVE-GREEN** at `09412b703cf41016f889d725ba23
 
 HISTORY-001D is now **COMPLETE / NATIVE-GREEN** at `bfaa8bf29f8019c25fe4f2ee8b1d60c554e5e988`: formatting, strict Clippy, 258 tests, 18 focused generalized transaction tests, Balance/report regression, isolated startup, and bubblewrap profile-custody proof all pass. Arbitrary `From < To <= now` assignment, gap insertion, collision confirmation, active-generation rebasing with protected live selection, daily-contribution reconciliation, rollback, and sediment/snapshot non-mutation are certified.
 
-The active edge is **HISTORY-001E — retained current-sediment recolor after historical correction**. The current pile is not a replayable complete ledger: full/Idle clears can remove mass and 001D can fill true historical gaps. Therefore 001E may recolor only retained grains/pending mass that still belong to categories reclassified by the correction. It must never fabricate missing historical grains or recolor unrelated categories to force a ledger-shaped pile. Coordinates, topology, total mass, frame/RNG state, and authentic first-write day-end snapshots remain unchanged; ledger-derived daily contributions continue to follow corrected chronology.
+HISTORY-001E is now **COMPLETE / NATIVE-GREEN** at `d67c8e382708dbbf3f71bf2a67d7daa81b2e36b8`: formatting, strict Clippy, 263 tests, pure recolor and historical-sediment transaction proofs, HISTORY-001D and sediment regression, isolated startup/detach/restart, and bubblewrap profile-custody proof all pass. Retained source-category mass recolors deterministically in place; true historical gaps and cleared-away mass never fabricate current grains; authentic first-write day-end snapshots remain immutable.
+
+The active edge is **SEDIMENT-002 — organic formation**. Falling sand keeps exact conserved mass and the visible-basin topology model. Straight-down motion stays unconditional, while diagonal opportunities now pass a tuned memoryless friction gate (one-quarter slide / three-quarters temporary hold) so steep local stacks can briefly persist and then avalanche. Top-edge ingress keeps a rain-like cadence: one persisted focus wanders slowly, most grains sample a broad triangular cloud around it, and occasional whole-width drops prevent nozzle-like concentration. The focus remains inside the visible physics basin when used, shifts with canonical canvas growth, and survives checkpoint/restart through `SandState` v3; v1/v2 remain readable. No terrain generator, pressure solver, pile sculpting, or user-facing randomness controls are part of this unit.
 
 The stale dirty adaptive-resize branch remains preserved as custody evidence and is superseded by the current-main
 visible-basin, resize/restore, and atomic clear-all authority. No adaptive code was ported.
 
-Later required order is HISTORY-001E retained current-sediment recolor, SEDIMENT-002 organic formation, then INTERACTION-002 menu/Settings convergence and product hardening. Pomodoro/RHYTHM-001 remains optional and must not block plateau.
+Later required order is SEDIMENT-002 organic formation, then INTERACTION-002 menu/Settings convergence and product hardening. Pomodoro/RHYTHM-001 remains optional and must not block plateau.
 
 ## Completed post-migration units
 
@@ -115,7 +117,7 @@ Later required order is HISTORY-001E retained current-sediment recolor, SEDIMENT
 
 ## Known non-blocking questions
 
-The accepted implementation does not settle every possible future product direction. Remaining design questions include vertical chronology, optional category relationships, future sediment clearing/formation semantics, zoom/compression/panning, configurable quantum migration, possible IANA timezone support, and any future stable identity for queued cross-authority mutation replay.
+The accepted implementation does not settle every possible future product direction. Remaining design questions include vertical chronology, optional category relationships, future sediment clear semantics and formation controls beyond SEDIMENT-002, zoom/compression/panning, configurable quantum migration, possible IANA timezone support, and any future stable identity for queued cross-authority mutation replay.
 
 These are not open implementation defects. They require new evidence and an explicit future unit before constraining the current system.
 
