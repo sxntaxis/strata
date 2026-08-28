@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-08-28
 authority: working
-summary: PLATEAU-001H H4 grain-causal contact behavior is native-green; SandState v5 persistence/migration candidate is authored and awaiting native validation.
-next: Native-validate exact H4 v5 persistence/migration candidate on a disposable profile; do not publish or install before exact-restart and v4→v5 proof.
+summary: PLATEAU-001H H4 grain-causal contact behavior and SandState v5 persistence/migration are native-green; publication and cutover remain controlled next edges.
+next: Return the validated H4 v5 bundle for controlled publication/cutover; do not install until a quiescent pre-v5 backup and forward-boundary checks are complete.
 ---
 
 # NOW — Strata
@@ -91,7 +91,7 @@ PLATEAU-001H / H2 — metastable repose + local avalanches — is **COMPLETE / P
 
 PLATEAU-001H / H3 — isolated-spire cap — is **COMPLETE / PUBLISHED / REAL-PROFILE GREEN**. Its validated lineage was merged through main `f3590a7aeb69a4b88cef90862bb01eb7afd564ba` and installed as SHA256 `fc6f806ba174313b9e89a7aa9814cf6ccf9e76a4ff017c755775a92421dd0350`. H3 remains useful historical evidence, but subsequent daily use rejected two-dot one-column prominences as well, so its shape-specific rule is superseded by the H4 candidate.
 
-PLATEAU-001H / H4 — contact-supported grain-causal avalanches — has **BEHAVIOR NATIVE-GREEN** at `579f3e1b652a2d90efcfcef65e1910d199e464ba`. Static support is below plus at least one lower diagonal/wall; unsupported arrivals become exact mobilized grains; dynamic continuation remains relief `>1`; exact support loss and same-source slip-lineage propagate only causal mobility. Regional activity, `active_vertical`, static relief `3`, and isolated-spire heuristics are retired. At real cadence, 40x20 / 10k produced 621 slip-lineage cascades (99 multi-lineage) and 80x30 produced 1,070 (152 multi-lineage), with exact mass, no runaway/jitter, non-flat slopes, and settled prominence <=1. The current H4 edge is SandState v5 persistence/migration: exact mobilized coordinates on v5→v5 restart plus deterministic one-time pre-v5 unsupported-surface seeding without translating obsolete v4 regional activity.
+PLATEAU-001H / H4 — contact-supported grain-causal avalanches + SandState v5 — is **COMPLETE / NATIVE-GREEN / NOT PUBLISHED**. Behavior remains native-green at `579f3e1b652a2d90efcfcef65e1910d199e464ba`; exact mobilized coordinates, v5 restart/continuation, hidden resize custody, deterministic v4 migration, malformed fail-closed validation, recovery, recolor, and SQLite schema invariance pass at `2c0be59`. Regional activity, `active_vertical`, static relief `3`, and isolated-spire heuristics remain retired. No publication, installation, real-profile access, or owner-process signaling occurred.
 
 ## Completed post-migration units
 

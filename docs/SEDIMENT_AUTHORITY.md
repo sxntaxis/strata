@@ -2,9 +2,9 @@
 
 Status: implemented and certified
 Program: SEDIMENT-002 + PLATEAU-001H hardening
-Current completed unit: PLATEAU-001H H3 isolated-spire hardening published; H4 grain-causal contact candidate awaiting native v5 validation
+Current completed unit: PLATEAU-001H H4 grain-causal contact + SandState v5 native validation; not yet published or installed
 Issues completed: #6, #7, #16, #18, #26
-Last reviewed: 2026-08-27
+Last reviewed: 2026-08-28
 
 ## Purpose
 
@@ -39,8 +39,8 @@ The current viewport is the active live-physics basin. New live grains enter at 
 
 ## SandState persistence
 
-`SandState` schema version 4 stores ordered pending runs, the optional canonical ingress focus, and sorted active avalanche
-columns. Version 3 remains readable and migrates with empty active activity.
+`SandState` schema version 5 stores ordered pending runs, the optional canonical ingress focus, and exact mobilized grain
+coordinates. Versions 1 through 4 remain readable; the v4 regional activity field is legacy migration input only.
 
 - Version 1 `pending_grains` vectors migrate deterministically into adjacent runs.
 - Version 2 compressed-pending states remain readable and upgrade to version 3 with no invented ingress focus.
@@ -49,6 +49,14 @@ columns. Version 3 remains readable and migrates with empty active activity.
 - The existing persisted RNG state seeds the first ingress focus after a v1/v2 migration; later v3 checkpoints preserve both RNG and focus for deterministic restart continuity.
 - `SandState` stores canonical grid dimensions explicitly; recovery through a zero viewport restores them exactly, while an ordinary larger live viewport may monotonically expand the restored canvas.
 - Ordinary restore normalizes unavailable category identities to idle; checkpoint recovery is stricter and refuses unavailable identities.
+- v5 coordinates are canonical row-major, unique, in bounds, and must reference occupied cells; v5 rejects legacy active columns and pre-v5 states reject non-empty mobility.
+- v5-to-v5 restore preserves exact mobility without normalization. v1-v4 migration validates and discards regional activity, then seeds only unsupported bottom-connected surface grains once without moving them.
+
+Native v5 validation is complete at `2c0be59`. The exact snapshot/restore, hidden-mobility resize/restart continuation,
+v4 migration, malformed-state fail-closed, recovery, recolor, and legacy regression proofs pass. The full validation run
+passed formatting, all-target check, strict Clippy, 269 library tests (one explicit real-cadence bench ignored), 23
+integration tests, doc tests, and help smoke. SQLite `user_version`, tables, and columns are unchanged; H4R2C runtime
+behavior was not retuned. The validated candidate is not yet published or installed.
 
 ## Metastable repose and local avalanches
 

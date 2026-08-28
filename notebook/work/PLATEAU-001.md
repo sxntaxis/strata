@@ -268,13 +268,15 @@ Native closure: the authored candidate was transplanted onto real published main
 
 #### H4 — Contact-supported grain-causal avalanches
 
-Status: **BEHAVIOR NATIVE-GREEN / V5 PERSISTENCE CANDIDATE AUTHORED**.
+Status: **COMPLETE / NATIVE-GREEN / NOT PUBLISHED**.
 
 Post-H3 daily-use evidence rejected narrow two-dot one-column peaks but retained the desire for steep one-sided slopes such as `0/6/5`. The accepted H4 model uses contact rather than an absolute peak cap: after vertical fall is blocked, a grain may settle with support below plus at least one lower diagonal or visible wall. Unsupported arrivals become exact mobilized grains. Dynamic movement retains relief `>1`; mobility travels with the grain, actual support loss wakes only exact dependents, and diagonal movement may pass mobility to the newly exposed grain on the same source slip face while that face still has a dynamic route. This preserves multi-grain cascades without regional activation, proximity inheritance, pressure/load state, or global terrain scans.
 
 Two rejected prototypes established the negative architecture: a global contact scan over-relaxed the surface, and event-driven contact coupled to regional `active_vertical` remained throughput-pathological. A first exact-grain prototype then proved clean causality but produced zero structural cascades. H4R2C added same-source slip lineage and passed native behavior validation at `579f3e1b652a2d90efcfcef65e1910d199e464ba`: 40x20 / 10,000 ingress yielded 621 structural cascades with 99 multi-lineage episodes; 80x30 yielded 1,070 with 152 multi-lineage episodes. Both runs conserved mass, completed without runaway/continuous motion, preserved broad/one-sided hills, and drained to interior prominence <=1.
 
 The production boundary now requires SandState v5. Current exact mobilized grain coordinates serialize in canonical row-major order. v5→v5 restore must reproduce grid, mobility, RNG, sweep, focus, pending mass, resize/hidden state, and subsequent gravity exactly. v1-v4 lack exact grain-causal mobility; migration therefore preserves their topology/category mass and deliberately does **not** translate v4 regional active columns into false per-grain causality. Instead restore performs one deterministic one-time scan of the pre-v5 bottom-connected canonical surface and marks only contact-unsupported surface grains mobilized; movement occurs later through ordinary H4 gravity. Once written as v5, this normalization never repeats.
+
+Native validation is complete at `2c0be59`: exact v5 snapshot/restart and multi-pass continuation, hidden-mobility resize custody, v4 semantic migration, malformed restore/recovery rejection, recolor, recovery, v1-v3 regressions, and SQLite schema invariance passed. The complete run passed with 269 library tests plus 23 integration tests, one explicit real-cadence bench ignored, doc tests, strict Clippy, and help smoke. No physics retuning, publication, installation, owner-process signaling, or real-profile access occurred.
 
 ### RHYTHM-001 — Focus/Pomodoro experiment (optional)
 
@@ -290,7 +292,7 @@ Preferred progression:
 
 ## Agent locator
 
-Current edge: **PLATEAU-001H H4 SandState v5 persistence/migration validation**. H4R2C behavior is native-green at `579f3e1b652a2d90efcfcef65e1910d199e464ba`; validate exact v5 mobility restart and deterministic pre-v5 normalization before publication or real-profile cutover.
+Current edge: **controlled PLATEAU-001H H4 SandState v5 publication/cutover**. H4R2C behavior is native-green at `579f3e1b652a2d90efcfcef65e1910d199e464ba`, and v5 validation is native-green at `2c0be59`; publish and cut over only with a quiescent pre-v5 backup and the required forward-boundary checks.
 
 HISTORY-001A/B/C are native-green through `09412b703cf41016f889d725ba235a7a1e63ae6a`. HISTORY-001C established the completed-Idle split transaction, active-preview validation, atomic daily-contribution reconciliation, and Balance historical editor. HISTORY-001D now generalizes that safe primitive into arbitrary From/To activity assignment with explicit collision confirmation and protected live selection.
 
