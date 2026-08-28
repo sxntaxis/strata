@@ -143,6 +143,7 @@ const INGRESS_FOCUS_BIAS_ONE_IN: usize = 4;
 const STATIC_REPOSE_RELIEF: usize = 3;
 const DYNAMIC_REPOSE_RELIEF: usize = 1;
 const AVALANCHE_ACTIVITY_RADIUS: usize = 1;
+const MAX_ISOLATED_SPIRE_HEIGHT: usize = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PendingRun {
@@ -566,13 +567,35 @@ impl SandEngine {
         false
     }
 
+    fn is_isolated_supported_spire(&self, bounds: ViewportBounds, x: usize) -> bool {
+        if x <= bounds.x_start || x + 1 >= bounds.x_end {
+            return false;
+        }
+        self.supported_heights[x] > MAX_ISOLATED_SPIRE_HEIGHT
+            && self.supported_heights[x - 1] == 0
+            && self.supported_heights[x + 1] == 0
+    }
+
     fn topple_column_if_unstable(
         &mut self,
         bounds: ViewportBounds,
         x: usize,
         threshold: usize,
     ) -> bool {
-        let Some((source_y, target_x)) = self.diagonal_target_for_relief(bounds, x, threshold)
+        // H2's ordinary static repose deliberately allows relief three. Daily-use
+        // evidence found one narrower artifact worth excluding: a bottom-supported
+        // single-column needle three dots high with completely empty immediate
+        // neighbors. Keep two-dot needles and all non-isolated shoulders on the
+        // normal 3/1 repose model; only the isolated static needle uses a cap of two.
+        let effective_threshold = if threshold == STATIC_REPOSE_RELIEF
+            && self.is_isolated_supported_spire(bounds, x)
+        {
+            MAX_ISOLATED_SPIRE_HEIGHT
+        } else {
+            threshold
+        };
+        let Some((source_y, target_x)) =
+            self.diagonal_target_for_relief(bounds, x, effective_threshold)
         else {
             return false;
         };
@@ -1636,6 +1659,82 @@ mod organic_formation_tests {
                 .iter()
                 .all(|row| row[source_x].is_some())
         );
+    }
+
+    #[test]
+    fn isolated_two_dot_spire_remains_allowed() {
+        let mut engine = SandEngine::new(4, 1);
+        engine.clear();
+        let x = engine.grid_width_dots / 2;
+        for y in engine.grid_height_dots - 2..engine.grid_height_dots {
+            engine.grid[y][x] = Some(CategoryId::new(1));
+        }
+        engine.grain_count = 2;
+        let before = engine.snapshot_state();
+
+        for _ in 0..10_000 {
+            engine.apply_gravity();
+        }
+
+        assert_eq!(engine.snapshot_state(), before);
+        assert!(engine.avalanche_active.iter().all(|active| !active));
+    }
+
+    #[test]
+    fn isolated_three_dot_spire_yields_on_next_static_pass() {
+        let mut engine = SandEngine::new(4, 1);
+        engine.clear();
+        let x = engine.grid_width_dots / 2;
+        for y in engine.grid_height_dots - 3..engine.grid_height_dots {
+            engine.grid[y][x] = Some(CategoryId::new(1));
+        }
+        engine.grain_count = 3;
+
+        engine.apply_gravity();
+
+        assert_eq!(engine.grid[engine.grid_height_dots - 3][x], None);
+        assert!(engine.avalanche_active.iter().any(|active| *active));
+        assert_eq!(engine.physical_grain_count(), 3);
+    }
+
+    #[test]
+    fn three_dot_peak_with_neighbor_support_keeps_normal_static_repose() {
+        let mut engine = SandEngine::new(4, 1);
+        engine.clear();
+        let x = engine.grid_width_dots / 2;
+        for y in engine.grid_height_dots - 3..engine.grid_height_dots {
+            engine.grid[y][x] = Some(CategoryId::new(1));
+        }
+        engine.grid[engine.grid_height_dots - 1][x - 1] = Some(CategoryId::new(2));
+        engine.grain_count = 4;
+        let before = engine.snapshot_state();
+
+        for _ in 0..10_000 {
+            engine.apply_gravity();
+        }
+
+        assert_eq!(engine.snapshot_state(), before);
+        assert!(engine.avalanche_active.iter().all(|active| !active));
+    }
+
+    #[test]
+    fn three_dot_spire_at_visible_wall_keeps_normal_static_repose() {
+        let mut engine = SandEngine::new(4, 1);
+        engine.clear();
+        let bounds = engine.viewport_bounds().unwrap();
+        let x = bounds.x_start;
+        for y in engine.grid_height_dots - 3..engine.grid_height_dots {
+            engine.grid[y][x] = Some(CategoryId::new(1));
+        }
+        engine.grain_count = 3;
+        let before = engine.snapshot_state();
+
+        for _ in 0..10_000 {
+            engine.apply_gravity();
+        }
+
+        assert_eq!(engine.snapshot_state(), before);
+        assert!(engine.avalanche_active.iter().all(|active| !active));
     }
 
     #[test]

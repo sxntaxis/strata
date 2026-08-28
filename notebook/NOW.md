@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-08-28
 authority: working
-summary: PLATEAU-001H H1 is published and running on the real profile; H2 metastable repose + local avalanches is native-green at f581de486a08547ea5fd74ef3ca2f2fb90e1eb34 and ready for controlled SandState v4 cutover.
-next: Publish and cut over exact native-green H2 with a pre-v4 real-profile backup and strict forward binary/profile pairing, then resume daily-use hardening with no pre-invented H3.
+summary: PLATEAU-001H H2 is published and real-profile green on SandState v4; H3 isolated-spire hardening is the current evidence-driven candidate.
+next: Native-validate the bounded H3 rule that permits isolated two-dot stacks but topples isolated supported spires at height three or more, without retuning H2 or changing SandState v4.
 ---
 
 # NOW — Strata
@@ -87,7 +87,9 @@ visible-basin, resize/restore, and atomic clear-all authority. No adaptive code 
 
 The required core path is now PLATEAU-001H product hardening. Pomodoro/RHYTHM-001 remains optional and must not block plateau.
 
-PLATEAU-001H / H2 — metastable repose + local avalanches — is **COMPLETE / NATIVE-GREEN** at `f581de486a08547ea5fd74ef3ca2f2fb90e1eb34`. Static supported relief 3 and dynamic active relief 1 replace the memoryless diagonal lottery; bottom-connected surface relief excludes airborne grains; radius-one local mobilization and one diagonal topple per gravity pass produce true buildup and bursty avalanches. Real-cadence validation corrected the earlier 1:1 overload false blocker: at normal 1000 ms ingress and 64 ms gravity cadence, 40x20 produced 449 events (median size 8, p95 82, quiet buildup 9) and 80x30 produced 658 events (median size 8, p95 20, quiet buildup 10), with 0% one-move events, conserved mass, no runaway, exact v4 restart continuation, all regressions green, 290 non-doc tests, and native gravity cost within the 2x target. The real profile and installed binary remain on H1 until controlled v4 cutover.
+PLATEAU-001H / H2 — metastable repose + local avalanches — is **COMPLETE / PUBLISHED / REAL-PROFILE GREEN** from native-green `f581de486a08547ea5fd74ef3ca2f2fb90e1eb34`, published main `71363c694e4c6f6c425f30378e081ef27cebd635`, and installed binary SHA256 `59f34237fab6348560141257c91cee6f6e4c4551a3915a5eef45fb4cc1ced9a`. Static supported relief 3 and dynamic active relief 1 replace the memoryless diagonal lottery; bottom-connected surface relief excludes airborne grains; radius-one local mobilization and one diagonal topple per gravity pass produce true buildup and bursty avalanches. Real-cadence validation corrected the earlier 1:1 overload false blocker: at normal 1000 ms ingress and 64 ms gravity cadence, 40x20 produced 449 events (median size 8, p95 82, quiet buildup 9) and 80x30 produced 658 events (median size 8, p95 20, quiet buildup 10), with 0% one-move events, conserved mass, no runaway, exact v4 restart continuation, all regressions green, 290 non-doc tests, and native gravity cost within the 2x target. The real profile has persisted SandState v4, normal restart and sqlite-doctor passed, and the matching H1 rollback binary plus pre-v4 backup remain retained.
+
+PLATEAU-001H / H3 — isolated-spire cap — is **ADMITTED / SOURCE CANDIDATE** from real-profile visual evidence: isolated one-column stacks three dots high are visually undesirable while two-dot stacks are acceptable. The bounded rule applies only when both immediate supported neighbors are empty; height two remains stable, height three or more yields through existing H2 avalanche mechanics, and non-isolated hills keep H2 relief 3/1 unchanged. Native validation is pending.
 
 ## Completed post-migration units
 

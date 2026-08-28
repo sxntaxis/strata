@@ -247,6 +247,23 @@ Design-bench evidence: selected 3/1 produced median event sizes 3–4, p95 7–1
 
 Native evidence: formatting, strict Clippy, 267 library + 23 integration tests (290 non-doc total), H1 rain/HISTORY/recovery regressions, exact v1/v2/v3→v4 migration, in-progress avalanche snapshot/restart equality, resize/hidden-activity continuity, airborne/cavity handling, and real-cadence performance all pass. Native H2/current gravity cost was approximately 1.92x at 40x20 and 1.38x at 80x30. No production semantics changed during H2R1; its sole follow-up commit corrects the statistics harness.
 
+#### H3 — Isolated-spire cap
+
+Status: **ADMITTED / SOURCE CANDIDATE; NATIVE VALIDATION PENDING**.
+
+Admitted from direct real-profile visual evidence after H2 cutover. H2's ordinary static threshold intentionally leaves relief three stable, which permits a narrow artifact: a fully isolated bottom-supported stack of exactly three dots can remain as a one-column needle with empty space on both sides. The owner accepts the same isolated shape at height two but not height three or more.
+
+Accepted bounded rule:
+
+- define an isolated spire only when the source supported height is greater than two and both immediate visible neighboring columns have supported height zero;
+- keep isolated height two stable;
+- for an isolated height-three-or-higher source during the static pass, use an effective cap of two so the surface grain yields through the existing H2 diagonal-topple and local-avalanche path;
+- do not apply the exception at a viewport side wall where two real neighboring columns are not visible;
+- if either immediate neighbor has supported material, retain ordinary H2 static relief `3`;
+- dynamic relief remains `1`; H1 rain, SandState v4, active avalanche persistence, resize custody, mass, and HISTORY semantics remain unchanged.
+
+Required native proof includes `0/2/0` long-run stability, `0/3/0` immediate yield, one-sided/broad supported peaks retaining ordinary H2 repose, existing 3/1 metastability and real-cadence avalanche statistics, H1 rain, resize/side-wall, restart/v4, HISTORY/recovery, full suite, and runtime smoke.
+
 ### RHYTHM-001 — Focus/Pomodoro experiment (optional)
 
 Not a plateau blocker.
@@ -261,7 +278,7 @@ Preferred progression:
 
 ## Agent locator
 
-Current edge: **PLATEAU-001H H2 controlled v4 cutover**. H2 is native-green at `f581de486a08547ea5fd74ef3ca2f2fb90e1eb34`; publish only the exact validated lineage, take a pre-v4 real-profile backup before first v4 write, and keep old-H1 rollback paired with that backup. After H2 cutover, resume evidence-driven daily use and admit no H3 without concrete friction.
+Current edge: **PLATEAU-001H H3 isolated-spire hardening**. H2 is published and real-profile green on SandState v4. H3 is admitted from concrete visual friction only: preserve isolated two-dot stacks, but prevent fully isolated supported needles from remaining three dots or taller. Native validation is the next gate; do not retune H2 or change persistence unless evidence forces it.
 
 HISTORY-001A/B/C are native-green through `09412b703cf41016f889d725ba235a7a1e63ae6a`. HISTORY-001C established the completed-Idle split transaction, active-preview validation, atomic daily-contribution reconciliation, and Balance historical editor. HISTORY-001D now generalizes that safe primitive into arbitrary From/To activity assignment with explicit collision confirmation and protected live selection.
 
