@@ -233,6 +233,20 @@ This pack is bounded hardening. It introduces no new feature surface, SQLite mig
 
 Native evidence: formatting, strict Clippy, 284 tests, organic-formation and friction regression, deterministic full-width-rain coverage and weak-focus-bias proof, Balance rendering, HISTORY/recovery/schema regression, isolated bubblewrapped TUI smoke, and validator profile custody all pass. Native fallout was limited to one candidate test iterator correction plus rustfmt in `src/app/report_modal_view.rs` and `src/sand/engine.rs`; architecture semantics did not change.
 
+#### H2 — Metastable repose + local avalanches
+
+Status: **COMPLETE / NATIVE-GREEN** at `f581de486a08547ea5fd74ef3ca2f2fb90e1eb34`.
+
+The design bench selected static/dynamic supported relief `3/1`. The implementation retires the memoryless 25% diagonal
+lottery, derives bottom-connected supported surface height from the canonical grid, performs one deterministic diagonal
+topple per gravity pass, refreshes a radius-one local active region, and persists sorted active canonical columns in
+SandState v4. H1 ingress, pending mass, visible-basin custody, resize, and HISTORY semantics are unchanged.
+
+Design-bench evidence: selected 3/1 produced median event sizes 3–4, p95 7–11, median quiet buildup 11.5–13 grains,
+0% one-move events, and no runaway in the synthetic long run. The first native statistics harness falsely blocked H2 by feeding one new grain per gravity pass, roughly 15.6 times normal live ingress. H2R1 corrected the harness to the product's exact 1000 ms ingress / 32 ms engine-update cadence with gravity every second update. Real-cadence proof produced 449 events at 40x20 (median size 8, p95 82, quiet buildup 9) and 658 at 80x30 (median size 8, p95 20, quiet buildup 10), with 0% one-move events, conserved mass, and no runaway. The 1:1 feed remains a bounded overload stress only.
+
+Native evidence: formatting, strict Clippy, 267 library + 23 integration tests (290 non-doc total), H1 rain/HISTORY/recovery regressions, exact v1/v2/v3→v4 migration, in-progress avalanche snapshot/restart equality, resize/hidden-activity continuity, airborne/cavity handling, and real-cadence performance all pass. Native H2/current gravity cost was approximately 1.92x at 40x20 and 1.38x at 80x30. No production semantics changed during H2R1; its sole follow-up commit corrects the statistics harness.
+
 ### RHYTHM-001 — Focus/Pomodoro experiment (optional)
 
 Not a plateau blocker.
@@ -247,7 +261,7 @@ Preferred progression:
 
 ## Agent locator
 
-Current edge: **PLATEAU-001H daily-use hardening**. H1 is native-green at `744b9f11a5341b0948178b932b23dd1d7e59662b` and is the first completed change admitted from direct daily-use screenshots rather than roadmap feature seeking. After H1 publication/cutover, further hardening is admitted only from concrete real-profile friction; no H2 is pre-invented.
+Current edge: **PLATEAU-001H H2 controlled v4 cutover**. H2 is native-green at `f581de486a08547ea5fd74ef3ca2f2fb90e1eb34`; publish only the exact validated lineage, take a pre-v4 real-profile backup before first v4 write, and keep old-H1 rollback paired with that backup. After H2 cutover, resume evidence-driven daily use and admit no H3 without concrete friction.
 
 HISTORY-001A/B/C are native-green through `09412b703cf41016f889d725ba235a7a1e63ae6a`. HISTORY-001C established the completed-Idle split transaction, active-preview validation, atomic daily-contribution reconciliation, and Balance historical editor. HISTORY-001D now generalizes that safe primitive into arbitrary From/To activity assignment with explicit collision confirmation and protected live selection.
 

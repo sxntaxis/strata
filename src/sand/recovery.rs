@@ -190,9 +190,12 @@ fn migrate_uninitialized_state(base_state: &SandState) -> Result<SandState, Stri
     }
     if state.version == SandState::LEGACY_VERSION
         || state.version == SandState::COMPRESSED_PENDING_VERSION
+        || state.version == SandState::ORGANIC_VERSION
     {
         state.version = SandState::VERSION;
-        state.ingress_focus_x = None;
+        if base_state.version != SandState::ORGANIC_VERSION {
+            state.ingress_focus_x = None;
+        }
     }
     Ok(state)
 }
@@ -204,6 +207,7 @@ fn validate_sediment_state(
 ) -> Result<(), String> {
     if state.version != SandState::VERSION
         && state.version != SandState::COMPRESSED_PENDING_VERSION
+        && state.version != SandState::ORGANIC_VERSION
         && state.version != SandState::LEGACY_VERSION
     {
         return Err(format!(
@@ -231,7 +235,10 @@ fn validate_sediment_state(
     if state.version == SandState::LEGACY_VERSION && !state.pending_runs.is_empty() {
         return Err("version 1 sediment state contains compressed pending runs".to_string());
     }
-    if state.version != SandState::VERSION && state.ingress_focus_x.is_some() {
+    if state.version != SandState::VERSION
+        && state.version != SandState::ORGANIC_VERSION
+        && state.ingress_focus_x.is_some()
+    {
         return Err("pre-organic sediment state contains an ingress focus".to_string());
     }
     if let Some(focus_x) = state.ingress_focus_x
@@ -241,6 +248,20 @@ fn validate_sediment_state(
             "recovery ingress focus {focus_x} is outside {}-column canvas",
             state.grid_width
         ));
+    }
+    if state.version != SandState::VERSION && !state.active_avalanche_columns.is_empty() {
+        return Err("pre-v4 sediment state contains active avalanche columns".to_string());
+    }
+    if state
+        .active_avalanche_columns
+        .windows(2)
+        .any(|columns| columns[0] >= columns[1])
+        || state
+            .active_avalanche_columns
+            .iter()
+            .any(|&x| x >= state.grid_width)
+    {
+        return Err("invalid active avalanche columns in recovery state".to_string());
     }
 
     let mut occupied = HashSet::with_capacity(state.grains.len());
@@ -326,6 +347,7 @@ mod tests {
                 category_id: 1,
                 count: 3,
             }],
+            active_avalanche_columns: Vec::new(),
         }
     }
 
@@ -487,6 +509,7 @@ mod tests {
             ingress_focus_x: None,
             pending_grains: Vec::new(),
             pending_runs: Vec::new(),
+            active_avalanche_columns: Vec::new(),
         };
         let timing = RecoveryTiming {
             elapsed: Duration::from_millis(100),
