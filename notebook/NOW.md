@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-08-27
 authority: working
-summary: HISTORY-001A/B/C/D/E and SEDIMENT-002 are natively green; INTERACTION-002 Settings/vocabulary convergence is the current edge.
-next: Native-validate INTERACTION-002 Settings/vocabulary convergence, then enter PLATEAU-001H product hardening.
+summary: HISTORY-001A/B/C/D/E, SEDIMENT-002, and INTERACTION-002 are natively green; PLATEAU-001H product hardening is the current edge.
+next: Cut over the validated build to the owner installation, then use PLATEAU-001H daily-use friction as the admission gate for further core changes.
 ---
 
 # NOW — Strata
@@ -74,12 +74,16 @@ HISTORY-001D is now **COMPLETE / NATIVE-GREEN** at `bfaa8bf29f8019c25fe4f2ee8b1d
 
 HISTORY-001E is now **COMPLETE / NATIVE-GREEN** at `d67c8e382708dbbf3f71bf2a67d7daa81b2e36b8`: formatting, strict Clippy, 263 tests, pure recolor and historical-sediment transaction proofs, HISTORY-001D and sediment regression, isolated startup/detach/restart, and bubblewrap profile-custody proof all pass. Retained source-category mass recolors deterministically in place; true historical gaps and cleared-away mass never fabricate current grains; authentic first-write day-end snapshots remain immutable.
 
-The active edge is **INTERACTION-002 — Settings and vocabulary convergence**. SEDIMENT-002 is native-green at `4059e28df2ebf82bd31453ee208093eef57a4511`. The current pass keeps the existing truthful keymap authority but renames the former Atlas surface to plain Settings, replaces machine action identifiers with human labels grouped by Main / Navigation / Layer / Balance / Settings, retires the misplaced Main `t → Detach` fallback, and scopes historical physical keys to Balance while keeping the command palette as the deliberate universal launcher.
+SEDIMENT-002 is **COMPLETE / NATIVE-GREEN** at `4059e28df2ebf82bd31453ee208093eef57a4511`: formatting, strict Clippy, 280 tests, focused friction/biased-rain/recovery proofs, visible-basin and HISTORY-001E regression, isolated startup/detach/restart, and bubblewrap profile-custody proof all pass.
+
+INTERACTION-002 is **COMPLETE / NATIVE-GREEN** at `b0f60eb3c6d76d1afee8d46737baab8ed220b01b`: formatting, strict Clippy, 283 tests, Settings/keymap and INTERACTION-001 regression, Balance/HISTORY and SEDIMENT-002 regression, isolated TUI startup, and bubblewrap profile-custody proof all pass. The former Atlas is now plain Settings; human action labels and Main / Navigation / Layer / Balance / Settings grouping are authoritative; the misplaced Main `t → Detach` fallback is retired; historical physical keys remain scoped to Balance while the command palette is the deliberate universal launcher.
+
+The active edge is **PLATEAU-001H — product hardening**. Further core work is admitted from concrete daily-use friction, defects, or evidence-backed hardening needs rather than roadmap feature seeking.
 
 The stale dirty adaptive-resize branch remains preserved as custody evidence and is superseded by the current-main
 visible-basin, resize/restore, and atomic clear-all authority. No adaptive code was ported.
 
-After INTERACTION-002 native validation, the required core path enters PLATEAU-001H product hardening. Pomodoro/RHYTHM-001 remains optional and must not block plateau.
+The required core path is now PLATEAU-001H product hardening. Pomodoro/RHYTHM-001 remains optional and must not block plateau.
 
 ## Completed post-migration units
 

@@ -166,7 +166,9 @@ Native proof must cover straight-down priority, friction hold and later slide fo
 
 ### INTERACTION-002 — Menus, Settings, and vocabulary convergence
 
-Status: **IMPLEMENTED / NATIVE VALIDATION PENDING**.
+Status: **COMPLETE / NATIVE-GREEN** at `b0f60eb3c6d76d1afee8d46737baab8ed220b01b`.
+
+Native evidence: formatting, strict Clippy, 283 tests, Settings/keymap-focused proof, INTERACTION-001 regression, Balance/HISTORY and SEDIMENT-002 regression, isolated TUI startup, and bubblewrap profile-custody proof all pass. The final native fallout was one coherent bounded follow-up commit and changed no architecture semantics.
 
 Goal: polish action placement after historical operations exist, rather than polishing an incomplete menu graph.
 
