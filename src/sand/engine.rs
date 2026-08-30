@@ -201,6 +201,12 @@ pub struct SandEngine {
     last_mobilized_vertical_moves: usize,
     #[cfg(test)]
     last_mobilized_diagonal_moves: usize,
+    #[cfg(test)]
+    slip_front_bench_enabled: bool,
+    #[cfg(test)]
+    last_slip_front_mobilizations: usize,
+    #[cfg(test)]
+    last_diagonal_topple_source_x: Option<usize>,
     pub grain_count: usize,
 }
 
@@ -240,6 +246,12 @@ impl SandEngine {
             last_mobilized_vertical_moves: 0,
             #[cfg(test)]
             last_mobilized_diagonal_moves: 0,
+            #[cfg(test)]
+            slip_front_bench_enabled: false,
+            #[cfg(test)]
+            last_slip_front_mobilizations: 0,
+            #[cfg(test)]
+            last_diagonal_topple_source_x: None,
             grain_count: 0,
         }
     }
@@ -735,6 +747,62 @@ impl SandEngine {
         }
     }
 
+    #[cfg(test)]
+    fn bench_mobilize_uphill_slip_front(
+        &mut self,
+        bounds: ViewportBounds,
+        source_x: usize,
+        target_x: usize,
+        source_height_before: usize,
+    ) {
+        if !self.slip_front_bench_enabled || source_height_before == 0 {
+            return;
+        }
+
+        let uphill_x = if target_x < source_x {
+            source_x.checked_add(1)
+        } else {
+            source_x.checked_sub(1)
+        };
+        let Some(uphill_x) = uphill_x else {
+            return;
+        };
+        if uphill_x < bounds.x_start || uphill_x >= bounds.x_end {
+            return;
+        }
+
+        let uphill_height = self.supported_heights[uphill_x];
+        if uphill_height == 0 {
+            return;
+        }
+        let source_height_after = source_height_before - 1;
+        let relief_before = uphill_height.saturating_sub(source_height_before);
+        let relief_after = uphill_height.saturating_sub(source_height_after);
+        if relief_before > DYNAMIC_REPOSE_RELIEF || relief_after <= DYNAMIC_REPOSE_RELIEF {
+            return;
+        }
+
+        let uphill_y = bounds.y_end - uphill_height;
+        if self.grid[uphill_y][uphill_x].is_none() || uphill_y + 1 >= bounds.y_end {
+            return;
+        }
+        if self.grid[uphill_y + 1][source_x].is_some() {
+            return;
+        }
+        // H4 already wakes a diagonal dependent that actually loses static
+        // support. H6 measures only the distinct case where another lower
+        // diagonal still braces the uphill surface, but this exact topple
+        // steepened the face toward the vacated source from relief 1 to 2.
+        if !self.grain_has_static_support(bounds, uphill_x, uphill_y)
+            || self.mobilized[uphill_y][uphill_x]
+        {
+            return;
+        }
+
+        self.mobilized[uphill_y][uphill_x] = true;
+        self.last_slip_front_mobilizations += 1;
+    }
+
     fn diagonal_target_for_relief(
         &mut self,
         bounds: ViewportBounds,
@@ -850,10 +918,12 @@ impl SandEngine {
 
         #[cfg(test)]
         {
+            self.bench_mobilize_uphill_slip_front(bounds, x, target_x, source_height);
             self.last_diagonal_topple = true;
             self.last_avalanche_motion = true;
             self.last_avalanche_span = x.abs_diff(target_x) + 1;
             self.last_mobilized_diagonal_moves += 1;
+            self.last_diagonal_topple_source_x = Some(x);
         }
         true
     }
@@ -870,6 +940,8 @@ impl SandEngine {
             self.last_ordinary_vertical_moves = 0;
             self.last_mobilized_vertical_moves = 0;
             self.last_mobilized_diagonal_moves = 0;
+            self.last_slip_front_mobilizations = 0;
+            self.last_diagonal_topple_source_x = None;
         }
         let Some(bounds) = self.viewport_bounds() else {
             return;
@@ -2518,6 +2590,360 @@ mod organic_formation_tests {
             recolored.mobilized_grains,
             vec![SandStateCoordinate { x: 2, y: 2 }]
         );
+    }
+
+    fn seed_supported_columns(engine: &mut SandEngine, start_x: usize, heights: &[usize]) {
+        let bounds = engine.viewport_bounds().expect("non-empty viewport");
+        for (offset, height) in heights.iter().copied().enumerate() {
+            let x = start_x + offset;
+            for depth in 0..height {
+                let y = bounds.y_end - 1 - depth;
+                engine.grid[y][x] = Some(CategoryId::new(1));
+                engine.grain_count += 1;
+            }
+        }
+        engine.derive_supported_heights(bounds);
+    }
+
+    #[test]
+    fn h6_slip_front_bench_wakes_only_causally_steepened_uphill_surface() {
+        let mut engine = SandEngine::new(8, 4);
+        engine.clear();
+        engine.slip_front_bench_enabled = true;
+        let bounds = engine.viewport_bounds().unwrap();
+        let outer = bounds.x_start + 3;
+        let uphill = outer + 1;
+        let source = uphill + 1;
+        let target = source + 1;
+        seed_supported_columns(&mut engine, outer, &[3, 4, 3, 1]);
+        let source_y = bounds.y_end - 3;
+        engine.mobilized[source_y][source] = true;
+
+        assert!(engine.topple_mobilized_column(bounds, source));
+        assert_eq!(engine.supported_heights[outer], 3);
+        assert_eq!(engine.supported_heights[uphill], 4);
+        assert_eq!(engine.supported_heights[source], 2);
+        assert_eq!(engine.supported_heights[target], 2);
+        let uphill_y = bounds.y_end - 4;
+        assert!(engine.grain_has_static_support(bounds, uphill, uphill_y));
+        assert!(engine.mobilized[uphill_y][uphill]);
+        assert_eq!(engine.last_slip_front_mobilizations, 1);
+
+        assert!(engine.topple_mobilized_column(bounds, uphill));
+        assert_eq!(engine.last_diagonal_topple_source_x, Some(uphill));
+    }
+
+    #[test]
+    fn h6_slip_front_bench_does_not_wake_without_threshold_crossing() {
+        for heights in [[3, 3, 3, 1], [4, 5, 3, 1]] {
+            let mut engine = SandEngine::new(8, 4);
+            engine.clear();
+            engine.slip_front_bench_enabled = true;
+            let bounds = engine.viewport_bounds().unwrap();
+            let outer = bounds.x_start + 3;
+            let uphill = outer + 1;
+            let source = uphill + 1;
+            seed_supported_columns(&mut engine, outer, &heights);
+            let source_y = bounds.y_end - heights[2];
+            engine.mobilized[source_y][source] = true;
+
+            assert!(engine.topple_mobilized_column(bounds, source));
+            let uphill_y = bounds.y_end - heights[1];
+            assert!(engine.grain_has_static_support(bounds, uphill, uphill_y));
+            assert!(!engine.mobilized[uphill_y][uphill]);
+            assert_eq!(engine.last_slip_front_mobilizations, 0);
+        }
+    }
+
+    #[test]
+    #[ignore = "explicit H6 slip-front A/B behavior bench"]
+    fn h6_slip_front_ab_bench_40x20_and_80x30() {
+        use std::time::Instant;
+
+        #[derive(Default)]
+        struct Episode {
+            diagonal_moves: usize,
+            lineage_mobilizations: usize,
+            support_loss_mobilizations: usize,
+            slip_front_mobilizations: usize,
+            topple_columns: HashSet<usize>,
+        }
+
+        struct Summary {
+            episodes: usize,
+            structural: usize,
+            multi_column: usize,
+            front_episodes: usize,
+            front_mobilizations: usize,
+            moves_median: usize,
+            moves_p95: usize,
+            moves_max: usize,
+            columns_median: usize,
+            columns_p95: usize,
+            columns_max: usize,
+            lineage_median: usize,
+            lineage_p95: usize,
+            structural_quiet_median: usize,
+            roughness_mean: f64,
+            height_variance: f64,
+            max_adjacent_delta: usize,
+            plateau_edge_ratio: f64,
+            plateau_runs_ge3: usize,
+            occupied_columns: usize,
+            max_height: usize,
+            pending: usize,
+        }
+
+        fn percentile(values: &mut [usize], numerator: usize, denominator: usize) -> usize {
+            if values.is_empty() {
+                return 0;
+            }
+            values.sort_unstable();
+            values[(values.len() - 1) * numerator / denominator]
+        }
+
+        fn record_pass(
+            engine: &SandEngine,
+            current: &mut Option<Episode>,
+            episodes: &mut Vec<Episode>,
+        ) {
+            if engine.last_avalanche_motion {
+                let episode = current.get_or_insert_with(Episode::default);
+                episode.diagonal_moves += engine.last_mobilized_diagonal_moves;
+                episode.lineage_mobilizations += engine.last_slip_lineage_mobilizations;
+                episode.support_loss_mobilizations += engine.last_support_loss_mobilizations;
+                episode.slip_front_mobilizations += engine.last_slip_front_mobilizations;
+                if let Some(x) = engine.last_diagonal_topple_source_x {
+                    episode.topple_columns.insert(x);
+                }
+            } else if let Some(episode) = current.take() {
+                episodes.push(episode);
+            }
+        }
+
+        fn summarize_surface(engine: &mut SandEngine) -> (f64, f64, usize, f64, usize, usize, usize) {
+            let bounds = engine.viewport_bounds().unwrap();
+            engine.derive_supported_heights(bounds);
+            let heights = &engine.supported_heights[bounds.x_start..bounds.x_end];
+            let edge_count = heights.len().saturating_sub(1);
+            let roughness = heights
+                .windows(2)
+                .map(|pair| pair[0].abs_diff(pair[1]))
+                .sum::<usize>();
+            let max_adjacent_delta = heights
+                .windows(2)
+                .map(|pair| pair[0].abs_diff(pair[1]))
+                .max()
+                .unwrap_or(0);
+            let plateau_edges = heights.windows(2).filter(|pair| pair[0] == pair[1]).count();
+            let mut plateau_runs_ge3 = 0usize;
+            let mut run = 1usize;
+            for pair in heights.windows(2) {
+                if pair[0] == pair[1] {
+                    run += 1;
+                } else {
+                    if run >= 3 {
+                        plateau_runs_ge3 += 1;
+                    }
+                    run = 1;
+                }
+            }
+            if run >= 3 {
+                plateau_runs_ge3 += 1;
+            }
+            let mean = heights.iter().sum::<usize>() as f64 / heights.len().max(1) as f64;
+            let variance = heights
+                .iter()
+                .map(|height| {
+                    let delta = *height as f64 - mean;
+                    delta * delta
+                })
+                .sum::<f64>()
+                / heights.len().max(1) as f64;
+            let occupied_columns = heights.iter().filter(|height| **height > 0).count();
+            let max_height = heights.iter().copied().max().unwrap_or(0);
+            (
+                roughness as f64 / edge_count.max(1) as f64,
+                variance,
+                max_adjacent_delta,
+                plateau_edges as f64 / edge_count.max(1) as f64,
+                plateau_runs_ge3,
+                occupied_columns,
+                max_height,
+            )
+        }
+
+        fn run(width: u16, height: u16, ingress_count: usize, slip_front: bool) -> Summary {
+            let started = Instant::now();
+            let mut engine = SandEngine::new(width, height);
+            engine.rng_state = 0xC0FF_EE00_0000_0001 ^ u64::from(width);
+            engine.slip_front_bench_enabled = slip_front;
+            let mut episodes = Vec::new();
+            let mut current = None;
+            let mut structural_ingresses = Vec::new();
+
+            for ingress in 0..ingress_count {
+                engine.spawn(CategoryId::new(1));
+                let mut structural_this_ingress = false;
+                let gravity_passes = if ingress % 8 < 5 { 15 } else { 16 };
+                for _ in 0..gravity_passes {
+                    engine.apply_gravity();
+                    structural_this_ingress |= engine.last_slip_lineage_mobilizations > 0
+                        || engine.last_support_loss_mobilizations > 0
+                        || engine.last_slip_front_mobilizations > 0;
+                    record_pass(&engine, &mut current, &mut episodes);
+                }
+                if structural_this_ingress {
+                    structural_ingresses.push(ingress);
+                }
+            }
+
+            let mut settled_streak = 0usize;
+            for _ in 0..50_000 {
+                engine.apply_gravity();
+                record_pass(&engine, &mut current, &mut episodes);
+                let moving = engine.last_ordinary_vertical_moves > 0
+                    || engine.last_avalanche_motion
+                    || engine.mobilized.iter().flatten().any(|mobile| *mobile);
+                if moving {
+                    settled_streak = 0;
+                } else {
+                    settled_streak += 1;
+                    if settled_streak >= 4 {
+                        break;
+                    }
+                }
+            }
+            if let Some(episode) = current.take() {
+                episodes.push(episode);
+            }
+            assert!(
+                !engine.mobilized.iter().flatten().any(|mobile| *mobile),
+                "bench must drain transient mobility"
+            );
+
+            let structural = episodes
+                .iter()
+                .filter(|episode| {
+                    episode.lineage_mobilizations > 0
+                        || episode.support_loss_mobilizations > 0
+                        || episode.slip_front_mobilizations > 0
+                })
+                .collect::<Vec<_>>();
+            let multi_column = structural
+                .iter()
+                .filter(|episode| episode.topple_columns.len() >= 2)
+                .count();
+            let front_episodes = structural
+                .iter()
+                .filter(|episode| episode.slip_front_mobilizations > 0)
+                .count();
+            let front_mobilizations = structural
+                .iter()
+                .map(|episode| episode.slip_front_mobilizations)
+                .sum::<usize>();
+            let mut moves = structural
+                .iter()
+                .map(|episode| episode.diagonal_moves)
+                .collect::<Vec<_>>();
+            let mut columns = structural
+                .iter()
+                .map(|episode| episode.topple_columns.len())
+                .collect::<Vec<_>>();
+            let mut lineage = structural
+                .iter()
+                .map(|episode| episode.lineage_mobilizations)
+                .collect::<Vec<_>>();
+            let mut structural_quiet = structural_ingresses
+                .windows(2)
+                .map(|pair| pair[1].saturating_sub(pair[0]))
+                .collect::<Vec<_>>();
+            let (roughness_mean, height_variance, max_adjacent_delta, plateau_edge_ratio,
+                plateau_runs_ge3, occupied_columns, max_height) = summarize_surface(&mut engine);
+            let mass = engine.physical_grain_count() + engine.pending_grain_count();
+            assert_eq!(mass, ingress_count);
+
+            let summary = Summary {
+                episodes: episodes.len(),
+                structural: structural.len(),
+                multi_column,
+                front_episodes,
+                front_mobilizations,
+                moves_median: percentile(&mut moves, 1, 2),
+                moves_p95: percentile(&mut moves, 19, 20),
+                moves_max: moves.iter().copied().max().unwrap_or(0),
+                columns_median: percentile(&mut columns, 1, 2),
+                columns_p95: percentile(&mut columns, 19, 20),
+                columns_max: columns.iter().copied().max().unwrap_or(0),
+                lineage_median: percentile(&mut lineage, 1, 2),
+                lineage_p95: percentile(&mut lineage, 19, 20),
+                structural_quiet_median: percentile(&mut structural_quiet, 1, 2),
+                roughness_mean,
+                height_variance,
+                max_adjacent_delta,
+                plateau_edge_ratio,
+                plateau_runs_ge3,
+                occupied_columns,
+                max_height,
+                pending: engine.pending_grain_count(),
+            };
+            println!(
+                "H6 mode={} {width}x{height} ingress={ingress_count} elapsed={:?} episodes={} structural={} multi_column={} front_episodes={} front_mobilizations={} moves_median={} moves_p95={} moves_max={} columns_median={} columns_p95={} columns_max={} lineage_median={} lineage_p95={} structural_quiet_median={} roughness_mean={:.4} height_variance={:.4} max_adjacent_delta={} plateau_edge_ratio={:.4} plateau_runs_ge3={} occupied_columns={} max_height={} pending={}",
+                if slip_front { "slip-front" } else { "h4" },
+                started.elapsed(),
+                summary.episodes,
+                summary.structural,
+                summary.multi_column,
+                summary.front_episodes,
+                summary.front_mobilizations,
+                summary.moves_median,
+                summary.moves_p95,
+                summary.moves_max,
+                summary.columns_median,
+                summary.columns_p95,
+                summary.columns_max,
+                summary.lineage_median,
+                summary.lineage_p95,
+                summary.structural_quiet_median,
+                summary.roughness_mean,
+                summary.height_variance,
+                summary.max_adjacent_delta,
+                summary.plateau_edge_ratio,
+                summary.plateau_runs_ge3,
+                summary.occupied_columns,
+                summary.max_height,
+                summary.pending,
+            );
+            summary
+        }
+
+        let ingress_count = std::env::var("H6_INGRESS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(4_000);
+        for (width, height) in [(40, 20), (80, 30)] {
+            let baseline = run(width, height, ingress_count, false);
+            let candidate = run(width, height, ingress_count, true);
+            println!(
+                "H6_COMPARE {width}x{height}: multi_column={}->{} moves_p95={}->{} columns_p95={}->{} roughness={:.4}->{:.4} variance={:.4}->{:.4} max_adjacent_delta={}->{} plateau_edge_ratio={:.4}->{:.4} plateau_runs_ge3={}->{}",
+                baseline.multi_column,
+                candidate.multi_column,
+                baseline.moves_p95,
+                candidate.moves_p95,
+                baseline.columns_p95,
+                candidate.columns_p95,
+                baseline.roughness_mean,
+                candidate.roughness_mean,
+                baseline.height_variance,
+                candidate.height_variance,
+                baseline.max_adjacent_delta,
+                candidate.max_adjacent_delta,
+                baseline.plateau_edge_ratio,
+                candidate.plateau_edge_ratio,
+                baseline.plateau_runs_ge3,
+                candidate.plateau_runs_ge3,
+            );
+        }
     }
 
     #[test]
