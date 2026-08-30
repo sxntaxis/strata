@@ -1681,7 +1681,12 @@ mod tests {
         assert_eq!(engine.grain_count, 11);
         assert!(engine.mobilized[surface_y][wall_x]);
         assert_eq!(
-            engine.mobilized.iter().flatten().filter(|mobile| **mobile).count(),
+            engine
+                .mobilized
+                .iter()
+                .flatten()
+                .filter(|mobile| **mobile)
+                .count(),
             1,
             "only the exact former-wall surface grain is released"
         );
@@ -1722,7 +1727,10 @@ mod tests {
         let shifted_right = right_x + offset;
         let surface_y = bottom - 4;
         assert_eq!(engine.grain_count, 14);
-        assert_eq!(engine.grid[surface_y][shifted_left], Some(CategoryId::new(1)));
+        assert_eq!(
+            engine.grid[surface_y][shifted_left],
+            Some(CategoryId::new(1))
+        );
         assert_eq!(
             engine.grid[surface_y][shifted_right],
             Some(CategoryId::new(2))
@@ -1730,7 +1738,12 @@ mod tests {
         assert!(engine.mobilized[surface_y][shifted_left]);
         assert!(engine.mobilized[surface_y][shifted_right]);
         assert_eq!(
-            engine.mobilized.iter().flatten().filter(|mobile| **mobile).count(),
+            engine
+                .mobilized
+                .iter()
+                .flatten()
+                .filter(|mobile| **mobile)
+                .count(),
             2
         );
     }
