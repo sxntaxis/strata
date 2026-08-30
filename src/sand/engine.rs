@@ -245,18 +245,32 @@ impl SandEngine {
     }
 
     pub fn resize(&mut self, width: u16, height: u16) {
+        let previous_bounds = self.viewport_bounds();
         self.cell_width = width;
         self.cell_height = height;
-        self.expand_logical_canvas_to_viewport();
+        let (horizontal_offset, vertical_offset) = self.expand_logical_canvas_to_viewport();
+
+        let Some(previous_bounds) = previous_bounds else {
+            return;
+        };
+        let shifted_previous_bounds = ViewportBounds {
+            x_start: previous_bounds.x_start.saturating_add(horizontal_offset),
+            x_end: previous_bounds.x_end.saturating_add(horizontal_offset),
+            y_start: previous_bounds.y_start.saturating_add(vertical_offset),
+            y_end: previous_bounds.y_end.saturating_add(vertical_offset),
+        };
+        if let Some(current_bounds) = self.viewport_bounds() {
+            self.release_lateral_confinement(shifted_previous_bounds, current_bounds);
+        }
     }
 
-    fn expand_logical_canvas_to_viewport(&mut self) {
+    fn expand_logical_canvas_to_viewport(&mut self) -> (usize, usize) {
         let viewport_width = self.cell_width as usize * SAND_ENGINE.dot_width;
         let viewport_height = self.cell_height as usize * SAND_ENGINE.dot_height;
         let target_width = self.grid_width_dots.max(viewport_width);
         let target_height = self.grid_height_dots.max(viewport_height);
         if target_width == self.grid_width_dots && target_height == self.grid_height_dots {
-            return;
+            return (0, 0);
         }
 
         let horizontal_offset = target_width.saturating_sub(self.grid_width_dots) / 2;
@@ -283,6 +297,62 @@ impl SandEngine {
         self.grid_width_dots = target_width;
         self.grid_height_dots = target_height;
         self.supported_heights.resize(target_width, 0);
+        (horizontal_offset, vertical_offset)
+    }
+
+    fn release_lateral_confinement(
+        &mut self,
+        previous_bounds: ViewportBounds,
+        current_bounds: ViewportBounds,
+    ) {
+        let released_left = current_bounds.x_start < previous_bounds.x_start;
+        let released_right = current_bounds.x_end > previous_bounds.x_end;
+        if !released_left && !released_right {
+            return;
+        }
+
+        self.derive_supported_heights(current_bounds);
+        if released_left {
+            let source_x = previous_bounds.x_start;
+            if let Some(target_x) = source_x.checked_sub(1) {
+                self.mobilize_released_wall_surface(current_bounds, source_x, target_x);
+            }
+        }
+        if released_right && previous_bounds.x_end > 0 {
+            let source_x = previous_bounds.x_end - 1;
+            let target_x = source_x.saturating_add(1);
+            self.mobilize_released_wall_surface(current_bounds, source_x, target_x);
+        }
+    }
+
+    fn mobilize_released_wall_surface(
+        &mut self,
+        bounds: ViewportBounds,
+        source_x: usize,
+        target_x: usize,
+    ) {
+        if source_x < bounds.x_start
+            || source_x >= bounds.x_end
+            || target_x < bounds.x_start
+            || target_x >= bounds.x_end
+        {
+            return;
+        }
+
+        let source_height = self.supported_heights[source_x];
+        if source_height == 0 {
+            return;
+        }
+        let source_y = bounds.y_end - source_height;
+        let target_y = source_y.saturating_add(1);
+        if target_y >= bounds.y_end || self.grid[target_y][target_x].is_some() {
+            return;
+        }
+
+        let outward_relief = source_height.saturating_sub(self.supported_heights[target_x]);
+        if outward_relief > DYNAMIC_REPOSE_RELIEF {
+            self.mobilized[source_y][source_x] = true;
+        }
     }
 
     fn capacity(&self) -> usize {
@@ -1566,6 +1636,102 @@ mod tests {
         assert_eq!(
             engine.grid[y_offset + old_height - 1][x_offset + old_width - 1],
             Some(CategoryId::new(2))
+        );
+    }
+
+    #[test]
+    fn narrowing_remains_projection_only_and_does_not_create_mobility() {
+        let mut engine = SandEngine::new(12, 3);
+        engine.clear();
+        let bottom = engine.grid_height_dots;
+        let x = engine.grid_width_dots / 2;
+        for y in bottom - 4..bottom {
+            engine.grid[y][x] = Some(CategoryId::new(1));
+        }
+        engine.grain_count = 4;
+        let before = engine.snapshot_state();
+
+        engine.resize(4, 2);
+
+        assert_eq!(engine.snapshot_state(), before);
+    }
+
+    #[test]
+    fn reexpansion_releases_former_visible_side_wall_through_existing_h4_physics() {
+        let mut engine = SandEngine::new(12, 3);
+        engine.clear();
+        engine.resize(4, 3);
+        let previous_bounds = engine.viewport_bounds().expect("visible viewport");
+        let wall_x = previous_bounds.x_start;
+        let bottom = previous_bounds.y_end;
+
+        for y in bottom - 6..bottom {
+            engine.grid[y][wall_x] = Some(CategoryId::new(1));
+        }
+        for y in bottom - 5..bottom {
+            engine.grid[y][wall_x + 1] = Some(CategoryId::new(1));
+        }
+        engine.grain_count = 11;
+        let surface_y = bottom - 6;
+        let before_grid = engine.grid.clone();
+
+        engine.resize(12, 3);
+
+        assert_eq!(engine.grid, before_grid, "resize must not reflow grains");
+        assert_eq!(engine.grain_count, 11);
+        assert!(engine.mobilized[surface_y][wall_x]);
+        assert_eq!(
+            engine.mobilized.iter().flatten().filter(|mobile| **mobile).count(),
+            1,
+            "only the exact former-wall surface grain is released"
+        );
+
+        engine.apply_gravity();
+
+        assert_eq!(engine.grid[surface_y][wall_x], None);
+        assert_eq!(
+            engine.grid[surface_y + 1][wall_x - 1],
+            Some(CategoryId::new(1))
+        );
+        assert_eq!(engine.grain_count, 11);
+    }
+
+    #[test]
+    fn canonical_growth_releases_shifted_former_side_walls_without_mass_change() {
+        let mut engine = SandEngine::new(4, 3);
+        engine.clear();
+        let old_width = engine.grid_width_dots;
+        let bottom = engine.grid_height_dots;
+        let left_x = 0;
+        let right_x = old_width - 1;
+
+        for y in bottom - 4..bottom {
+            engine.grid[y][left_x] = Some(CategoryId::new(1));
+            engine.grid[y][right_x] = Some(CategoryId::new(2));
+        }
+        for y in bottom - 3..bottom {
+            engine.grid[y][left_x + 1] = Some(CategoryId::new(1));
+            engine.grid[y][right_x - 1] = Some(CategoryId::new(2));
+        }
+        engine.grain_count = 14;
+
+        engine.resize(8, 3);
+
+        let offset = (engine.grid_width_dots - old_width) / 2;
+        let shifted_left = left_x + offset;
+        let shifted_right = right_x + offset;
+        let surface_y = bottom - 4;
+        assert_eq!(engine.grain_count, 14);
+        assert_eq!(engine.grid[surface_y][shifted_left], Some(CategoryId::new(1)));
+        assert_eq!(
+            engine.grid[surface_y][shifted_right],
+            Some(CategoryId::new(2))
+        );
+        assert!(engine.mobilized[surface_y][shifted_left]);
+        assert!(engine.mobilized[surface_y][shifted_right]);
+        assert_eq!(
+            engine.mobilized.iter().flatten().filter(|mobile| **mobile).count(),
+            2
         );
     }
 
