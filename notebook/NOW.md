@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-08-30
 authority: working
-summary: Concrete resize friction admitted PLATEAU-001H H5 boundary release; the authored candidate preserves H4 topology while releasing former visible side walls through exact one-shot mobility.
-next: Native-certify H5 resize boundary release. Only after H5 closure, bench slip-front avalanche propagation separately; keep ingress-focus padding later.
+summary: H5 resize boundary release is native-certified; PLATEAU-001H H6 now benches one exact causal slip-front extension against unchanged H4 before any production avalanche retuning.
+next: Execute the H6 test-only A/B bench at real cadence, compare multi-column avalanche growth against topology guardrails, and decide whether slip-front propagation deserves a production candidate. Keep ingress-focus padding later.
 ---
 
 # NOW — Strata
@@ -93,7 +93,9 @@ PLATEAU-001H / H3 — isolated-spire cap — is **COMPLETE / PUBLISHED / REAL-PR
 
 PLATEAU-001H / H4 — contact-supported grain-causal avalanches + SandState v5 — is **COMPLETE / PUBLISHED / REAL-PROFILE GREEN**. Behavior remains native-green at `579f3e1b652a2d90efcfcef65e1910d199e464ba`; exact mobilized coordinates, v5 restart/continuation, hidden resize custody, deterministic v4 migration, malformed fail-closed validation, recovery, recolor, and SQLite schema invariance passed at `f00b628bd37c42a9b27b2abb4b73b1068c74f551`. PR #89 published main `67ffd84d3c5c924211ac9a14b52b5749fb07ed8b`, and the installed binary is SHA256 `b6f3af5247ce633b4c01c6232c1f1be057f7f9af562b6a5114f424b5f3559f93`. Real profile `95446134-3681-4390-84d7-8d900ebbb892` crossed v4→v5 successfully and passed a second v5→v5 restart plus sqlite-doctor; the pre-v5 backup and H3 rollback pair remain retained. Regional activity, `active_vertical`, static relief `3`, and isolated-spire heuristics remain retired.
 
-PLATEAU-001H / H5 — resize boundary release — is **AUTHORED / NATIVE CERTIFICATION REQUIRED** from current main `b5afc619bace6d9d98ec14ccd065add3689e2e38`. Owner screenshots showed that widening the live terminal left former visible side walls frozen as artificial vertical cuts. The candidate keeps shrink projection-only and keeps resize itself mass/topology preserving, but when widening actually removes a lateral wall it may mark only that wall's exact bottom-connected surface grain as H4-mobilized if newly exposed outward space has dynamic relief `>1`. No grain moves during resize; subsequent spill uses existing H4 gravity/slip lineage. Slip-front propagation and ingress-focus padding are explicitly excluded from H5 and remain separately sequenced.
+PLATEAU-001H / H5 — resize boundary release — is **NATIVE-CERTIFIED / PUBLICATION PENDING** at `3920ab3899f3249569f2dfb8c990e6389cb6fc47` / tree `8f3f69f7baeb15cd60423e5663b36647efd4a68b`, based on current main `b5afc619bace6d9d98ec14ccd065add3689e2e38`. Focused H5 tests, 22 focused H4/organic tests plus one ignored behavior bench, 272 full library tests plus one ignored bench, 23 integration tests, formatting, strict Clippy, help smoke, and diff hygiene all passed; the only fallout was rustfmt-only. No merge to main has occurred.
+
+PLATEAU-001H / H6 — causal slip-front propagation — is **AUTHORED A/B BENCH / NATIVE EXECUTION REQUIRED** on top of certified H5. H4 already wakes exact grains that lose contact support. H6 tests only the distinct broad-face case where a real downhill topple leaves the immediately uphill surface statically braced on its other side but steepens its relief toward the vacated source from `<=1` to `>1`. The mechanism is `cfg(test)` only and disabled by default; unchanged H4 and H6 share initial seeds/cadence, and the bench compares multi-column episode growth against roughness, variance, slope, plateau, width/height, conservation, rest, and runaway guardrails. No production avalanche semantics have been accepted. Ingress-focus padding remains later.
 
 ## Completed post-migration units
 

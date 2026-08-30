@@ -2,7 +2,7 @@
 
 Status: implemented and certified
 Program: SEDIMENT-002 + PLATEAU-001H hardening
-Current completed unit: PLATEAU-001H H4 grain-causal contact + SandState v5 published and real-profile green
+Current published unit: PLATEAU-001H H4 grain-causal contact + SandState v5 real-profile green; H5 resize boundary release is native-certified and awaiting publication
 Issues completed: #6, #7, #16, #18, #26
 Last reviewed: 2026-08-28
 
@@ -34,6 +34,8 @@ Terminal-cell dimensions and Braille-dot dimensions are distinct units:
 The persisted logical grid owns coordinates, neighborhoods, category composition, and topology. Shrinking the terminal changes viewport state only and crops presentation without deleting hidden grains. Growing beyond the logical canvas expands it monotonically: old cells are copied around the horizontal center and bottom baseline, new cells begin empty, and the canvas is never shrunk again merely because the viewport shrinks.
 
 Canvas growth never runs gravity or repacks existing grains. Pending logical mass may occupy newly available capacity through the normal pending-grain placement path. Live viewport widening is also a boundary event: when a visible left or right wall ceases to be a wall, resize may one-shot mark only the exact bottom-connected surface grain on that former wall as H4-mobilized, and only when the newly revealed outward diagonal creates dynamic relief `>1`. Resize itself still moves no grain, consumes no random choice, and changes no mass; any later spill is ordinary H4 gravity and slip-lineage behavior.
+
+H5 resize-boundary release is native-certified at `3920ab3899f3249569f2dfb8c990e6389cb6fc47` (tree `8f3f69f7baeb15cd60423e5663b36647efd4a68b`). Focused H5 and H4/organic regressions, 272 library tests plus 23 integration tests, formatting, strict Clippy, help smoke, and diff hygiene passed. The only certification fallout was rustfmt-only in `src/sand/engine.rs`; H5 remains unmerged to main pending publication.
 
 The current viewport is the active live-physics basin. New live grains enter at the visible top edge, gravity and diagonal movement remain within the visible rectangle, and the visible left and right edges act as temporary walls. Grains hidden by shrink remain frozen at their canonical coordinates. When re-expansion makes them visible, ordinary hidden grains reactivate normally and a former lateral wall may receive the one-shot boundary-release trigger above; narrowing never triggers it. Full clear is the one exception to monotonic canvas retention: it removes all placed and pending mass and resets the empty canonical canvas to the current viewport dimensions. Category-specific clearing, including Idle clear, preserves canonical extent.
 

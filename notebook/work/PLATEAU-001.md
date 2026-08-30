@@ -280,7 +280,7 @@ Native validation is complete at `f00b628bd37c42a9b27b2abb4b73b1068c74f551`: exa
 
 #### H5 — Resize boundary release
 
-Status: **AUTHORED CANDIDATE / NATIVE CERTIFICATION REQUIRED**.
+Status: **NATIVE-CERTIFIED / PUBLICATION PENDING**.
 
 Admitted from concrete owner screenshots and daily use, not feature-seeking. When the live terminal widens, a side wall that previously confined the visible basin can become an interior column. H4 correctly treats a visible wall as static contact support, but current resize merely exposes empty space and supplies no physical event, leaving the former edge frozen as an artificial vertical cut.
 
@@ -293,7 +293,27 @@ Accepted semantics are deliberately narrow:
 - that grain is marked only when the newly exposed outward diagonal provides the existing dynamic relief `>1` route;
 - all later movement, same-source slip lineage, support-loss propagation, sweep ordering, and persistence remain ordinary H4/SandState v5 behavior.
 
-The candidate adds focused regressions for both canonical growth and hidden-canvas re-expansion. Native certification must run formatting, strict Clippy, full tests, help smoke, and focused resize/H4 regressions. No slip-front propagation or ingress-focus padding belongs to H5. Those remain separate follow-ups so relaxation and deposition cannot be conflated with boundary correctness.
+The candidate adds focused regressions for both canonical growth and hidden-canvas re-expansion. Native certification passed at `3920ab3899f3249569f2dfb8c990e6389cb6fc47` / tree `8f3f69f7baeb15cd60423e5663b36647efd4a68b`: focused H5 tests passed; focused H4/organic tests passed 22 with the explicit behavior bench ignored; the full library passed 272 with one ignored benchmark; 23 integration tests, formatting, strict Clippy, help smoke, and diff hygiene all passed. The only fallout commit was rustfmt-only. H5 is certified but not yet merged to main.
+
+No slip-front propagation or ingress-focus padding belongs to H5. Those remain separate follow-ups so relaxation and deposition cannot be conflated with boundary correctness.
+
+#### H6 — Causal slip-front propagation bench
+
+Status: **AUTHORED A/B BENCH / NATIVE EXECUTION REQUIRED**.
+
+Daily-use evidence says H4 cascades are often too small to read visually as avalanches even though exact-grain causality is healthy. H6 therefore does not lower static stability, change ingress, or broadly wake neighbors. It tests one narrower propagation rule against unchanged H4 with identical initial seeds and live cadence.
+
+A real diagonal topple from source column `x` toward its downhill target may inspect only the immediately uphill column on the opposite side of `x`. H4 already owns the case where that uphill surface actually loses static contact support, so H6 explicitly excludes it. The candidate bench wakes the exact uphill bottom-connected surface grain only when all of the following are true:
+
+- the source topple actually occurred;
+- the uphill surface remains statically supported by another lower diagonal after the vacancy;
+- the source vacancy is the newly open downhill route for that surface;
+- relief from uphill toward the source crossed the existing dynamic threshold because of this topple: `<= 1` before and `> 1` after;
+- that exact grain is not already mobilized.
+
+This is a test-only A/B mechanism, not production semantics. The ignored H6 bench compares H4 and the candidate at 40x20 and 80x30 using the existing real-cadence harness. It records structural episode count, distinct topple columns per episode, multi-column episodes, slip-front mobilizations, move and lineage percentiles, quiet spacing, surface roughness, height variance, maximum adjacent height delta, plateau-edge ratio/runs, occupied width, height, pending mass, conservation, and bounded drain to rest. A deterministic fixture proves the intended broad-face case (`3/4/3/1`) and rejects both no-crossing and already-dynamic cases.
+
+H6 has no acceptance threshold before data. The candidate is eligible for production design only if it materially increases perceptible multi-column propagation while preserving H4's broad/one-sided hill character and avoiding runaway, flattening, or materially higher ordinary instability. SandState v5, persistence, resize H5, rain/focus, and static contact authority are non-goals.
 
 ### RHYTHM-001 — Focus/Pomodoro experiment (optional)
 
@@ -309,7 +329,7 @@ Preferred progression:
 
 ## Agent locator
 
-Current edge: **PLATEAU-001H / H5 resize boundary release**. Concrete owner resize evidence admitted this unit after H4 real-profile use. The authored candidate changes only the one-shot confinement-release trigger; native certification is required before publication. Slip-front avalanche propagation is the next separate bench only after H5 is certified, and ingress-focus padding remains later so deposition is not mixed with relaxation.
+Current edge: **PLATEAU-001H / H6 causal slip-front propagation bench**. H5 resize boundary release is native-certified at `3920ab3899f3249569f2dfb8c990e6389cb6fc47` and awaits publication. H6 is test-only A/B work: compare unchanged H4 against exact uphill threshold-cross propagation after a real topple, without changing static support, persistence, resize, rain, or focus semantics. Ingress-focus padding remains later so deposition is not mixed with relaxation.
 
 HISTORY-001A/B/C are native-green through `09412b703cf41016f889d725ba235a7a1e63ae6a`. HISTORY-001C established the completed-Idle split transaction, active-preview validation, atomic daily-contribution reconciliation, and Balance historical editor. HISTORY-001D now generalizes that safe primitive into arbitrary From/To activity assignment with explicit collision confirmation and protected live selection.
 
