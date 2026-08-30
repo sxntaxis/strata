@@ -278,6 +278,23 @@ The production boundary now requires SandState v5. Current exact mobilized grain
 
 Native validation is complete at `f00b628bd37c42a9b27b2abb4b73b1068c74f551`: exact v5 snapshot/restart and multi-pass continuation, hidden-mobility resize custody, v4 semantic migration, malformed restore/recovery rejection, recolor, recovery, v1-v3 regressions, and SQLite schema invariance passed. PR #89 published main `67ffd84d3c5c924211ac9a14b52b5749fb07ed8b` with installed binary SHA256 `b6f3af5247ce633b4c01c6232c1f1be057f7f9af562b6a5114f424b5f3559f93`. Real profile `95446134-3681-4390-84d7-8d900ebbb892` completed the first v4→v5 owner smoke and second v5→v5 owner restart; persisted state is v5 and sqlite-doctor passed. The pre-v5 backup and H3 rollback pair remain retained; the pre-v4 rollback pair remains retained. No production source or schema changed during closure.
 
+#### H5 — Resize boundary release
+
+Status: **AUTHORED CANDIDATE / NATIVE CERTIFICATION REQUIRED**.
+
+Admitted from concrete owner screenshots and daily use, not feature-seeking. When the live terminal widens, a side wall that previously confined the visible basin can become an interior column. H4 correctly treats a visible wall as static contact support, but current resize merely exposes empty space and supplies no physical event, leaving the former edge frozen as an artificial vertical cut.
+
+Accepted semantics are deliberately narrow:
+
+- shrinking remains projection-only and never wakes hidden grains;
+- widening detects each lateral visible boundary that actually ceased to be a wall, including re-expansion inside an already larger canonical canvas and first-time canonical growth;
+- resize does not move, repack, globally relax, recolor, add, or remove any grain and consumes no RNG;
+- only the exact bottom-connected surface grain of each released former wall is eligible for one-shot H4 mobility;
+- that grain is marked only when the newly exposed outward diagonal provides the existing dynamic relief `>1` route;
+- all later movement, same-source slip lineage, support-loss propagation, sweep ordering, and persistence remain ordinary H4/SandState v5 behavior.
+
+The candidate adds focused regressions for both canonical growth and hidden-canvas re-expansion. Native certification must run formatting, strict Clippy, full tests, help smoke, and focused resize/H4 regressions. No slip-front propagation or ingress-focus padding belongs to H5. Those remain separate follow-ups so relaxation and deposition cannot be conflated with boundary correctness.
+
 ### RHYTHM-001 — Focus/Pomodoro experiment (optional)
 
 Not a plateau blocker.
@@ -292,7 +309,7 @@ Preferred progression:
 
 ## Agent locator
 
-Current edge: **PLATEAU-001H evidence-driven daily use**. H4R2C behavior is native-green at `579f3e1b652a2d90efcfcef65e1910d199e464ba`, v5 validation is native-green at `f00b628bd37c42a9b27b2abb4b73b1068c74f551`, and real-profile cutover is green through published main `67ffd84d3c5c924211ac9a14b52b5749fb07ed8b`. Do not invent H5; admit another hardening unit only from concrete daily-use friction.
+Current edge: **PLATEAU-001H / H5 resize boundary release**. Concrete owner resize evidence admitted this unit after H4 real-profile use. The authored candidate changes only the one-shot confinement-release trigger; native certification is required before publication. Slip-front avalanche propagation is the next separate bench only after H5 is certified, and ingress-focus padding remains later so deposition is not mixed with relaxation.
 
 HISTORY-001A/B/C are native-green through `09412b703cf41016f889d725ba235a7a1e63ae6a`. HISTORY-001C established the completed-Idle split transaction, active-preview validation, atomic daily-contribution reconciliation, and Balance historical editor. HISTORY-001D now generalizes that safe primitive into arbitrary From/To activity assignment with explicit collision confirmation and protected live selection.
 
