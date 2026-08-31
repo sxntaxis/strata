@@ -2721,7 +2721,9 @@ mod organic_formation_tests {
             }
         }
 
-        fn summarize_surface(engine: &mut SandEngine) -> (f64, f64, usize, f64, usize, usize, usize) {
+        fn summarize_surface(
+            engine: &mut SandEngine,
+        ) -> (f64, f64, usize, f64, usize, usize, usize) {
             let bounds = engine.viewport_bounds().unwrap();
             engine.derive_supported_heights(bounds);
             let heights = &engine.supported_heights[bounds.x_start..bounds.x_end];
@@ -2858,8 +2860,15 @@ mod organic_formation_tests {
                 .windows(2)
                 .map(|pair| pair[1].saturating_sub(pair[0]))
                 .collect::<Vec<_>>();
-            let (roughness_mean, height_variance, max_adjacent_delta, plateau_edge_ratio,
-                plateau_runs_ge3, occupied_columns, max_height) = summarize_surface(&mut engine);
+            let (
+                roughness_mean,
+                height_variance,
+                max_adjacent_delta,
+                plateau_edge_ratio,
+                plateau_runs_ge3,
+                occupied_columns,
+                max_height,
+            ) = summarize_surface(&mut engine);
             let mass = engine.physical_grain_count() + engine.pending_grain_count();
             assert_eq!(mass, ingress_count);
 
