@@ -2260,7 +2260,7 @@ mod tests {
 mod organic_formation_tests {
     use std::collections::HashSet;
 
-    use super::SlipFrontOpportunity;
+    use super::{RuptureToken, SlipFrontOpportunity};
     use crate::{
         domain::CategoryId,
         sand::{SandEngine, SandState, SandStateCoordinate},
