@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-08-30
 authority: working
-summary: H5 resize boundary release is native-certified; PLATEAU-001H H6 now benches one exact causal slip-front extension against unchanged H4 before any production avalanche retuning.
-next: Execute the H6 test-only A/B bench at real cadence, compare multi-column avalanche growth against topology guardrails, and decide whether slip-front propagation deserves a production candidate. Keep ingress-focus padding later.
+summary: H5 resize boundary release is native-certified; H6 slip-front threshold-cross propagation was natively benched and rejected; PLATEAU-001H H7 now diagnoses where H4 rupture continuity actually disappears before another avalanche design.
+next: Execute the H7 passive rupture-opportunity census on unchanged H4 at real cadence, quantify support-loss, threshold-cross, and already-dynamic uphill opportunities, then choose whether a narrower rupture-transfer experiment is justified. Keep ingress-focus padding later.
 ---
 
 # NOW — Strata
@@ -95,7 +95,9 @@ PLATEAU-001H / H4 — contact-supported grain-causal avalanches + SandState v5 �
 
 PLATEAU-001H / H5 — resize boundary release — is **NATIVE-CERTIFIED / PUBLICATION PENDING** at `3920ab3899f3249569f2dfb8c990e6389cb6fc47` / tree `8f3f69f7baeb15cd60423e5663b36647efd4a68b`, based on current main `b5afc619bace6d9d98ec14ccd065add3689e2e38`. Focused H5 tests, 22 focused H4/organic tests plus one ignored behavior bench, 272 full library tests plus one ignored bench, 23 integration tests, formatting, strict Clippy, help smoke, and diff hygiene all passed; the only fallout was rustfmt-only. No merge to main has occurred.
 
-PLATEAU-001H / H6 — causal slip-front propagation — is **AUTHORED A/B BENCH / NATIVE EXECUTION REQUIRED** on top of certified H5. H4 already wakes exact grains that lose contact support. H6 tests only the distinct broad-face case where a real downhill topple leaves the immediately uphill surface statically braced on its other side but steepens its relief toward the vacated source from `<=1` to `>1`. The mechanism is `cfg(test)` only and disabled by default; unchanged H4 and H6 share initial seeds/cadence, and the bench compares multi-column episode growth against roughness, variance, slope, plateau, width/height, conservation, rest, and runaway guardrails. No production avalanche semantics have been accepted. Ingress-focus padding remains later.
+PLATEAU-001H / H6 — causal slip-front threshold-cross propagation — is **NATIVE-BENCHED / REJECTED FOR PRODUCTION** at final source `f4f9683586f362342b259f6c83170a6e02ee3bf4` / tree `aebfef878ec28a59a9e182f64e01b412d25fac1f`. The test-only rule did create front activity, but it did not materially widen ordinary avalanches: column p95 remained 3 in every comparable lane; 40x20 / 4,000 multi-column episodes were unchanged `133 -> 133`; and 80x30 / 10,000 fell `407 -> 348`. Topology guardrails also moved the wrong way, including 40x20 / 4,000 roughness `1.0506 -> 1.8861` and 80x30 / 10,000 variance `44.1750 -> 56.3875`. The 40x20 / 10,000 shape endpoint is excluded from topology judgment because the 6,400-dot basin saturated with 3,600 pending grains. H6 stays test-only evidence and no production slip-front behavior is accepted.
+
+PLATEAU-001H / H7 — rupture-opportunity diagnostics — is **AUTHORED PASSIVE BENCH / NATIVE EXECUTION REQUIRED**. Historical H2/H3 evidence shows that real-cadence radius-one activity produced median eight-move avalanches, while H4 deliberately retired regional activation to obtain the preferred contact-supported topology and now has p95 structural size around four to five moves / three distinct topple columns. H7 changes no behavior. After each actual H4 diagonal topple it classifies only the immediately uphill surface on the opposite side of travel: H4-owned complete support loss; H6 threshold crossing; supported but already-dynamic relief 2, 3, or >=4; already mobilized; no dynamic relief; blocked/empty; or out of bounds. The census decides whether a future exact rupture-transfer bench has real geometric opportunity or whether the missing perceptibility should be attacked elsewhere. Ingress-focus padding remains later.
 
 ## Completed post-migration units
 

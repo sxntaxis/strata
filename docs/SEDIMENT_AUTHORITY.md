@@ -4,7 +4,7 @@ Status: implemented and certified
 Program: SEDIMENT-002 + PLATEAU-001H hardening
 Current published unit: PLATEAU-001H H4 grain-causal contact + SandState v5 real-profile green; H5 resize boundary release is native-certified and awaiting publication
 Issues completed: #6, #7, #16, #18, #26
-Last reviewed: 2026-08-28
+Last reviewed: 2026-08-30
 
 ## Purpose
 
@@ -85,6 +85,10 @@ H4 candidate authority replaces static relief/spire exceptions with contact supp
 
 The H4R2C behavior candidate is native-green at `579f3e1b652a2d90efcfcef65e1910d199e464ba`: 40x20 / 10,000 ingress produced 621 slip-lineage cascades including 99 multi-lineage episodes; 80x30 produced 1,070 cascades including 152 multi-lineage episodes. Both conserved 10,000/10,000 mass, completed without runaway or continuous motion, preserved `0/6/5`-like slopes and broad hills, and settled with interior one-column prominence at most one dot. SandState v5 persistence and the one-time pre-v5 semantic migration are now published and real-profile green. The retained pre-v5 backup and H3 rollback binary pair the forward boundary; the pre-v4 rollback pair remains retained.
 
+H6 tested one stricter causal extension without changing production semantics: after a real topple, wake only the immediately uphill surface that retained another static brace but crossed dynamic relief `<=1 -> >1` toward the vacated source. Native A/B execution rejected that rule for production. At 40x20 / 4,000 ingress, multi-column structural episodes stayed `133 -> 133` and column p95 stayed `3 -> 3`, while roughness rose `1.0506 -> 1.8861` and height variance `53.1000 -> 63.1750`. At 80x30 / 10,000 ingress, multi-column episodes fell `407 -> 348`, column p95 again stayed `3 -> 3`, roughness rose `1.1572 -> 1.2579`, variance rose `44.1750 -> 56.3875`, and maximum adjacent delta rose `5 -> 8`. The 40x20 / 10,000 lane filled its 6,400-dot visible capacity and left 3,600 grains pending, so its final topology metrics are saturation artifacts rather than shape evidence. H6 remains test-only historical evidence and must not be promoted.
+
+The next diagnostic question is narrower than another retune. Historical H2/H3 radius-one activity produced median eight-move avalanches at real cadence, whereas H4 preserves the preferred contact-supported topology but most structural episodes remain microscopic. H7 therefore performs a passive, test-only census after real H4 topples: it classifies the exact immediately-uphill surface as H4-owned support loss, H6 threshold crossing, already-dynamic supported relief `2`, `3`, or `>=4`, already mobilized, no dynamic route, blocked/empty, or out of bounds. H7 activates nothing. Its purpose is to establish whether the lost event size is primarily latent metastable-neighbor opportunity before any new rupture-transfer semantics are designed.
+
 ## Organic live formation
 
 Live formation remains an ordinary falling-sand process; SEDIMENT-002 changes local stochastic personality, not sediment meaning or mass authority.
@@ -92,13 +96,13 @@ Live formation remains an ordinary falling-sand process; SEDIMENT-002 changes lo
 For each visible grain during a gravity pass:
 
 1. fall straight down whenever that cell is open;
-2. if down is blocked, evaluate supported local repose and active-avalanche state;
-3. static failure uses relief greater than three and active continuation uses relief greater than one;
+2. once down is blocked, an ordinary arrival settles only with support below plus at least one lower diagonal or visible wall; otherwise that exact grain becomes mobilized;
+3. only exact mobilized surface grains use dynamic relief greater than one for diagonal continuation;
 4. after a deterministic yield, take the preferred reachable diagonal, randomizing only an equal-relief tie;
-5. if neither diagonal is open, remain in place without consuming a friction/lateral choice.
+5. a real vacancy may wake only exact contact dependents, while a diagonal topple may pass mobility to the newly exposed surface in that same source column if it still has a dynamic route;
+6. if no mobilized dynamic route exists, remain in place without creating regional activity.
 
-The former one-quarter slide personality is retired by H2. No per-grain friction age, pressure, or slope field exists. The
-existing alternating horizontal sweep remains an ordering/fairness mechanism.
+The former one-quarter slide personality, H2/H3 static-relief gate, radius-one avalanche activity, and `active_vertical` proximity inheritance are retired by H4. No per-grain friction age, pressure, or slope field exists. The existing alternating horizontal sweep remains an ordering/fairness mechanism.
 
 New physical ingress keeps the rain-like cadence while introducing only a weak long-term spatial preference. One persisted **ingress focus** wanders slowly across the visible top edge, but it must not be visually traceable as a nozzle from a handful of falling grains. For each physical ingress:
 

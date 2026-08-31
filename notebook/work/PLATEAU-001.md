@@ -299,7 +299,7 @@ No slip-front propagation or ingress-focus padding belongs to H5. Those remain s
 
 #### H6 — Causal slip-front propagation bench
 
-Status: **AUTHORED A/B BENCH / NATIVE EXECUTION REQUIRED**.
+Status: **NATIVE-BENCHED / REJECTED FOR PRODUCTION**.
 
 Daily-use evidence says H4 cascades are often too small to read visually as avalanches even though exact-grain causality is healthy. H6 therefore does not lower static stability, change ingress, or broadly wake neighbors. It tests one narrower propagation rule against unchanged H4 with identical initial seeds and live cadence.
 
@@ -313,7 +313,25 @@ A real diagonal topple from source column `x` toward its downhill target may ins
 
 This is a test-only A/B mechanism, not production semantics. The ignored H6 bench compares H4 and the candidate at 40x20 and 80x30 using the existing real-cadence harness. It records structural episode count, distinct topple columns per episode, multi-column episodes, slip-front mobilizations, move and lineage percentiles, quiet spacing, surface roughness, height variance, maximum adjacent height delta, plateau-edge ratio/runs, occupied width, height, pending mass, conservation, and bounded drain to rest. A deterministic fixture proves the intended broad-face case (`3/4/3/1`) and rejects both no-crossing and already-dynamic cases.
 
-H6 has no acceptance threshold before data. The candidate is eligible for production design only if it materially increases perceptible multi-column propagation while preserving H4's broad/one-sided hill character and avoiding runaway, flattening, or materially higher ordinary instability. SandState v5, persistence, resize H5, rain/focus, and static contact authority are non-goals.
+Native execution completed at final source `f4f9683586f362342b259f6c83170a6e02ee3bf4` / tree `aebfef878ec28a59a9e182f64e01b412d25fac1f`. H6 is rejected for production. At 40x20 / 4,000 ingress, multi-column structural episodes were unchanged `133 -> 133`, move p95 rose only `4 -> 5`, column p95 stayed `3 -> 3`, roughness rose `1.0506 -> 1.8861`, variance rose `53.1000 -> 63.1750`, and maximum adjacent delta doubled `4 -> 8`. At 80x30 / 4,000, multi-column episodes fell `130 -> 127` and column p95 stayed 3. At 80x30 / 10,000, multi-column episodes fell `407 -> 348`, move/column p95 stayed `5 / 3`, roughness rose `1.1572 -> 1.2579`, variance rose `44.1750 -> 56.3875`, and maximum adjacent delta rose `5 -> 8`. H6 did generate 95 front episodes / 119 front mobilizations in that long lane, so the negative result is not an extinct trigger; the rule simply failed to translate its extra activity into broader perceptible rupture while preserving shape. The 40x20 / 10,000 endpoint saturated its 6,400-dot physical basin and retained 3,600 pending grains, so its flat final surface is not topology evidence. Full validation passed after rustfmt-only fallout: focused H6 tests, focused H4/H5 regressions, 274 tests plus two ignored benches, 23 integration tests, formatting, strict Clippy, help smoke, and diff hygiene.
+
+#### H7 — Passive rupture-opportunity diagnostics
+
+Status: **AUTHORED PASSIVE BENCH / NATIVE EXECUTION REQUIRED**.
+
+H6 answered the threshold-cross hypothesis but exposed a deeper historical contrast. H2/H3 real-cadence local activity produced median eight-move avalanches (40x20 p95 82; 80x30 p95 20), while H4 deliberately removed radius-one activation and now preserves the owner-preferred contact-supported hills with structural move p95 around four to five and distinct-column p95 three. The next step is therefore diagnosis, not another parameter guess.
+
+H7 leaves H4 and H6 behavior untouched. After each actual H4 diagonal topple, a `cfg(test)` probe examines only the immediately uphill column opposite the topple direction and records exactly one opportunity class:
+
+- no uphill column / empty uphill surface;
+- no dynamic relief toward the source after the topple;
+- direct route blocked;
+- H4-owned complete support loss;
+- already mobilized by existing H4 causality;
+- H6's exact supported threshold crossing (`<=1 -> >1`);
+- supported but already-dynamic relief 2, relief 3, or relief >=4 before the topple.
+
+The ignored real-cadence census reports those classes per actual topple for 40x20 and 80x30. It activates no grain, consumes no extra RNG, changes no topology, and adds no persisted state. If already-dynamic supported opportunities materially dominate H6 crossings, a later bench may test a deliberately bounded rupture-transfer token rather than reviving H2's radius. If they are rare, avalanche perceptibility should be pursued outside neighbor activation rather than by weakening H4.
 
 ### RHYTHM-001 — Focus/Pomodoro experiment (optional)
 
@@ -329,7 +347,7 @@ Preferred progression:
 
 ## Agent locator
 
-Current edge: **PLATEAU-001H / H6 causal slip-front propagation bench**. H5 resize boundary release is native-certified at `3920ab3899f3249569f2dfb8c990e6389cb6fc47` and awaits publication. H6 is test-only A/B work: compare unchanged H4 against exact uphill threshold-cross propagation after a real topple, without changing static support, persistence, resize, rain, or focus semantics. Ingress-focus padding remains later so deposition is not mixed with relaxation.
+Current edge: **PLATEAU-001H / H7 passive rupture-opportunity diagnostics**. H5 resize boundary release is native-certified at `3920ab3899f3249569f2dfb8c990e6389cb6fc47` and awaits publication. H6 threshold-cross slip-front propagation is natively benched and rejected for production. H7 changes no sediment behavior: it measures what kind of immediately-uphill opportunity exists after real H4 topples before any new rupture-transfer rule is designed. Ingress-focus padding remains later so deposition is not mixed with relaxation.
 
 HISTORY-001A/B/C are native-green through `09412b703cf41016f889d725ba235a7a1e63ae6a`. HISTORY-001C established the completed-Idle split transaction, active-preview validation, atomic daily-contribution reconciliation, and Balance historical editor. HISTORY-001D now generalizes that safe primitive into arbitrary From/To activity assignment with explicit collision confirmation and protected live selection.
 
