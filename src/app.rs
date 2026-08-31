@@ -2693,7 +2693,9 @@ mod recovery_statement_tests {
 
         assert!(!should_use_visual_catchup(physics));
         assert!(!should_use_visual_catchup(live_edge));
-        assert!(should_use_visual_catchup(live_edge + Duration::from_millis(1)));
+        assert!(should_use_visual_catchup(
+            live_edge + Duration::from_millis(1)
+        ));
         assert!(!should_use_visual_catchup(Duration::from_secs(9)));
         assert!(render < gravity);
     }
