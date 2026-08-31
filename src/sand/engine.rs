@@ -185,6 +185,13 @@ enum SlipFrontOpportunity {
     PreexistingRelief4Plus,
 }
 
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RuptureToken {
+    source_x: usize,
+    target_x: usize,
+}
+
 pub struct SandEngine {
     pub(crate) grid: Vec<Vec<Option<CategoryId>>>,
     pub cell_width: u16,
@@ -222,6 +229,14 @@ pub struct SandEngine {
     last_slip_front_mobilizations: usize,
     #[cfg(test)]
     last_slip_front_opportunity: Option<SlipFrontOpportunity>,
+    #[cfg(test)]
+    rupture_token_bench_enabled: bool,
+    #[cfg(test)]
+    rupture_token: Option<RuptureToken>,
+    #[cfg(test)]
+    last_rupture_token_transfers: usize,
+    #[cfg(test)]
+    last_rupture_token_moves: usize,
     #[cfg(test)]
     last_diagonal_topple_source_x: Option<usize>,
     pub grain_count: usize,
@@ -269,6 +284,14 @@ impl SandEngine {
             last_slip_front_mobilizations: 0,
             #[cfg(test)]
             last_slip_front_opportunity: None,
+            #[cfg(test)]
+            rupture_token_bench_enabled: false,
+            #[cfg(test)]
+            rupture_token: None,
+            #[cfg(test)]
+            last_rupture_token_transfers: 0,
+            #[cfg(test)]
+            last_rupture_token_moves: 0,
             #[cfg(test)]
             last_diagonal_topple_source_x: None,
             grain_count: 0,
@@ -838,18 +861,82 @@ impl SandEngine {
         let (opportunity, candidate) =
             self.bench_classify_uphill_slip_front(bounds, source_x, target_x, source_height_before);
         self.last_slip_front_opportunity = Some(opportunity);
-        if !self.slip_front_bench_enabled || opportunity != SlipFrontOpportunity::H6ThresholdCross {
-            return;
+        if self.slip_front_bench_enabled && opportunity == SlipFrontOpportunity::H6ThresholdCross {
+            let Some((uphill_x, uphill_y)) = candidate else {
+                return;
+            };
+            // H4 already owns complete support loss. H6 is deliberately narrower:
+            // the uphill surface retained another lower-diagonal brace, but this
+            // exact topple changed its relief toward the source from 1 to 2.
+            self.mobilized[uphill_y][uphill_x] = true;
+            self.last_slip_front_mobilizations += 1;
         }
 
-        let Some((uphill_x, uphill_y)) = candidate else {
+        if !self.rupture_token_bench_enabled
+            || self.rupture_token.is_some()
+            || opportunity != SlipFrontOpportunity::PreexistingRelief2
+        {
+            return;
+        }
+        let Some((uphill_x, _)) = candidate else {
             return;
         };
-        // H4 already owns complete support loss. H6 is deliberately narrower:
-        // the uphill surface retained another lower-diagonal brace, but this
-        // exact topple changed its relief toward the source from 1 to 2.
-        self.mobilized[uphill_y][uphill_x] = true;
-        self.last_slip_front_mobilizations += 1;
+        self.rupture_token = Some(RuptureToken {
+            source_x: uphill_x,
+            target_x: source_x,
+        });
+        self.last_rupture_token_transfers += 1;
+    }
+
+    #[cfg(test)]
+    fn bench_topple_rupture_token(&mut self, bounds: ViewportBounds, x: usize) -> bool {
+        let Some(token) = self.rupture_token else {
+            return false;
+        };
+        if !self.rupture_token_bench_enabled || token.source_x != x {
+            return false;
+        }
+        self.rupture_token = None;
+
+        let source_height = self.supported_heights[x];
+        if source_height == 0 || token.target_x.abs_diff(x) != 1 {
+            return false;
+        }
+        let source_y = bounds.y_end - source_height;
+        if self.grid[source_y][x].is_none()
+            || self.mobilized[source_y][x]
+            || !self.grain_has_static_support(bounds, x, source_y)
+            || source_y + 1 >= bounds.y_end
+            || self.grid[source_y + 1][token.target_x].is_some()
+        {
+            return false;
+        }
+        let target_height_before = self.supported_heights[token.target_x];
+        let relief = source_height.saturating_sub(target_height_before);
+        if relief <= DYNAMIC_REPOSE_RELIEF {
+            return false;
+        }
+
+        let category = self.grid[source_y][x]
+            .take()
+            .expect("rupture-token surface grain exists");
+        self.grid[source_y + 1][token.target_x] = Some(category);
+        // H8 transfers the rupture for one exact diagonal hop, not the grain's
+        // dynamic-mobility bit. Subsequent settling or renewed mobility is H4's
+        // decision through ordinary contact/support semantics.
+        self.mobilized[source_y + 1][token.target_x] = false;
+        self.mobilize_dependents_after_vacancy(bounds, x, source_y);
+        self.supported_heights[x] = source_height - 1;
+        if relief == 2 {
+            self.supported_heights[token.target_x] = target_height_before + 1;
+        }
+        self.bench_mobilize_uphill_slip_front(bounds, x, token.target_x, source_height);
+        self.last_diagonal_topple = true;
+        self.last_avalanche_motion = true;
+        self.last_avalanche_span = x.abs_diff(token.target_x) + 1;
+        self.last_rupture_token_moves += 1;
+        self.last_diagonal_topple_source_x = Some(x);
+        true
     }
 
     fn diagonal_target_for_relief(
@@ -914,12 +1001,20 @@ impl SandEngine {
         let left_to_right = !self.sweep_left_to_right;
         if left_to_right {
             for x in bounds.x_start..bounds.x_end {
+                #[cfg(test)]
+                if self.bench_topple_rupture_token(bounds, x) {
+                    return true;
+                }
                 if self.topple_mobilized_column(bounds, x) {
                     return true;
                 }
             }
         } else {
             for x in (bounds.x_start..bounds.x_end).rev() {
+                #[cfg(test)]
+                if self.bench_topple_rupture_token(bounds, x) {
+                    return true;
+                }
                 if self.topple_mobilized_column(bounds, x) {
                     return true;
                 }
@@ -991,6 +1086,8 @@ impl SandEngine {
             self.last_mobilized_diagonal_moves = 0;
             self.last_slip_front_mobilizations = 0;
             self.last_slip_front_opportunity = None;
+            self.last_rupture_token_transfers = 0;
+            self.last_rupture_token_moves = 0;
             self.last_diagonal_topple_source_x = None;
         }
         let Some(bounds) = self.viewport_bounds() else {
@@ -1166,6 +1263,10 @@ impl SandEngine {
         self.mobilized = vec![vec![false; self.grid_width_dots]; self.grid_height_dots];
         self.pending_runs.clear();
         self.ingress_focus_x = None;
+        #[cfg(test)]
+        {
+            self.rupture_token = None;
+        }
         self.grain_count = 0;
     }
 
@@ -2758,6 +2859,91 @@ mod organic_formation_tests {
     }
 
     #[test]
+    fn h8_rupture_token_chains_across_exact_preexisting_relief_two_face() {
+        let mut engine = SandEngine::new(10, 4);
+        engine.clear();
+        engine.rupture_token_bench_enabled = true;
+        let bounds = engine.viewport_bounds().unwrap();
+        let start = bounds.x_start + 3;
+        seed_supported_columns(&mut engine, start, &[6, 7, 5, 3, 1]);
+        let outer = start;
+        let uphill_two = start + 1;
+        let uphill_one = start + 2;
+        let source = start + 3;
+        let target = start + 4;
+        let source_y = bounds.y_end - 3;
+        engine.mobilized[source_y][source] = true;
+
+        assert!(engine.topple_mobilized_column(bounds, source));
+        assert_eq!(
+            engine.rupture_token,
+            Some(RuptureToken {
+                source_x: uphill_one,
+                target_x: source,
+            })
+        );
+        assert_eq!(engine.last_rupture_token_transfers, 1);
+
+        assert!(engine.bench_topple_rupture_token(bounds, uphill_one));
+        assert!(!engine.mobilized[bounds.y_end - 4][source]);
+        assert_eq!(
+            engine.rupture_token,
+            Some(RuptureToken {
+                source_x: uphill_two,
+                target_x: uphill_one,
+            })
+        );
+        assert_eq!(engine.last_rupture_token_moves, 1);
+        assert_eq!(engine.last_rupture_token_transfers, 2);
+
+        assert!(engine.bench_topple_rupture_token(bounds, uphill_two));
+        assert_eq!(engine.last_rupture_token_moves, 2);
+        assert_eq!(engine.rupture_token, None);
+        assert_eq!(engine.supported_heights[outer], 6);
+    }
+
+    #[test]
+    fn h8_rupture_token_excludes_threshold_cross_and_sharper_preexisting_relief() {
+        for heights in [[3, 4, 3, 1], [5, 6, 3, 1], [6, 7, 3, 1]] {
+            let mut engine = SandEngine::new(8, 4);
+            engine.clear();
+            engine.rupture_token_bench_enabled = true;
+            let bounds = engine.viewport_bounds().unwrap();
+            let outer = bounds.x_start + 3;
+            let uphill = outer + 1;
+            let source = uphill + 1;
+            seed_supported_columns(&mut engine, outer, &heights);
+            let source_y = bounds.y_end - heights[2];
+            engine.mobilized[source_y][source] = true;
+
+            assert!(engine.topple_mobilized_column(bounds, source));
+            assert_eq!(engine.rupture_token, None);
+        }
+    }
+
+    #[test]
+    fn h8_rupture_token_yields_to_existing_h4_mobility_before_execution() {
+        let mut engine = SandEngine::new(8, 4);
+        engine.clear();
+        engine.rupture_token_bench_enabled = true;
+        let bounds = engine.viewport_bounds().unwrap();
+        let outer = bounds.x_start + 3;
+        let uphill = outer + 1;
+        let source = uphill + 1;
+        seed_supported_columns(&mut engine, outer, &[4, 5, 3, 1]);
+        let source_y = bounds.y_end - 3;
+        engine.mobilized[source_y][source] = true;
+        assert!(engine.topple_mobilized_column(bounds, source));
+        assert!(engine.rupture_token.is_some());
+
+        let uphill_y = bounds.y_end - 5;
+        engine.mobilized[uphill_y][uphill] = true;
+        assert!(!engine.bench_topple_rupture_token(bounds, uphill));
+        assert_eq!(engine.rupture_token, None);
+        assert!(engine.mobilized[uphill_y][uphill]);
+    }
+
+    #[test]
     #[ignore = "explicit H7 passive rupture-opportunity census"]
     fn h7_slip_front_opportunity_census_40x20_and_80x30() {
         use std::time::Instant;
@@ -2882,6 +3068,327 @@ mod organic_formation_tests {
             .unwrap_or(4_000);
         run(40, 20, ingress_count);
         run(80, 30, ingress_count);
+    }
+
+    #[test]
+    #[ignore = "explicit H8 exact-path rupture-token A/B behavior bench"]
+    fn h8_exact_path_rupture_token_ab_bench_40x20_and_80x30() {
+        use std::time::Instant;
+
+        #[derive(Default)]
+        struct Episode {
+            diagonal_moves: usize,
+            lineage_mobilizations: usize,
+            support_loss_mobilizations: usize,
+            token_transfers: usize,
+            token_moves: usize,
+            topple_columns: HashSet<usize>,
+        }
+
+        struct Summary {
+            episodes: usize,
+            structural: usize,
+            multi_column: usize,
+            token_episodes: usize,
+            token_chains: usize,
+            token_transfers: usize,
+            token_moves: usize,
+            moves_median: usize,
+            moves_p95: usize,
+            moves_max: usize,
+            columns_median: usize,
+            columns_p95: usize,
+            columns_max: usize,
+            lineage_median: usize,
+            lineage_p95: usize,
+            structural_quiet_median: usize,
+            roughness_mean: f64,
+            height_variance: f64,
+            max_adjacent_delta: usize,
+            plateau_edge_ratio: f64,
+            plateau_runs_ge3: usize,
+            occupied_columns: usize,
+            max_height: usize,
+            pending: usize,
+        }
+
+        fn percentile(values: &mut [usize], numerator: usize, denominator: usize) -> usize {
+            if values.is_empty() {
+                return 0;
+            }
+            values.sort_unstable();
+            values[(values.len() - 1) * numerator / denominator]
+        }
+
+        fn record_pass(
+            engine: &SandEngine,
+            current: &mut Option<Episode>,
+            episodes: &mut Vec<Episode>,
+        ) {
+            if engine.last_avalanche_motion {
+                let episode = current.get_or_insert_with(Episode::default);
+                episode.diagonal_moves +=
+                    engine.last_mobilized_diagonal_moves + engine.last_rupture_token_moves;
+                episode.lineage_mobilizations += engine.last_slip_lineage_mobilizations;
+                episode.support_loss_mobilizations += engine.last_support_loss_mobilizations;
+                episode.token_transfers += engine.last_rupture_token_transfers;
+                episode.token_moves += engine.last_rupture_token_moves;
+                if let Some(x) = engine.last_diagonal_topple_source_x {
+                    episode.topple_columns.insert(x);
+                }
+            } else if let Some(episode) = current.take() {
+                episodes.push(episode);
+            }
+        }
+
+        fn summarize_surface(
+            engine: &mut SandEngine,
+        ) -> (f64, f64, usize, f64, usize, usize, usize) {
+            let bounds = engine.viewport_bounds().unwrap();
+            engine.derive_supported_heights(bounds);
+            let heights = &engine.supported_heights[bounds.x_start..bounds.x_end];
+            let edge_count = heights.len().saturating_sub(1);
+            let roughness = heights
+                .windows(2)
+                .map(|pair| pair[0].abs_diff(pair[1]))
+                .sum::<usize>();
+            let max_adjacent_delta = heights
+                .windows(2)
+                .map(|pair| pair[0].abs_diff(pair[1]))
+                .max()
+                .unwrap_or(0);
+            let plateau_edges = heights.windows(2).filter(|pair| pair[0] == pair[1]).count();
+            let mut plateau_runs_ge3 = 0usize;
+            let mut run = 1usize;
+            for pair in heights.windows(2) {
+                if pair[0] == pair[1] {
+                    run += 1;
+                } else {
+                    if run >= 3 {
+                        plateau_runs_ge3 += 1;
+                    }
+                    run = 1;
+                }
+            }
+            if run >= 3 {
+                plateau_runs_ge3 += 1;
+            }
+            let mean = heights.iter().sum::<usize>() as f64 / heights.len().max(1) as f64;
+            let variance = heights
+                .iter()
+                .map(|height| {
+                    let delta = *height as f64 - mean;
+                    delta * delta
+                })
+                .sum::<f64>()
+                / heights.len().max(1) as f64;
+            let occupied_columns = heights.iter().filter(|height| **height > 0).count();
+            let max_height = heights.iter().copied().max().unwrap_or(0);
+            (
+                roughness as f64 / edge_count.max(1) as f64,
+                variance,
+                max_adjacent_delta,
+                plateau_edges as f64 / edge_count.max(1) as f64,
+                plateau_runs_ge3,
+                occupied_columns,
+                max_height,
+            )
+        }
+
+        fn run(width: u16, height: u16, ingress_count: usize, rupture_token: bool) -> Summary {
+            let started = Instant::now();
+            let mut engine = SandEngine::new(width, height);
+            engine.rng_state = 0xC0FF_EE00_0000_0001 ^ u64::from(width);
+            engine.slip_front_bench_enabled = false;
+            engine.rupture_token_bench_enabled = rupture_token;
+            let mut episodes = Vec::new();
+            let mut current = None;
+            let mut structural_ingresses = Vec::new();
+
+            for ingress in 0..ingress_count {
+                engine.spawn(CategoryId::new(1));
+                let mut structural_this_ingress = false;
+                let gravity_passes = if ingress % 8 < 5 { 15 } else { 16 };
+                for _ in 0..gravity_passes {
+                    engine.apply_gravity();
+                    structural_this_ingress |= engine.last_slip_lineage_mobilizations > 0
+                        || engine.last_support_loss_mobilizations > 0
+                        || engine.last_rupture_token_moves > 0;
+                    record_pass(&engine, &mut current, &mut episodes);
+                }
+                if structural_this_ingress {
+                    structural_ingresses.push(ingress);
+                }
+            }
+
+            let mut settled_streak = 0usize;
+            for _ in 0..50_000 {
+                engine.apply_gravity();
+                record_pass(&engine, &mut current, &mut episodes);
+                let moving = engine.last_ordinary_vertical_moves > 0
+                    || engine.last_avalanche_motion
+                    || engine.mobilized.iter().flatten().any(|mobile| *mobile)
+                    || engine.rupture_token.is_some();
+                if moving {
+                    settled_streak = 0;
+                } else {
+                    settled_streak += 1;
+                    if settled_streak >= 4 {
+                        break;
+                    }
+                }
+            }
+            if let Some(episode) = current.take() {
+                episodes.push(episode);
+            }
+            assert!(
+                !engine.mobilized.iter().flatten().any(|mobile| *mobile),
+                "H8 bench must drain H4 mobility"
+            );
+            assert_eq!(engine.rupture_token, None, "H8 bench must drain rupture token");
+
+            let structural = episodes
+                .iter()
+                .filter(|episode| {
+                    episode.lineage_mobilizations > 0
+                        || episode.support_loss_mobilizations > 0
+                        || episode.token_moves > 0
+                })
+                .collect::<Vec<_>>();
+            let multi_column = structural
+                .iter()
+                .filter(|episode| episode.topple_columns.len() >= 2)
+                .count();
+            let token_episodes = structural
+                .iter()
+                .filter(|episode| episode.token_moves > 0)
+                .count();
+            let token_chains = structural
+                .iter()
+                .filter(|episode| episode.token_moves >= 2)
+                .count();
+            let token_transfers = episodes
+                .iter()
+                .map(|episode| episode.token_transfers)
+                .sum::<usize>();
+            let token_moves = episodes
+                .iter()
+                .map(|episode| episode.token_moves)
+                .sum::<usize>();
+            let mut moves = structural
+                .iter()
+                .map(|episode| episode.diagonal_moves)
+                .collect::<Vec<_>>();
+            let mut columns = structural
+                .iter()
+                .map(|episode| episode.topple_columns.len())
+                .collect::<Vec<_>>();
+            let mut lineage = structural
+                .iter()
+                .map(|episode| episode.lineage_mobilizations)
+                .collect::<Vec<_>>();
+            let mut structural_quiet = structural_ingresses
+                .windows(2)
+                .map(|pair| pair[1].saturating_sub(pair[0]))
+                .collect::<Vec<_>>();
+            let (
+                roughness_mean,
+                height_variance,
+                max_adjacent_delta,
+                plateau_edge_ratio,
+                plateau_runs_ge3,
+                occupied_columns,
+                max_height,
+            ) = summarize_surface(&mut engine);
+            let mass = engine.physical_grain_count() + engine.pending_grain_count();
+            assert_eq!(mass, ingress_count);
+
+            let summary = Summary {
+                episodes: episodes.len(),
+                structural: structural.len(),
+                multi_column,
+                token_episodes,
+                token_chains,
+                token_transfers,
+                token_moves,
+                moves_median: percentile(&mut moves, 1, 2),
+                moves_p95: percentile(&mut moves, 19, 20),
+                moves_max: moves.iter().copied().max().unwrap_or(0),
+                columns_median: percentile(&mut columns, 1, 2),
+                columns_p95: percentile(&mut columns, 19, 20),
+                columns_max: columns.iter().copied().max().unwrap_or(0),
+                lineage_median: percentile(&mut lineage, 1, 2),
+                lineage_p95: percentile(&mut lineage, 19, 20),
+                structural_quiet_median: percentile(&mut structural_quiet, 1, 2),
+                roughness_mean,
+                height_variance,
+                max_adjacent_delta,
+                plateau_edge_ratio,
+                plateau_runs_ge3,
+                occupied_columns,
+                max_height,
+                pending: engine.pending_grain_count(),
+            };
+            println!(
+                "H8 mode={} {width}x{height} ingress={ingress_count} elapsed={:?} episodes={} structural={} multi_column={} token_episodes={} token_chains={} token_transfers={} token_moves={} moves_median={} moves_p95={} moves_max={} columns_median={} columns_p95={} columns_max={} lineage_median={} lineage_p95={} structural_quiet_median={} roughness_mean={:.4} height_variance={:.4} max_adjacent_delta={} plateau_edge_ratio={:.4} plateau_runs_ge3={} occupied_columns={} max_height={} pending={}",
+                if rupture_token { "rupture-token" } else { "h4" },
+                started.elapsed(),
+                summary.episodes,
+                summary.structural,
+                summary.multi_column,
+                summary.token_episodes,
+                summary.token_chains,
+                summary.token_transfers,
+                summary.token_moves,
+                summary.moves_median,
+                summary.moves_p95,
+                summary.moves_max,
+                summary.columns_median,
+                summary.columns_p95,
+                summary.columns_max,
+                summary.lineage_median,
+                summary.lineage_p95,
+                summary.structural_quiet_median,
+                summary.roughness_mean,
+                summary.height_variance,
+                summary.max_adjacent_delta,
+                summary.plateau_edge_ratio,
+                summary.plateau_runs_ge3,
+                summary.occupied_columns,
+                summary.max_height,
+                summary.pending,
+            );
+            summary
+        }
+
+        let ingress_count = std::env::var("H8_INGRESS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(4_000);
+        for (width, height) in [(40, 20), (80, 30)] {
+            let baseline = run(width, height, ingress_count, false);
+            let candidate = run(width, height, ingress_count, true);
+            println!(
+                "H8_COMPARE {width}x{height}: multi_column={}->{} moves_p95={}->{} columns_p95={}->{} token_chains={} roughness={:.4}->{:.4} variance={:.4}->{:.4} max_adjacent_delta={}->{} plateau_edge_ratio={:.4}->{:.4} plateau_runs_ge3={}->{}",
+                baseline.multi_column,
+                candidate.multi_column,
+                baseline.moves_p95,
+                candidate.moves_p95,
+                baseline.columns_p95,
+                candidate.columns_p95,
+                candidate.token_chains,
+                baseline.roughness_mean,
+                candidate.roughness_mean,
+                baseline.height_variance,
+                candidate.height_variance,
+                baseline.max_adjacent_delta,
+                candidate.max_adjacent_delta,
+                baseline.plateau_edge_ratio,
+                candidate.plateau_edge_ratio,
+                baseline.plateau_runs_ge3,
+                candidate.plateau_runs_ge3,
+            );
+        }
     }
 
     #[test]
