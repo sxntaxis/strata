@@ -323,7 +323,9 @@ fn validate_sediment_state(
     }
     for front in &state.boundary_release_fronts {
         if front.wall_x >= state.grid_width || front.front_x >= state.grid_width {
-            return Err("recovery boundary-release front is outside the canonical grid".to_string());
+            return Err(
+                "recovery boundary-release front is outside the canonical grid".to_string(),
+            );
         }
         let direction_shape_valid = match front.direction {
             BoundaryReleaseDirection::Left => front.wall_x <= front.front_x && front.wall_x > 0,
@@ -355,7 +357,9 @@ fn validate_sediment_state(
         }
     }
     if state.version != SandState::VERSION && state.boundary_release_in_flight.is_some() {
-        return Err("pre-v6 recovery state contains a boundary-release in-flight grain".to_string());
+        return Err(
+            "pre-v6 recovery state contains a boundary-release in-flight grain".to_string(),
+        );
     }
     if state.boundary_release_in_flight.is_some() && state.boundary_release_fronts.is_empty() {
         return Err(

@@ -425,11 +425,12 @@ impl SandEngine {
             return;
         }
 
-        self.boundary_release_fronts.push(SandStateBoundaryReleaseFront {
-            direction,
-            wall_x: source_x,
-            front_x: source_x,
-        });
+        self.boundary_release_fronts
+            .push(SandStateBoundaryReleaseFront {
+                direction,
+                wall_x: source_x,
+                front_x: source_x,
+            });
         self.normalize_boundary_release_fronts();
     }
 
@@ -439,10 +440,11 @@ impl SandEngine {
         (low..=high).contains(&x)
     }
 
-    fn boundary_release_front_interval(
-        front: SandStateBoundaryReleaseFront,
-    ) -> (usize, usize) {
-        (front.wall_x.min(front.front_x), front.wall_x.max(front.front_x))
+    fn boundary_release_front_interval(front: SandStateBoundaryReleaseFront) -> (usize, usize) {
+        (
+            front.wall_x.min(front.front_x),
+            front.wall_x.max(front.front_x),
+        )
     }
 
     fn normalize_boundary_release_fronts(&mut self) {
@@ -995,9 +997,15 @@ impl SandEngine {
         }
 
         let directions = if self.sweep_left_to_right {
-            [BoundaryReleaseDirection::Left, BoundaryReleaseDirection::Right]
+            [
+                BoundaryReleaseDirection::Left,
+                BoundaryReleaseDirection::Right,
+            ]
         } else {
-            [BoundaryReleaseDirection::Right, BoundaryReleaseDirection::Left]
+            [
+                BoundaryReleaseDirection::Right,
+                BoundaryReleaseDirection::Left,
+            ]
         };
 
         for direction in directions {
@@ -1019,11 +1027,7 @@ impl SandEngine {
         false
     }
 
-    fn process_boundary_release_front(
-        &mut self,
-        bounds: ViewportBounds,
-        index: usize,
-    ) -> bool {
+    fn process_boundary_release_front(&mut self, bounds: ViewportBounds, index: usize) -> bool {
         let front = self.boundary_release_fronts[index];
 
         match front.direction {
@@ -1693,7 +1697,9 @@ impl SandEngine {
             }
         }
         if state.version != SandState::VERSION && state.boundary_release_in_flight.is_some() {
-            return Err("pre-v6 sand state contains a boundary-release in-flight grain".to_string());
+            return Err(
+                "pre-v6 sand state contains a boundary-release in-flight grain".to_string(),
+            );
         }
         if state.boundary_release_in_flight.is_some() && state.boundary_release_fronts.is_empty() {
             return Err(
@@ -1905,11 +1911,13 @@ impl SandEngine {
 mod tests {
     use std::collections::HashSet;
 
+    use super::DYNAMIC_REPOSE_RELIEF;
     use crate::{
         domain::CategoryId,
         sand::{
             BoundaryReleaseDirection, PendingGrainRun, SandEngine, SandState,
-            SandStateBoundaryReleaseFront, SandStateGrain, recolor_state_category_mass,
+            SandStateBoundaryReleaseFront, SandStateCoordinate, SandStateGrain,
+            recolor_state_category_mass,
         },
     };
 
@@ -2209,9 +2217,15 @@ mod tests {
             BoundaryReleaseDirection::Left => previous_bounds.x_start,
             BoundaryReleaseDirection::Right => previous_bounds.x_end - 1,
         };
-        let outward_x = direction.outward_target(wall_x).expect("canonical outward column");
-        let inward_1 = direction.inward_source(wall_x).expect("first inward column");
-        let inward_2 = direction.inward_source(inward_1).expect("second inward column");
+        let outward_x = direction
+            .outward_target(wall_x)
+            .expect("canonical outward column");
+        let inward_1 = direction
+            .inward_source(wall_x)
+            .expect("first inward column");
+        let inward_2 = direction
+            .inward_source(inward_1)
+            .expect("second inward column");
 
         fill_supported_column(&mut engine, wall_x, 2, CategoryId::new(1));
         fill_supported_column(&mut engine, inward_1, 4, CategoryId::new(1));
@@ -2295,7 +2309,10 @@ mod tests {
             engine.apply_gravity();
             passes += 1;
         }
-        assert!(passes < 128, "boundary release must converge in bounded gravity passes");
+        assert!(
+            passes < 128,
+            "boundary release must converge in bounded gravity passes"
+        );
         assert!(engine.boundary_release_fronts.is_empty());
         assert!(engine.boundary_release_in_flight.is_none());
         assert_eq!(engine.grain_count, 20);
@@ -2453,8 +2470,7 @@ mod tests {
         engine.apply_gravity();
 
         assert_eq!(
-            engine.grid[second_surface_y][second_wall],
-            None,
+            engine.grid[second_surface_y][second_wall], None,
             "a hidden older release must not block the newly visible former wall"
         );
         assert_eq!(
@@ -2494,7 +2510,11 @@ mod tests {
             .filter(|front| front.direction == BoundaryReleaseDirection::Left)
             .copied()
             .collect::<Vec<_>>();
-        assert_eq!(left_fronts.len(), 1, "overlapping incremental releases must normalize");
+        assert_eq!(
+            left_fronts.len(),
+            1,
+            "overlapping incremental releases must normalize"
+        );
         assert!(left_fronts[0].wall_x <= left_fronts[0].front_x);
         assert_eq!(engine.grain_count, engine.physical_grain_count());
     }
@@ -2828,7 +2848,10 @@ mod organic_formation_tests {
 
     use crate::{
         domain::CategoryId,
-        sand::{SandEngine, SandState, SandStateCoordinate},
+        sand::{
+            BoundaryReleaseDirection, SandEngine, SandState, SandStateBoundaryReleaseFront,
+            SandStateCoordinate,
+        },
     };
 
     fn set_supported_profile(engine: &mut SandEngine, x_start: usize, heights: &[usize]) {
@@ -3348,7 +3371,8 @@ mod organic_formation_tests {
         malformed_states.push(pre_v6_release);
 
         let mut in_flight_without_front = base.clone();
-        in_flight_without_front.boundary_release_in_flight = Some(SandStateCoordinate { x: 1, y: 1 });
+        in_flight_without_front.boundary_release_in_flight =
+            Some(SandStateCoordinate { x: 1, y: 1 });
         malformed_states.push(in_flight_without_front);
 
         let mut in_flight_empty_coordinate = base.clone();
@@ -3364,8 +3388,7 @@ mod organic_formation_tests {
         let mut pre_v6_in_flight = base.clone();
         pre_v6_in_flight.version = SandState::GRAIN_CAUSAL_VERSION;
         pre_v6_in_flight.boundary_release_fronts.clear();
-        pre_v6_in_flight.boundary_release_in_flight =
-            Some(SandStateCoordinate { x: 1, y: 1 });
+        pre_v6_in_flight.boundary_release_in_flight = Some(SandStateCoordinate { x: 1, y: 1 });
         malformed_states.push(pre_v6_in_flight);
 
         let mut mobile_in_flight = base.clone();
