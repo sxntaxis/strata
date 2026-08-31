@@ -3,7 +3,7 @@ id: PLATEAU-001
 kind: work
 state: active
 created: 2026-08-27
-updated: 2026-08-28
+updated: 2026-08-30
 authority: working
 summary: Final core-development roadmap: historical time editing, more organic sediment formation, interaction/menu convergence, then sustained product hardening; Pomodoro remains an optional post-plateau experiment.
 ---
@@ -280,7 +280,7 @@ Native validation is complete at `f00b628bd37c42a9b27b2abb4b73b1068c74f551`: exa
 
 #### H5 — Resize boundary release
 
-Status: **AUTHORED CANDIDATE / NATIVE CERTIFICATION REQUIRED**.
+Status: **NATIVE-CERTIFIED / PUBLICATION PENDING**.
 
 Admitted from concrete owner screenshots and daily use, not feature-seeking. When the live terminal widens, a side wall that previously confined the visible basin can become an interior column. H4 correctly treats a visible wall as static contact support, but current resize merely exposes empty space and supplies no physical event, leaving the former edge frozen as an artificial vertical cut.
 
@@ -293,7 +293,74 @@ Accepted semantics are deliberately narrow:
 - that grain is marked only when the newly exposed outward diagonal provides the existing dynamic relief `>1` route;
 - all later movement, same-source slip lineage, support-loss propagation, sweep ordering, and persistence remain ordinary H4/SandState v5 behavior.
 
-The candidate adds focused regressions for both canonical growth and hidden-canvas re-expansion. Native certification must run formatting, strict Clippy, full tests, help smoke, and focused resize/H4 regressions. No slip-front propagation or ingress-focus padding belongs to H5. Those remain separate follow-ups so relaxation and deposition cannot be conflated with boundary correctness.
+The candidate adds focused regressions for both canonical growth and hidden-canvas re-expansion. Native certification passed at `3920ab3899f3249569f2dfb8c990e6389cb6fc47` / tree `8f3f69f7baeb15cd60423e5663b36647efd4a68b`: focused H5 tests passed; focused H4/organic tests passed 22 with the explicit behavior bench ignored; the full library passed 272 with one ignored benchmark; 23 integration tests, formatting, strict Clippy, help smoke, and diff hygiene all passed. The only fallout commit was rustfmt-only. H5 is certified but not yet merged to main.
+
+No slip-front propagation or ingress-focus padding belongs to H5. Those remain separate follow-ups so relaxation and deposition cannot be conflated with boundary correctness.
+
+#### H6 — Causal slip-front propagation bench
+
+Status: **NATIVE-BENCHED / REJECTED FOR PRODUCTION**.
+
+Daily-use evidence says H4 cascades are often too small to read visually as avalanches even though exact-grain causality is healthy. H6 therefore does not lower static stability, change ingress, or broadly wake neighbors. It tests one narrower propagation rule against unchanged H4 with identical initial seeds and live cadence.
+
+A real diagonal topple from source column `x` toward its downhill target may inspect only the immediately uphill column on the opposite side of `x`. H4 already owns the case where that uphill surface actually loses static contact support, so H6 explicitly excludes it. The candidate bench wakes the exact uphill bottom-connected surface grain only when all of the following are true:
+
+- the source topple actually occurred;
+- the uphill surface remains statically supported by another lower diagonal after the vacancy;
+- the source vacancy is the newly open downhill route for that surface;
+- relief from uphill toward the source crossed the existing dynamic threshold because of this topple: `<= 1` before and `> 1` after;
+- that exact grain is not already mobilized.
+
+This is a test-only A/B mechanism, not production semantics. The ignored H6 bench compares H4 and the candidate at 40x20 and 80x30 using the existing real-cadence harness. It records structural episode count, distinct topple columns per episode, multi-column episodes, slip-front mobilizations, move and lineage percentiles, quiet spacing, surface roughness, height variance, maximum adjacent height delta, plateau-edge ratio/runs, occupied width, height, pending mass, conservation, and bounded drain to rest. A deterministic fixture proves the intended broad-face case (`3/4/3/1`) and rejects both no-crossing and already-dynamic cases.
+
+Native execution completed at final source `f4f9683586f362342b259f6c83170a6e02ee3bf4` / tree `aebfef878ec28a59a9e182f64e01b412d25fac1f`. H6 is rejected for production. At 40x20 / 4,000 ingress, multi-column structural episodes were unchanged `133 -> 133`, move p95 rose only `4 -> 5`, column p95 stayed `3 -> 3`, roughness rose `1.0506 -> 1.8861`, variance rose `53.1000 -> 63.1750`, and maximum adjacent delta doubled `4 -> 8`. At 80x30 / 4,000, multi-column episodes fell `130 -> 127` and column p95 stayed 3. At 80x30 / 10,000, multi-column episodes fell `407 -> 348`, move/column p95 stayed `5 / 3`, roughness rose `1.1572 -> 1.2579`, variance rose `44.1750 -> 56.3875`, and maximum adjacent delta rose `5 -> 8`. H6 did generate 95 front episodes / 119 front mobilizations in that long lane, so the negative result is not an extinct trigger; the rule simply failed to translate its extra activity into broader perceptible rupture while preserving shape. The 40x20 / 10,000 endpoint saturated its 6,400-dot physical basin and retained 3,600 pending grains, so its flat final surface is not topology evidence. Full validation passed after rustfmt-only fallout: focused H6 tests, focused H4/H5 regressions, 274 tests plus two ignored benches, 23 integration tests, formatting, strict Clippy, help smoke, and diff hygiene.
+
+#### H7 — Passive rupture-opportunity diagnostics
+
+Status: **NATIVE-CERTIFIED PASSIVE EVIDENCE**.
+
+H6 answered the threshold-cross hypothesis but exposed a deeper historical contrast. H2/H3 real-cadence local activity produced median eight-move avalanches (40x20 p95 82; 80x30 p95 20), while H4 deliberately removed radius-one activation and now preserves the owner-preferred contact-supported hills with structural move p95 around four to five and distinct-column p95 three. The next step is therefore diagnosis, not another parameter guess.
+
+H7 leaves H4 and H6 behavior untouched. After each actual H4 diagonal topple, a `cfg(test)` probe examines only the immediately uphill column opposite the topple direction and records exactly one opportunity class:
+
+- no uphill column / empty uphill surface;
+- no dynamic relief toward the source after the topple;
+- direct route blocked;
+- H4-owned complete support loss;
+- already mobilized by existing H4 causality;
+- H6's exact supported threshold crossing (`<=1 -> >1`);
+- supported but already-dynamic relief 2, relief 3, or relief >=4 before the topple.
+
+The ignored real-cadence census reports those classes per actual topple for 40x20 and 80x30. It activates no grain, consumes no extra RNG, changes no topology, and adds no persisted state.
+
+Native execution completed at final source `46a3621ccbcb174921d8f015c834838fa31c6f9b` / tree `e132f614485013a2fd12eb028af84896b0e5a10e`. H6 4,000-ingress replay was exactly identical apart from elapsed time, proving the H7 refactor did not perturb the prior experiment. The immediately-uphill H4 support-loss class was zero in every H7 lane; this is a statement about that exact census position, not about H4 support-loss globally. No-dynamic-relief dominated roughly 82-85% of actual topples. H6 threshold crossings occurred about 43-57 per 1,000 topples, while preexisting already-dynamic supported opportunities occurred about 43-60 per 1,000. The strongest unsaturated lane, 80x30 / 10,000, observed 2,561 topples: 2,099 no-dynamic-relief, 164 already mobilized, 125 H6 threshold crossings, and 154 latent preexisting opportunities split as relief 2 = 100, relief 3 = 32, relief >=4 = 22. H7 therefore establishes enough real face geometry for one narrower transfer experiment, but does not support restoring H2's radius.
+
+#### H8 — Exact-path relief-2 rupture-token bench
+
+Status: **NATIVE-BENCHED / REJECTED FOR PRODUCTION**.
+
+H8 targeted avalanche width rather than general instability. It did not wake the H6 threshold-cross grain and deliberately protected sharper relief-3+ contact-supported shapes. After an actual H4 diagonal topple, only an immediately-uphill supported surface already at relief exactly `2` could receive a transient exact-path token. One token authorized one diagonal move toward the causal vacancy without copying mobility or invoking same-column slip-lineage; another relief-2 stair could then inherit the token.
+
+Native A/B completed at final source `8dc98d4d93c4742db322fb34b07c3749af0bc795` / tree `f3cebc0c64f3a46c7d1baec243c26af0d0849997`. Baseline parity was exact. The token was not extinct, but it failed the widening gate: column p95 remained `3` in every lane; multi-column episodes changed `133 -> 140` at 40x20 / 4,000, `130 -> 117` at 80x30 / 4,000, `223 -> 212` in the saturated 40x20 / 10,000 lane, and `407 -> 322` at unsaturated 80x30 / 10,000. Token chains were only 3, 1, 3, and 4 respectively. The long 80x30 lane reduced move p95 `5 -> 4`. Shape movement was inconsistent: 40x20 / 4,000 roughness and variance rose, while 80x30 became somewhat smoother but more plateau-heavy. H8 therefore remains test-only evidence; no rupture token is accepted for production.
+
+#### H9 — Live sediment presentation cadence separation
+
+Status: **NATIVE-CERTIFIED / CLEAN PUBLICATION COMPOSITION PENDING**.
+
+H6 and H8 both show a similar failure mode: extra causal activity can perturb equilibrium while ordinary distinct-column p95 stays at three. Before inventing another propagation rule, H9 audits whether H4 motion is actually being presented at the cadence its physics was designed around.
+
+The code-history finding is concrete. Before detached catch-up in v0.7.5, the runtime called `SandEngine::update()` whenever the 32 ms physics timer elapsed and marked a redraw. The detached catch-up scheduler later made every positive live backlog wait behind `CATCHUP_SETTINGS.cadence_ms = 120`. H4 gravity executes every second engine update, so normal physical motion is spaced at 64 ms; the TUI render cap is 24 fps, about 41 ms per frame. A 120 ms live batch can therefore collapse one or two gravity states into a single visible frame. That batching mattered less when H2/H3 avalanches had median eight moves, but it can hide most of an H4 episode whose move p95 is only four or five.
+
+H9 changes runtime scheduling, not sediment physics:
+
+- backlog `<= 120 ms` is ordinary live time and advances immediately to the current UTC target;
+- spawn and physics due-event ordering remains owned by the existing accumulators, so splitting the same simulated interval more finely does not change the resulting event sequence;
+- only backlog `> 120 ms` enters accelerated visual catch-up;
+- backlog `> 8 s` retains the certified bounded settlement path;
+- `advance_simulation_by` reports whether a spawn or physics event occurred, and live runtime requests redraw on those simulation events;
+- H4/H5 contact, mobility, resize release, RNG, ingress, persistence, snapshots, recovery arithmetic, and catch-up semantics remain otherwise unchanged.
+
+The focused scheduler regression pins the intended boundary: 32 ms physics and exactly 120 ms remain live, 121 ms selects visual catch-up, nine seconds selects bounded settlement, and the render interval remains shorter than the 64 ms H4 gravity interval. Native certification completed at final source `17fa94a3655de846641393afb8a23c04c63e80d4` / tree `b6d69e520a02be77182aed70c72b901ff322f16c`: focused thresholds, H4/H5 regressions, recovery/transition regressions, 302 full tests plus 23 integration/process tests, strict formatter/check/Clippy/help smoke, and an isolated PTY runtime/restart proof all passed. H9 should still receive one short owner visual judgment before publication because its intended benefit is perceptual.
 
 ### RHYTHM-001 — Focus/Pomodoro experiment (optional)
 
@@ -309,7 +376,7 @@ Preferred progression:
 
 ## Agent locator
 
-Current edge: **PLATEAU-001H / H5 resize boundary release**. Concrete owner resize evidence admitted this unit after H4 real-profile use. The authored candidate changes only the one-shot confinement-release trigger; native certification is required before publication. Slip-front avalanche propagation is the next separate bench only after H5 is certified, and ingress-focus padding remains later so deposition is not mixed with relaxation.
+Current edge: **PLATEAU-001H / clean H5+H9 publication composition**. H5 resize boundary release is native-certified at `3920ab3899f3249569f2dfb8c990e6389cb6fc47`; H9 live cadence is native-certified at `17fa94a3655de846641393afb8a23c04c63e80d4`. H6 threshold-cross propagation and H8 exact-path rupture tokens are native-benched and rejected for production; H7 remains passive evidence. The publication branch must contain only H5 + H9 production changes, with rejected experiment code excluded. After composition certification, one short owner visual pass decides whether H9 sufficiently restores avalanche perceptibility. Ingress-focus padding remains the next separate deposition unit.
 
 HISTORY-001A/B/C are native-green through `09412b703cf41016f889d725ba235a7a1e63ae6a`. HISTORY-001C established the completed-Idle split transaction, active-preview validation, atomic daily-contribution reconciliation, and Balance historical editor. HISTORY-001D now generalizes that safe primitive into arbitrary From/To activity assignment with explicit collision confirmation and protected live selection.
 

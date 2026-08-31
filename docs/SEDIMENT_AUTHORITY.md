@@ -2,9 +2,9 @@
 
 Status: implemented and certified
 Program: SEDIMENT-002 + PLATEAU-001H hardening
-Current completed unit: PLATEAU-001H H4 grain-causal contact + SandState v5 published and real-profile green
+Current published unit: PLATEAU-001H H4 grain-causal contact + SandState v5 real-profile green; H5 resize boundary release is native-certified and awaiting publication
 Issues completed: #6, #7, #16, #18, #26
-Last reviewed: 2026-08-28
+Last reviewed: 2026-08-30
 
 ## Purpose
 
@@ -34,6 +34,8 @@ Terminal-cell dimensions and Braille-dot dimensions are distinct units:
 The persisted logical grid owns coordinates, neighborhoods, category composition, and topology. Shrinking the terminal changes viewport state only and crops presentation without deleting hidden grains. Growing beyond the logical canvas expands it monotonically: old cells are copied around the horizontal center and bottom baseline, new cells begin empty, and the canvas is never shrunk again merely because the viewport shrinks.
 
 Canvas growth never runs gravity or repacks existing grains. Pending logical mass may occupy newly available capacity through the normal pending-grain placement path. Live viewport widening is also a boundary event: when a visible left or right wall ceases to be a wall, resize may one-shot mark only the exact bottom-connected surface grain on that former wall as H4-mobilized, and only when the newly revealed outward diagonal creates dynamic relief `>1`. Resize itself still moves no grain, consumes no random choice, and changes no mass; any later spill is ordinary H4 gravity and slip-lineage behavior.
+
+H5 resize-boundary release is native-certified at `3920ab3899f3249569f2dfb8c990e6389cb6fc47` (tree `8f3f69f7baeb15cd60423e5663b36647efd4a68b`). Focused H5 and H4/organic regressions, 272 library tests plus 23 integration tests, formatting, strict Clippy, help smoke, and diff hygiene passed. The only certification fallout was rustfmt-only in `src/sand/engine.rs`; H5 remains unmerged to main pending publication.
 
 The current viewport is the active live-physics basin. New live grains enter at the visible top edge, gravity and diagonal movement remain within the visible rectangle, and the visible left and right edges act as temporary walls. Grains hidden by shrink remain frozen at their canonical coordinates. When re-expansion makes them visible, ordinary hidden grains reactivate normally and a former lateral wall may receive the one-shot boundary-release trigger above; narrowing never triggers it. Full clear is the one exception to monotonic canvas retention: it removes all placed and pending mass and resets the empty canonical canvas to the current viewport dimensions. Category-specific clearing, including Idle clear, preserves canonical extent.
 
@@ -83,6 +85,14 @@ H4 candidate authority replaces static relief/spire exceptions with contact supp
 
 The H4R2C behavior candidate is native-green at `579f3e1b652a2d90efcfcef65e1910d199e464ba`: 40x20 / 10,000 ingress produced 621 slip-lineage cascades including 99 multi-lineage episodes; 80x30 produced 1,070 cascades including 152 multi-lineage episodes. Both conserved 10,000/10,000 mass, completed without runaway or continuous motion, preserved `0/6/5`-like slopes and broad hills, and settled with interior one-column prominence at most one dot. SandState v5 persistence and the one-time pre-v5 semantic migration are now published and real-profile green. The retained pre-v5 backup and H3 rollback binary pair the forward boundary; the pre-v4 rollback pair remains retained.
 
+H6 tested one stricter causal extension without changing production semantics: after a real topple, wake only the immediately uphill surface that retained another static brace but crossed dynamic relief `<=1 -> >1` toward the vacated source. Native A/B execution rejected that rule for production. At 40x20 / 4,000 ingress, multi-column structural episodes stayed `133 -> 133` and column p95 stayed `3 -> 3`, while roughness rose `1.0506 -> 1.8861` and height variance `53.1000 -> 63.1750`. At 80x30 / 10,000 ingress, multi-column episodes fell `407 -> 348`, column p95 again stayed `3 -> 3`, roughness rose `1.1572 -> 1.2579`, variance rose `44.1750 -> 56.3875`, and maximum adjacent delta rose `5 -> 8`. The 40x20 / 10,000 lane filled its 6,400-dot visible capacity and left 3,600 grains pending, so its final topology metrics are saturation artifacts rather than shape evidence. H6 remains test-only historical evidence and must not be promoted.
+
+H7 passively measured that frontier without changing H4. Native execution completed at `46a3621ccbcb174921d8f015c834838fa31c6f9b` / tree `e132f614485013a2fd12eb028af84896b0e5a10e`, with H6 4,000-ingress parity exact apart from timing and the full validation green. Across the four H7 lanes, roughly 82-85% of actual diagonal topples had no immediately-uphill dynamic route. The exact immediately-uphill H4-support-loss class was zero in every lane, while H6 threshold crossings remained about 43-57 per 1,000 topples and already-dynamic supported opportunities remained about 43-60 per 1,000. In the unsaturated 80x30 / 10,000 lane, H7 observed 125 threshold crossings and 154 already-dynamic opportunities, including 100 at preexisting relief `2`, 32 at relief `3`, and 22 at relief `>=4`. This establishes real metastable face opportunity but does not justify broad neighbor activation.
+
+H8 tested a narrower exact-path rupture token under `cfg(test)` only and is rejected for production. Only an immediately-uphill surface already at supported relief exactly `2` before a real H4 topple could receive one transient token toward the vacated source side; the move copied no mobility bit and invoked no same-column slip-lineage. Native A/B completed at `8dc98d4d93c4742db322fb34b07c3749af0bc795` / tree `f3cebc0c64f3a46c7d1baec243c26af0d0849997`. Column p95 remained `3` in all lanes. Multi-column episodes changed `133 -> 140` at 40x20 / 4,000, `130 -> 117` at 80x30 / 4,000, and `407 -> 322` at unsaturated 80x30 / 10,000; token chains numbered only 3, 1, 3, and 4 across the four lanes. H8 therefore did not create an ordinary broad rupture front and remains historical test-only evidence.
+
+H9 addresses presentation before any further physics experiment. Code history shows that pre-v0.7.5 live runtime advanced the sediment engine on its 32 ms physics timer and requested redraw, while detached catch-up later placed every positive live backlog behind the 120 ms accelerated-catch-up cadence. H4 gravity occurs every second engine update (64 ms), and the 24 fps render interval is about 41 ms; steady live batching at 120 ms can therefore execute one or two H4 gravity moves before another frame is presented. H9 separates ordinary live time from catch-up: backlog at or below 120 ms advances immediately using the unchanged spawn/physics accumulators and requests redraw only when a simulation event occurs; backlog above 120 ms retains accelerated visual catch-up, and backlog above eight seconds retains bounded settlement. Native certification completed at `17fa94a3655de846641393afb8a23c04c63e80d4` / tree `b6d69e520a02be77182aed70c72b901ff322f16c`: focused scheduler thresholds passed, H4/H5 sediment and recovery regressions passed, 302 tests plus 23 integration/process tests passed, strict Clippy/format/check/help smoke passed, and an isolated PTY runtime/restart proof was green. This changes presentation scheduling but no H4/H5 contact, mobility, RNG, ingress, mass, persistence, recovery, or event-order semantics. Publication remains pending a clean H5+H9 composition and short owner visual judgment.
+
 ## Organic live formation
 
 Live formation remains an ordinary falling-sand process; SEDIMENT-002 changes local stochastic personality, not sediment meaning or mass authority.
@@ -90,13 +100,13 @@ Live formation remains an ordinary falling-sand process; SEDIMENT-002 changes lo
 For each visible grain during a gravity pass:
 
 1. fall straight down whenever that cell is open;
-2. if down is blocked, evaluate supported local repose and active-avalanche state;
-3. static failure uses relief greater than three and active continuation uses relief greater than one;
+2. once down is blocked, an ordinary arrival settles only with support below plus at least one lower diagonal or visible wall; otherwise that exact grain becomes mobilized;
+3. only exact mobilized surface grains use dynamic relief greater than one for diagonal continuation;
 4. after a deterministic yield, take the preferred reachable diagonal, randomizing only an equal-relief tie;
-5. if neither diagonal is open, remain in place without consuming a friction/lateral choice.
+5. a real vacancy may wake only exact contact dependents, while a diagonal topple may pass mobility to the newly exposed surface in that same source column if it still has a dynamic route;
+6. if no mobilized dynamic route exists, remain in place without creating regional activity.
 
-The former one-quarter slide personality is retired by H2. No per-grain friction age, pressure, or slope field exists. The
-existing alternating horizontal sweep remains an ordering/fairness mechanism.
+The former one-quarter slide personality, H2/H3 static-relief gate, radius-one avalanche activity, and `active_vertical` proximity inheritance are retired by H4. No per-grain friction age, pressure, or slope field exists. The existing alternating horizontal sweep remains an ordering/fairness mechanism.
 
 New physical ingress keeps the rain-like cadence while introducing only a weak long-term spatial preference. One persisted **ingress focus** wanders slowly across the visible top edge, but it must not be visually traceable as a nozzle from a handful of falling grains. For each physical ingress:
 

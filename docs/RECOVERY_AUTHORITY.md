@@ -72,7 +72,8 @@ Before a switch, finish, reset/clear, detach, or live mutation at a known timest
 - mass due exactly at the boundary belongs to the outgoing interval;
 - later mass belongs to the resulting category;
 - checked arithmetic and compressed pending runs avoid replay proportional to missed seconds;
-- live backlog beyond eight seconds uses this bounded settlement instead of a long accelerated replay;
+- ordinary live backlog at or below the 120 ms catch-up visibility threshold advances directly with the normal spawn/physics accumulators rather than waiting for accelerated catch-up cadence;
+- backlog above 120 ms and through eight seconds may use the short accelerated visual path; backlog beyond eight seconds uses bounded settlement instead of a long accelerated replay;
 - a mutation requested during catch-up settles to its exact UTC boundary and applies immediately rather than entering a live mutation queue;
 - detach settles to its exit boundary before publishing the detached checkpoint;
 - periodic autosave defers while catch-up is active and resumes once the runtime is coherent;
