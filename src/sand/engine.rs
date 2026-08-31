@@ -835,12 +835,8 @@ impl SandEngine {
         if source_height_before == 0 {
             return;
         }
-        let (opportunity, candidate) = self.bench_classify_uphill_slip_front(
-            bounds,
-            source_x,
-            target_x,
-            source_height_before,
-        );
+        let (opportunity, candidate) =
+            self.bench_classify_uphill_slip_front(bounds, source_x, target_x, source_height_before);
         self.last_slip_front_opportunity = Some(opportunity);
         if !self.slip_front_bench_enabled || opportunity != SlipFrontOpportunity::H6ThresholdCross {
             return;
@@ -2821,9 +2817,9 @@ mod organic_formation_tests {
                     engine.apply_gravity();
                     if engine.last_diagonal_topple {
                         counts.record(
-                            engine
-                                .last_slip_front_opportunity
-                                .expect("every diagonal topple must produce one H7 opportunity class"),
+                            engine.last_slip_front_opportunity.expect(
+                                "every diagonal topple must produce one H7 opportunity class",
+                            ),
                         );
                     }
                 }
