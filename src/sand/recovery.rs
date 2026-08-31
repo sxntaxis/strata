@@ -2,7 +2,7 @@ use std::{collections::HashSet, time::Duration};
 
 use crate::domain::CategoryId;
 
-use super::{PendingGrainRun, SandEngine, SandState};
+use super::{BoundaryReleaseDirection, PendingGrainRun, SandEngine, SandState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PeriodicAdvance {
@@ -192,15 +192,21 @@ fn migrate_uninitialized_state(base_state: &SandState) -> Result<SandState, Stri
         || state.version == SandState::COMPRESSED_PENDING_VERSION
         || state.version == SandState::ORGANIC_VERSION
         || state.version == SandState::REGIONAL_AVALANCHE_VERSION
+        || state.version == SandState::GRAIN_CAUSAL_VERSION
     {
         state.version = SandState::VERSION;
         if base_state.version != SandState::ORGANIC_VERSION
             && base_state.version != SandState::REGIONAL_AVALANCHE_VERSION
+            && base_state.version != SandState::GRAIN_CAUSAL_VERSION
         {
             state.ingress_focus_x = None;
         }
         state.active_avalanche_columns.clear();
-        state.mobilized_grains.clear();
+        if base_state.version != SandState::GRAIN_CAUSAL_VERSION {
+            state.mobilized_grains.clear();
+        }
+        state.boundary_release_fronts.clear();
+        state.boundary_release_in_flight = None;
     }
     Ok(state)
 }
@@ -211,6 +217,7 @@ fn validate_sediment_state(
     canvas_policy: CanvasPolicy,
 ) -> Result<(), String> {
     if state.version != SandState::VERSION
+        && state.version != SandState::GRAIN_CAUSAL_VERSION
         && state.version != SandState::REGIONAL_AVALANCHE_VERSION
         && state.version != SandState::COMPRESSED_PENDING_VERSION
         && state.version != SandState::ORGANIC_VERSION
@@ -233,6 +240,7 @@ fn validate_sediment_state(
         }
     }
     if (state.version == SandState::VERSION
+        || state.version == SandState::GRAIN_CAUSAL_VERSION
         || state.version == SandState::REGIONAL_AVALANCHE_VERSION
         || state.version == SandState::COMPRESSED_PENDING_VERSION)
         && !state.pending_grains.is_empty()
@@ -243,6 +251,7 @@ fn validate_sediment_state(
         return Err("version 1 sediment state contains compressed pending runs".to_string());
     }
     if state.version != SandState::VERSION
+        && state.version != SandState::GRAIN_CAUSAL_VERSION
         && state.version != SandState::REGIONAL_AVALANCHE_VERSION
         && state.version != SandState::ORGANIC_VERSION
         && state.ingress_focus_x.is_some()
@@ -262,8 +271,14 @@ fn validate_sediment_state(
     {
         return Err("only v4 recovery state may contain active avalanche columns".to_string());
     }
-    if state.version != SandState::VERSION && !state.mobilized_grains.is_empty() {
+    if state.version != SandState::VERSION
+        && state.version != SandState::GRAIN_CAUSAL_VERSION
+        && !state.mobilized_grains.is_empty()
+    {
         return Err("pre-v5 recovery state contains mobilized grain coordinates".to_string());
+    }
+    if state.version != SandState::VERSION && !state.boundary_release_fronts.is_empty() {
+        return Err("pre-v6 recovery state contains boundary-release fronts".to_string());
     }
     if state
         .active_avalanche_columns
@@ -291,6 +306,60 @@ fn validate_sediment_state(
     {
         return Err(
             "recovery mobilized grain coordinate is outside the canonical grid".to_string(),
+        );
+    }
+
+    let release_sort_key = |front: &super::SandStateBoundaryReleaseFront| {
+        let low = front.wall_x.min(front.front_x);
+        let high = front.wall_x.max(front.front_x);
+        (front.direction, low, high)
+    };
+    if state
+        .boundary_release_fronts
+        .windows(2)
+        .any(|fronts| release_sort_key(&fronts[0]) >= release_sort_key(&fronts[1]))
+    {
+        return Err("recovery boundary-release fronts must be strictly sorted".to_string());
+    }
+    for front in &state.boundary_release_fronts {
+        if front.wall_x >= state.grid_width || front.front_x >= state.grid_width {
+            return Err("recovery boundary-release front is outside the canonical grid".to_string());
+        }
+        let direction_shape_valid = match front.direction {
+            BoundaryReleaseDirection::Left => front.wall_x <= front.front_x && front.wall_x > 0,
+            BoundaryReleaseDirection::Right => {
+                front.front_x <= front.wall_x
+                    && front
+                        .wall_x
+                        .checked_add(1)
+                        .is_some_and(|target_x| target_x < state.grid_width)
+            }
+        };
+        if !direction_shape_valid {
+            return Err(
+                "recovery boundary-release front has invalid direction or outward target"
+                    .to_string(),
+            );
+        }
+    }
+    for fronts in state.boundary_release_fronts.windows(2) {
+        if fronts[0].direction != fronts[1].direction {
+            continue;
+        }
+        let first_high = fronts[0].wall_x.max(fronts[0].front_x);
+        let second_low = fronts[1].wall_x.min(fronts[1].front_x);
+        if second_low <= first_high.saturating_add(1) {
+            return Err(
+                "recovery boundary-release fronts of one direction must be normalized".to_string(),
+            );
+        }
+    }
+    if state.version != SandState::VERSION && state.boundary_release_in_flight.is_some() {
+        return Err("pre-v6 recovery state contains a boundary-release in-flight grain".to_string());
+    }
+    if state.boundary_release_in_flight.is_some() && state.boundary_release_fronts.is_empty() {
+        return Err(
+            "recovery boundary-release in-flight grain requires a release front".to_string(),
         );
     }
 
@@ -327,6 +396,44 @@ fn validate_sediment_state(
         );
     }
 
+    if let Some(coordinate) = state.boundary_release_in_flight {
+        if coordinate.x >= state.grid_width || coordinate.y >= state.grid_height {
+            return Err(
+                "recovery boundary-release in-flight grain is outside the canonical grid"
+                    .to_string(),
+            );
+        }
+        if !occupied.contains(&(coordinate.x, coordinate.y)) {
+            return Err(
+                "recovery boundary-release in-flight coordinate does not reference a placed grain"
+                    .to_string(),
+            );
+        }
+        if state.mobilized_grains.contains(&coordinate) {
+            return Err(
+                "recovery boundary-release in-flight grain cannot simultaneously carry H4 mobility"
+                    .to_string(),
+            );
+        }
+        let belongs_to_release = state.boundary_release_fronts.iter().any(|front| {
+            let source_x = match front.direction {
+                BoundaryReleaseDirection::Left => coordinate.x.checked_add(1),
+                BoundaryReleaseDirection::Right => coordinate.x.checked_sub(1),
+            };
+            source_x.is_some_and(|x| {
+                let low = front.wall_x.min(front.front_x);
+                let high = front.wall_x.max(front.front_x);
+                (low..=high).contains(&x)
+            })
+        });
+        if !belongs_to_release {
+            return Err(
+                "recovery boundary-release in-flight grain is unrelated to every persisted release front"
+                    .to_string(),
+            );
+        }
+    }
+
     for category_id in &state.pending_grains {
         if !valid_category_ids.contains(&CategoryId::new(*category_id)) {
             return Err(format!(
@@ -353,7 +460,10 @@ mod tests {
     };
     use crate::{
         domain::CategoryId,
-        sand::{PendingGrainRun, SandState, SandStateGrain},
+        sand::{
+            BoundaryReleaseDirection, PendingGrainRun, SandState, SandStateBoundaryReleaseFront,
+            SandStateCoordinate, SandStateGrain,
+        },
     };
     use std::{collections::HashSet, time::Duration};
 
@@ -389,6 +499,8 @@ mod tests {
             }],
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            boundary_release_fronts: Vec::new(),
+            boundary_release_in_flight: None,
         }
     }
 
@@ -480,7 +592,7 @@ mod tests {
     }
 
     #[test]
-    fn version_four_checkpoint_recovers_into_v5_without_regional_activity() {
+    fn version_four_checkpoint_recovers_into_v6_without_regional_activity() {
         let mut base = base_state();
         base.version = SandState::REGIONAL_AVALANCHE_VERSION;
         base.active_avalanche_columns = vec![1];
@@ -505,6 +617,32 @@ mod tests {
         let mut expected_grains = base.grains.clone();
         expected_grains.sort_by_key(|grain| (grain.y, grain.x));
         assert_eq!(recovered.state.grains, expected_grains);
+    }
+
+    #[test]
+    fn version_five_checkpoint_recovers_into_v6_with_exact_mobility_and_no_front() {
+        let mut base = base_state();
+        base.version = SandState::GRAIN_CAUSAL_VERSION;
+        base.mobilized_grains = vec![SandStateCoordinate { x: 0, y: 3 }];
+
+        let recovered = recover_detached_sediment(
+            &base,
+            &categories(),
+            CategoryId::new(1),
+            RecoveryTiming {
+                elapsed: Duration::ZERO,
+                spawn_accumulator: Duration::ZERO,
+                physics_accumulator: Duration::ZERO,
+                spawn_period: Duration::from_secs(1),
+                physics_period: Duration::from_millis(50),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(recovered.state.version, SandState::VERSION);
+        assert_eq!(recovered.state.mobilized_grains, base.mobilized_grains);
+        assert!(recovered.state.boundary_release_fronts.is_empty());
+        assert!(recovered.state.boundary_release_in_flight.is_none());
     }
 
     #[test]
@@ -543,6 +681,107 @@ mod tests {
                 validate_sediment_state(&state, &categories(), CanvasPolicy::RequireInitialized)
                     .is_err(),
                 "malformed mobility case {index} was accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_boundary_release_state_is_rejected_before_recovery_installation() {
+        let base = base_state();
+        let cases = [
+            {
+                let mut state = base.clone();
+                state.boundary_release_fronts = vec![SandStateBoundaryReleaseFront {
+                    direction: BoundaryReleaseDirection::Left,
+                    wall_x: 0,
+                    front_x: 0,
+                }];
+                state
+            },
+            {
+                let mut state = base.clone();
+                state.boundary_release_fronts = vec![
+                    SandStateBoundaryReleaseFront {
+                        direction: BoundaryReleaseDirection::Left,
+                        wall_x: 1,
+                        front_x: 2,
+                    },
+                    SandStateBoundaryReleaseFront {
+                        direction: BoundaryReleaseDirection::Left,
+                        wall_x: 3,
+                        front_x: 3,
+                    },
+                ];
+                state
+            },
+            {
+                let mut state = base.clone();
+                state.boundary_release_fronts = vec![
+                    SandStateBoundaryReleaseFront {
+                        direction: BoundaryReleaseDirection::Right,
+                        wall_x: 2,
+                        front_x: 2,
+                    },
+                    SandStateBoundaryReleaseFront {
+                        direction: BoundaryReleaseDirection::Left,
+                        wall_x: 1,
+                        front_x: 1,
+                    },
+                ];
+                state
+            },
+            {
+                let mut state = base.clone();
+                state.version = SandState::GRAIN_CAUSAL_VERSION;
+                state.boundary_release_fronts = vec![SandStateBoundaryReleaseFront {
+                    direction: BoundaryReleaseDirection::Left,
+                    wall_x: 1,
+                    front_x: 1,
+                }];
+                state
+            },
+            {
+                let mut state = base.clone();
+                state.boundary_release_in_flight = Some(SandStateCoordinate { x: 0, y: 3 });
+                state
+            },
+            {
+                let mut state = base.clone();
+                state.boundary_release_fronts = vec![SandStateBoundaryReleaseFront {
+                    direction: BoundaryReleaseDirection::Left,
+                    wall_x: 1,
+                    front_x: 1,
+                }];
+                state.boundary_release_in_flight = Some(SandStateCoordinate { x: 1, y: 1 });
+                state
+            },
+            {
+                let mut state = base.clone();
+                state.boundary_release_fronts = vec![SandStateBoundaryReleaseFront {
+                    direction: BoundaryReleaseDirection::Left,
+                    wall_x: 1,
+                    front_x: 1,
+                }];
+                state.mobilized_grains = vec![SandStateCoordinate { x: 0, y: 3 }];
+                state.boundary_release_in_flight = Some(SandStateCoordinate { x: 0, y: 3 });
+                state
+            },
+            {
+                let mut state = base.clone();
+                state.boundary_release_fronts = vec![SandStateBoundaryReleaseFront {
+                    direction: BoundaryReleaseDirection::Left,
+                    wall_x: 1,
+                    front_x: 1,
+                }];
+                state.boundary_release_in_flight = Some(SandStateCoordinate { x: 2, y: 2 });
+                state
+            },
+        ];
+        for (index, state) in cases.into_iter().enumerate() {
+            assert!(
+                validate_sediment_state(&state, &categories(), CanvasPolicy::RequireInitialized)
+                    .is_err(),
+                "malformed boundary-release case {index} was accepted"
             );
         }
     }
@@ -620,6 +859,8 @@ mod tests {
             pending_runs: Vec::new(),
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            boundary_release_fronts: Vec::new(),
+            boundary_release_in_flight: None,
         };
         let timing = RecoveryTiming {
             elapsed: Duration::from_millis(100),

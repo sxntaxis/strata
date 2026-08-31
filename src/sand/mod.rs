@@ -4,7 +4,10 @@ mod snapshot;
 
 pub(crate) use engine::recolor_state_category_mass;
 #[allow(unused_imports)]
-pub use engine::{PendingGrainRun, SandEngine, SandState, SandStateCoordinate, SandStateGrain};
+pub use engine::{
+    BoundaryReleaseDirection, PendingGrainRun, SandEngine, SandState,
+    SandStateBoundaryReleaseFront, SandStateCoordinate, SandStateGrain,
+};
 pub(crate) use recovery::{RecoveryTiming, recover_detached_sediment, settle_transition_sediment};
 pub(crate) use snapshot::{
     DailySedimentSlice, daily_contribution_from_slices, derived_preview_from_slices,

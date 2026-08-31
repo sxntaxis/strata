@@ -210,6 +210,8 @@ pub(crate) fn daily_contribution_from_slices(
         pending_runs,
         active_avalanche_columns: Vec::new(),
         mobilized_grains: Vec::new(),
+        boundary_release_fronts: Vec::new(),
+        boundary_release_in_flight: None,
     };
     Some(SedimentSnapshot::daily_contribution(
         operational_day.to_string(),
@@ -276,6 +278,8 @@ pub(crate) fn derived_preview_from_slices(
         pending_runs,
         active_avalanche_columns: Vec::new(),
         mobilized_grains: Vec::new(),
+        boundary_release_fronts: Vec::new(),
+        boundary_release_in_flight: None,
     };
     Some(SedimentSnapshot::derived_preview(
         operational_day.to_string(),
@@ -401,6 +405,8 @@ mod tests {
             }],
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            boundary_release_fronts: Vec::new(),
+            boundary_release_in_flight: None,
         }
     }
 

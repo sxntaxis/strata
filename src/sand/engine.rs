@@ -24,6 +24,38 @@ pub struct SandStateCoordinate {
     pub y: usize,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum BoundaryReleaseDirection {
+    Left,
+    Right,
+}
+
+impl BoundaryReleaseDirection {
+    fn outward_target(self, x: usize) -> Option<usize> {
+        match self {
+            Self::Left => x.checked_sub(1),
+            Self::Right => x.checked_add(1),
+        }
+    }
+
+    fn inward_source(self, x: usize) -> Option<usize> {
+        match self {
+            Self::Left => x.checked_add(1),
+            Self::Right => x.checked_sub(1),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SandStateBoundaryReleaseFront {
+    pub direction: BoundaryReleaseDirection,
+    /// Canonical column that was the visible wall when confinement was removed.
+    pub wall_x: usize,
+    /// Deepest inward canonical column admitted into this release lineage.
+    pub front_x: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PendingGrainRun {
     pub category_id: u64,
@@ -49,8 +81,8 @@ pub struct SandState {
     pub pending_grains: Vec<u64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_runs: Vec<PendingGrainRun>,
-    /// Legacy v4 regional-avalanche evidence. Current v5 snapshots always emit
-    /// this empty; it remains readable only so the v4→v5 semantic migration can
+    /// Legacy v4 regional-avalanche evidence. Current v6 snapshots always emit
+    /// this empty; it remains readable only so pre-v5 semantic migration can
     /// reject malformed historical state without reviving regional runtime causality.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub active_avalanche_columns: Vec<usize>,
@@ -58,10 +90,21 @@ pub struct SandState {
     /// are canonical, row-major sorted, unique, and must reference placed grains.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mobilized_grains: Vec<SandStateCoordinate>,
+    /// Exact transient release fronts created only when resize removes a visible
+    /// lateral wall. Each front owns one canonical column and a fixed outward
+    /// direction until the newly exposed face reaches dynamic repose.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub boundary_release_fronts: Vec<SandStateBoundaryReleaseFront>,
+    /// At most one grain may be in flight because of boundary release itself.
+    /// This is distinct from H4 mobility: it preserves exact restart custody
+    /// without granting the released grain artificial slip momentum.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boundary_release_in_flight: Option<SandStateCoordinate>,
 }
 
 impl SandState {
-    pub const VERSION: u8 = 5;
+    pub const VERSION: u8 = 6;
+    pub const GRAIN_CAUSAL_VERSION: u8 = 5;
     pub const REGIONAL_AVALANCHE_VERSION: u8 = 4;
     pub const ORGANIC_VERSION: u8 = 3;
     pub const COMPRESSED_PENDING_VERSION: u8 = 2;
@@ -170,6 +213,16 @@ struct ViewportBounds {
     y_end: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BoundaryReleaseRouteState {
+    Reposed,
+    Paused,
+    Ready {
+        source_y: usize,
+        target_height: usize,
+    },
+}
+
 pub struct SandEngine {
     pub(crate) grid: Vec<Vec<Option<CategoryId>>>,
     pub cell_width: u16,
@@ -182,6 +235,8 @@ pub struct SandEngine {
     ingress_focus_x: Option<usize>,
     pending_runs: VecDeque<PendingRun>,
     mobilized: Vec<Vec<bool>>,
+    boundary_release_fronts: Vec<SandStateBoundaryReleaseFront>,
+    boundary_release_in_flight: Option<SandStateCoordinate>,
     supported_heights: Vec<usize>,
     #[cfg(test)]
     last_avalanche_motion: bool,
@@ -221,6 +276,8 @@ impl SandEngine {
             ingress_focus_x: None,
             pending_runs: VecDeque::new(),
             mobilized: vec![vec![false; grid_width_dots]; grid_height_dots],
+            boundary_release_fronts: Vec::new(),
+            boundary_release_in_flight: None,
             supported_heights: vec![0; grid_width_dots],
             #[cfg(test)]
             last_avalanche_motion: false,
@@ -294,6 +351,14 @@ impl SandEngine {
         self.ingress_focus_x = self
             .ingress_focus_x
             .map(|x| x.saturating_add(horizontal_offset));
+        for front in &mut self.boundary_release_fronts {
+            front.wall_x = front.wall_x.saturating_add(horizontal_offset);
+            front.front_x = front.front_x.saturating_add(horizontal_offset);
+        }
+        if let Some(coordinate) = &mut self.boundary_release_in_flight {
+            coordinate.x = coordinate.x.saturating_add(horizontal_offset);
+            coordinate.y = coordinate.y.saturating_add(vertical_offset);
+        }
         self.grid_width_dots = target_width;
         self.grid_height_dots = target_height;
         self.supported_heights.resize(target_width, 0);
@@ -313,24 +378,30 @@ impl SandEngine {
 
         self.derive_supported_heights(current_bounds);
         if released_left {
-            let source_x = previous_bounds.x_start;
-            if let Some(target_x) = source_x.checked_sub(1) {
-                self.mobilize_released_wall_surface(current_bounds, source_x, target_x);
-            }
+            self.start_boundary_release_front(
+                current_bounds,
+                previous_bounds.x_start,
+                BoundaryReleaseDirection::Left,
+            );
         }
         if released_right && previous_bounds.x_end > 0 {
-            let source_x = previous_bounds.x_end - 1;
-            let target_x = source_x.saturating_add(1);
-            self.mobilize_released_wall_surface(current_bounds, source_x, target_x);
+            self.start_boundary_release_front(
+                current_bounds,
+                previous_bounds.x_end - 1,
+                BoundaryReleaseDirection::Right,
+            );
         }
     }
 
-    fn mobilize_released_wall_surface(
+    fn start_boundary_release_front(
         &mut self,
         bounds: ViewportBounds,
         source_x: usize,
-        target_x: usize,
+        direction: BoundaryReleaseDirection,
     ) {
+        let Some(target_x) = direction.outward_target(source_x) else {
+            return;
+        };
         if source_x < bounds.x_start
             || source_x >= bounds.x_end
             || target_x < bounds.x_start
@@ -338,20 +409,117 @@ impl SandEngine {
         {
             return;
         }
+        if !matches!(
+            self.boundary_release_route_state(bounds, source_x, target_x),
+            BoundaryReleaseRouteState::Ready { .. } | BoundaryReleaseRouteState::Paused
+        ) {
+            return;
+        }
+
+        // A resize event that falls inside an already admitted release lineage
+        // does not create a second obligation. Distinct former walls remain
+        // separate until their causal domains actually meet.
+        if self.boundary_release_fronts.iter().any(|front| {
+            front.direction == direction && Self::boundary_release_front_contains(*front, source_x)
+        }) {
+            return;
+        }
+
+        self.boundary_release_fronts.push(SandStateBoundaryReleaseFront {
+            direction,
+            wall_x: source_x,
+            front_x: source_x,
+        });
+        self.normalize_boundary_release_fronts();
+    }
+
+    fn boundary_release_front_contains(front: SandStateBoundaryReleaseFront, x: usize) -> bool {
+        let low = front.wall_x.min(front.front_x);
+        let high = front.wall_x.max(front.front_x);
+        (low..=high).contains(&x)
+    }
+
+    fn boundary_release_front_interval(
+        front: SandStateBoundaryReleaseFront,
+    ) -> (usize, usize) {
+        (front.wall_x.min(front.front_x), front.wall_x.max(front.front_x))
+    }
+
+    fn normalize_boundary_release_fronts(&mut self) {
+        self.boundary_release_fronts.sort_unstable_by_key(|front| {
+            let (low, high) = Self::boundary_release_front_interval(*front);
+            (front.direction, low, high)
+        });
+
+        let mut normalized: Vec<SandStateBoundaryReleaseFront> = Vec::new();
+        for front in self.boundary_release_fronts.drain(..) {
+            let Some(last) = normalized.last_mut() else {
+                normalized.push(front);
+                continue;
+            };
+            if last.direction != front.direction {
+                normalized.push(front);
+                continue;
+            }
+
+            let (last_low, last_high) = Self::boundary_release_front_interval(*last);
+            let (front_low, front_high) = Self::boundary_release_front_interval(front);
+            if front_low > last_high.saturating_add(1) {
+                normalized.push(front);
+                continue;
+            }
+
+            let merged_low = last_low.min(front_low);
+            let merged_high = last_high.max(front_high);
+            match last.direction {
+                BoundaryReleaseDirection::Left => {
+                    last.wall_x = merged_low;
+                    last.front_x = merged_high;
+                }
+                BoundaryReleaseDirection::Right => {
+                    last.wall_x = merged_high;
+                    last.front_x = merged_low;
+                }
+            }
+        }
+        self.boundary_release_fronts = normalized;
+    }
+
+    fn boundary_release_route_state(
+        &self,
+        bounds: ViewportBounds,
+        source_x: usize,
+        target_x: usize,
+    ) -> BoundaryReleaseRouteState {
+        if source_x < bounds.x_start
+            || source_x >= bounds.x_end
+            || target_x < bounds.x_start
+            || target_x >= bounds.x_end
+        {
+            return BoundaryReleaseRouteState::Paused;
+        }
 
         let source_height = self.supported_heights[source_x];
         if source_height == 0 {
-            return;
+            return BoundaryReleaseRouteState::Reposed;
         }
-        let source_y = bounds.y_end - source_height;
-        let target_y = source_y.saturating_add(1);
-        if target_y >= bounds.y_end || self.grid[target_y][target_x].is_some() {
-            return;
+        let target_height = self.supported_heights[target_x];
+        if source_height.saturating_sub(target_height) <= DYNAMIC_REPOSE_RELIEF {
+            return BoundaryReleaseRouteState::Reposed;
         }
 
-        let outward_relief = source_height.saturating_sub(self.supported_heights[target_x]);
-        if outward_relief > DYNAMIC_REPOSE_RELIEF {
-            self.mobilized[source_y][source_x] = true;
+        let source_y = bounds.y_end - source_height;
+        let target_y = source_y.saturating_add(1);
+        if target_y >= bounds.y_end
+            || self.grid[source_y][source_x].is_none()
+            || self.grid[target_y][target_x].is_some()
+        {
+            return BoundaryReleaseRouteState::Paused;
+        }
+
+        BoundaryReleaseRouteState::Ready {
+            source_y,
+            target_height,
         }
     }
 
@@ -662,6 +830,9 @@ impl SandEngine {
         self.mobilized[y][x] = false;
         self.grid[y + 1][x] = Some(category);
         self.mobilized[y + 1][x] = was_mobilized;
+        if self.boundary_release_in_flight == Some(SandStateCoordinate { x, y }) {
+            self.boundary_release_in_flight = Some(SandStateCoordinate { x, y: y + 1 });
+        }
 
         if was_mobilized {
             #[cfg(test)]
@@ -791,6 +962,193 @@ impl SandEngine {
             preferred_target
         };
         Some((source_y, target_x))
+    }
+
+    fn refresh_boundary_release_in_flight(&mut self, bounds: ViewportBounds) {
+        let Some(coordinate) = self.boundary_release_in_flight else {
+            return;
+        };
+        if coordinate.x < bounds.x_start
+            || coordinate.x >= bounds.x_end
+            || coordinate.y < bounds.y_start
+            || coordinate.y >= bounds.y_end
+        {
+            return;
+        }
+
+        let supported_height = self.supported_heights[coordinate.x];
+        if supported_height == 0 {
+            return;
+        }
+        let supported_top = bounds.y_end - supported_height;
+        if coordinate.y >= supported_top {
+            self.boundary_release_in_flight = None;
+        }
+    }
+
+    fn process_one_boundary_release_front(&mut self, bounds: ViewportBounds) -> bool {
+        // Boundary release intentionally serializes its own grains. A released
+        // grain must settle into the bottom-connected face before another
+        // boundary-release topple can occur; ordinary H4 motion may continue.
+        if self.boundary_release_in_flight.is_some() || self.boundary_release_fronts.is_empty() {
+            return false;
+        }
+
+        let directions = if self.sweep_left_to_right {
+            [BoundaryReleaseDirection::Left, BoundaryReleaseDirection::Right]
+        } else {
+            [BoundaryReleaseDirection::Right, BoundaryReleaseDirection::Left]
+        };
+
+        for direction in directions {
+            let mut index = 0usize;
+            while index < self.boundary_release_fronts.len() {
+                if self.boundary_release_fronts[index].direction != direction {
+                    index += 1;
+                    continue;
+                }
+                let before_len = self.boundary_release_fronts.len();
+                if self.process_boundary_release_front(bounds, index) {
+                    return true;
+                }
+                if self.boundary_release_fronts.len() == before_len {
+                    index += 1;
+                }
+            }
+        }
+        false
+    }
+
+    fn process_boundary_release_front(
+        &mut self,
+        bounds: ViewportBounds,
+        index: usize,
+    ) -> bool {
+        let front = self.boundary_release_fronts[index];
+
+        match front.direction {
+            BoundaryReleaseDirection::Left => {
+                for source_x in front.wall_x..=front.front_x {
+                    let Some(target_x) = source_x.checked_sub(1) else {
+                        self.boundary_release_fronts.remove(index);
+                        return false;
+                    };
+                    match self.boundary_release_route_state(bounds, source_x, target_x) {
+                        BoundaryReleaseRouteState::Ready {
+                            source_y,
+                            target_height,
+                        } => {
+                            self.topple_boundary_release_grain(
+                                bounds,
+                                source_x,
+                                source_y,
+                                target_x,
+                                target_height,
+                            );
+                            return true;
+                        }
+                        BoundaryReleaseRouteState::Paused => return false,
+                        BoundaryReleaseRouteState::Reposed => {}
+                    }
+                }
+            }
+            BoundaryReleaseDirection::Right => {
+                for source_x in (front.front_x..=front.wall_x).rev() {
+                    let Some(target_x) = source_x.checked_add(1) else {
+                        self.boundary_release_fronts.remove(index);
+                        return false;
+                    };
+                    match self.boundary_release_route_state(bounds, source_x, target_x) {
+                        BoundaryReleaseRouteState::Ready {
+                            source_y,
+                            target_height,
+                        } => {
+                            self.topple_boundary_release_grain(
+                                bounds,
+                                source_x,
+                                source_y,
+                                target_x,
+                                target_height,
+                            );
+                            return true;
+                        }
+                        BoundaryReleaseRouteState::Paused => return false,
+                        BoundaryReleaseRouteState::Reposed => {}
+                    }
+                }
+            }
+        }
+
+        let Some(inward_x) = front.direction.inward_source(front.front_x) else {
+            self.boundary_release_fronts.remove(index);
+            return false;
+        };
+        match self.boundary_release_route_state(bounds, inward_x, front.front_x) {
+            BoundaryReleaseRouteState::Ready {
+                source_y,
+                target_height,
+            } => {
+                self.boundary_release_fronts[index].front_x = inward_x;
+                self.topple_boundary_release_grain(
+                    bounds,
+                    inward_x,
+                    source_y,
+                    front.front_x,
+                    target_height,
+                );
+                self.normalize_boundary_release_fronts();
+                true
+            }
+            BoundaryReleaseRouteState::Paused => false,
+            BoundaryReleaseRouteState::Reposed => {
+                self.boundary_release_fronts.remove(index);
+                false
+            }
+        }
+    }
+
+    fn topple_boundary_release_grain(
+        &mut self,
+        bounds: ViewportBounds,
+        source_x: usize,
+        source_y: usize,
+        target_x: usize,
+        target_height_before: usize,
+    ) {
+        debug_assert!(self.boundary_release_in_flight.is_none());
+        let source_height = self.supported_heights[source_x];
+        let relief_before = source_height.saturating_sub(target_height_before);
+        let target_y = source_y + 1;
+        let category = self.grid[source_y][source_x]
+            .take()
+            .expect("boundary-release surface grain exists");
+        self.mobilized[source_y][source_x] = false;
+        self.grid[target_y][target_x] = Some(category);
+        // Boundary release is the causal carrier. The moved grain does not inherit
+        // mobility merely because the removed wall let it topple; after this one
+        // diagonal release step it returns to ordinary H4 fall/support semantics.
+        self.mobilized[target_y][target_x] = false;
+        self.mobilize_dependents_after_vacancy(bounds, source_x, source_y);
+
+        self.supported_heights[source_x] = source_height - 1;
+        if relief_before == 2 {
+            self.supported_heights[target_x] = target_height_before + 1;
+        } else {
+            // Relief >2 places the grain above the bottom-connected target stack.
+            // Keep exact custody until ordinary vertical gravity lands it; no
+            // second boundary topple may outrun that visible fall.
+            self.boundary_release_in_flight = Some(SandStateCoordinate {
+                x: target_x,
+                y: target_y,
+            });
+        }
+
+        #[cfg(test)]
+        {
+            self.last_diagonal_topple = true;
+            self.last_avalanche_motion = true;
+            self.last_avalanche_span = source_x.abs_diff(target_x) + 1;
+        }
     }
 
     fn topple_one_mobilized_surface(&mut self, bounds: ViewportBounds) -> bool {
@@ -923,7 +1281,10 @@ impl SandEngine {
         }
 
         self.derive_supported_heights(bounds);
-        let _ = self.topple_one_mobilized_surface(bounds);
+        self.refresh_boundary_release_in_flight(bounds);
+        if !self.process_one_boundary_release_front(bounds) {
+            let _ = self.topple_one_mobilized_surface(bounds);
+        }
     }
 
     pub fn update(&mut self) {
@@ -1042,6 +1403,8 @@ impl SandEngine {
         self.grid_height_dots = (self.cell_height as usize).saturating_mul(SAND_ENGINE.dot_height);
         self.grid = vec![vec![None; self.grid_width_dots]; self.grid_height_dots];
         self.mobilized = vec![vec![false; self.grid_width_dots]; self.grid_height_dots];
+        self.boundary_release_fronts.clear();
+        self.boundary_release_in_flight = None;
         self.pending_runs.clear();
         self.ingress_focus_x = None;
         self.grain_count = 0;
@@ -1054,6 +1417,9 @@ impl SandEngine {
                 if *cell == Some(category_id) {
                     *cell = None;
                     self.mobilized[y][x] = false;
+                    if self.boundary_release_in_flight == Some(SandStateCoordinate { x, y }) {
+                        self.boundary_release_in_flight = None;
+                    }
                     removed.push((x, y));
                 }
             }
@@ -1086,6 +1452,9 @@ impl SandEngine {
                 if self.grid[y][x] == Some(category_id) {
                     self.grid[y][x] = None;
                     self.mobilized[y][x] = false;
+                    if self.boundary_release_in_flight == Some(SandStateCoordinate { x, y }) {
+                        self.boundary_release_in_flight = None;
+                    }
                     removed_coordinates.push((x, y));
                     removed += 1;
                 }
@@ -1175,6 +1544,8 @@ impl SandEngine {
                 .collect(),
             active_avalanche_columns: Vec::new(),
             mobilized_grains,
+            boundary_release_fronts: self.boundary_release_fronts.clone(),
+            boundary_release_in_flight: self.boundary_release_in_flight,
         }
     }
 
@@ -1190,8 +1561,8 @@ impl SandEngine {
         // to translate v4 regional activity into per-grain causality: that would
         // preserve the obsolete approximation H4 deliberately retired. Instead,
         // preserve topology exactly and deterministically seed only currently
-        // unsupported bottom-connected surface grains. The first ordinary v5
-        // gravity passes relax those grains through the new causal mechanics.
+        // unsupported bottom-connected surface grains. The first ordinary
+        // grain-causal gravity passes relax those grains through H4 mechanics.
         self.derive_supported_heights(bounds);
         for x in bounds.x_start..bounds.x_end {
             let height = self.supported_heights[x];
@@ -1211,6 +1582,7 @@ impl SandEngine {
         valid_category_ids: &HashSet<CategoryId>,
     ) -> Result<(), String> {
         if state.version != SandState::VERSION
+            && state.version != SandState::GRAIN_CAUSAL_VERSION
             && state.version != SandState::REGIONAL_AVALANCHE_VERSION
             && state.version != SandState::COMPRESSED_PENDING_VERSION
             && state.version != SandState::ORGANIC_VERSION
@@ -1222,6 +1594,7 @@ impl SandEngine {
             return Err("zero-sized sand state cannot contain placed grains".to_string());
         }
         if state.version != SandState::VERSION
+            && state.version != SandState::GRAIN_CAUSAL_VERSION
             && state.version != SandState::REGIONAL_AVALANCHE_VERSION
             && state.version != SandState::ORGANIC_VERSION
             && state.ingress_focus_x.is_some()
@@ -1235,8 +1608,14 @@ impl SandEngine {
                 "only v4 sand state may contain legacy active avalanche columns".to_string(),
             );
         }
-        if state.version != SandState::VERSION && !state.mobilized_grains.is_empty() {
+        if state.version != SandState::VERSION
+            && state.version != SandState::GRAIN_CAUSAL_VERSION
+            && !state.mobilized_grains.is_empty()
+        {
             return Err("pre-v5 sand state contains mobilized grain coordinates".to_string());
+        }
+        if state.version != SandState::VERSION && !state.boundary_release_fronts.is_empty() {
+            return Err("pre-v6 sand state contains boundary-release fronts".to_string());
         }
         if state
             .active_avalanche_columns
@@ -1268,6 +1647,60 @@ impl SandEngine {
                 "sand mobilized grain coordinate is outside the canonical grid".to_string(),
             );
         }
+        let release_sort_key = |front: &SandStateBoundaryReleaseFront| {
+            let low = front.wall_x.min(front.front_x);
+            let high = front.wall_x.max(front.front_x);
+            (front.direction, low, high)
+        };
+        if state
+            .boundary_release_fronts
+            .windows(2)
+            .any(|fronts| release_sort_key(&fronts[0]) >= release_sort_key(&fronts[1]))
+        {
+            return Err("sand boundary-release fronts must be strictly sorted".to_string());
+        }
+        for front in &state.boundary_release_fronts {
+            if front.wall_x >= state.grid_width || front.front_x >= state.grid_width {
+                return Err("sand boundary-release front is outside the canonical grid".to_string());
+            }
+            let direction_shape_valid = match front.direction {
+                BoundaryReleaseDirection::Left => front.wall_x <= front.front_x && front.wall_x > 0,
+                BoundaryReleaseDirection::Right => {
+                    front.front_x <= front.wall_x
+                        && front
+                            .wall_x
+                            .checked_add(1)
+                            .is_some_and(|target_x| target_x < state.grid_width)
+                }
+            };
+            if !direction_shape_valid {
+                return Err(
+                    "sand boundary-release front has invalid direction or outward target"
+                        .to_string(),
+                );
+            }
+        }
+        for fronts in state.boundary_release_fronts.windows(2) {
+            if fronts[0].direction != fronts[1].direction {
+                continue;
+            }
+            let (_, first_high) = Self::boundary_release_front_interval(fronts[0]);
+            let (second_low, _) = Self::boundary_release_front_interval(fronts[1]);
+            if second_low <= first_high.saturating_add(1) {
+                return Err(
+                    "sand boundary-release fronts of one direction must be normalized".to_string(),
+                );
+            }
+        }
+        if state.version != SandState::VERSION && state.boundary_release_in_flight.is_some() {
+            return Err("pre-v6 sand state contains a boundary-release in-flight grain".to_string());
+        }
+        if state.boundary_release_in_flight.is_some() && state.boundary_release_fronts.is_empty() {
+            return Err(
+                "sand boundary-release in-flight grain requires a release front".to_string(),
+            );
+        }
+
         if let Some(focus_x) = state.ingress_focus_x
             && (state.grid_width == 0 || focus_x >= state.grid_width)
         {
@@ -1309,6 +1742,40 @@ impl SandEngine {
             return Err(
                 "sand mobilized grain coordinate does not reference a placed grain".to_string(),
             );
+        }
+
+        if let Some(coordinate) = state.boundary_release_in_flight {
+            if coordinate.x >= state.grid_width || coordinate.y >= state.grid_height {
+                return Err(
+                    "sand boundary-release in-flight grain is outside the canonical grid"
+                        .to_string(),
+                );
+            }
+            if !occupied.contains(&(coordinate.x, coordinate.y)) {
+                return Err(
+                    "sand boundary-release in-flight coordinate does not reference a placed grain"
+                        .to_string(),
+                );
+            }
+            if state.mobilized_grains.contains(&coordinate) {
+                return Err(
+                    "sand boundary-release in-flight grain cannot simultaneously carry H4 mobility"
+                        .to_string(),
+                );
+            }
+            let belongs_to_release = state.boundary_release_fronts.iter().any(|front| {
+                let source_x = match front.direction {
+                    BoundaryReleaseDirection::Left => coordinate.x.checked_add(1),
+                    BoundaryReleaseDirection::Right => coordinate.x.checked_sub(1),
+                };
+                source_x.is_some_and(|x| Self::boundary_release_front_contains(*front, x))
+            });
+            if !belongs_to_release {
+                return Err(
+                    "sand boundary-release in-flight grain is unrelated to every persisted release front"
+                        .to_string(),
+                );
+            }
         }
 
         let mut pending_runs = VecDeque::new();
@@ -1365,11 +1832,21 @@ impl SandEngine {
 
         self.grid = restored;
         self.mobilized = vec![vec![false; state.grid_width]; state.grid_height];
-        if state.version == SandState::VERSION {
+        if state.version == SandState::VERSION || state.version == SandState::GRAIN_CAUSAL_VERSION {
             for coordinate in &state.mobilized_grains {
                 self.mobilized[coordinate.y][coordinate.x] = true;
             }
         }
+        self.boundary_release_fronts = if state.version == SandState::VERSION {
+            state.boundary_release_fronts.clone()
+        } else {
+            Vec::new()
+        };
+        self.boundary_release_in_flight = if state.version == SandState::VERSION {
+            state.boundary_release_in_flight
+        } else {
+            None
+        };
         self.grid_width_dots = state.grid_width;
         self.grid_height_dots = state.grid_height;
         self.pending_runs = pending_runs;
@@ -1382,6 +1859,7 @@ impl SandEngine {
             state.rng_state
         };
         self.ingress_focus_x = if state.version == SandState::VERSION
+            || state.version == SandState::GRAIN_CAUSAL_VERSION
             || state.version == SandState::REGIONAL_AVALANCHE_VERSION
             || state.version == SandState::ORGANIC_VERSION
         {
@@ -1390,7 +1868,7 @@ impl SandEngine {
             None
         };
         self.supported_heights = vec![0; state.grid_width];
-        if state.version != SandState::VERSION {
+        if state.version != SandState::VERSION && state.version != SandState::GRAIN_CAUSAL_VERSION {
             self.seed_pre_v5_mobility();
         }
         self.expand_logical_canvas_to_viewport();
@@ -1430,7 +1908,8 @@ mod tests {
     use crate::{
         domain::CategoryId,
         sand::{
-            PendingGrainRun, SandEngine, SandState, SandStateGrain, recolor_state_category_mass,
+            BoundaryReleaseDirection, PendingGrainRun, SandEngine, SandState,
+            SandStateBoundaryReleaseFront, SandStateGrain, recolor_state_category_mass,
         },
     };
 
@@ -1490,6 +1969,8 @@ mod tests {
             ],
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            boundary_release_fronts: Vec::new(),
+            boundary_release_in_flight: None,
         };
         let before_coordinates = state
             .grains
@@ -1574,6 +2055,8 @@ mod tests {
             }],
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            boundary_release_fronts: Vec::new(),
+            boundary_release_in_flight: None,
         };
 
         let recolored =
@@ -1656,8 +2139,20 @@ mod tests {
         assert_eq!(engine.snapshot_state(), before);
     }
 
+    fn fill_supported_column(
+        engine: &mut SandEngine,
+        x: usize,
+        height: usize,
+        category_id: CategoryId,
+    ) {
+        let bottom = engine.grid_height_dots;
+        for y in bottom - height..bottom {
+            engine.grid[y][x] = Some(category_id);
+        }
+    }
+
     #[test]
-    fn reexpansion_releases_former_visible_side_wall_through_existing_h4_physics() {
+    fn reexpansion_starts_boundary_release_without_resize_reflow_or_invented_mobility() {
         let mut engine = SandEngine::new(12, 3);
         engine.clear();
         engine.resize(4, 3);
@@ -1665,31 +2160,28 @@ mod tests {
         let wall_x = previous_bounds.x_start;
         let bottom = previous_bounds.y_end;
 
-        for y in bottom - 6..bottom {
-            engine.grid[y][wall_x] = Some(CategoryId::new(1));
-        }
-        for y in bottom - 5..bottom {
-            engine.grid[y][wall_x + 1] = Some(CategoryId::new(1));
-        }
+        fill_supported_column(&mut engine, wall_x, 6, CategoryId::new(1));
+        fill_supported_column(&mut engine, wall_x + 1, 5, CategoryId::new(1));
         engine.grain_count = 11;
         let surface_y = bottom - 6;
         let before_grid = engine.grid.clone();
+        let before_rng = engine.rng_state;
 
         engine.resize(12, 3);
 
         assert_eq!(engine.grid, before_grid, "resize must not reflow grains");
         assert_eq!(engine.grain_count, 11);
-        assert!(engine.mobilized[surface_y][wall_x]);
+        assert_eq!(engine.rng_state, before_rng, "resize must not consume RNG");
+        assert!(engine.mobilized.iter().flatten().all(|mobile| !*mobile));
         assert_eq!(
-            engine
-                .mobilized
-                .iter()
-                .flatten()
-                .filter(|mobile| **mobile)
-                .count(),
-            1,
-            "only the exact former-wall surface grain is released"
+            engine.boundary_release_fronts,
+            vec![SandStateBoundaryReleaseFront {
+                direction: BoundaryReleaseDirection::Left,
+                wall_x,
+                front_x: wall_x,
+            }]
         );
+        assert!(engine.boundary_release_in_flight.is_none());
 
         engine.apply_gravity();
 
@@ -1699,10 +2191,188 @@ mod tests {
             Some(CategoryId::new(1))
         );
         assert_eq!(engine.grain_count, 11);
+        assert_eq!(
+            engine.boundary_release_in_flight,
+            Some(SandStateCoordinate {
+                x: wall_x - 1,
+                y: surface_y + 1,
+            })
+        );
+    }
+
+    fn assert_boundary_release_staircase(direction: BoundaryReleaseDirection) {
+        let mut engine = SandEngine::new(12, 6);
+        engine.clear();
+        engine.resize(4, 6);
+        let previous_bounds = engine.viewport_bounds().expect("visible viewport");
+        let wall_x = match direction {
+            BoundaryReleaseDirection::Left => previous_bounds.x_start,
+            BoundaryReleaseDirection::Right => previous_bounds.x_end - 1,
+        };
+        let outward_x = direction.outward_target(wall_x).expect("canonical outward column");
+        let inward_1 = direction.inward_source(wall_x).expect("first inward column");
+        let inward_2 = direction.inward_source(inward_1).expect("second inward column");
+
+        fill_supported_column(&mut engine, wall_x, 2, CategoryId::new(1));
+        fill_supported_column(&mut engine, inward_1, 4, CategoryId::new(1));
+        fill_supported_column(&mut engine, inward_2, 4, CategoryId::new(1));
+        engine.grain_count = 10;
+        let before_grid = engine.grid.clone();
+
+        engine.resize(12, 6);
+        assert_eq!(engine.grid, before_grid, "resize must remain movement-free");
+        assert_eq!(
+            engine.boundary_release_fronts,
+            vec![SandStateBoundaryReleaseFront {
+                direction,
+                wall_x,
+                front_x: wall_x,
+            }]
+        );
+
+        engine.apply_gravity();
+        assert_eq!(engine.boundary_release_fronts[0].front_x, wall_x);
+
+        engine.apply_gravity();
+        assert_eq!(
+            engine.boundary_release_fronts[0].front_x, inward_1,
+            "the release must admit the next inward column after the former wall reaches repose"
+        );
+        assert!(engine.boundary_release_in_flight.is_some());
+
+        engine.apply_gravity();
+        assert!(engine.boundary_release_in_flight.is_none());
+        assert!(
+            engine.boundary_release_fronts.is_empty(),
+            "the release front must stop only after its released grain lands and the whole admitted face is stable"
+        );
+        let bounds = engine.viewport_bounds().expect("expanded viewport");
+        engine.derive_supported_heights(bounds);
+        assert_eq!(engine.supported_heights[outward_x], 1);
+        assert_eq!(engine.supported_heights[wall_x], 2);
+        assert_eq!(engine.supported_heights[inward_1], 3);
+        assert_eq!(engine.supported_heights[inward_2], 4);
+        assert_eq!(engine.grain_count, 10);
     }
 
     #[test]
-    fn canonical_growth_releases_shifted_former_side_walls_without_mass_change() {
+    fn left_boundary_release_propagates_inward_until_the_face_reaches_repose() {
+        assert_boundary_release_staircase(BoundaryReleaseDirection::Left);
+    }
+
+    #[test]
+    fn right_boundary_release_propagates_inward_until_the_face_reaches_repose() {
+        assert_boundary_release_staircase(BoundaryReleaseDirection::Right);
+    }
+
+    fn assert_tall_boundary_face_releases_without_leaving_a_new_frozen_cliff(
+        direction: BoundaryReleaseDirection,
+    ) {
+        let mut engine = SandEngine::new(14, 8);
+        engine.clear();
+        engine.resize(5, 8);
+        let previous_bounds = engine.viewport_bounds().expect("visible viewport");
+        let wall_x = match direction {
+            BoundaryReleaseDirection::Left => previous_bounds.x_start,
+            BoundaryReleaseDirection::Right => previous_bounds.x_end - 1,
+        };
+        let outward_x = direction.outward_target(wall_x).expect("outward column");
+        let inward_1 = direction.inward_source(wall_x).expect("inward 1");
+        let inward_2 = direction.inward_source(inward_1).expect("inward 2");
+        let inward_3 = direction.inward_source(inward_2).expect("inward 3");
+
+        for (x, height) in [(wall_x, 2), (inward_1, 4), (inward_2, 6), (inward_3, 8)] {
+            fill_supported_column(&mut engine, x, height, CategoryId::new(1));
+        }
+        engine.grain_count = 20;
+        engine.resize(14, 8);
+
+        let mut passes = 0usize;
+        while (!engine.boundary_release_fronts.is_empty()
+            || engine.boundary_release_in_flight.is_some())
+            && passes < 128
+        {
+            engine.apply_gravity();
+            passes += 1;
+        }
+        assert!(passes < 128, "boundary release must converge in bounded gravity passes");
+        assert!(engine.boundary_release_fronts.is_empty());
+        assert!(engine.boundary_release_in_flight.is_none());
+        assert_eq!(engine.grain_count, 20);
+
+        let bounds = engine.viewport_bounds().expect("expanded viewport");
+        engine.derive_supported_heights(bounds);
+        let columns = vec![outward_x, wall_x, inward_1, inward_2, inward_3];
+        for pair in columns.windows(2) {
+            let outward_height = engine.supported_heights[pair[0]];
+            let inward_height = engine.supported_heights[pair[1]];
+            assert!(
+                inward_height.saturating_sub(outward_height) <= DYNAMIC_REPOSE_RELIEF,
+                "released face retained a cliff between columns {} and {}: {} -> {}",
+                pair[0],
+                pair[1],
+                outward_height,
+                inward_height
+            );
+        }
+    }
+
+    #[test]
+    fn tall_left_boundary_face_revisits_outward_steps_until_stable() {
+        assert_tall_boundary_face_releases_without_leaving_a_new_frozen_cliff(
+            BoundaryReleaseDirection::Left,
+        );
+    }
+
+    #[test]
+    fn tall_right_boundary_face_revisits_outward_steps_until_stable() {
+        assert_tall_boundary_face_releases_without_leaving_a_new_frozen_cliff(
+            BoundaryReleaseDirection::Right,
+        );
+    }
+
+    #[test]
+    fn boundary_release_in_flight_grain_survives_exact_v6_restart() {
+        let mut source = SandEngine::new(12, 6);
+        source.clear();
+        source.resize(4, 6);
+        let bounds = source.viewport_bounds().expect("visible viewport");
+        let wall_x = bounds.x_start;
+        fill_supported_column(&mut source, wall_x, 4, CategoryId::new(1));
+        source.grain_count = 4;
+        source.resize(12, 6);
+        source.apply_gravity();
+        assert!(source.boundary_release_in_flight.is_some());
+
+        let checkpoint = source.snapshot_state();
+        assert_eq!(checkpoint.version, SandState::VERSION);
+        assert_eq!(
+            checkpoint.boundary_release_fronts,
+            source.boundary_release_fronts
+        );
+        assert_eq!(
+            checkpoint.boundary_release_in_flight,
+            source.boundary_release_in_flight
+        );
+
+        let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
+        let mut restored = SandEngine::new(12, 6);
+        restored.restore_state(&checkpoint, &valid).unwrap();
+        assert_eq!(restored.snapshot_state(), checkpoint);
+
+        for _ in 0..8 {
+            source.apply_gravity();
+            restored.apply_gravity();
+            assert_eq!(restored.snapshot_state(), source.snapshot_state());
+            if source.boundary_release_in_flight.is_none() {
+                break;
+            }
+        }
+        assert!(source.boundary_release_in_flight.is_none());
+    }
+
+    #[test]
+    fn canonical_growth_tracks_shifted_release_state_without_mass_change() {
         let mut engine = SandEngine::new(4, 3);
         engine.clear();
         let old_width = engine.grid_width_dots;
@@ -1735,16 +2405,133 @@ mod tests {
             engine.grid[surface_y][shifted_right],
             Some(CategoryId::new(2))
         );
-        assert!(engine.mobilized[surface_y][shifted_left]);
-        assert!(engine.mobilized[surface_y][shifted_right]);
+        assert!(engine.mobilized.iter().flatten().all(|mobile| !*mobile));
         assert_eq!(
-            engine
-                .mobilized
-                .iter()
-                .flatten()
-                .filter(|mobile| **mobile)
-                .count(),
-            2
+            engine.boundary_release_fronts,
+            vec![
+                SandStateBoundaryReleaseFront {
+                    direction: BoundaryReleaseDirection::Left,
+                    wall_x: shifted_left,
+                    front_x: shifted_left,
+                },
+                SandStateBoundaryReleaseFront {
+                    direction: BoundaryReleaseDirection::Right,
+                    wall_x: shifted_right,
+                    front_x: shifted_right,
+                },
+            ]
+        );
+        assert!(engine.boundary_release_in_flight.is_none());
+    }
+
+    #[test]
+    fn reexpansion_can_start_a_visible_release_while_an_older_same_side_front_is_hidden() {
+        let mut engine = SandEngine::new(12, 6);
+        engine.clear();
+        engine.resize(4, 6);
+        let first_bounds = engine.viewport_bounds().expect("first narrow viewport");
+        let first_wall = first_bounds.x_start;
+        fill_supported_column(&mut engine, first_wall, 4, CategoryId::new(1));
+        engine.grain_count = 4;
+
+        engine.resize(6, 6);
+        assert_eq!(engine.boundary_release_fronts.len(), 1);
+        assert_eq!(engine.boundary_release_fronts[0].wall_x, first_wall);
+
+        engine.resize(2, 6);
+        let second_bounds = engine.viewport_bounds().expect("second narrow viewport");
+        let second_wall = second_bounds.x_start;
+        fill_supported_column(&mut engine, second_wall, 4, CategoryId::new(2));
+        engine.grain_count = 8;
+
+        engine.resize(4, 6);
+        assert_eq!(engine.boundary_release_fronts.len(), 2);
+        assert_eq!(engine.boundary_release_fronts[0].wall_x, first_wall);
+        assert_eq!(engine.boundary_release_fronts[1].wall_x, second_wall);
+        let second_surface_y = engine.grid_height_dots - 4;
+
+        engine.apply_gravity();
+
+        assert_eq!(
+            engine.grid[second_surface_y][second_wall],
+            None,
+            "a hidden older release must not block the newly visible former wall"
+        );
+        assert_eq!(
+            engine.grid[second_surface_y + 1][second_wall - 1],
+            Some(CategoryId::new(2))
+        );
+        assert_eq!(engine.grain_count, 8);
+    }
+
+    #[test]
+    fn incremental_reexpansion_normalizes_overlapping_same_side_release_obligations() {
+        let mut engine = SandEngine::new(12, 6);
+        engine.clear();
+        engine.resize(4, 6);
+        let first_bounds = engine.viewport_bounds().expect("first narrow viewport");
+        let first_wall = first_bounds.x_start;
+        fill_supported_column(&mut engine, first_wall, 4, CategoryId::new(1));
+        fill_supported_column(&mut engine, first_wall + 1, 5, CategoryId::new(1));
+        engine.grain_count = 9;
+
+        engine.resize(5, 6);
+        assert_eq!(engine.boundary_release_fronts.len(), 1);
+        let first_front = engine.boundary_release_fronts[0];
+
+        engine.resize(4, 6);
+        let second_bounds = engine.viewport_bounds().expect("second narrow viewport");
+        let second_wall = second_bounds.x_start;
+        assert!(second_wall >= first_front.wall_x);
+        fill_supported_column(&mut engine, second_wall, 6, CategoryId::new(2));
+        engine.grain_count = engine.physical_grain_count();
+
+        engine.resize(6, 6);
+
+        let left_fronts = engine
+            .boundary_release_fronts
+            .iter()
+            .filter(|front| front.direction == BoundaryReleaseDirection::Left)
+            .copied()
+            .collect::<Vec<_>>();
+        assert_eq!(left_fronts.len(), 1, "overlapping incremental releases must normalize");
+        assert!(left_fronts[0].wall_x <= left_fronts[0].front_x);
+        assert_eq!(engine.grain_count, engine.physical_grain_count());
+    }
+
+    #[test]
+    fn later_canonical_growth_shifts_active_release_front_and_in_flight_grain_exactly() {
+        let mut engine = SandEngine::new(4, 4);
+        engine.clear();
+        fill_supported_column(&mut engine, 0, 4, CategoryId::new(1));
+        engine.grain_count = 4;
+
+        engine.resize(8, 4);
+        engine.apply_gravity();
+        let before_front = engine.boundary_release_fronts[0];
+        let before_in_flight = engine
+            .boundary_release_in_flight
+            .expect("released grain must still be in flight");
+        let width_before_second_growth = engine.grid_width_dots;
+
+        engine.resize(12, 4);
+        let second_offset = (engine.grid_width_dots - width_before_second_growth) / 2;
+        assert_eq!(engine.grain_count, 4);
+        assert_eq!(engine.boundary_release_fronts.len(), 1);
+        assert_eq!(
+            engine.boundary_release_fronts[0],
+            SandStateBoundaryReleaseFront {
+                direction: before_front.direction,
+                wall_x: before_front.wall_x + second_offset,
+                front_x: before_front.front_x + second_offset,
+            }
+        );
+        assert_eq!(
+            engine.boundary_release_in_flight,
+            Some(SandStateCoordinate {
+                x: before_in_flight.x + second_offset,
+                y: before_in_flight.y,
+            })
         );
     }
 
@@ -1881,6 +2668,8 @@ mod tests {
             pending_runs: Vec::new(),
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            boundary_release_fronts: Vec::new(),
+            boundary_release_in_flight: None,
         };
 
         let mut restored = SandEngine::new(20, 20);
@@ -2270,7 +3059,7 @@ mod organic_formation_tests {
     }
 
     #[test]
-    fn v5_snapshot_restore_preserves_exact_mobilized_grain_state() {
+    fn v6_snapshot_restore_preserves_exact_mobilized_grain_state() {
         let mut source = SandEngine::new(5, 2);
         let x = source.grid_width_dots / 2;
         set_supported_profile(&mut source, x - 1, &[0, 4, 0]);
@@ -2296,6 +3085,32 @@ mod organic_formation_tests {
             restored.apply_gravity();
             assert_eq!(restored.snapshot_state(), source.snapshot_state());
         }
+    }
+
+    #[test]
+    fn v5_restore_upgrades_exact_mobility_without_inventing_boundary_release() {
+        let mut source = SandEngine::new(5, 2);
+        let x = source.grid_width_dots / 2;
+        set_supported_profile(&mut source, x - 1, &[0, 4, 0]);
+        let source_y = source.grid_height_dots - 4;
+        source.mobilized[source_y][x] = true;
+        source.rng_state = 0x1234_5678;
+
+        let mut v5 = source.snapshot_state();
+        v5.version = SandState::GRAIN_CAUSAL_VERSION;
+        v5.boundary_release_fronts.clear();
+        v5.boundary_release_in_flight = None;
+
+        let valid = HashSet::from([CategoryId::new(1)]);
+        let mut restored = SandEngine::new(5, 2);
+        restored.restore_state(&v5, &valid).unwrap();
+        let migrated = restored.snapshot_state();
+
+        assert_eq!(migrated.version, SandState::VERSION);
+        assert_eq!(migrated.mobilized_grains, v5.mobilized_grains);
+        assert!(migrated.boundary_release_fronts.is_empty());
+        assert!(migrated.boundary_release_in_flight.is_none());
+        assert_eq!(migrated.rng_state, v5.rng_state);
     }
 
     #[test]
@@ -2345,7 +3160,7 @@ mod organic_formation_tests {
     }
 
     #[test]
-    fn v5_restore_rejects_malformed_mobilized_coordinates_without_mutation() {
+    fn v6_restore_rejects_malformed_mobilized_coordinates_without_mutation() {
         let mut source = SandEngine::new(5, 2);
         let x = source.grid_width_dots / 2;
         set_supported_profile(&mut source, x, &[2]);
@@ -2407,7 +3222,7 @@ mod organic_formation_tests {
     }
 
     #[test]
-    fn v5_restart_preserves_hidden_mobility_and_continuation_exactly() {
+    fn v6_restart_preserves_hidden_mobility_and_continuation_exactly() {
         let mut source = SandEngine::new(8, 4);
         source.clear();
         let x = source.grid_width_dots / 2;
@@ -2441,7 +3256,7 @@ mod organic_formation_tests {
     }
 
     #[test]
-    fn v5_restore_rejects_each_mobility_invariant_without_mutation() {
+    fn v6_restore_rejects_each_dynamic_state_invariant_without_mutation() {
         let mut source = SandEngine::new(4, 4);
         source.clear();
         source.grid[1][1] = Some(CategoryId::new(1));
@@ -2477,6 +3292,100 @@ mod organic_formation_tests {
         pre_v5_conflict.version = SandState::REGIONAL_AVALANCHE_VERSION;
         malformed_states.push(pre_v5_conflict);
 
+        let mut overlapping_release_domains = base.clone();
+        overlapping_release_domains.boundary_release_fronts = vec![
+            SandStateBoundaryReleaseFront {
+                direction: BoundaryReleaseDirection::Left,
+                wall_x: 1,
+                front_x: 2,
+            },
+            SandStateBoundaryReleaseFront {
+                direction: BoundaryReleaseDirection::Left,
+                wall_x: 3,
+                front_x: 3,
+            },
+        ];
+        malformed_states.push(overlapping_release_domains);
+
+        let mut unsorted_release_fronts = base.clone();
+        unsorted_release_fronts.boundary_release_fronts = vec![
+            SandStateBoundaryReleaseFront {
+                direction: BoundaryReleaseDirection::Right,
+                wall_x: 2,
+                front_x: 2,
+            },
+            SandStateBoundaryReleaseFront {
+                direction: BoundaryReleaseDirection::Left,
+                wall_x: 1,
+                front_x: 1,
+            },
+        ];
+        malformed_states.push(unsorted_release_fronts);
+
+        let mut reversed_release_front = base.clone();
+        reversed_release_front.boundary_release_fronts = vec![SandStateBoundaryReleaseFront {
+            direction: BoundaryReleaseDirection::Left,
+            wall_x: 2,
+            front_x: 1,
+        }];
+        malformed_states.push(reversed_release_front);
+
+        let mut release_without_target = base.clone();
+        release_without_target.boundary_release_fronts = vec![SandStateBoundaryReleaseFront {
+            direction: BoundaryReleaseDirection::Left,
+            wall_x: 0,
+            front_x: 0,
+        }];
+        malformed_states.push(release_without_target);
+
+        let mut pre_v6_release = base.clone();
+        pre_v6_release.version = SandState::GRAIN_CAUSAL_VERSION;
+        pre_v6_release.boundary_release_fronts = vec![SandStateBoundaryReleaseFront {
+            direction: BoundaryReleaseDirection::Left,
+            wall_x: 1,
+            front_x: 1,
+        }];
+        malformed_states.push(pre_v6_release);
+
+        let mut in_flight_without_front = base.clone();
+        in_flight_without_front.boundary_release_in_flight = Some(SandStateCoordinate { x: 1, y: 1 });
+        malformed_states.push(in_flight_without_front);
+
+        let mut in_flight_empty_coordinate = base.clone();
+        in_flight_empty_coordinate.boundary_release_fronts = vec![SandStateBoundaryReleaseFront {
+            direction: BoundaryReleaseDirection::Left,
+            wall_x: 1,
+            front_x: 1,
+        }];
+        in_flight_empty_coordinate.boundary_release_in_flight =
+            Some(SandStateCoordinate { x: 0, y: 0 });
+        malformed_states.push(in_flight_empty_coordinate);
+
+        let mut pre_v6_in_flight = base.clone();
+        pre_v6_in_flight.version = SandState::GRAIN_CAUSAL_VERSION;
+        pre_v6_in_flight.boundary_release_fronts.clear();
+        pre_v6_in_flight.boundary_release_in_flight =
+            Some(SandStateCoordinate { x: 1, y: 1 });
+        malformed_states.push(pre_v6_in_flight);
+
+        let mut mobile_in_flight = base.clone();
+        mobile_in_flight.boundary_release_fronts = vec![SandStateBoundaryReleaseFront {
+            direction: BoundaryReleaseDirection::Right,
+            wall_x: 0,
+            front_x: 0,
+        }];
+        mobile_in_flight.boundary_release_in_flight = Some(SandStateCoordinate { x: 1, y: 1 });
+        malformed_states.push(mobile_in_flight);
+
+        let mut unrelated_in_flight = base.clone();
+        unrelated_in_flight.boundary_release_fronts = vec![SandStateBoundaryReleaseFront {
+            direction: BoundaryReleaseDirection::Left,
+            wall_x: 1,
+            front_x: 1,
+        }];
+        unrelated_in_flight.boundary_release_in_flight = Some(SandStateCoordinate { x: 2, y: 2 });
+        malformed_states.push(unrelated_in_flight);
+
         for malformed in malformed_states {
             let mut target = SandEngine::new(4, 4);
             let before = target.snapshot_state();
@@ -2486,7 +3395,7 @@ mod organic_formation_tests {
     }
 
     #[test]
-    fn v5_restore_does_not_normalize_empty_mobility() {
+    fn v6_restore_does_not_normalize_empty_mobility() {
         let mut source = SandEngine::new(4, 2);
         let x = source.grid_width_dots / 2;
         set_supported_profile(&mut source, x, &[2]);
@@ -2855,6 +3764,8 @@ mod conservation_tests {
                 pending_runs: Vec::new(),
                 active_avalanche_columns: Vec::new(),
                 mobilized_grains: Vec::new(),
+                boundary_release_fronts: Vec::new(),
+                boundary_release_in_flight: None,
             };
             let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1), CategoryId::new(2)]);
             let mut engine = SandEngine::new(1, 1);

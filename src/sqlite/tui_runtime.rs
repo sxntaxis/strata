@@ -2959,6 +2959,8 @@ mod tests {
             pending_runs: Vec::new(),
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            boundary_release_fronts: Vec::new(),
+            boundary_release_in_flight: None,
         };
         save_sand_state(&path, &state).unwrap();
         let daily = SedimentSnapshot::daily_contribution(
@@ -3154,6 +3156,8 @@ mod clear_all_transaction_tests {
             pending_runs: Vec::new(),
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            boundary_release_fronts: Vec::new(),
+            boundary_release_in_flight: None,
         }
     }
 
@@ -3219,6 +3223,8 @@ mod clear_all_transaction_tests {
             pending_runs: Vec::new(),
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            boundary_release_fronts: Vec::new(),
+            boundary_release_in_flight: None,
         };
         let snapshot =
             SedimentSnapshot::day_end_checkpoint("2026-08-01".to_string(), state.clone());
@@ -3261,6 +3267,8 @@ mod clear_all_transaction_tests {
             pending_runs: Vec::new(),
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            boundary_release_fronts: Vec::new(),
+            boundary_release_in_flight: None,
         };
         let payload = serde_json::to_string(&state).unwrap();
         let repository = open_cli_repository(&path).unwrap();
@@ -3428,6 +3436,8 @@ mod clear_all_additional_transaction_tests {
             pending_runs: Vec::new(),
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            boundary_release_fronts: Vec::new(),
+            boundary_release_in_flight: None,
         }
     }
 
@@ -3741,6 +3751,8 @@ mod clear_all_additional_transaction_tests {
                 .collect(),
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            boundary_release_fronts: Vec::new(),
+            boundary_release_in_flight: None,
         }
     }
 

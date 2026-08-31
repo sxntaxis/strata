@@ -1890,6 +1890,8 @@ impl App {
             pending_runs: state.pending_runs.clone(),
             active_avalanche_columns: state.active_avalanche_columns.clone(),
             mobilized_grains: Vec::new(),
+            boundary_release_fronts: Vec::new(),
+            boundary_release_in_flight: None,
             sweep_left_to_right: state.sweep_left_to_right,
             rng_state: state.rng_state,
             ingress_focus_x: state.ingress_focus_x,
@@ -2641,6 +2643,8 @@ mod recovery_statement_tests {
                 pending_runs: Vec::new(),
                 active_avalanche_columns: Vec::new(),
                 mobilized_grains: Vec::new(),
+                boundary_release_fronts: Vec::new(),
+                boundary_release_in_flight: None,
             },
             pending_mutations: Vec::new(),
             recovery_target_utc: None,
@@ -2797,6 +2801,8 @@ mod transition_edge_tests {
             pending_runs: Vec::new(),
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            boundary_release_fronts: Vec::new(),
+            boundary_release_in_flight: None,
         }
     }
 
@@ -3003,6 +3009,8 @@ mod day_end_snapshot_tests {
             }],
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            boundary_release_fronts: Vec::new(),
+            boundary_release_in_flight: None,
         }
     }
 

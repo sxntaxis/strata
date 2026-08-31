@@ -907,6 +907,8 @@ mod tests {
                 pending_runs: Vec::new(),
                 active_avalanche_columns: Vec::new(),
                 mobilized_grains: Vec::new(),
+                boundary_release_fronts: Vec::new(),
+                boundary_release_in_flight: None,
             },
             simulation_time_utc: captured.to_rfc3339(),
             pending_mutations: Vec::new(),
