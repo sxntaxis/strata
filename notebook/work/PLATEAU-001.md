@@ -317,7 +317,7 @@ Native execution completed at final source `f4f9683586f362342b259f6c83170a6e02ee
 
 #### H7 — Passive rupture-opportunity diagnostics
 
-Status: **AUTHORED PASSIVE BENCH / NATIVE EXECUTION REQUIRED**.
+Status: **NATIVE-CERTIFIED PASSIVE EVIDENCE**.
 
 H6 answered the threshold-cross hypothesis but exposed a deeper historical contrast. H2/H3 real-cadence local activity produced median eight-move avalanches (40x20 p95 82; 80x30 p95 20), while H4 deliberately removed radius-one activation and now preserves the owner-preferred contact-supported hills with structural move p95 around four to five and distinct-column p95 three. The next step is therefore diagnosis, not another parameter guess.
 
@@ -331,7 +331,19 @@ H7 leaves H4 and H6 behavior untouched. After each actual H4 diagonal topple, a 
 - H6's exact supported threshold crossing (`<=1 -> >1`);
 - supported but already-dynamic relief 2, relief 3, or relief >=4 before the topple.
 
-The ignored real-cadence census reports those classes per actual topple for 40x20 and 80x30. It activates no grain, consumes no extra RNG, changes no topology, and adds no persisted state. If already-dynamic supported opportunities materially dominate H6 crossings, a later bench may test a deliberately bounded rupture-transfer token rather than reviving H2's radius. If they are rare, avalanche perceptibility should be pursued outside neighbor activation rather than by weakening H4.
+The ignored real-cadence census reports those classes per actual topple for 40x20 and 80x30. It activates no grain, consumes no extra RNG, changes no topology, and adds no persisted state.
+
+Native execution completed at final source `46a3621ccbcb174921d8f015c834838fa31c6f9b` / tree `e132f614485013a2fd12eb028af84896b0e5a10e`. H6 4,000-ingress replay was exactly identical apart from elapsed time, proving the H7 refactor did not perturb the prior experiment. The immediately-uphill H4 support-loss class was zero in every H7 lane; this is a statement about that exact census position, not about H4 support-loss globally. No-dynamic-relief dominated roughly 82-85% of actual topples. H6 threshold crossings occurred about 43-57 per 1,000 topples, while preexisting already-dynamic supported opportunities occurred about 43-60 per 1,000. The strongest unsaturated lane, 80x30 / 10,000, observed 2,561 topples: 2,099 no-dynamic-relief, 164 already mobilized, 125 H6 threshold crossings, and 154 latent preexisting opportunities split as relief 2 = 100, relief 3 = 32, relief >=4 = 22. H7 therefore establishes enough real face geometry for one narrower transfer experiment, but does not support restoring H2's radius.
+
+#### H8 — Exact-path relief-2 rupture-token bench
+
+Status: **AUTHORED TEST-ONLY A/B / NATIVE EXECUTION REQUIRED**.
+
+H8 targets avalanche width rather than general instability. It does not wake the H6 threshold-cross grain and it deliberately protects the sharper relief-3+ contact-supported shapes that may contribute to the owner-preferred topology. After an actual H4 diagonal topple, the immediately-uphill surface is eligible only when H7 classifies it as preexisting supported relief exactly `2`. That exact grain receives a transient token tied to the causal source side.
+
+When its normal sweep position is reached, the token may perform one exact diagonal topple into that causal side if the grain is still the supported surface and has not meanwhile become H4-mobilized. The move does **not** copy a mobility bit to the moved grain and does **not** call same-column slip-lineage inheritance. Real support loss caused by the vacancy still uses H4's existing dependent wakeup. The token is then recomputed from the topple geometry: if the next immediately-uphill grain is another supported preexisting-relief-2 step, the token passes one column farther; otherwise it ends. This permits a bounded staircase-like rupture front without a radius, scan, static-threshold retune, or durable activity field.
+
+Deterministic fixtures cover a two-hop `6/7/5/3/1` face, exclusion of H6 `1 -> 2` threshold crossings, exclusion of preexisting relief 3+, and H4 authority when a token candidate becomes genuinely mobilized before token execution. The ignored H8 A/B uses the same seeds and real-cadence 40x20 / 80x30 harness as H6 at configurable 4,000 and 10,000 ingress. It reports multi-column episodes, token episodes/chains/transfers/moves, move and column percentiles, lineage, quiet spacing, roughness, variance, maximum adjacent delta, plateaus, occupied width, height, pending mass, conservation, and bounded drain. H8 remains rejected unless it materially widens ordinary cascades without H6-like topology degradation.
 
 ### RHYTHM-001 — Focus/Pomodoro experiment (optional)
 
@@ -347,7 +359,7 @@ Preferred progression:
 
 ## Agent locator
 
-Current edge: **PLATEAU-001H / H7 passive rupture-opportunity diagnostics**. H5 resize boundary release is native-certified at `3920ab3899f3249569f2dfb8c990e6389cb6fc47` and awaits publication. H6 threshold-cross slip-front propagation is natively benched and rejected for production. H7 changes no sediment behavior: it measures what kind of immediately-uphill opportunity exists after real H4 topples before any new rupture-transfer rule is designed. Ingress-focus padding remains later so deposition is not mixed with relaxation.
+Current edge: **PLATEAU-001H / H8 exact-path relief-2 rupture-token A/B**. H5 resize boundary release is native-certified at `3920ab3899f3249569f2dfb8c990e6389cb6fc47` and awaits publication. H6 threshold-cross slip-front propagation is rejected. H7 is native-certified passive evidence at `46a3621ccbcb174921d8f015c834838fa31c6f9b` and establishes real latent supported face opportunity. H8 changes no production behavior; it tests whether a transient one-hop token across contiguous relief-2 steps can widen rupture without H6-like topology damage. Ingress-focus padding remains later so deposition is not mixed with relaxation.
 
 HISTORY-001A/B/C are native-green through `09412b703cf41016f889d725ba235a7a1e63ae6a`. HISTORY-001C established the completed-Idle split transaction, active-preview validation, atomic daily-contribution reconciliation, and Balance historical editor. HISTORY-001D now generalizes that safe primitive into arbitrary From/To activity assignment with explicit collision confirmation and protected live selection.
 
