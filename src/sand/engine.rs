@@ -170,6 +170,21 @@ struct ViewportBounds {
     y_end: usize,
 }
 
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SlipFrontOpportunity {
+    OutOfBounds,
+    Empty,
+    NoDynamicRelief,
+    RouteBlocked,
+    H4SupportLoss,
+    AlreadyMobilized,
+    H6ThresholdCross,
+    PreexistingRelief2,
+    PreexistingRelief3,
+    PreexistingRelief4Plus,
+}
+
 pub struct SandEngine {
     pub(crate) grid: Vec<Vec<Option<CategoryId>>>,
     pub cell_width: u16,
@@ -205,6 +220,8 @@ pub struct SandEngine {
     slip_front_bench_enabled: bool,
     #[cfg(test)]
     last_slip_front_mobilizations: usize,
+    #[cfg(test)]
+    last_slip_front_opportunity: Option<SlipFrontOpportunity>,
     #[cfg(test)]
     last_diagonal_topple_source_x: Option<usize>,
     pub grain_count: usize,
@@ -250,6 +267,8 @@ impl SandEngine {
             slip_front_bench_enabled: false,
             #[cfg(test)]
             last_slip_front_mobilizations: 0,
+            #[cfg(test)]
+            last_slip_front_opportunity: None,
             #[cfg(test)]
             last_diagonal_topple_source_x: None,
             grain_count: 0,
@@ -748,6 +767,64 @@ impl SandEngine {
     }
 
     #[cfg(test)]
+    fn bench_classify_uphill_slip_front(
+        &self,
+        bounds: ViewportBounds,
+        source_x: usize,
+        target_x: usize,
+        source_height_before: usize,
+    ) -> (SlipFrontOpportunity, Option<(usize, usize)>) {
+        debug_assert!(source_height_before > 0);
+        let uphill_x = if target_x < source_x {
+            source_x.checked_add(1)
+        } else {
+            source_x.checked_sub(1)
+        };
+        let Some(uphill_x) = uphill_x else {
+            return (SlipFrontOpportunity::OutOfBounds, None);
+        };
+        if uphill_x < bounds.x_start || uphill_x >= bounds.x_end {
+            return (SlipFrontOpportunity::OutOfBounds, None);
+        }
+
+        let uphill_height = self.supported_heights[uphill_x];
+        if uphill_height == 0 {
+            return (SlipFrontOpportunity::Empty, None);
+        }
+        let source_height_after = source_height_before - 1;
+        let relief_before = uphill_height.saturating_sub(source_height_before);
+        let relief_after = uphill_height.saturating_sub(source_height_after);
+        if relief_after <= DYNAMIC_REPOSE_RELIEF {
+            return (SlipFrontOpportunity::NoDynamicRelief, None);
+        }
+
+        let uphill_y = bounds.y_end - uphill_height;
+        if self.grid[uphill_y][uphill_x].is_none() || uphill_y + 1 >= bounds.y_end {
+            return (SlipFrontOpportunity::Empty, None);
+        }
+        if self.grid[uphill_y + 1][source_x].is_some() {
+            return (SlipFrontOpportunity::RouteBlocked, None);
+        }
+        if !self.grain_has_static_support(bounds, uphill_x, uphill_y) {
+            return (SlipFrontOpportunity::H4SupportLoss, None);
+        }
+        if self.mobilized[uphill_y][uphill_x] {
+            return (SlipFrontOpportunity::AlreadyMobilized, None);
+        }
+
+        let opportunity = if relief_before <= DYNAMIC_REPOSE_RELIEF {
+            SlipFrontOpportunity::H6ThresholdCross
+        } else if relief_before == 2 {
+            SlipFrontOpportunity::PreexistingRelief2
+        } else if relief_before == 3 {
+            SlipFrontOpportunity::PreexistingRelief3
+        } else {
+            SlipFrontOpportunity::PreexistingRelief4Plus
+        };
+        (opportunity, Some((uphill_x, uphill_y)))
+    }
+
+    #[cfg(test)]
     fn bench_mobilize_uphill_slip_front(
         &mut self,
         bounds: ViewportBounds,
@@ -755,50 +832,26 @@ impl SandEngine {
         target_x: usize,
         source_height_before: usize,
     ) {
-        if !self.slip_front_bench_enabled || source_height_before == 0 {
+        if source_height_before == 0 {
+            return;
+        }
+        let (opportunity, candidate) = self.bench_classify_uphill_slip_front(
+            bounds,
+            source_x,
+            target_x,
+            source_height_before,
+        );
+        self.last_slip_front_opportunity = Some(opportunity);
+        if !self.slip_front_bench_enabled || opportunity != SlipFrontOpportunity::H6ThresholdCross {
             return;
         }
 
-        let uphill_x = if target_x < source_x {
-            source_x.checked_add(1)
-        } else {
-            source_x.checked_sub(1)
+        let Some((uphill_x, uphill_y)) = candidate else {
+            return;
         };
-        let Some(uphill_x) = uphill_x else {
-            return;
-        };
-        if uphill_x < bounds.x_start || uphill_x >= bounds.x_end {
-            return;
-        }
-
-        let uphill_height = self.supported_heights[uphill_x];
-        if uphill_height == 0 {
-            return;
-        }
-        let source_height_after = source_height_before - 1;
-        let relief_before = uphill_height.saturating_sub(source_height_before);
-        let relief_after = uphill_height.saturating_sub(source_height_after);
-        if relief_before > DYNAMIC_REPOSE_RELIEF || relief_after <= DYNAMIC_REPOSE_RELIEF {
-            return;
-        }
-
-        let uphill_y = bounds.y_end - uphill_height;
-        if self.grid[uphill_y][uphill_x].is_none() || uphill_y + 1 >= bounds.y_end {
-            return;
-        }
-        if self.grid[uphill_y + 1][source_x].is_some() {
-            return;
-        }
-        // H4 already wakes a diagonal dependent that actually loses static
-        // support. H6 measures only the distinct case where another lower
-        // diagonal still braces the uphill surface, but this exact topple
-        // steepened the face toward the vacated source from relief 1 to 2.
-        if !self.grain_has_static_support(bounds, uphill_x, uphill_y)
-            || self.mobilized[uphill_y][uphill_x]
-        {
-            return;
-        }
-
+        // H4 already owns complete support loss. H6 is deliberately narrower:
+        // the uphill surface retained another lower-diagonal brace, but this
+        // exact topple changed its relief toward the source from 1 to 2.
         self.mobilized[uphill_y][uphill_x] = true;
         self.last_slip_front_mobilizations += 1;
     }
@@ -941,6 +994,7 @@ impl SandEngine {
             self.last_mobilized_vertical_moves = 0;
             self.last_mobilized_diagonal_moves = 0;
             self.last_slip_front_mobilizations = 0;
+            self.last_slip_front_opportunity = None;
             self.last_diagonal_topple_source_x = None;
         }
         let Some(bounds) = self.viewport_bounds() else {
@@ -2653,6 +2707,184 @@ mod organic_formation_tests {
             assert!(!engine.mobilized[uphill_y][uphill]);
             assert_eq!(engine.last_slip_front_mobilizations, 0);
         }
+    }
+
+    #[test]
+    fn h7_slip_front_opportunity_probe_distinguishes_h4_h6_and_latent_relief() {
+        fn classify(heights: [usize; 4], pre_mobilize_uphill: bool) -> SlipFrontOpportunity {
+            let mut engine = SandEngine::new(8, 4);
+            engine.clear();
+            let bounds = engine.viewport_bounds().unwrap();
+            let outer = bounds.x_start + 3;
+            let uphill = outer + 1;
+            let source = uphill + 1;
+            seed_supported_columns(&mut engine, outer, &heights);
+            if pre_mobilize_uphill {
+                let uphill_y = bounds.y_end - heights[1];
+                engine.mobilized[uphill_y][uphill] = true;
+            }
+            let source_y = bounds.y_end - heights[2];
+            engine.mobilized[source_y][source] = true;
+
+            assert!(engine.topple_mobilized_column(bounds, source));
+            engine.last_slip_front_opportunity.unwrap()
+        }
+
+        assert_eq!(
+            classify([3, 3, 3, 1], false),
+            SlipFrontOpportunity::NoDynamicRelief
+        );
+        assert_eq!(
+            classify([0, 4, 3, 1], false),
+            SlipFrontOpportunity::H4SupportLoss
+        );
+        assert_eq!(
+            classify([3, 4, 3, 1], true),
+            SlipFrontOpportunity::AlreadyMobilized
+        );
+        assert_eq!(
+            classify([3, 4, 3, 1], false),
+            SlipFrontOpportunity::H6ThresholdCross
+        );
+        assert_eq!(
+            classify([4, 5, 3, 1], false),
+            SlipFrontOpportunity::PreexistingRelief2
+        );
+        assert_eq!(
+            classify([5, 6, 3, 1], false),
+            SlipFrontOpportunity::PreexistingRelief3
+        );
+        assert_eq!(
+            classify([6, 7, 3, 1], false),
+            SlipFrontOpportunity::PreexistingRelief4Plus
+        );
+    }
+
+    #[test]
+    #[ignore = "explicit H7 passive rupture-opportunity census"]
+    fn h7_slip_front_opportunity_census_40x20_and_80x30() {
+        use std::time::Instant;
+
+        #[derive(Default)]
+        struct Counts {
+            topples: usize,
+            out_of_bounds: usize,
+            empty: usize,
+            no_dynamic_relief: usize,
+            route_blocked: usize,
+            h4_support_loss: usize,
+            already_mobilized: usize,
+            h6_threshold_cross: usize,
+            preexisting_relief_2: usize,
+            preexisting_relief_3: usize,
+            preexisting_relief_4_plus: usize,
+        }
+
+        impl Counts {
+            fn record(&mut self, opportunity: SlipFrontOpportunity) {
+                self.topples += 1;
+                match opportunity {
+                    SlipFrontOpportunity::OutOfBounds => self.out_of_bounds += 1,
+                    SlipFrontOpportunity::Empty => self.empty += 1,
+                    SlipFrontOpportunity::NoDynamicRelief => self.no_dynamic_relief += 1,
+                    SlipFrontOpportunity::RouteBlocked => self.route_blocked += 1,
+                    SlipFrontOpportunity::H4SupportLoss => self.h4_support_loss += 1,
+                    SlipFrontOpportunity::AlreadyMobilized => self.already_mobilized += 1,
+                    SlipFrontOpportunity::H6ThresholdCross => self.h6_threshold_cross += 1,
+                    SlipFrontOpportunity::PreexistingRelief2 => self.preexisting_relief_2 += 1,
+                    SlipFrontOpportunity::PreexistingRelief3 => self.preexisting_relief_3 += 1,
+                    SlipFrontOpportunity::PreexistingRelief4Plus => {
+                        self.preexisting_relief_4_plus += 1
+                    }
+                }
+            }
+
+            fn latent_preexisting(&self) -> usize {
+                self.preexisting_relief_2
+                    + self.preexisting_relief_3
+                    + self.preexisting_relief_4_plus
+            }
+        }
+
+        fn run(width: u16, height: u16, ingress_count: usize) {
+            let started = Instant::now();
+            let mut engine = SandEngine::new(width, height);
+            engine.rng_state = 0xC0FF_EE00_0000_0001 ^ u64::from(width);
+            engine.slip_front_bench_enabled = false;
+            let mut counts = Counts::default();
+
+            for ingress in 0..ingress_count {
+                engine.spawn(CategoryId::new(1));
+                let gravity_passes = if ingress % 8 < 5 { 15 } else { 16 };
+                for _ in 0..gravity_passes {
+                    engine.apply_gravity();
+                    if engine.last_diagonal_topple {
+                        counts.record(
+                            engine
+                                .last_slip_front_opportunity
+                                .expect("every diagonal topple must produce one H7 opportunity class"),
+                        );
+                    }
+                }
+            }
+
+            let mut settled_streak = 0usize;
+            for _ in 0..50_000 {
+                engine.apply_gravity();
+                if engine.last_diagonal_topple {
+                    counts.record(
+                        engine
+                            .last_slip_front_opportunity
+                            .expect("every drain topple must produce one H7 opportunity class"),
+                    );
+                }
+                let moving = engine.last_ordinary_vertical_moves > 0
+                    || engine.last_avalanche_motion
+                    || engine.mobilized.iter().flatten().any(|mobile| *mobile);
+                if moving {
+                    settled_streak = 0;
+                } else {
+                    settled_streak += 1;
+                    if settled_streak >= 4 {
+                        break;
+                    }
+                }
+            }
+            assert!(
+                !engine.mobilized.iter().flatten().any(|mobile| *mobile),
+                "H7 census must drain unchanged H4 mobility"
+            );
+            let mass = engine.physical_grain_count() + engine.pending_grain_count();
+            assert_eq!(mass, ingress_count);
+            let latent = counts.latent_preexisting();
+            println!(
+                "H7_CENSUS {width}x{height} ingress={ingress_count} elapsed={:?} topples={} out_of_bounds={} empty={} no_dynamic_relief={} route_blocked={} h4_support_loss={} already_mobilized={} h6_threshold_cross={} preexisting_relief_2={} preexisting_relief_3={} preexisting_relief_4_plus={} latent_preexisting={} threshold_per_1000={:.3} latent_per_1000={:.3} latent_to_threshold={:.3} pending={}",
+                started.elapsed(),
+                counts.topples,
+                counts.out_of_bounds,
+                counts.empty,
+                counts.no_dynamic_relief,
+                counts.route_blocked,
+                counts.h4_support_loss,
+                counts.already_mobilized,
+                counts.h6_threshold_cross,
+                counts.preexisting_relief_2,
+                counts.preexisting_relief_3,
+                counts.preexisting_relief_4_plus,
+                latent,
+                counts.h6_threshold_cross as f64 * 1000.0 / counts.topples.max(1) as f64,
+                latent as f64 * 1000.0 / counts.topples.max(1) as f64,
+                latent as f64 / counts.h6_threshold_cross.max(1) as f64,
+                engine.pending_grain_count(),
+            );
+        }
+
+        let ingress_count = std::env::var("H7_INGRESS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(4_000);
+        run(40, 20, ingress_count);
+        run(80, 30, ingress_count);
     }
 
     #[test]
