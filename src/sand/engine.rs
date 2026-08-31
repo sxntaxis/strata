@@ -2870,7 +2870,6 @@ mod organic_formation_tests {
         let uphill_two = start + 1;
         let uphill_one = start + 2;
         let source = start + 3;
-        let target = start + 4;
         let source_y = bounds.y_end - 3;
         engine.mobilized[source_y][source] = true;
 
