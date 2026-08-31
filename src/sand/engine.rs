@@ -2319,7 +2319,7 @@ mod tests {
 
         let bounds = engine.viewport_bounds().expect("expanded viewport");
         engine.derive_supported_heights(bounds);
-        let columns = vec![outward_x, wall_x, inward_1, inward_2, inward_3];
+        let columns = [outward_x, wall_x, inward_1, inward_2, inward_3];
         for pair in columns.windows(2) {
             let outward_height = engine.supported_heights[pair[0]];
             let inward_height = engine.supported_heights[pair[1]];
