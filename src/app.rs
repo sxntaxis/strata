@@ -344,6 +344,11 @@ fn should_use_bounded_catchup(backlog: Duration) -> bool {
     backlog > Duration::from_secs(CATCHUP_SETTINGS.bounded_catchup_after_secs)
 }
 
+fn should_use_visual_catchup(backlog: Duration) -> bool {
+    backlog > Duration::from_millis(CATCHUP_SETTINGS.cadence_ms)
+        && !should_use_bounded_catchup(backlog)
+}
+
 fn recovery_target_for_claim(
     persisted_target_utc: Option<DateTime<Utc>>,
     claim_time_utc: DateTime<Utc>,
@@ -1710,18 +1715,27 @@ impl App {
                 self.simulation.catchup_cadence_accumulator = Duration::ZERO;
                 self.render_needed = true;
             }
-        } else if backlog.is_zero() {
-            if let Err(error) = self.advance_simulation_by(Duration::ZERO, tick_rate, physics_rate)
-            {
-                self.record_storage_result_for::<()>(
-                    PersistenceOperation::DailySnapshotSave,
-                    RecoveryAction::FlushCurrentState,
-                    Err(error),
-                );
-                return;
+        } else if !should_use_visual_catchup(backlog) {
+            // Live time is not catch-up. Advance it immediately so ordinary 32 ms
+            // physics events are not grouped behind the 120 ms accelerated-catch-up
+            // cadence. Event accumulators still own spawn/physics ordering, so
+            // slicing live wall time more finely changes presentation only.
+            self.simulation.catchup_cadence_accumulator = Duration::ZERO;
+            match self.advance_simulation_by(backlog, tick_rate, physics_rate) {
+                Ok(visual_event) => {
+                    if visual_event {
+                        self.render_needed = true;
+                    }
+                }
+                Err(error) => {
+                    self.record_storage_result_for::<()>(
+                        PersistenceOperation::DailySnapshotSave,
+                        RecoveryAction::FlushCurrentState,
+                        Err(error),
+                    );
+                    return;
+                }
             }
-            self.simulation.catchup_cadence_accumulator =
-                self.simulation.catchup_cadence_accumulator.min(cadence);
         } else {
             while self.simulation.catchup_cadence_accumulator >= cadence {
                 self.simulation.catchup_cadence_accumulator = self
@@ -1932,14 +1946,15 @@ impl App {
         delta: Duration,
         tick_rate: Duration,
         physics_rate: Duration,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
         let target_time = self.simulation.simulation_time_utc
             + ChronoDuration::from_std(delta).unwrap_or(ChronoDuration::zero());
 
         if delta.is_zero() {
-            return Ok(());
+            return Ok(false);
         }
 
+        let mut visual_event = false;
         while self.simulation.simulation_time_utc < target_time {
             let config = crate::domain::day_boundary_config();
             let (ending_day, next_boundary) = temporal::next_operational_day_boundary_after(
@@ -1951,7 +1966,7 @@ impl App {
                 .to_std()
                 .map_err(|error| error.to_string())?;
 
-            self.process_simulation_delta(remaining, tick_rate, physics_rate);
+            visual_event |= self.process_simulation_delta(remaining, tick_rate, physics_rate);
             self.simulation.simulation_time_utc = segment_target;
 
             if segment_target == next_boundary {
@@ -1963,7 +1978,7 @@ impl App {
                 )?;
             }
         }
-        Ok(())
+        Ok(visual_event)
     }
 
     fn process_simulation_delta(
@@ -1971,7 +1986,8 @@ impl App {
         mut delta: Duration,
         tick_rate: Duration,
         physics_rate: Duration,
-    ) {
+    ) -> bool {
+        let mut visual_event = false;
         while !delta.is_zero() {
             let spawn_left = tick_rate.saturating_sub(self.simulation.spawn_accumulator);
             let physics_left = physics_rate.saturating_sub(self.simulation.physics_accumulator);
@@ -1989,6 +2005,7 @@ impl App {
                 self.simulation.spawn_accumulator =
                     self.simulation.spawn_accumulator.saturating_sub(tick_rate);
                 self.run_spawn_tick();
+                visual_event = true;
             }
 
             if physics_due {
@@ -1997,12 +2014,14 @@ impl App {
                     .physics_accumulator
                     .saturating_sub(physics_rate);
                 self.run_physics_tick();
+                visual_event = true;
             }
 
             if step.is_zero() && !spawn_due && !physics_due {
                 break;
             }
         }
+        visual_event
     }
 
     fn run_spawn_tick(&mut self) {
@@ -2590,6 +2609,7 @@ mod recovery_statement_tests {
         DetachedRuntimeCheckpoint, PostTargetClass, RecoveredIntervalClass,
         build_recovery_statement, recovery_target_for_claim,
         repair_initial_checkpoint_simulation_boundary, should_use_bounded_catchup,
+        should_use_visual_catchup,
     };
     use crate::sand::SandState;
 
@@ -2662,6 +2682,20 @@ mod recovery_statement_tests {
         assert!(!should_use_bounded_catchup(Duration::from_secs(8)));
         assert!(should_use_bounded_catchup(Duration::from_secs(9)));
         assert!(should_use_bounded_catchup(Duration::from_secs(60 * 60)));
+    }
+
+    #[test]
+    fn steady_live_time_is_not_batched_behind_catchup_cadence() {
+        let live_edge = Duration::from_millis(crate::constants::CATCHUP_SETTINGS.cadence_ms);
+        let physics = Duration::from_millis(crate::constants::TIME_SETTINGS.physics_ms);
+        let gravity = physics.saturating_mul(2);
+        let render = Duration::from_millis(1000 / crate::constants::TIME_SETTINGS.target_fps);
+
+        assert!(!should_use_visual_catchup(physics));
+        assert!(!should_use_visual_catchup(live_edge));
+        assert!(should_use_visual_catchup(live_edge + Duration::from_millis(1)));
+        assert!(!should_use_visual_catchup(Duration::from_secs(9)));
+        assert!(render < gravity);
     }
 
     #[test]
