@@ -280,7 +280,7 @@ Native validation is complete at `f00b628bd37c42a9b27b2abb4b73b1068c74f551`: exa
 
 #### H5 — Resize boundary release
 
-Status: **NATIVE-CERTIFIED / PUBLICATION PENDING**.
+Status: **NATIVE-CERTIFIED IMPLEMENTATION EVIDENCE / OWNER-REJECTED AS SUFFICIENT PRODUCT BEHAVIOR**.
 
 Admitted from concrete owner screenshots and daily use, not feature-seeking. When the live terminal widens, a side wall that previously confined the visible basin can become an interior column. H4 correctly treats a visible wall as static contact support, but current resize merely exposes empty space and supplies no physical event, leaving the former edge frozen as an artificial vertical cut.
 
@@ -293,9 +293,11 @@ Accepted semantics are deliberately narrow:
 - that grain is marked only when the newly exposed outward diagonal provides the existing dynamic relief `>1` route;
 - all later movement, same-source slip lineage, support-loss propagation, sweep ordering, and persistence remain ordinary H4/SandState v5 behavior.
 
-The candidate adds focused regressions for both canonical growth and hidden-canvas re-expansion. Native certification passed at `3920ab3899f3249569f2dfb8c990e6389cb6fc47` / tree `8f3f69f7baeb15cd60423e5663b36647efd4a68b`: focused H5 tests passed; focused H4/organic tests passed 22 with the explicit behavior bench ignored; the full library passed 272 with one ignored benchmark; 23 integration tests, formatting, strict Clippy, help smoke, and diff hygiene all passed. The only fallout commit was rustfmt-only. H5 is certified but not yet merged to main.
+The candidate adds focused regressions for both canonical growth and hidden-canvas re-expansion. Native certification passed at `3920ab3899f3249569f2dfb8c990e6389cb6fc47` / tree `8f3f69f7baeb15cd60423e5663b36647efd4a68b`: focused H5 tests passed; focused H4/organic tests passed 22 with the explicit behavior bench ignored; the full library passed 272 with one ignored benchmark; 23 integration tests, formatting, strict Clippy, help smoke, and diff hygiene all passed. The only fallout commit was rustfmt-only. A later clean H5+H9 composition also passed exact native source-equivalence/full-check proof at `58b6a5d91b2fae2bdb4b244e793416b8fffab8c8`.
 
-No slip-front propagation or ingress-focus padding belongs to H5. Those remain separate follow-ups so relaxation and deposition cannot be conflated with boundary correctness.
+Owner visual acceptance then deliberately widened a live pile and reproduced the original product defect in a subtler form: after the one-shot former-wall grain moved, a replacement near-vertical interior face remained frozen while new sediment accumulated in the newly exposed space. The evidence therefore rejects H5 as the final resize rule despite its mechanical/native correctness. The clean H5+H9 candidate must not merge. H10 below supersedes only this boundary-release mechanism.
+
+No general slip-front propagation or ingress-focus padding belongs to the resize repair. Those remain separate follow-ups so confinement release, general relaxation, and deposition cannot be conflated.
 
 #### H6 — Causal slip-front propagation bench
 
@@ -345,7 +347,7 @@ Native A/B completed at final source `8dc98d4d93c4742db322fb34b07c3749af0bc795` 
 
 #### H9 — Live sediment presentation cadence separation
 
-Status: **NATIVE-CERTIFIED / CLEAN PUBLICATION COMPOSITION PENDING**.
+Status: **NATIVE-CERTIFIED / FROZEN WHILE RESIZE ACCEPTANCE IS REPAIRED**.
 
 H6 and H8 both show a similar failure mode: extra causal activity can perturb equilibrium while ordinary distinct-column p95 stays at three. Before inventing another propagation rule, H9 audits whether H4 motion is actually being presented at the cadence its physics was designed around.
 
@@ -358,9 +360,31 @@ H9 changes runtime scheduling, not sediment physics:
 - only backlog `> 120 ms` enters accelerated visual catch-up;
 - backlog `> 8 s` retains the certified bounded settlement path;
 - `advance_simulation_by` reports whether a spawn or physics event occurred, and live runtime requests redraw on those simulation events;
-- H4/H5 contact, mobility, resize release, RNG, ingress, persistence, snapshots, recovery arithmetic, and catch-up semantics remain otherwise unchanged.
+- H4 contact/mobility, ingress, RNG, mass, due-event ordering, recovery arithmetic, and catch-up semantics remain otherwise unchanged; H10 may extend SandState only for resize-release custody.
 
-The focused scheduler regression pins the intended boundary: 32 ms physics and exactly 120 ms remain live, 121 ms selects visual catch-up, nine seconds selects bounded settlement, and the render interval remains shorter than the 64 ms H4 gravity interval. Native certification completed at final source `17fa94a3655de846641393afb8a23c04c63e80d4` / tree `b6d69e520a02be77182aed70c72b901ff322f16c`: focused thresholds, H4/H5 regressions, recovery/transition regressions, 302 full tests plus 23 integration/process tests, strict formatter/check/Clippy/help smoke, and an isolated PTY runtime/restart proof all passed. H9 should still receive one short owner visual judgment before publication because its intended benefit is perceptual.
+The focused scheduler regression pins the intended boundary: 32 ms physics and exactly 120 ms remain live, 121 ms selects visual catch-up, nine seconds selects bounded settlement, and the render interval remains shorter than the 64 ms H4 gravity interval. Native certification completed at final source `17fa94a3655de846641393afb8a23c04c63e80d4` / tree `b6d69e520a02be77182aed70c72b901ff322f16c`: focused thresholds, H4/H5 regressions, recovery/transition regressions, 302 full tests plus 23 integration/process tests, strict formatter/check/Clippy/help smoke, and an isolated PTY runtime/restart proof all passed. The clean H5+H9 composition later passed exact equivalence/full validation. Owner viewing confirms that ordinary falling motion is markedly smoother, while also exposing a synchronized periodic spatial jump across falling dots and a perception that diagonal slips move too quickly or retain too much momentum. Those are separate presentation/friction findings. General avalanche visibility remained inconclusive because the pile was still low and the deliberate resize test produced the H5 frozen-wall topology. H9 stays frozen during H10.
+
+#### H10 — Persistent resize boundary-release lineage + SandState v6
+
+Status: **AUTHORED / NATIVE CERTIFICATION PENDING**.
+
+The H5 failure is not evidence for broader avalanche activation. It shows that wall removal is a continuing confinement-release process: moving one former-wall grain can expose or refill another step of the same face, and a one-shot H4 mobility bit does not retain that causal obligation. H10 therefore changes only resize-originated confinement semantics while keeping H4 ordinary topology and H9 scheduling fixed.
+
+Accepted H10 semantics:
+
+- shrink remains projection-only; widening/re-expansion starts release only for a former visible wall whose newly exposed outward route has bottom-connected relief `>1`;
+- `resize()` itself moves zero grains, consumes zero RNG, preserves mass/category identity, and only records transient release state;
+- each release domain stores the former-wall canonical column, fixed outward direction, and deepest immediately-inward column admitted into that lineage;
+- on a gravity pass, an admitted domain is rechecked from the former wall inward. At most one exact boundary-release diagonal topple may occur, so later inward material cannot refill an outward step and leave a replacement cliff without that step being revisited;
+- a new inward column is admitted only when the already-admitted face is at dynamic repose and that exact adjacent inward surface still has relief `>1` toward the released face;
+- distinct same-side resize events may coexist while their domains are disjoint. Domains normalize only when their admitted intervals actually meet; an older hidden domain cannot block a newer visible release;
+- a grain moved by boundary release does not inherit H4 mobility merely from removed confinement. Relief exactly two lands immediately; relief greater than two creates at most one separately tracked boundary-release grain in flight, which falls vertically under ordinary gravity before release may advance again;
+- genuine support loss caused by the boundary topple continues to use existing H4 exact-dependent causality; no radius, regional activation, terrain scan, threshold retune, or general avalanche token is introduced;
+- hidden release domains and an in-flight release grain freeze with the hidden physics basin and resume exactly on re-expansion; canonical growth shifts all release coordinates by the same canvas offset;
+- full clear removes release transient state. Category-specific removal clears an in-flight marker if it removes that exact grain, while the remaining domain reevaluates normally;
+- SandState v6 persists normalized release domains and the optional exact in-flight coordinate in addition to v5 H4 mobility. v5→v6 preserves exact v5 mobility/RNG/focus/topology and invents no release state; pre-v6 state cannot contain H10 fields. SQLite schema/user_version do not change.
+
+Authored proof includes left/right staircase release, a taller stepped former-wall fixture that must revisit outward columns until every admitted outward→inward relief is `<=1`, re-expansion with an older hidden same-side domain, canonical-growth coordinate shifting, exact v6 restart while a boundary-release grain is airborne, v5→v6 compatibility, and malformed release-state rejection in both engine restore and bounded recovery. Native certification must additionally prove H4/H9 regressions, full fmt/check/strict-Clippy/tests/integration/help smoke, isolated runtime startup, and no H6/H8 experiment machinery. No human avalanche judgment is required until H10 itself passes native proof; the next owner action is one short deliberate resize acceptance.
 
 ### RHYTHM-001 — Focus/Pomodoro experiment (optional)
 
@@ -376,7 +400,7 @@ Preferred progression:
 
 ## Agent locator
 
-Current edge: **PLATEAU-001H / clean H5+H9 publication composition**. H5 resize boundary release is native-certified at `3920ab3899f3249569f2dfb8c990e6389cb6fc47`; H9 live cadence is native-certified at `17fa94a3655de846641393afb8a23c04c63e80d4`. H6 threshold-cross propagation and H8 exact-path rupture tokens are native-benched and rejected for production; H7 remains passive evidence. The publication branch must contain only H5 + H9 production changes, with rejected experiment code excluded. After composition certification, one short owner visual pass decides whether H9 sufficiently restores avalanche perceptibility. Ingress-focus padding remains the next separate deposition unit.
+Current edge: **PLATEAU-001H / H10 persistent resize boundary release**. The clean H5+H9 candidate `58b6a5d91b2fae2bdb4b244e793416b8fffab8c8` passed native composition proof but must not merge because owner visual acceptance rejected H5's one-shot confinement release. H9 remains native-certified/frozen. H6 and H8 remain rejected test-only evidence; H7 remains passive evidence. H10 now owns resize correctness and SandState v6 transient custody. Native certification comes first, then one short owner deliberate-resize pass. General avalanche physics, synchronized falling-dot jump, slip-friction cadence, and ingress-focus padding remain separate later units.
 
 HISTORY-001A/B/C are native-green through `09412b703cf41016f889d725ba235a7a1e63ae6a`. HISTORY-001C established the completed-Idle split transaction, active-preview validation, atomic daily-contribution reconciliation, and Balance historical editor. HISTORY-001D now generalizes that safe primitive into arbitrary From/To activity assignment with explicit collision confirmation and protected live selection.
 

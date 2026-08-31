@@ -99,7 +99,7 @@ See `docs/RECOVERY_AUTHORITY.md`.
 - The logical sand canvas is persisted independently from terminal dimensions.
 - Shrinking a terminal changes only the viewport/projection.
 - Growing beyond the current logical canvas expands it monotonically, preserving existing cells around the horizontal center and bottom baseline and filling new space with emptiness.
-- When live viewport widening removes a temporary lateral wall, only that former wall's exact bottom-connected surface grain may receive a one-shot H4 mobility trigger, and only if newly exposed outward space has dynamic relief `>1`; resize itself never reflows grains or changes mass.
+- When live viewport widening removes a temporary lateral wall and exposes dynamic relief `>1`, resize records a persistent boundary-release lineage rather than reflowing grains. The lineage drains only toward the newly opened side, rechecks its already-admitted face before advancing one column inward, and persists exact in-flight release custody in SandState v6. Boundary-released grains do not inherit H4 mobility merely from wall removal; resize itself moves no grain, consumes no RNG, and changes no mass.
 - The logical canvas does not shrink again merely because the viewport shrinks.
 - Pending grains may occupy newly available capacity after expansion.
 - Historical artifacts remain immutable projections of stored or reconstructed sediment state.
