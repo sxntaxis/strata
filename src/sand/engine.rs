@@ -3245,7 +3245,10 @@ mod organic_formation_tests {
                 !engine.mobilized.iter().flatten().any(|mobile| *mobile),
                 "H8 bench must drain H4 mobility"
             );
-            assert_eq!(engine.rupture_token, None, "H8 bench must drain rupture token");
+            assert_eq!(
+                engine.rupture_token, None,
+                "H8 bench must drain rupture token"
+            );
 
             let structural = episodes
                 .iter()
