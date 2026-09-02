@@ -451,7 +451,7 @@ impl App {
             }
             #[cfg(debug_assertions)]
             CommandIntent::TestingCheatsHelp => Ok(
-                "testingcheats: model <h4|classic|hybrid> · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · clear · status · reset"
+                "testingcheats: model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel> · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · clear · status · reset"
                     .to_string(),
             ),
             #[cfg(debug_assertions)]

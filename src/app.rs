@@ -42,7 +42,9 @@ mod ui_helpers;
 mod view_style;
 
 #[cfg(debug_assertions)]
-use crate::sand::{ClassicRainMode, ClassicSandboxEngine};
+use crate::sand::{
+    ClassicRainMode, ClassicSandboxEngine, OsloBoundaryMode, OsloSandboxEngine,
+};
 use persistence_recovery::{PersistenceOperation, PersistenceRecoveryState, RecoveryAction};
 use terminal_lifecycle::{ManagedTerminal, TerminalSession};
 
@@ -523,6 +525,7 @@ struct SimulationState {
 enum TestingSandEngine {
     H4(SandEngine),
     Classic(ClassicSandboxEngine),
+    Oslo(OsloSandboxEngine),
 }
 
 #[cfg(debug_assertions)]
@@ -531,6 +534,7 @@ impl TestingSandEngine {
         match self {
             Self::H4(_) => "h4",
             Self::Classic(engine) => engine.model_name(),
+            Self::Oslo(engine) => engine.boundary_mode().model_name(),
         }
     }
 
@@ -538,13 +542,27 @@ impl TestingSandEngine {
         match self {
             Self::H4(engine) => engine.spawn(category_id),
             Self::Classic(engine) => engine.spawn(category_id),
+            Self::Oslo(engine) => engine.spawn(category_id),
         }
     }
 
-    fn update(&mut self) {
+    fn update_deferred(&mut self) -> bool {
         match self {
-            Self::H4(engine) => engine.update(),
-            Self::Classic(engine) => engine.update(),
+            Self::H4(engine) => {
+                engine.update();
+                true
+            }
+            Self::Classic(engine) => {
+                engine.update();
+                true
+            }
+            Self::Oslo(engine) => engine.update_deferred(),
+        }
+    }
+
+    fn sync_after_batch(&mut self) {
+        if let Self::Oslo(engine) = self {
+            engine.sync_for_render();
         }
     }
 
@@ -552,6 +570,7 @@ impl TestingSandEngine {
         match self {
             Self::H4(engine) => engine.resize(width, height),
             Self::Classic(engine) => engine.resize(width, height),
+            Self::Oslo(engine) => engine.resize(width, height),
         }
     }
 
@@ -559,6 +578,7 @@ impl TestingSandEngine {
         match self {
             Self::H4(engine) => (engine.cell_width, engine.cell_height),
             Self::Classic(engine) => engine.dimensions(),
+            Self::Oslo(engine) => engine.dimensions(),
         }
     }
 
@@ -566,6 +586,7 @@ impl TestingSandEngine {
         match self {
             Self::H4(engine) => engine.render(categories),
             Self::Classic(engine) => engine.render(categories),
+            Self::Oslo(engine) => engine.render(categories),
         }
     }
 
@@ -573,6 +594,7 @@ impl TestingSandEngine {
         match self {
             Self::H4(engine) => engine.clear(),
             Self::Classic(engine) => engine.clear(),
+            Self::Oslo(engine) => engine.clear(),
         }
     }
 
@@ -580,6 +602,7 @@ impl TestingSandEngine {
         match self {
             Self::H4(engine) => engine.grain_count,
             Self::Classic(engine) => engine.grain_count(),
+            Self::Oslo(engine) => engine.grain_count(),
         }
     }
 
@@ -598,6 +621,35 @@ impl TestingSandEngine {
                     canonical_h,
                     vertical,
                     diagonal
+                )
+            }
+            Self::Oslo(engine) => {
+                let (canonical_w, canonical_h) = engine.canonical_dimensions();
+                let (min_h, max_h, left_h, right_h) = engine.visible_profile();
+                let (rain_left, rain_center, rain_right) = engine.rain_region_counts();
+                format!(
+                    "{} · current={} generated={} settled={} pending={} discharged={} · canonical={}x{} visible-h={} wall={} · profile={}..{} edges={}/{} · avalanches={} last={} p95={} peak={} · rain={}/{}/{}",
+                    engine.boundary_mode().model_name(),
+                    engine.grain_count(),
+                    engine.generated_count(),
+                    engine.settled_count(),
+                    engine.pending_count(),
+                    engine.discharged_count(),
+                    canonical_w,
+                    canonical_h,
+                    engine.visible_height(),
+                    engine.canonical_wall_height(),
+                    min_h,
+                    max_h,
+                    left_h,
+                    right_h,
+                    engine.avalanche_completed(),
+                    engine.avalanche_last_moves(),
+                    engine.avalanche_recent_p95(),
+                    engine.avalanche_peak_moves(),
+                    rain_left,
+                    rain_center,
+                    rain_right
                 )
             }
         }
@@ -2164,7 +2216,24 @@ impl App {
                     mode,
                 )))
             }
-            _ => Err("testingcheats model must be h4, classic, or hybrid".to_string()),
+            "oslo-zero" | "oslo-box" | "oslo-vessel" => {
+                let boundary = match model {
+                    "oslo-zero" => OsloBoundaryMode::ZeroOutside,
+                    "oslo-box" => OsloBoundaryMode::ClosedBox,
+                    "oslo-vessel" => OsloBoundaryMode::CanonicalWallOverflow,
+                    _ => unreachable!("matched Oslo sandbox model"),
+                };
+                Ok(TestingSandEngine::Oslo(OsloSandboxEngine::new(
+                    self.sand_engine.cell_width,
+                    self.sand_engine.cell_height,
+                    self.sand_engine.snapshot_state().rng_state,
+                    boundary,
+                )))
+            }
+            _ => Err(
+                "testingcheats model must be h4, classic, hybrid, oslo-zero, oslo-box, or oslo-vessel"
+                    .to_string(),
+            ),
         }
     }
 
@@ -2279,14 +2348,14 @@ impl App {
             if physics_due {
                 testing.physics_accumulator =
                     testing.physics_accumulator.saturating_sub(physics_rate);
-                testing.engine.update();
-                changed = true;
+                changed |= testing.engine.update_deferred();
             }
             if step.is_zero() && !spawn_due && !physics_due {
                 break;
             }
         }
         if changed {
+            testing.engine.sync_after_batch();
             self.render_needed = true;
         }
     }

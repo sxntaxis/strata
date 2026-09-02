@@ -4,6 +4,8 @@ mod snapshot;
 
 #[cfg(debug_assertions)]
 pub(crate) use engine::classic::{ClassicRainMode, ClassicSandboxEngine};
+#[cfg(debug_assertions)]
+pub(crate) use engine::oslo_sandbox::{OsloBoundaryMode, OsloSandboxEngine};
 pub(crate) use engine::recolor_state_category_mass;
 #[allow(unused_imports)]
 pub use engine::{PendingGrainRun, SandEngine, SandState, SandStateCoordinate, SandStateGrain};

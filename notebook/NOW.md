@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-02
 authority: working
-summary: H4/v5 remains the published production sediment authority; SEDIMENT-003 is an isolated debug comparison of pre-pause grain physics versus the same physics with weak Oslo-era focus rain on the modern canonical visible basin.
-next: Natively validate and visually compare H4, classic uniform-rain, and classic + weak-focus hybrid sandboxes. Do not change production sediment authority until owner evidence selects a direction.
+summary: H4/v5 remains the published production sediment authority; SEDIMENT-004 is an isolated Oslo boundary laboratory comparing the legacy zero-outside control, a literal closed box, and canonical-height vessel overflow on the modern visible basin.
+next: Natively validate and visually compare H4, oslo-zero, oslo-box, and oslo-vessel at matched ages, including multi-hour vessel fill/overflow and horizontal shrink/re-expansion. Do not change production sediment authority until owner evidence selects a direction.
 ---
 
 # NOW — Strata
@@ -64,7 +64,7 @@ test suite, build, help smoke, diff hygiene, and the long-profile dangling-symli
 
 ## Current plateau program
 
-SEDIMENT-003 is the current bounded experiment. The owner rejected the raised-open/discharge-boundary direction and asked to recover the useful pre-pause grain law while retaining the post-pause canonical-canvas/visible-basin semantics. The debug-only comparison keeps H4 as the untouched production authority and exposes `classic` (uniform rain) and `hybrid` (identical classic gravity plus 90/10 slow wandering-focus rain) for local visual evidence. See `notebook/work/SEDIMENT-003-CLASSIC-HYBRID-SANDBOX.md`.
+SEDIMENT-004 is the current bounded experiment. SEDIMENT-003 established useful negative owner evidence: classic/hybrid topography is too bland, H4 remains visually better but its cascades are not legible enough, and the earlier Oslo-derived sandbox remains the strongest observed topology/avalanche behavior despite its pyramid envelope. The new debug-only lab keeps H4 untouched and holds Oslo rain/relaxation constant while comparing `oslo-zero` (historical height-zero/discharge control), `oslo-box` (literal closed side wall), and `oslo-vessel` (closed below the monotonic canonical wall top, overflow only above it). The local agent's cooperative 6 ms / 128x / queued-advance harness is retained and Oslo batching avoids per-tick presentation rebuilds. See `notebook/work/SEDIMENT-004-OSLO-BOUNDARY-LAB.md`.
 
 `notebook/work/PLATEAU-001.md` is the durable roadmap for the remaining core-development arc. The owner has accepted the existing day-end snapshot behavior as baseline and does not want an artificial re-certification gate before continuing.
 

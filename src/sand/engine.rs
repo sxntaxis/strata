@@ -1,5 +1,7 @@
 #[cfg(debug_assertions)]
 pub(crate) mod classic;
+#[cfg(debug_assertions)]
+pub(crate) mod oslo_sandbox;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 

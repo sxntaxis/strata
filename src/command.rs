@@ -124,7 +124,7 @@ pub(crate) fn parse(input: &str) -> Result<CommandIntent, String> {
 #[cfg(debug_assertions)]
 fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
     let Some((subcommand, rest)) = args.split_first() else {
-        return Err("Usage: testingcheats help | model <h4|classic|hybrid> | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | clear | status | reset".to_string());
+        return Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel> | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | clear | status | reset".to_string());
     };
 
     match subcommand.to_ascii_lowercase().as_str() {
@@ -151,15 +151,21 @@ fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
         }
         "model" if rest.len() == 1 => {
             let model = rest[0].trim().to_ascii_lowercase();
-            if !matches!(model.as_str(), "h4" | "classic" | "hybrid") {
-                return Err("testingcheats model must be h4, classic, or hybrid".to_string());
+            if !matches!(
+                model.as_str(),
+                "h4" | "classic" | "hybrid" | "oslo-zero" | "oslo-box" | "oslo-vessel"
+            ) {
+                return Err(
+                    "testingcheats model must be h4, classic, hybrid, oslo-zero, oslo-box, or oslo-vessel"
+                        .to_string(),
+                );
             }
             Ok(CommandIntent::TestingCheatsModel { model })
         }
         "clear" if rest.is_empty() => Ok(CommandIntent::TestingCheatsClear),
         "status" if rest.is_empty() => Ok(CommandIntent::TestingCheatsStatus),
         "reset" if rest.is_empty() => Ok(CommandIntent::TestingCheatsReset),
-        _ => Err("Usage: testingcheats help | model <h4|classic|hybrid> | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | clear | status | reset".to_string()),
+        _ => Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel> | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | clear | status | reset".to_string()),
     }
 }
 
@@ -562,6 +568,24 @@ mod tests {
             parse("testingcheats model hybrid").unwrap(),
             CommandIntent::TestingCheatsModel {
                 model: "hybrid".into()
+            }
+        );
+        assert_eq!(
+            parse("testingcheats model oslo-zero").unwrap(),
+            CommandIntent::TestingCheatsModel {
+                model: "oslo-zero".into()
+            }
+        );
+        assert_eq!(
+            parse("testingcheats model oslo-box").unwrap(),
+            CommandIntent::TestingCheatsModel {
+                model: "oslo-box".into()
+            }
+        );
+        assert_eq!(
+            parse("testingcheats model oslo-vessel").unwrap(),
+            CommandIntent::TestingCheatsModel {
+                model: "oslo-vessel".into()
             }
         );
         assert_eq!(
