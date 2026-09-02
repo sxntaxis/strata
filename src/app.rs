@@ -41,10 +41,13 @@ mod time_format;
 mod ui_helpers;
 mod view_style;
 
-use persistence_recovery::{PersistenceOperation, PersistenceRecoveryState, RecoveryAction};
 #[cfg(debug_assertions)]
 use crate::sand::{ClassicRainMode, ClassicSandboxEngine};
+use persistence_recovery::{PersistenceOperation, PersistenceRecoveryState, RecoveryAction};
 use terminal_lifecycle::{ManagedTerminal, TerminalSession};
+
+#[cfg(debug_assertions)]
+const TESTING_CHEATS_FRAME_BUDGET: Duration = Duration::from_millis(6);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum UiMode {
@@ -607,6 +610,7 @@ struct TestingCheatsState {
     spawn_accumulator: Duration,
     physics_accumulator: Duration,
     speed_multiplier: u32,
+    queued_simulated: Duration,
 }
 
 struct App {
@@ -2178,6 +2182,7 @@ impl App {
             spawn_accumulator: self.simulation.spawn_accumulator,
             physics_accumulator: self.simulation.physics_accumulator,
             speed_multiplier: 1,
+            queued_simulated: Duration::ZERO,
         });
         self.render_needed = true;
         Ok(())
@@ -2198,6 +2203,7 @@ impl App {
             spawn_accumulator: self.simulation.spawn_accumulator,
             physics_accumulator: self.simulation.physics_accumulator,
             speed_multiplier,
+            queued_simulated: Duration::ZERO,
         });
         self.render_needed = true;
         Ok(())
@@ -2212,12 +2218,29 @@ impl App {
         else {
             return;
         };
-        self.advance_testing_cheats_simulated(wall_delta.saturating_mul(multiplier));
+        self.queue_testing_cheats_simulated(wall_delta.saturating_mul(multiplier));
     }
 
     #[cfg(debug_assertions)]
-    fn advance_testing_cheats_simulated(&mut self, mut delta: Duration) {
+    fn queue_testing_cheats_simulated(&mut self, delta: Duration) {
         if delta.is_zero() || self.testing_cheats.is_none() {
+            return;
+        }
+        let testing = self
+            .testing_cheats
+            .as_mut()
+            .expect("testing preview exists");
+        testing.queued_simulated = testing.queued_simulated.saturating_add(delta);
+        self.process_testing_cheats_budget();
+    }
+
+    #[cfg(debug_assertions)]
+    fn process_testing_cheats_budget(&mut self) {
+        if self
+            .testing_cheats
+            .as_ref()
+            .is_none_or(|testing| testing.queued_simulated.is_zero())
+        {
             return;
         }
 
@@ -2228,17 +2251,21 @@ impl App {
         let category_id = self.time_tracker.active_category_id();
         let tick_rate = Duration::from_millis(TIME_SETTINGS.tick_ms);
         let physics_rate = Duration::from_millis(TIME_SETTINGS.physics_ms);
-        let testing = self.testing_cheats.as_mut().expect("testing preview exists");
+        let deadline = Instant::now() + TESTING_CHEATS_FRAME_BUDGET;
+        let testing = self
+            .testing_cheats
+            .as_mut()
+            .expect("testing preview exists");
         let mut changed = false;
 
-        while !delta.is_zero() {
+        while !testing.queued_simulated.is_zero() && Instant::now() < deadline {
             let spawn_left = tick_rate.saturating_sub(testing.spawn_accumulator);
             let physics_left = physics_rate.saturating_sub(testing.physics_accumulator);
             let next_event = spawn_left.min(physics_left);
-            let step = delta.min(next_event);
+            let step = testing.queued_simulated.min(next_event);
             testing.spawn_accumulator += step;
             testing.physics_accumulator += step;
-            delta = delta.saturating_sub(step);
+            testing.queued_simulated = testing.queued_simulated.saturating_sub(step);
 
             let spawn_due = testing.spawn_accumulator >= tick_rate;
             let physics_due = testing.physics_accumulator >= physics_rate;
@@ -2250,7 +2277,8 @@ impl App {
                 }
             }
             if physics_due {
-                testing.physics_accumulator = testing.physics_accumulator.saturating_sub(physics_rate);
+                testing.physics_accumulator =
+                    testing.physics_accumulator.saturating_sub(physics_rate);
                 testing.engine.update();
                 changed = true;
             }
@@ -2265,10 +2293,15 @@ impl App {
 
     #[cfg(debug_assertions)]
     fn testing_cheats_cycle_fallspeed(&self) -> u32 {
-        match self.testing_cheats.as_ref().map_or(1, |testing| testing.speed_multiplier) {
+        match self
+            .testing_cheats
+            .as_ref()
+            .map_or(1, |testing| testing.speed_multiplier)
+        {
             1 => 4,
             4 => 16,
             16 => 64,
+            64 => 128,
             _ => 1,
         }
     }

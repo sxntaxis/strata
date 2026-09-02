@@ -172,7 +172,10 @@ impl ClassicSandboxEngine {
             let target = self.choose_rain_target(bounds);
             let free_index = self.nearest_free_index(target, &free_columns);
             let x = free_columns.swap_remove(free_index);
-            let category_id = self.pending_drive.pop_front().expect("pending drive exists");
+            let category_id = self
+                .pending_drive
+                .pop_front()
+                .expect("pending drive exists");
             self.surface.grid[ingress_y][x] = Some(category_id);
         }
         self.sync_surface_metadata();
@@ -184,9 +187,7 @@ impl ClassicSandboxEngine {
         let mut best_distance = free_columns[0].abs_diff(target);
         for (index, x) in free_columns.iter().copied().enumerate().skip(1) {
             let distance = x.abs_diff(target);
-            if distance < best_distance
-                || (distance == best_distance && self.rain_random_bool())
-            {
+            if distance < best_distance || (distance == best_distance && self.rain_random_bool()) {
                 best_index = index;
                 best_distance = distance;
             }
@@ -355,7 +356,11 @@ impl ClassicSandboxEngine {
         // This intentionally reproduces the pre-pause rule: choose exactly one
         // diagonal. If that side is blocked, the grain waits for a later tick
         // rather than trying the opposite side in the same update.
-        let step = if self.physics_random_bool() { 1isize } else { -1isize };
+        let step = if self.physics_random_bool() {
+            1isize
+        } else {
+            -1isize
+        };
         let Some(target_x) = x.checked_add_signed(step) else {
             return;
         };

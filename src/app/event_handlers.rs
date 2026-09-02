@@ -451,7 +451,7 @@ impl App {
             }
             #[cfg(debug_assertions)]
             CommandIntent::TestingCheatsHelp => Ok(
-                "testingcheats: model <h4|classic|hybrid> · fallspeed [1x|4x|16x|64x] · advance <duration> · clear · status · reset"
+                "testingcheats: model <h4|classic|hybrid> · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · clear · status · reset"
                     .to_string(),
             ),
             #[cfg(debug_assertions)]
@@ -482,16 +482,24 @@ impl App {
             #[cfg(debug_assertions)]
             CommandIntent::TestingCheatsAdvance { duration_seconds } => {
                 self.ensure_testing_cheats_preview()?;
-                self.advance_testing_cheats_simulated(std::time::Duration::from_secs(
+                self.queue_testing_cheats_simulated(std::time::Duration::from_secs(
                     duration_seconds,
                 ));
-                let (model, grains) = self.testing_cheats.as_ref().map_or(("none", 0), |testing| {
-                    (testing.engine.model_name(), testing.engine.grain_count())
-                });
+                let (model, grains, queued) = self.testing_cheats.as_ref().map_or(
+                    ("none", 0, std::time::Duration::ZERO),
+                    |testing| {
+                        (
+                            testing.engine.model_name(),
+                            testing.engine.grain_count(),
+                            testing.queued_simulated,
+                        )
+                    },
+                );
                 Ok(format!(
-                    "Testing sandbox {model} advanced {} ({} grains; authoritative sediment unchanged)",
+                    "Testing sandbox {model} queued {} ({} grains; {} remains queued; authoritative sediment unchanged)",
                     command::format_hms(duration_seconds as usize),
-                    grains
+                    grains,
+                    command::format_hms(queued.as_secs() as usize)
                 ))
             }
             #[cfg(debug_assertions)]
@@ -502,6 +510,7 @@ impl App {
                 testing.engine.clear();
                 testing.spawn_accumulator = std::time::Duration::ZERO;
                 testing.physics_accumulator = std::time::Duration::ZERO;
+                testing.queued_simulated = std::time::Duration::ZERO;
                 self.render_needed = true;
                 Ok(format!(
                     "Testing sandbox {model} cleared (authoritative sediment unchanged)"
@@ -511,11 +520,12 @@ impl App {
             CommandIntent::TestingCheatsStatus => {
                 if let Some(testing) = self.testing_cheats.as_ref() {
                     Ok(format!(
-                        "Testing sandbox: model={}, speed={}x, grains={} · {} · reset returns to authoritative sediment",
+                        "Testing sandbox: model={}, speed={}x, grains={} · {} · queued={} · reset returns to authoritative sediment",
                         testing.engine.model_name(),
                         testing.speed_multiplier,
                         testing.engine.grain_count(),
-                        testing.engine.detail_status()
+                        testing.engine.detail_status(),
+                        command::format_hms(testing.queued_simulated.as_secs() as usize)
                     ))
                 } else {
                     Ok("Testing sandbox inactive; authoritative live sediment is displayed".to_string())

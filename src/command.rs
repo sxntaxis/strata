@@ -31,11 +31,17 @@ pub(crate) enum CommandIntent {
     #[cfg(debug_assertions)]
     TestingCheatsHelp,
     #[cfg(debug_assertions)]
-    TestingCheatsFallSpeed { multiplier: Option<u32> },
+    TestingCheatsFallSpeed {
+        multiplier: Option<u32>,
+    },
     #[cfg(debug_assertions)]
-    TestingCheatsAdvance { duration_seconds: u64 },
+    TestingCheatsAdvance {
+        duration_seconds: u64,
+    },
     #[cfg(debug_assertions)]
-    TestingCheatsModel { model: String },
+    TestingCheatsModel {
+        model: String,
+    },
     #[cfg(debug_assertions)]
     TestingCheatsClear,
     #[cfg(debug_assertions)]
@@ -74,7 +80,6 @@ impl CommandIntent {
         }
     }
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum BalanceSelector {
@@ -116,11 +121,10 @@ pub(crate) fn parse(input: &str) -> Result<CommandIntent, String> {
     }
 }
 
-
 #[cfg(debug_assertions)]
 fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
     let Some((subcommand, rest)) = args.split_first() else {
-        return Err("Usage: testingcheats help | model <h4|classic|hybrid> | fallspeed [1x|4x|16x|64x] | advance <duration> | clear | status | reset".to_string());
+        return Err("Usage: testingcheats help | model <h4|classic|hybrid> | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | clear | status | reset".to_string());
     };
 
     match subcommand.to_ascii_lowercase().as_str() {
@@ -133,9 +137,9 @@ fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
             let number = raw.strip_suffix('x').unwrap_or(&raw);
             let multiplier = number
                 .parse::<u32>()
-                .map_err(|_| "Usage: testingcheats fallspeed [1x|4x|16x|64x]".to_string())?;
-            if !matches!(multiplier, 1 | 4 | 16 | 64) {
-                return Err("fallspeed must be one of 1x, 4x, 16x, or 64x".to_string());
+                .map_err(|_| "Usage: testingcheats fallspeed [1x|4x|16x|64x|128x]".to_string())?;
+            if !matches!(multiplier, 1 | 4 | 16 | 64 | 128) {
+                return Err("fallspeed must be one of 1x, 4x, 16x, 64x, or 128x".to_string());
             }
             Ok(CommandIntent::TestingCheatsFallSpeed {
                 multiplier: Some(multiplier),
@@ -143,9 +147,6 @@ fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
         }
         "advance" if !rest.is_empty() => {
             let duration_seconds = parse_duration(rest)?;
-            if duration_seconds > 2 * 60 * 60 {
-                return Err("testingcheats advance is capped at 2h per command".to_string());
-            }
             Ok(CommandIntent::TestingCheatsAdvance { duration_seconds })
         }
         "model" if rest.len() == 1 => {
@@ -158,7 +159,7 @@ fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
         "clear" if rest.is_empty() => Ok(CommandIntent::TestingCheatsClear),
         "status" if rest.is_empty() => Ok(CommandIntent::TestingCheatsStatus),
         "reset" if rest.is_empty() => Ok(CommandIntent::TestingCheatsReset),
-        _ => Err("Usage: testingcheats help | model <h4|classic|hybrid> | fallspeed [1x|4x|16x|64x] | advance <duration> | clear | status | reset".to_string()),
+        _ => Err("Usage: testingcheats help | model <h4|classic|hybrid> | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | clear | status | reset".to_string()),
     }
 }
 
@@ -525,32 +526,63 @@ mod tests {
     #[cfg(debug_assertions)]
     #[test]
     fn parses_testing_cheats_commands() {
-        assert_eq!(parse("testingcheats help").unwrap(), CommandIntent::TestingCheatsHelp);
+        assert_eq!(
+            parse("testingcheats help").unwrap(),
+            CommandIntent::TestingCheatsHelp
+        );
         assert_eq!(
             parse("testingcheats fallspeed").unwrap(),
             CommandIntent::TestingCheatsFallSpeed { multiplier: None }
         );
         assert_eq!(
             parse("testingcheats fallspeed 16x").unwrap(),
-            CommandIntent::TestingCheatsFallSpeed { multiplier: Some(16) }
+            CommandIntent::TestingCheatsFallSpeed {
+                multiplier: Some(16)
+            }
+        );
+        assert_eq!(
+            parse("testingcheats fallspeed 128x").unwrap(),
+            CommandIntent::TestingCheatsFallSpeed {
+                multiplier: Some(128)
+            }
         );
         assert_eq!(
             parse("testingcheats advance 30m").unwrap(),
-            CommandIntent::TestingCheatsAdvance { duration_seconds: 1800 }
+            CommandIntent::TestingCheatsAdvance {
+                duration_seconds: 1800
+            }
         );
         assert_eq!(
             parse("testingcheats model classic").unwrap(),
-            CommandIntent::TestingCheatsModel { model: "classic".into() }
+            CommandIntent::TestingCheatsModel {
+                model: "classic".into()
+            }
         );
         assert_eq!(
             parse("testingcheats model hybrid").unwrap(),
-            CommandIntent::TestingCheatsModel { model: "hybrid".into() }
+            CommandIntent::TestingCheatsModel {
+                model: "hybrid".into()
+            }
         );
-        assert_eq!(parse("testingcheats clear").unwrap(), CommandIntent::TestingCheatsClear);
-        assert_eq!(parse("testingcheats status").unwrap(), CommandIntent::TestingCheatsStatus);
-        assert_eq!(parse("testingcheats reset").unwrap(), CommandIntent::TestingCheatsReset);
+        assert_eq!(
+            parse("testingcheats clear").unwrap(),
+            CommandIntent::TestingCheatsClear
+        );
+        assert_eq!(
+            parse("testingcheats status").unwrap(),
+            CommandIntent::TestingCheatsStatus
+        );
+        assert_eq!(
+            parse("testingcheats reset").unwrap(),
+            CommandIntent::TestingCheatsReset
+        );
         assert!(parse("testingcheats fallspeed 3x").is_err());
-        assert!(parse("testingcheats advance 3h").is_err());
+        assert_eq!(
+            parse("testingcheats advance 24h").unwrap(),
+            CommandIntent::TestingCheatsAdvance {
+                duration_seconds: 24 * 60 * 60
+            }
+        );
         assert!(parse("testingcheats model h3").is_err());
         assert!(parse("testingcheats model oslo").is_err());
     }
