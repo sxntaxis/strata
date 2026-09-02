@@ -450,8 +450,82 @@ impl App {
                 ))
             }
             #[cfg(debug_assertions)]
-            CommandIntent::TestingCheatsHalfFull => {
-                Err("testingcheats is not available in the SQLite runtime".to_string())
+            CommandIntent::TestingCheatsHelp => Ok(
+                "testingcheats: model <h4|classic|hybrid> · fallspeed [1x|4x|16x|64x] · advance <duration> · clear · status · reset"
+                    .to_string(),
+            ),
+            #[cfg(debug_assertions)]
+            CommandIntent::TestingCheatsModel { model } => {
+                self.set_testing_cheats_model(&model)?;
+                let source = match model.as_str() {
+                    "h4" => "fresh clone of authoritative sediment",
+                    "classic" => "fresh empty pre-pause grain physics + modern canonical/VW walls",
+                    "hybrid" => "classic physics + 90/10 slow wandering-focus rain",
+                    _ => "testing sandbox",
+                };
+                Ok(format!(
+                    "Testing sandbox model: {model} ({source}; never persisted)"
+                ))
+            }
+            #[cfg(debug_assertions)]
+            CommandIntent::TestingCheatsFallSpeed { multiplier } => {
+                self.ensure_testing_cheats_preview()?;
+                let selected = multiplier.unwrap_or_else(|| self.testing_cheats_cycle_fallspeed());
+                let testing = self.testing_cheats.as_mut().expect("testing preview exists");
+                testing.speed_multiplier = selected;
+                self.render_needed = true;
+                Ok(format!(
+                    "Testing sandbox {} fallspeed: {selected}x (authoritative sediment unchanged)",
+                    testing.engine.model_name()
+                ))
+            }
+            #[cfg(debug_assertions)]
+            CommandIntent::TestingCheatsAdvance { duration_seconds } => {
+                self.ensure_testing_cheats_preview()?;
+                self.advance_testing_cheats_simulated(std::time::Duration::from_secs(
+                    duration_seconds,
+                ));
+                let (model, grains) = self.testing_cheats.as_ref().map_or(("none", 0), |testing| {
+                    (testing.engine.model_name(), testing.engine.grain_count())
+                });
+                Ok(format!(
+                    "Testing sandbox {model} advanced {} ({} grains; authoritative sediment unchanged)",
+                    command::format_hms(duration_seconds as usize),
+                    grains
+                ))
+            }
+            #[cfg(debug_assertions)]
+            CommandIntent::TestingCheatsClear => {
+                self.ensure_testing_cheats_preview()?;
+                let testing = self.testing_cheats.as_mut().expect("testing preview exists");
+                let model = testing.engine.model_name();
+                testing.engine.clear();
+                testing.spawn_accumulator = std::time::Duration::ZERO;
+                testing.physics_accumulator = std::time::Duration::ZERO;
+                self.render_needed = true;
+                Ok(format!(
+                    "Testing sandbox {model} cleared (authoritative sediment unchanged)"
+                ))
+            }
+            #[cfg(debug_assertions)]
+            CommandIntent::TestingCheatsStatus => {
+                if let Some(testing) = self.testing_cheats.as_ref() {
+                    Ok(format!(
+                        "Testing sandbox: model={}, speed={}x, grains={} · {} · reset returns to authoritative sediment",
+                        testing.engine.model_name(),
+                        testing.speed_multiplier,
+                        testing.engine.grain_count(),
+                        testing.engine.detail_status()
+                    ))
+                } else {
+                    Ok("Testing sandbox inactive; authoritative live sediment is displayed".to_string())
+                }
+            }
+            #[cfg(debug_assertions)]
+            CommandIntent::TestingCheatsReset => {
+                self.testing_cheats = None;
+                self.render_needed = true;
+                Ok("Testing sandbox reset; authoritative live sediment restored".to_string())
             }
         }
     }

@@ -3,10 +3,10 @@ id: NOW-001
 kind: status
 state: active
 created: 2026-08-01
-updated: 2026-08-28
+updated: 2026-09-02
 authority: working
-summary: PLATEAU-001H H4 grain-causal contact behavior and SandState v5 persistence/migration are published and real-profile green; the program returns to evidence-driven daily use.
-next: Resume evidence-driven PLATEAU-001H daily use. Admit another hardening unit only from concrete friction; do not invent H5.
+summary: H4/v5 remains the published production sediment authority; SEDIMENT-003 is an isolated debug comparison of pre-pause grain physics versus the same physics with weak Oslo-era focus rain on the modern canonical visible basin.
+next: Natively validate and visually compare H4, classic uniform-rain, and classic + weak-focus hybrid sandboxes. Do not change production sediment authority until owner evidence selects a direction.
 ---
 
 # NOW — Strata
@@ -63,6 +63,8 @@ runtime/checkpoint failure boundary. Final native validation passed formatting, 
 test suite, build, help smoke, diff hygiene, and the long-profile dangling-symlink runtime proof.
 
 ## Current plateau program
+
+SEDIMENT-003 is the current bounded experiment. The owner rejected the raised-open/discharge-boundary direction and asked to recover the useful pre-pause grain law while retaining the post-pause canonical-canvas/visible-basin semantics. The debug-only comparison keeps H4 as the untouched production authority and exposes `classic` (uniform rain) and `hybrid` (identical classic gravity plus 90/10 slow wandering-focus rain) for local visual evidence. See `notebook/work/SEDIMENT-003-CLASSIC-HYBRID-SANDBOX.md`.
 
 `notebook/work/PLATEAU-001.md` is the durable roadmap for the remaining core-development arc. The owner has accepted the existing day-end snapshot behavior as baseline and does not want an artificial re-certification gate before continuing.
 

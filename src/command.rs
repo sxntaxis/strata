@@ -29,21 +29,52 @@ pub(crate) enum CommandIntent {
         duration_seconds: u64,
     },
     #[cfg(debug_assertions)]
-    TestingCheatsHalfFull,
+    TestingCheatsHelp,
+    #[cfg(debug_assertions)]
+    TestingCheatsFallSpeed { multiplier: Option<u32> },
+    #[cfg(debug_assertions)]
+    TestingCheatsAdvance { duration_seconds: u64 },
+    #[cfg(debug_assertions)]
+    TestingCheatsModel { model: String },
+    #[cfg(debug_assertions)]
+    TestingCheatsClear,
+    #[cfg(debug_assertions)]
+    TestingCheatsStatus,
+    #[cfg(debug_assertions)]
+    TestingCheatsReset,
 }
 
 impl CommandIntent {
     pub(crate) fn keeps_palette_open(&self) -> bool {
-        matches!(
+        let ordinary = matches!(
             self,
             Self::Status
                 | Self::Balance { .. }
                 | Self::DataDir
                 | Self::ConfigDir
                 | Self::Timer { .. }
-        )
+        );
+        #[cfg(debug_assertions)]
+        {
+            ordinary
+                || matches!(
+                    self,
+                    Self::TestingCheatsHelp
+                        | Self::TestingCheatsFallSpeed { .. }
+                        | Self::TestingCheatsAdvance { .. }
+                        | Self::TestingCheatsModel { .. }
+                        | Self::TestingCheatsClear
+                        | Self::TestingCheatsStatus
+                        | Self::TestingCheatsReset
+                )
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            ordinary
+        }
     }
 }
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum BalanceSelector {
@@ -80,10 +111,54 @@ pub(crate) fn parse(input: &str) -> Result<CommandIntent, String> {
             duration_seconds: parse_duration(args)?,
         }),
         #[cfg(debug_assertions)]
-        "testingcheats" if args.len() == 1 && args[0].eq_ignore_ascii_case("half") => {
-            Ok(CommandIntent::TestingCheatsHalfFull)
-        }
+        "testingcheats" => parse_testing_cheats(args),
         _ => Err(format!("Invalid command or arguments: {input}")),
+    }
+}
+
+
+#[cfg(debug_assertions)]
+fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
+    let Some((subcommand, rest)) = args.split_first() else {
+        return Err("Usage: testingcheats help | model <h4|classic|hybrid> | fallspeed [1x|4x|16x|64x] | advance <duration> | clear | status | reset".to_string());
+    };
+
+    match subcommand.to_ascii_lowercase().as_str() {
+        "help" if rest.is_empty() => Ok(CommandIntent::TestingCheatsHelp),
+        "fallspeed" if rest.is_empty() => {
+            Ok(CommandIntent::TestingCheatsFallSpeed { multiplier: None })
+        }
+        "fallspeed" if rest.len() == 1 => {
+            let raw = rest[0].trim().to_ascii_lowercase();
+            let number = raw.strip_suffix('x').unwrap_or(&raw);
+            let multiplier = number
+                .parse::<u32>()
+                .map_err(|_| "Usage: testingcheats fallspeed [1x|4x|16x|64x]".to_string())?;
+            if !matches!(multiplier, 1 | 4 | 16 | 64) {
+                return Err("fallspeed must be one of 1x, 4x, 16x, or 64x".to_string());
+            }
+            Ok(CommandIntent::TestingCheatsFallSpeed {
+                multiplier: Some(multiplier),
+            })
+        }
+        "advance" if !rest.is_empty() => {
+            let duration_seconds = parse_duration(rest)?;
+            if duration_seconds > 2 * 60 * 60 {
+                return Err("testingcheats advance is capped at 2h per command".to_string());
+            }
+            Ok(CommandIntent::TestingCheatsAdvance { duration_seconds })
+        }
+        "model" if rest.len() == 1 => {
+            let model = rest[0].trim().to_ascii_lowercase();
+            if !matches!(model.as_str(), "h4" | "classic" | "hybrid") {
+                return Err("testingcheats model must be h4, classic, or hybrid".to_string());
+            }
+            Ok(CommandIntent::TestingCheatsModel { model })
+        }
+        "clear" if rest.is_empty() => Ok(CommandIntent::TestingCheatsClear),
+        "status" if rest.is_empty() => Ok(CommandIntent::TestingCheatsStatus),
+        "reset" if rest.is_empty() => Ok(CommandIntent::TestingCheatsReset),
+        _ => Err("Usage: testingcheats help | model <h4|classic|hybrid> | fallspeed [1x|4x|16x|64x] | advance <duration> | clear | status | reset".to_string()),
     }
 }
 
@@ -446,6 +521,39 @@ pub(crate) fn format_signed_hms(seconds: isize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn parses_testing_cheats_commands() {
+        assert_eq!(parse("testingcheats help").unwrap(), CommandIntent::TestingCheatsHelp);
+        assert_eq!(
+            parse("testingcheats fallspeed").unwrap(),
+            CommandIntent::TestingCheatsFallSpeed { multiplier: None }
+        );
+        assert_eq!(
+            parse("testingcheats fallspeed 16x").unwrap(),
+            CommandIntent::TestingCheatsFallSpeed { multiplier: Some(16) }
+        );
+        assert_eq!(
+            parse("testingcheats advance 30m").unwrap(),
+            CommandIntent::TestingCheatsAdvance { duration_seconds: 1800 }
+        );
+        assert_eq!(
+            parse("testingcheats model classic").unwrap(),
+            CommandIntent::TestingCheatsModel { model: "classic".into() }
+        );
+        assert_eq!(
+            parse("testingcheats model hybrid").unwrap(),
+            CommandIntent::TestingCheatsModel { model: "hybrid".into() }
+        );
+        assert_eq!(parse("testingcheats clear").unwrap(), CommandIntent::TestingCheatsClear);
+        assert_eq!(parse("testingcheats status").unwrap(), CommandIntent::TestingCheatsStatus);
+        assert_eq!(parse("testingcheats reset").unwrap(), CommandIntent::TestingCheatsReset);
+        assert!(parse("testingcheats fallspeed 3x").is_err());
+        assert!(parse("testingcheats advance 3h").is_err());
+        assert!(parse("testingcheats model h3").is_err());
+        assert!(parse("testingcheats model oslo").is_err());
+    }
 
     #[test]
     fn parses_old_expert_command_shapes() {

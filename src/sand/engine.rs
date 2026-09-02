@@ -1,3 +1,6 @@
+#[cfg(debug_assertions)]
+pub(crate) mod classic;
+
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use ratatui::{

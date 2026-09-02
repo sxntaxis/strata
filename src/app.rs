@@ -42,6 +42,8 @@ mod ui_helpers;
 mod view_style;
 
 use persistence_recovery::{PersistenceOperation, PersistenceRecoveryState, RecoveryAction};
+#[cfg(debug_assertions)]
+use crate::sand::{ClassicRainMode, ClassicSandboxEngine};
 use terminal_lifecycle::{ManagedTerminal, TerminalSession};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -514,6 +516,99 @@ struct SimulationState {
     catchup_was_active: bool,
 }
 
+#[cfg(debug_assertions)]
+enum TestingSandEngine {
+    H4(SandEngine),
+    Classic(ClassicSandboxEngine),
+}
+
+#[cfg(debug_assertions)]
+impl TestingSandEngine {
+    fn model_name(&self) -> &'static str {
+        match self {
+            Self::H4(_) => "h4",
+            Self::Classic(engine) => engine.model_name(),
+        }
+    }
+
+    fn spawn(&mut self, category_id: CategoryId) {
+        match self {
+            Self::H4(engine) => engine.spawn(category_id),
+            Self::Classic(engine) => engine.spawn(category_id),
+        }
+    }
+
+    fn update(&mut self) {
+        match self {
+            Self::H4(engine) => engine.update(),
+            Self::Classic(engine) => engine.update(),
+        }
+    }
+
+    fn resize(&mut self, width: u16, height: u16) {
+        match self {
+            Self::H4(engine) => engine.resize(width, height),
+            Self::Classic(engine) => engine.resize(width, height),
+        }
+    }
+
+    fn dimensions(&self) -> (u16, u16) {
+        match self {
+            Self::H4(engine) => (engine.cell_width, engine.cell_height),
+            Self::Classic(engine) => engine.dimensions(),
+        }
+    }
+
+    fn render(&self, categories: &[Category]) -> Vec<ratatui::text::Line<'static>> {
+        match self {
+            Self::H4(engine) => engine.render(categories),
+            Self::Classic(engine) => engine.render(categories),
+        }
+    }
+
+    fn clear(&mut self) {
+        match self {
+            Self::H4(engine) => engine.clear(),
+            Self::Classic(engine) => engine.clear(),
+        }
+    }
+
+    fn grain_count(&self) -> usize {
+        match self {
+            Self::H4(engine) => engine.grain_count,
+            Self::Classic(engine) => engine.grain_count(),
+        }
+    }
+
+    fn detail_status(&self) -> String {
+        match self {
+            Self::H4(_) => "H4 production physics clone".to_string(),
+            Self::Classic(engine) => {
+                let (canonical_w, canonical_h) = engine.canonical_dimensions();
+                let (vertical, diagonal) = engine.movement_counts();
+                format!(
+                    "{} sandbox · physical={} · pending={} · canonical={}x{} · vertical_moves={} · diagonal_moves={} · closed VW walls · no discharge",
+                    engine.model_name(),
+                    engine.physical_grain_count(),
+                    engine.pending_count(),
+                    canonical_w,
+                    canonical_h,
+                    vertical,
+                    diagonal
+                )
+            }
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+struct TestingCheatsState {
+    engine: TestingSandEngine,
+    spawn_accumulator: Duration,
+    physics_accumulator: Duration,
+    speed_multiplier: u32,
+}
+
 struct App {
     time_tracker: TimeTracker,
     sand_engine: SandEngine,
@@ -542,6 +637,8 @@ struct App {
     report_snapshot_preview_lines: Option<Vec<ratatui::text::Line<'static>>>,
     pending_day_end_snapshots: Vec<PendingDayEndSnapshot>,
     simulation: SimulationState,
+    #[cfg(debug_assertions)]
+    testing_cheats: Option<TestingCheatsState>,
     detach_requested: bool,
     keymap: keybindings::Keymap,
     runtime_settings: RuntimeSettings,
@@ -647,6 +744,8 @@ impl App {
                 catchup_gauge_hold_until: None,
                 catchup_was_active: false,
             },
+            #[cfg(debug_assertions)]
+            testing_cheats: None,
             detach_requested: false,
             keymap,
             runtime_settings,
@@ -1687,6 +1786,9 @@ impl App {
         tick_rate: Duration,
         physics_rate: Duration,
     ) {
+        #[cfg(debug_assertions)]
+        self.advance_testing_cheats_wall_time(wall_delta);
+
         let was_catching = self.simulation.catchup_was_active;
         let cadence = Duration::from_millis(CATCHUP_SETTINGS.cadence_ms);
         self.simulation.catchup_cadence_accumulator = self
@@ -2017,6 +2119,158 @@ impl App {
 
     fn run_physics_tick(&mut self) {
         self.sand_engine.update();
+    }
+
+    #[cfg(debug_assertions)]
+    fn testing_cheats_valid_category_ids(&self) -> HashSet<CategoryId> {
+        let mut ids = self
+            .time_tracker
+            .categories_for_storage()
+            .into_iter()
+            .chain(self.archived_categories.iter().cloned())
+            .map(|category| category.id)
+            .collect::<HashSet<_>>();
+        ids.insert(DRIFT_CATEGORY_ID);
+        ids
+    }
+
+    #[cfg(debug_assertions)]
+    fn testing_h4_clone(&self) -> Result<SandEngine, String> {
+        let state = self.sand_engine.snapshot_state();
+        let valid_category_ids = self.testing_cheats_valid_category_ids();
+        let mut engine = SandEngine::new(self.sand_engine.cell_width, self.sand_engine.cell_height);
+        engine.restore_state(&state, &valid_category_ids)?;
+        Ok(engine)
+    }
+
+    #[cfg(debug_assertions)]
+    fn build_testing_model(&self, model: &str) -> Result<TestingSandEngine, String> {
+        match model {
+            "h4" => Ok(TestingSandEngine::H4(self.testing_h4_clone()?)),
+            "classic" | "hybrid" => {
+                let mode = if model == "classic" {
+                    ClassicRainMode::Uniform
+                } else {
+                    ClassicRainMode::WanderingFocus
+                };
+                Ok(TestingSandEngine::Classic(ClassicSandboxEngine::new(
+                    self.sand_engine.cell_width,
+                    self.sand_engine.cell_height,
+                    self.sand_engine.snapshot_state().rng_state,
+                    mode,
+                )))
+            }
+            _ => Err("testingcheats model must be h4, classic, or hybrid".to_string()),
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    fn ensure_testing_cheats_preview(&mut self) -> Result<(), String> {
+        if self.testing_cheats.is_some() {
+            return Ok(());
+        }
+        if self.is_catching_up() {
+            return Err("testingcheats is unavailable while catch-up is active".to_string());
+        }
+        let engine = self.build_testing_model("h4")?;
+        self.testing_cheats = Some(TestingCheatsState {
+            engine,
+            spawn_accumulator: self.simulation.spawn_accumulator,
+            physics_accumulator: self.simulation.physics_accumulator,
+            speed_multiplier: 1,
+        });
+        self.render_needed = true;
+        Ok(())
+    }
+
+    #[cfg(debug_assertions)]
+    fn set_testing_cheats_model(&mut self, model: &str) -> Result<(), String> {
+        if self.is_catching_up() {
+            return Err("testingcheats is unavailable while catch-up is active".to_string());
+        }
+        let engine = self.build_testing_model(model)?;
+        let speed_multiplier = self
+            .testing_cheats
+            .as_ref()
+            .map_or(1, |testing| testing.speed_multiplier);
+        self.testing_cheats = Some(TestingCheatsState {
+            engine,
+            spawn_accumulator: self.simulation.spawn_accumulator,
+            physics_accumulator: self.simulation.physics_accumulator,
+            speed_multiplier,
+        });
+        self.render_needed = true;
+        Ok(())
+    }
+
+    #[cfg(debug_assertions)]
+    fn advance_testing_cheats_wall_time(&mut self, wall_delta: Duration) {
+        let Some(multiplier) = self
+            .testing_cheats
+            .as_ref()
+            .map(|testing| testing.speed_multiplier)
+        else {
+            return;
+        };
+        self.advance_testing_cheats_simulated(wall_delta.saturating_mul(multiplier));
+    }
+
+    #[cfg(debug_assertions)]
+    fn advance_testing_cheats_simulated(&mut self, mut delta: Duration) {
+        if delta.is_zero() || self.testing_cheats.is_none() {
+            return;
+        }
+
+        // The testing sandbox intentionally advances even while the real tracker
+        // is idle. In that case the current Drift/Idle category colors the
+        // synthetic grains; authoritative sediment remains untouched.
+        let should_spawn = true;
+        let category_id = self.time_tracker.active_category_id();
+        let tick_rate = Duration::from_millis(TIME_SETTINGS.tick_ms);
+        let physics_rate = Duration::from_millis(TIME_SETTINGS.physics_ms);
+        let testing = self.testing_cheats.as_mut().expect("testing preview exists");
+        let mut changed = false;
+
+        while !delta.is_zero() {
+            let spawn_left = tick_rate.saturating_sub(testing.spawn_accumulator);
+            let physics_left = physics_rate.saturating_sub(testing.physics_accumulator);
+            let next_event = spawn_left.min(physics_left);
+            let step = delta.min(next_event);
+            testing.spawn_accumulator += step;
+            testing.physics_accumulator += step;
+            delta = delta.saturating_sub(step);
+
+            let spawn_due = testing.spawn_accumulator >= tick_rate;
+            let physics_due = testing.physics_accumulator >= physics_rate;
+            if spawn_due {
+                testing.spawn_accumulator = testing.spawn_accumulator.saturating_sub(tick_rate);
+                if should_spawn {
+                    testing.engine.spawn(category_id);
+                    changed = true;
+                }
+            }
+            if physics_due {
+                testing.physics_accumulator = testing.physics_accumulator.saturating_sub(physics_rate);
+                testing.engine.update();
+                changed = true;
+            }
+            if step.is_zero() && !spawn_due && !physics_due {
+                break;
+            }
+        }
+        if changed {
+            self.render_needed = true;
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    fn testing_cheats_cycle_fallspeed(&self) -> u32 {
+        match self.testing_cheats.as_ref().map_or(1, |testing| testing.speed_multiplier) {
+            1 => 4,
+            4 => 16,
+            16 => 64,
+            _ => 1,
+        }
     }
 
     fn catchup_progress_ratio(&mut self) -> Option<f64> {

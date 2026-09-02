@@ -26,9 +26,21 @@ impl App {
         }
 
         let categories = self.time_tracker.categories_ordered();
+        #[cfg(debug_assertions)]
+        let testing_sand = self.testing_cheats.as_mut().map(|testing| {
+            if testing.engine.dimensions() != (inner_width, inner_height) {
+                testing.engine.resize(inner_width, inner_height);
+            }
+            testing.engine.render(&categories)
+        });
+        #[cfg(not(debug_assertions))]
+        let testing_sand: Option<Vec<ratatui::text::Line<'static>>> = None;
+
         let sand = if self.in_balance_modal() && self.should_use_report_snapshot() {
             self.report_snapshot_lines(inner_width, inner_height, &categories)
                 .unwrap_or_else(|| self.sand_engine.render(&categories))
+        } else if let Some(testing_lines) = testing_sand {
+            testing_lines
         } else if let Some(catchup_lines) =
             self.catchup_visual_lines(inner_width, inner_height, &categories)
         {

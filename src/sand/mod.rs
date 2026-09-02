@@ -3,6 +3,8 @@ mod recovery;
 mod snapshot;
 
 pub(crate) use engine::recolor_state_category_mass;
+#[cfg(debug_assertions)]
+pub(crate) use engine::classic::{ClassicRainMode, ClassicSandboxEngine};
 #[allow(unused_imports)]
 pub use engine::{PendingGrainRun, SandEngine, SandState, SandStateCoordinate, SandStateGrain};
 pub(crate) use recovery::{RecoveryTiming, recover_detached_sediment, settle_transition_sediment};
