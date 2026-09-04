@@ -567,3 +567,108 @@ fn front_wall_failure_erodes_propagates_uphill_and_quiesces_with_mass_conserved(
     assert!(engine.front_last_erosions() > 0);
     assert!(engine.front_last_support_recruits() > 0);
 }
+
+#[test]
+fn fluid_vessel_preserves_frozen_front_for_ordinary_oslo_drive() {
+    let mut front = OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED);
+    let mut fluid = OsloSandboxEngine::new_fluid_vessel(20, 10, TEST_SEED);
+    let width = front.lattice_size();
+
+    for drive in 0..2_000usize {
+        let site = drive % width;
+        assert_eq!(
+            direct_drive_and_relax(&mut fluid, site),
+            direct_drive_and_relax(&mut front, site)
+        );
+    }
+
+    assert_eq!(fluid.fluid_activations(), 0);
+    assert_eq!(fluid.fluid_releases(), 0);
+    assert_eq!(fluid.fluid_active_sites(), 0);
+    assert_eq!(fluid.columns, front.columns);
+    assert_eq!(fluid.critical_slopes, front.critical_slopes);
+    assert_eq!(fluid.threshold_rng_state, front.threshold_rng_state);
+    assert_eq!(fluid.relax_rng_state, front.relax_rng_state);
+    assert_eq!(fluid.discharged_count(), front.discharged_count());
+}
+
+#[test]
+fn fluidization_nucleates_on_first_severe_failure_and_spreads_as_a_region() {
+    let mut engine = OsloSandboxEngine::new_fluid_vessel(20, 10, TEST_SEED);
+    let width = engine.lattice_size();
+    let source = width / 2 - 2;
+    for (offset, height) in [14usize, 14, 10, 7, 4, 2].into_iter().enumerate() {
+        set_column_height(&mut engine, source - 1 + offset, height);
+    }
+    engine.critical_slopes[source] = OSLO_THRESHOLD_HIGH;
+    engine.enqueue_neighborhood(source);
+
+    assert!(engine.topple_one_active_site());
+    assert!(engine.fluid_activations() >= 2);
+    assert!(engine.fluid_active_sites() >= 2);
+    assert!(engine.rolling_count() >= 1);
+
+    for _ in 0..8 {
+        let _ = engine.advance_fluidization_field();
+        let _ = engine.advance_rolling_grains();
+        let _ = engine.topple_one_active_site();
+    }
+
+    assert!(engine.fluid_peak_active_sites() >= 3);
+    assert!(engine.fluid_releases() > 0);
+}
+
+#[test]
+fn fluid_wall_failure_releases_mass_collectively_then_reaches_quiescence() {
+    let mut engine = OsloSandboxEngine::new_fluid_vessel(20, 10, TEST_SEED);
+    let width = engine.lattice_size();
+    for site in 0..(width / 2) {
+        set_column_height(&mut engine, site, 14);
+    }
+    for site in (width / 2)..width {
+        set_column_height(&mut engine, site, 2);
+    }
+    engine.critical_slopes.fill(OSLO_THRESHOLD_HIGH);
+    let mass_before = engine.grain_count();
+    engine.enqueue_neighborhood(width / 2 - 1);
+    engine.enqueue_neighborhood(width / 2);
+
+    let mut guard = 0usize;
+    loop {
+        guard = guard.saturating_add(1);
+        assert!(guard < 300_000, "fluid wall relaxation failed to quiesce");
+        let mut changed = engine.advance_fluidization_field();
+        changed |= engine.advance_rolling_grains();
+        changed |= engine.topple_one_active_site();
+        if !changed && engine.active_sites.is_empty() && !engine.explicit_flow_active() {
+            break;
+        }
+    }
+
+    assert!(engine.fluid_activations() > 0);
+    assert!(engine.fluid_releases() > 0);
+    assert!(engine.fluid_peak_active_sites() >= 3);
+    assert!(engine.momentum_peak_active() >= 3);
+    assert_eq!(engine.discharged_count(), 0);
+    assert_eq!(engine.grain_count(), mass_before);
+    assert_eq!(engine.settled_count(), mass_before);
+    assert_eq!(engine.fluid_active_sites(), 0);
+}
+
+#[test]
+fn rainbow_fill_populates_exactly_eighty_percent_of_current_visible_window() {
+    let mut engine = OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED);
+    let categories = [CategoryId(11), CategoryId(22), CategoryId(33), CategoryId(44)];
+    let (start, end) = engine.visible_lattice_bounds();
+    let expected_height = engine.visible_height() * 4 / 5;
+    let grains = engine.debug_fill_rainbow_80(&categories).unwrap();
+
+    assert_eq!(grains, (end - start) * expected_height);
+    for site in start..end {
+        assert_eq!(engine.columns[site].len(), expected_height);
+        assert_eq!(engine.columns[site].first().copied(), Some(categories[0]));
+        assert_eq!(engine.columns[site].last().copied(), Some(categories[3]));
+    }
+    assert!(engine.columns[..start].iter().all(Vec::is_empty));
+    assert!(engine.columns[end..].iter().all(Vec::is_empty));
+}

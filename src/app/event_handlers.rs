@@ -451,7 +451,7 @@ impl App {
             }
             #[cfg(debug_assertions)]
             CommandIntent::TestingCheatsHelp => Ok(
-                "testingcheats: model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front> · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · clear · status · reset"
+                "testingcheats: model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-fluid> · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · fill · clear · status · reset"
                     .to_string(),
             ),
             #[cfg(debug_assertions)]
@@ -465,7 +465,10 @@ impl App {
                         "oslo-vessel + causal moving-grain momentum phase on steep local failures"
                     }
                     "oslo-vessel-front" => {
-                        "oslo-vessel + rolling/static erosion-deposition exchange and uphill support-loss front"
+                        "frozen oslo-vessel + rolling/static erosion-deposition exchange and uphill support-loss front"
+                    }
+                    "oslo-vessel-fluid" => {
+                        "oslo-vessel-front + explicit partial-fluidization order field with start/stop hysteresis"
                     }
                     _ => "testing sandbox",
                 };
@@ -510,6 +513,29 @@ impl App {
                 ))
             }
             #[cfg(debug_assertions)]
+            CommandIntent::TestingCheatsFill => {
+                self.ensure_testing_cheats_preview()?;
+                let category_ids = self
+                    .time_tracker
+                    .categories_ordered()
+                    .iter()
+                    .map(|category| category.id)
+                    .filter(|category_id| *category_id != DRIFT_CATEGORY_ID)
+                    .collect::<Vec<_>>();
+                let testing = self.testing_cheats.as_mut().expect("testing preview exists");
+                let model = testing.engine.model_name();
+                let grains = testing.engine.fill_rainbow_80(&category_ids)?;
+                testing.spawn_accumulator = std::time::Duration::ZERO;
+                testing.physics_accumulator = std::time::Duration::ZERO;
+                testing.queued_simulated = std::time::Duration::ZERO;
+                testing.flow_wall_accumulator = std::time::Duration::ZERO;
+                testing.visual_dirty = false;
+                self.render_needed = true;
+                Ok(format!(
+                    "Testing sandbox {model} rainbow-filled to 80% of the visible window ({grains} grains; authoritative sediment unchanged)"
+                ))
+            }
+            #[cfg(debug_assertions)]
             CommandIntent::TestingCheatsClear => {
                 self.ensure_testing_cheats_preview()?;
                 let testing = self.testing_cheats.as_mut().expect("testing preview exists");
@@ -518,6 +544,7 @@ impl App {
                 testing.spawn_accumulator = std::time::Duration::ZERO;
                 testing.physics_accumulator = std::time::Duration::ZERO;
                 testing.queued_simulated = std::time::Duration::ZERO;
+                testing.flow_wall_accumulator = std::time::Duration::ZERO;
                 testing.visual_dirty = false;
                 self.render_needed = true;
                 Ok(format!(

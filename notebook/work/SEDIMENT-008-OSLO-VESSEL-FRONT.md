@@ -1,11 +1,11 @@
 ---
 id: SEDIMENT-008
 kind: work
-state: active
+state: frozen
 created: 2026-09-03
 updated: 2026-09-03
 authority: working
-summary: Keep oslo-vessel as the static pile, but replace momentum-v1's isolated rolling grains with a bounded static/rolling exchange front: erosion on steep moving passages, higher static start than dynamic stop, and uphill propagation by loss of support.
+summary: Owner-accepted frozen debug baseline: Oslo-vessel static topology plus bounded rolling/static erosion, dynamic/static hysteresis, and uphill support-loss propagation. Physical rules are frozen at 8817e19; later work may alter only harness/presentation unless explicitly forked.
 ---
 
 # SEDIMENT-008 — Oslo-vessel erosion/support front
@@ -22,6 +22,20 @@ The owner judged `oslo-vessel-momentum` materially more interesting than the ear
 This is enough evidence to retain the **separate moving phase** but reject momentum-v1's rule that mobile grains merely coast independently over a fixed static bed.
 
 Production H4/v5 remains untouched. SEDIMENT-008 is debug-only and never persisted.
+
+## Owner freeze — 2026-09-04
+
+Human resize/reconnection evidence selected this model as the first avalanche variant that was both visually convincing and structurally useful. The owner specifically accepted:
+
+- Oslo-vessel ordinary topology and rain distribution;
+- the broad distribution of category-colored grains through the collapse;
+- moving-layer erosion of the static bed;
+- uphill propagation by loss of support;
+- large structural reconnection avalanches as a desirable event.
+
+`8817e1990188c76b50246e6d84edcdde79a19a60` is therefore the **frozen SEDIMENT-008 physics baseline**. SEDIMENT-009 must not tune SEDIMENT-008 thresholds, erosion, runout, support recruitment, mass transfer, or Oslo preparation rules in place. The only accepted follow-up on the `oslo-vessel-front` command in SEDIMENT-009 is a debug-harness temporalization fix that caps explicit-flow physics to a stable wall-clock cadence while preserving the exact engine call sequence and final physical result.
+
+The owner also observed that accelerated testing could make this otherwise-good avalanche appear to change speed depending on solver load. That is classified as a harness/presentation timing defect, not a SEDIMENT-008 physics defect.
 
 ## Literature direction
 

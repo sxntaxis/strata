@@ -34,6 +34,18 @@ const FRONT_EROSION_RELIEF: usize = 2;
 const FRONT_SUPPORT_LOSS_RELIEF: usize = 3;
 const FRONT_BASE_FLAT_COAST_STEPS: u8 = 1;
 const FRONT_MAX_FLAT_COAST_STEPS: u8 = 3;
+// SEDIMENT-009 curiosity model: a bounded discrete analogue of BCRE /
+// Aranson-Tsimring partial fluidization. The static Oslo bed remains the
+// preparation mechanism, but a severe failure can create a spatial fluidity
+// field. Static material needs relief 4 to nucleate fluidity; already-fluidized
+// material can remain active down to relief 1, giving start/stop hysteresis.
+const FLUIDITY_MAX: u8 = 8;
+const FLUIDITY_SEED: u8 = 8;
+const FLUIDITY_SPREAD_MIN: u8 = 3;
+const FLUIDITY_RELEASE_MIN: u8 = 4;
+const FLUIDITY_STATIC_START_RELIEF: usize = 4;
+const FLUIDITY_DYNAMIC_STOP_RELIEF: usize = 1;
+const FLUIDITY_RELEASE_RELIEF: usize = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ToppleDirection {
@@ -113,6 +125,13 @@ pub(super) struct RollingGrain {
 /// bounded to one erosion per source site per rolling tick; this remains a debug
 /// product experiment rather than a claim of numerical fidelity to a paper.
 ///
+/// `oslo-vessel-fluid` freezes those front rules and adds a separate transient
+/// fluidity/order field. A severe Oslo failure nucleates the field; it spreads
+/// locally, survives at a lower dynamic-stop relief than the static-start relief,
+/// and converts settled grains into the existing explicit rolling layer. This is
+/// a dot-preserving discrete visualization of partial fluidization, not a direct
+/// discretization of the continuum BCRE or Aranson-Tsimring equations.
+///
 /// Strata's rain remains full-width. Only the slowly wandering statistical focus
 /// is constrained to a centered corridor whose side padding is one additional
 /// golden-ratio subdivision of the earlier ~19.1% margin: about 11.8% on each
@@ -128,6 +147,7 @@ pub(crate) struct OsloSandboxEngine {
     boundary: OsloBoundaryMode,
     momentum_enabled: bool,
     front_enabled: bool,
+    fluid_enabled: bool,
     columns: Vec<Vec<CategoryId>>,
     critical_slopes: Vec<u8>,
     threshold_rng_state: u64,
@@ -168,10 +188,18 @@ pub(crate) struct OsloSandboxEngine {
     front_event_support_recruits: usize,
     front_last_erosions: usize,
     front_last_support_recruits: usize,
+    fluidity: Vec<u8>,
+    fluid_activations: usize,
+    fluid_releases: usize,
+    fluid_peak_active_sites: usize,
+    fluid_event_activations: usize,
+    fluid_event_releases: usize,
+    fluid_last_activations: usize,
+    fluid_last_releases: usize,
 }
 impl OsloSandboxEngine {
     pub(crate) fn new(width: u16, height: u16, seed: u64, boundary: OsloBoundaryMode) -> Self {
-        Self::new_with_flow(width, height, seed, boundary, false, false)
+        Self::new_with_flow(width, height, seed, boundary, false, false, false)
     }
 
     pub(crate) fn new_momentum_vessel(width: u16, height: u16, seed: u64) -> Self {
@@ -181,6 +209,7 @@ impl OsloSandboxEngine {
             seed,
             OsloBoundaryMode::CanonicalWallOverflow,
             true,
+            false,
             false,
         )
     }
@@ -193,6 +222,19 @@ impl OsloSandboxEngine {
             OsloBoundaryMode::CanonicalWallOverflow,
             true,
             true,
+            false,
+        )
+    }
+
+    pub(crate) fn new_fluid_vessel(width: u16, height: u16, seed: u64) -> Self {
+        Self::new_with_flow(
+            width,
+            height,
+            seed,
+            OsloBoundaryMode::CanonicalWallOverflow,
+            true,
+            true,
+            true,
         )
     }
 
@@ -203,6 +245,7 @@ impl OsloSandboxEngine {
         boundary: OsloBoundaryMode,
         momentum_enabled: bool,
         front_enabled: bool,
+        fluid_enabled: bool,
     ) -> Self {
         debug_assert!(
             !momentum_enabled || boundary == OsloBoundaryMode::CanonicalWallOverflow,
@@ -211,6 +254,10 @@ impl OsloSandboxEngine {
         debug_assert!(
             !front_enabled || momentum_enabled,
             "front exchange requires the causal rolling phase"
+        );
+        debug_assert!(
+            !fluid_enabled || front_enabled,
+            "partial fluidization requires the rolling/static front substrate"
         );
         let surface = SandEngine::new(width, height);
         let lattice_size = Self::lattice_size_for(&surface);
@@ -231,6 +278,7 @@ impl OsloSandboxEngine {
             boundary,
             momentum_enabled,
             front_enabled,
+            fluid_enabled,
             columns: vec![Vec::new(); lattice_size],
             critical_slopes: vec![OSLO_THRESHOLD_LOW; lattice_size],
             threshold_rng_state,
@@ -271,6 +319,14 @@ impl OsloSandboxEngine {
             front_event_support_recruits: 0,
             front_last_erosions: 0,
             front_last_support_recruits: 0,
+            fluidity: vec![0; lattice_size],
+            fluid_activations: 0,
+            fluid_releases: 0,
+            fluid_peak_active_sites: 0,
+            fluid_event_activations: 0,
+            fluid_event_releases: 0,
+            fluid_last_activations: 0,
+            fluid_last_releases: 0,
         };
         sandbox.randomize_all_thresholds();
         sandbox.sync_surface();
@@ -311,6 +367,7 @@ impl OsloSandboxEngine {
 
         let mut changed = self.launch_one_pending();
         changed |= self.advance_falling_drives();
+        changed |= self.advance_fluidization_field();
         changed |= self.advance_rolling_grains();
         if self.topple_one_active_site() {
             return true;
@@ -343,6 +400,12 @@ impl OsloSandboxEngine {
                 columns[left_added + index] = column;
             }
             self.columns = columns;
+
+            let old_fluidity = std::mem::take(&mut self.fluidity);
+            self.fluidity = vec![0; new_width];
+            for (index, fluidity) in old_fluidity.into_iter().enumerate() {
+                self.fluidity[left_added + index] = fluidity;
+            }
 
             let old_slopes = std::mem::take(&mut self.critical_slopes);
             self.critical_slopes = vec![OSLO_THRESHOLD_LOW; new_width];
@@ -433,6 +496,13 @@ impl OsloSandboxEngine {
         for &site in &self.active_sites {
             self.queued_sites[site] = true;
         }
+        if self.fluid_enabled {
+            for (site, value) in self.fluidity.iter_mut().enumerate() {
+                if site < new_visible.0 || site >= new_visible.1 {
+                    *value = 0;
+                }
+            }
+        }
         if old_dimensions != (width, height) || new_width > old_width {
             for site in new_visible.0..new_visible.1 {
                 if site < shifted_old_visible.0 || site >= shifted_old_visible.1 {
@@ -508,6 +578,14 @@ impl OsloSandboxEngine {
         self.front_event_support_recruits = 0;
         self.front_last_erosions = 0;
         self.front_last_support_recruits = 0;
+        self.fluidity = vec![0; lattice_size];
+        self.fluid_activations = 0;
+        self.fluid_releases = 0;
+        self.fluid_peak_active_sites = 0;
+        self.fluid_event_activations = 0;
+        self.fluid_event_releases = 0;
+        self.fluid_last_activations = 0;
+        self.fluid_last_releases = 0;
         self.rain_focus_site = None;
         self.rain_focus_target_site = None;
         self.rain_focus_move_counter = 0;
@@ -516,6 +594,32 @@ impl OsloSandboxEngine {
         self.rain_right_padding_targets = 0;
         self.randomize_all_thresholds();
         self.sync_surface();
+    }
+
+    pub(crate) fn debug_fill_rainbow_80(&mut self, category_ids: &[CategoryId]) -> Result<usize, String> {
+        if category_ids.is_empty() {
+            return Err("testingcheats fill requires at least one configured layer".to_string());
+        }
+        self.clear();
+        let (visible_start, visible_end) = self.visible_lattice_bounds();
+        let fill_height = self.visible_height().saturating_mul(4) / 5;
+        if fill_height == 0 || visible_start >= visible_end {
+            return Ok(0);
+        }
+        for column in &mut self.columns[visible_start..visible_end] {
+            let mut filled = Vec::with_capacity(fill_height);
+            for depth in 0..fill_height {
+                let layer = depth.saturating_mul(category_ids.len()) / fill_height;
+                filled.push(category_ids[layer.min(category_ids.len() - 1)]);
+            }
+            *column = filled;
+        }
+        self.total_generated = self.settled_count();
+        for site in visible_start..visible_end {
+            self.enqueue_neighborhood(site);
+        }
+        self.sync_surface();
+        Ok(self.settled_count())
     }
 
     pub(crate) fn render(&self, categories: &[Category]) -> Vec<Line<'static>> {
@@ -581,7 +685,9 @@ impl OsloSandboxEngine {
     }
 
     pub(crate) fn model_name(&self) -> &'static str {
-        if self.front_enabled {
+        if self.fluid_enabled {
+            "oslo-vessel-fluid"
+        } else if self.front_enabled {
             "oslo-vessel-front"
         } else if self.momentum_enabled {
             "oslo-vessel-momentum"
@@ -596,6 +702,38 @@ impl OsloSandboxEngine {
 
     pub(crate) fn front_enabled(&self) -> bool {
         self.front_enabled
+    }
+
+    pub(crate) fn fluid_enabled(&self) -> bool {
+        self.fluid_enabled
+    }
+
+    pub(crate) fn explicit_flow_active(&self) -> bool {
+        !self.rolling_grains.is_empty() || self.fluidity.iter().any(|value| *value > 0)
+    }
+
+    pub(crate) fn fluid_active_sites(&self) -> usize {
+        self.fluidity.iter().filter(|value| **value > 0).count()
+    }
+
+    pub(crate) fn fluid_activations(&self) -> usize {
+        self.fluid_activations
+    }
+
+    pub(crate) fn fluid_releases(&self) -> usize {
+        self.fluid_releases
+    }
+
+    pub(crate) fn fluid_peak_active_sites(&self) -> usize {
+        self.fluid_peak_active_sites
+    }
+
+    pub(crate) fn fluid_last_activations(&self) -> usize {
+        self.fluid_last_activations
+    }
+
+    pub(crate) fn fluid_last_releases(&self) -> usize {
+        self.fluid_last_releases
     }
 
     pub(crate) fn rolling_count(&self) -> usize {
@@ -680,6 +818,7 @@ impl OsloSandboxEngine {
     }
 }
 
+mod fluidization;
 mod momentum;
 mod physics;
 mod rain;

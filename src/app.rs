@@ -48,6 +48,8 @@ use terminal_lifecycle::{ManagedTerminal, TerminalSession};
 
 #[cfg(debug_assertions)]
 const TESTING_CHEATS_FRAME_BUDGET: Duration = Duration::from_millis(4);
+#[cfg(debug_assertions)]
+const TESTING_CHEATS_FLOW_WALL_TICK: Duration = Duration::from_millis(32);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum UiMode {
@@ -558,6 +560,17 @@ impl TestingSandEngine {
         }
     }
 
+    fn explicit_flow_active(&self) -> bool {
+        matches!(self, Self::Oslo(engine) if engine.explicit_flow_active())
+    }
+
+    fn fill_rainbow_80(&mut self, category_ids: &[CategoryId]) -> Result<usize, String> {
+        match self {
+            Self::Oslo(engine) => engine.debug_fill_rainbow_80(category_ids),
+            _ => Err("testingcheats fill is available only for Oslo sandbox models".to_string()),
+        }
+    }
+
     fn sync_for_render(&mut self) {
         if let Self::Oslo(engine) = self {
             engine.sync_for_render();
@@ -637,8 +650,21 @@ impl TestingSandEngine {
                     } else {
                         String::new()
                     };
+                    let fluid = if engine.fluid_enabled() {
+                        format!(
+                            " fluid=active:{} activations:{} releases:{} peak:{} last={}/{}",
+                            engine.fluid_active_sites(),
+                            engine.fluid_activations(),
+                            engine.fluid_releases(),
+                            engine.fluid_peak_active_sites(),
+                            engine.fluid_last_activations(),
+                            engine.fluid_last_releases()
+                        )
+                    } else {
+                        String::new()
+                    };
                     format!(
-                        " · momentum=rolling:{} seeds:{} hops:{} settles:{} peak:{} last={}/{}/{}{}",
+                        " · momentum=rolling:{} seeds:{} hops:{} settles:{} peak:{} last={}/{}/{}{}{}",
                         engine.rolling_count(),
                         engine.momentum_seeds(),
                         engine.momentum_hops(),
@@ -647,7 +673,8 @@ impl TestingSandEngine {
                         engine.momentum_last_seeds(),
                         engine.momentum_last_hops(),
                         engine.momentum_last_peak_active(),
-                        front
+                        front,
+                        fluid
                     )
                 } else {
                     String::new()
@@ -689,6 +716,7 @@ struct TestingCheatsState {
     physics_accumulator: Duration,
     speed_multiplier: u32,
     queued_simulated: Duration,
+    flow_wall_accumulator: Duration,
     visual_dirty: bool,
 }
 
@@ -2274,8 +2302,15 @@ impl App {
                     self.sand_engine.snapshot_state().rng_state,
                 ),
             ))),
+            "oslo-vessel-fluid" => Ok(TestingSandEngine::Oslo(Box::new(
+                OsloSandboxEngine::new_fluid_vessel(
+                    self.sand_engine.cell_width,
+                    self.sand_engine.cell_height,
+                    self.sand_engine.snapshot_state().rng_state,
+                ),
+            ))),
             _ => Err(
-                "testingcheats model must be h4, classic, hybrid, oslo-zero, oslo-box, oslo-vessel, oslo-vessel-momentum, or oslo-vessel-front"
+                "testingcheats model must be h4, classic, hybrid, oslo-zero, oslo-box, oslo-vessel, oslo-vessel-momentum, oslo-vessel-front, or oslo-vessel-fluid"
                     .to_string(),
             ),
         }
@@ -2296,6 +2331,7 @@ impl App {
             physics_accumulator: self.simulation.physics_accumulator,
             speed_multiplier: 1,
             queued_simulated: Duration::ZERO,
+            flow_wall_accumulator: Duration::ZERO,
             visual_dirty: false,
         });
         self.simulation.catchup_progress_anchor = None;
@@ -2320,6 +2356,7 @@ impl App {
             physics_accumulator: self.simulation.physics_accumulator,
             speed_multiplier,
             queued_simulated: Duration::ZERO,
+            flow_wall_accumulator: Duration::ZERO,
             visual_dirty: false,
         });
         self.simulation.catchup_progress_anchor = None;
@@ -2335,6 +2372,14 @@ impl App {
         };
         let accelerated = wall_delta.saturating_mul(testing.speed_multiplier);
         testing.queued_simulated = testing.queued_simulated.saturating_add(accelerated);
+        if testing.engine.explicit_flow_active() {
+            testing.flow_wall_accumulator = testing
+                .flow_wall_accumulator
+                .saturating_add(wall_delta)
+                .min(TESTING_CHEATS_FLOW_WALL_TICK.saturating_mul(2));
+        } else {
+            testing.flow_wall_accumulator = Duration::ZERO;
+        }
     }
 
     #[cfg(debug_assertions)]
@@ -2370,7 +2415,12 @@ impl App {
             .as_mut()
             .expect("testing preview exists");
         let mut changed = false;
-
+        let flow_limited_at_start = testing.engine.explicit_flow_active();
+        if flow_limited_at_start
+            && testing.flow_wall_accumulator < TESTING_CHEATS_FLOW_WALL_TICK
+        {
+            return;
+        }
         while !testing.queued_simulated.is_zero() && Instant::now() < deadline {
             let spawn_left = tick_rate.saturating_sub(testing.spawn_accumulator);
             let physics_left = physics_rate.saturating_sub(testing.physics_accumulator);
@@ -2393,6 +2443,16 @@ impl App {
                 testing.physics_accumulator =
                     testing.physics_accumulator.saturating_sub(physics_rate);
                 changed |= testing.engine.update_deferred();
+                if flow_limited_at_start || testing.engine.explicit_flow_active() {
+                    if flow_limited_at_start {
+                        testing.flow_wall_accumulator = testing
+                            .flow_wall_accumulator
+                            .saturating_sub(TESTING_CHEATS_FLOW_WALL_TICK);
+                    } else {
+                        testing.flow_wall_accumulator = Duration::ZERO;
+                    }
+                    break;
+                }
             }
             if step.is_zero() && !spawn_due && !physics_due {
                 break;

@@ -36,7 +36,7 @@ impl OsloSandboxEngine {
         self.momentum_enabled && relief >= MOMENTUM_TRIGGER_RELIEF
     }
 
-    fn rolling_depth_at(&self, site: usize) -> usize {
+    pub(super) fn rolling_depth_at(&self, site: usize) -> usize {
         self.rolling_grains
             .iter()
             .filter(|rolling| rolling.site == site)
@@ -73,7 +73,7 @@ impl OsloSandboxEngine {
         self.record_rolling_peak();
     }
 
-    fn push_recruited_rolling_grain(
+    pub(super) fn push_recruited_rolling_grain(
         &mut self,
         site: usize,
         category_id: CategoryId,
@@ -276,5 +276,6 @@ impl OsloSandboxEngine {
         self.momentum_event_peak_active = 0;
         self.front_event_erosions = 0;
         self.front_event_support_recruits = 0;
+        self.finalize_fluid_event();
     }
 }

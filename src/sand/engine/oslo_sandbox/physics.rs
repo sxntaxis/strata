@@ -164,6 +164,7 @@ impl OsloSandboxEngine {
 
         if self.active_sites.is_empty()
             && self.rolling_grains.is_empty()
+            && !self.explicit_flow_active()
             && self.avalanche_moves > 0
         {
             self.avalanche_last_moves = self.avalanche_moves;
@@ -205,6 +206,7 @@ impl OsloSandboxEngine {
         if let Some(destination) = destination {
             if self.should_seed_momentum(relief) {
                 self.seed_rolling_grain(destination, category_id, direction);
+                self.seed_fluidization_failure(site, destination);
             } else {
                 self.columns[destination].push(category_id);
             }
@@ -285,7 +287,7 @@ impl OsloSandboxEngine {
 
     pub(super) fn commit_next_drive_if_quiescent(&mut self) -> bool {
         if !self.active_sites.is_empty()
-            || !self.rolling_grains.is_empty()
+            || self.explicit_flow_active()
             || self.columns.is_empty()
         {
             return false;
