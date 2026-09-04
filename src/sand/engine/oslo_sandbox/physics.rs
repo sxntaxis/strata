@@ -200,12 +200,15 @@ impl OsloSandboxEngine {
             return false;
         }
 
+        let visual_y = self
+            .top_grain_y(site)
+            .expect("over-critical Oslo site contains a grain");
         let category_id = self.columns[site]
             .pop()
             .expect("over-critical Oslo site contains a grain");
         if let Some(destination) = destination {
             if self.should_seed_momentum(relief) {
-                self.seed_rolling_grain(destination, category_id, direction);
+                self.seed_rolling_grain_at_y(destination, category_id, direction, visual_y);
                 self.seed_fluidization_failure(site, destination);
             } else {
                 self.columns[destination].push(category_id);
@@ -360,18 +363,12 @@ impl OsloSandboxEngine {
             }
         }
 
-        let mut rolling_per_site = vec![0usize; self.columns.len()];
         for rolling in &self.rolling_grains {
             let x = rolling.site;
-            if x >= self.surface.grid_width_dots {
+            let y = rolling.visual_y;
+            if x >= self.surface.grid_width_dots || y >= grid_height {
                 continue;
             }
-            let offset = rolling_per_site[x];
-            rolling_per_site[x] = rolling_per_site[x].saturating_add(1);
-            let occupied_height = self.columns[x].len().saturating_add(offset);
-            let Some(y) = grid_height.checked_sub(occupied_height.saturating_add(1)) else {
-                continue;
-            };
             self.surface.grid[y][x] = Some(rolling.category_id);
             self.surface.mobilized[y][x] = true;
         }

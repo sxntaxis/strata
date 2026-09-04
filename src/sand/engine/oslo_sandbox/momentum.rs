@@ -55,15 +55,38 @@ impl OsloSandboxEngine {
             .min(FRONT_MAX_FLAT_COAST_STEPS)
     }
 
+    pub(super) fn top_grain_y(&self, site: usize) -> Option<usize> {
+        let height = self.columns.get(site)?.len();
+        (height > 0).then(|| self.surface.grid_height_dots.saturating_sub(height))
+    }
+
+    fn rolling_target_y(&self, site: usize, offset: usize) -> usize {
+        self.surface
+            .grid_height_dots
+            .saturating_sub(self.columns[site].len().saturating_add(offset).saturating_add(1))
+    }
+
     pub(super) fn seed_rolling_grain(
         &mut self,
         site: usize,
         category_id: CategoryId,
         direction: ToppleDirection,
     ) {
+        let visual_y = self.rolling_target_y(site, self.rolling_depth_at(site));
+        self.seed_rolling_grain_at_y(site, category_id, direction, visual_y);
+    }
+
+    pub(super) fn seed_rolling_grain_at_y(
+        &mut self,
+        site: usize,
+        category_id: CategoryId,
+        direction: ToppleDirection,
+        visual_y: usize,
+    ) {
         let flat_coast_remaining = self.flat_coast_budget(site);
         self.rolling_grains.push_back(RollingGrain {
             site,
+            visual_y,
             category_id,
             direction,
             flat_coast_remaining,
@@ -73,20 +96,68 @@ impl OsloSandboxEngine {
         self.record_rolling_peak();
     }
 
-    pub(super) fn push_recruited_rolling_grain(
+    pub(super) fn push_recruited_rolling_grain_at_y(
         &mut self,
         site: usize,
         category_id: CategoryId,
         direction: ToppleDirection,
+        visual_y: usize,
     ) {
         let flat_coast_remaining = self.flat_coast_budget(site);
         self.rolling_grains.push_back(RollingGrain {
             site,
+            visual_y,
             category_id,
             direction,
             flat_coast_remaining,
         });
         self.record_rolling_peak();
+    }
+
+    pub(crate) fn rolling_visual_motion_active(&self) -> bool {
+        self.rolling_visual_in_transit_count() > 0
+    }
+
+    pub(crate) fn rolling_visual_in_transit_count(&self) -> usize {
+        if self.rolling_grains.is_empty() {
+            return 0;
+        }
+        let mut offsets = vec![0usize; self.columns.len()];
+        self.rolling_grains
+            .iter()
+            .filter(|rolling| {
+                let offset = offsets[rolling.site];
+                offsets[rolling.site] = offset.saturating_add(1);
+                rolling.visual_y != self.rolling_target_y(rolling.site, offset)
+            })
+            .count()
+    }
+
+    pub(crate) fn advance_rolling_visual_motion(&mut self) -> bool {
+        if self.rolling_grains.is_empty() {
+            return false;
+        }
+        let grid_height = self.surface.grid_height_dots;
+        let settled_heights = self.columns.iter().map(Vec::len).collect::<Vec<_>>();
+        let mut offsets = vec![0usize; self.columns.len()];
+        let mut changed = false;
+        for rolling in &mut self.rolling_grains {
+            let offset = offsets[rolling.site];
+            offsets[rolling.site] = offset.saturating_add(1);
+            let target = grid_height.saturating_sub(
+                settled_heights[rolling.site]
+                    .saturating_add(offset)
+                    .saturating_add(1),
+            );
+            let next = match rolling.visual_y.cmp(&target) {
+                std::cmp::Ordering::Less => rolling.visual_y.saturating_add(1),
+                std::cmp::Ordering::Greater => rolling.visual_y.saturating_sub(1),
+                std::cmp::Ordering::Equal => rolling.visual_y,
+            };
+            changed |= next != rolling.visual_y;
+            rolling.visual_y = next;
+        }
+        changed
     }
 
     fn record_rolling_peak(&mut self) {
@@ -160,11 +231,14 @@ impl OsloSandboxEngine {
             return false;
         }
 
+        let visual_y = self
+            .top_grain_y(source)
+            .expect("front erosion source was checked non-empty");
         let category_id = self.columns[source]
             .pop()
             .expect("front erosion source was checked non-empty");
         eroded_this_tick[source] = true;
-        self.push_recruited_rolling_grain(destination, category_id, direction);
+        self.push_recruited_rolling_grain_at_y(destination, category_id, direction, visual_y);
         self.record_front_recruit_move(true);
         self.enqueue_neighborhood(source);
         self.enqueue_neighborhood(destination);
@@ -199,10 +273,18 @@ impl OsloSandboxEngine {
             return false;
         }
 
+        let visual_y = self
+            .top_grain_y(uphill)
+            .expect("support-loss source was checked non-empty");
         let category_id = self.columns[uphill]
             .pop()
             .expect("support-loss source was checked non-empty");
-        self.push_recruited_rolling_grain(support_site, category_id, direction);
+        self.push_recruited_rolling_grain_at_y(
+            support_site,
+            category_id,
+            direction,
+            visual_y,
+        );
         self.record_front_recruit_move(false);
         self.enqueue_neighborhood(uphill);
         self.enqueue_neighborhood(support_site);

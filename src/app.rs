@@ -48,8 +48,6 @@ use terminal_lifecycle::{ManagedTerminal, TerminalSession};
 
 #[cfg(debug_assertions)]
 const TESTING_CHEATS_FRAME_BUDGET: Duration = Duration::from_millis(4);
-#[cfg(debug_assertions)]
-const TESTING_CHEATS_FLOW_WALL_TICK: Duration = Duration::from_millis(32);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum UiMode {
@@ -564,6 +562,22 @@ impl TestingSandEngine {
         matches!(self, Self::Oslo(engine) if engine.explicit_flow_active())
     }
 
+    fn visible_flow_active(&self) -> bool {
+        matches!(self, Self::Oslo(engine) if engine.visible_flow_active())
+    }
+
+    fn latent_flow_active(&self) -> bool {
+        matches!(self, Self::Oslo(engine) if engine.latent_flow_active())
+    }
+
+    fn rolling_visual_motion_active(&self) -> bool {
+        matches!(self, Self::Oslo(engine) if engine.rolling_visual_motion_active())
+    }
+
+    fn advance_rolling_visual_motion(&mut self) -> bool {
+        matches!(self, Self::Oslo(engine) if engine.advance_rolling_visual_motion())
+    }
+
     fn fill_rainbow_80(&mut self, category_ids: &[CategoryId]) -> Result<usize, String> {
         match self {
             Self::Oslo(engine) => engine.debug_fill_rainbow_80(category_ids),
@@ -664,8 +678,9 @@ impl TestingSandEngine {
                         String::new()
                     };
                     format!(
-                        " · momentum=rolling:{} seeds:{} hops:{} settles:{} peak:{} last={}/{}/{}{}{}",
+                        " · momentum=rolling:{} transit:{} seeds:{} hops:{} settles:{} peak:{} last={}/{}/{}{}{}",
                         engine.rolling_count(),
+                        engine.rolling_in_transit_count(),
                         engine.momentum_seeds(),
                         engine.momentum_hops(),
                         engine.momentum_settles(),
@@ -718,6 +733,22 @@ struct TestingCheatsState {
     queued_simulated: Duration,
     flow_wall_accumulator: Duration,
     visual_dirty: bool,
+}
+
+#[cfg(debug_assertions)]
+impl TestingCheatsState {
+    fn accumulate_wall_time(&mut self, wall_delta: Duration) {
+        if self.engine.explicit_flow_active() || self.engine.rolling_visual_motion_active() {
+            self.flow_wall_accumulator = self
+                .flow_wall_accumulator
+                .saturating_add(wall_delta)
+                .min(Duration::from_millis(TIME_SETTINGS.physics_ms.saturating_mul(8)));
+        } else {
+            let accelerated = wall_delta.saturating_mul(self.speed_multiplier);
+            self.queued_simulated = self.queued_simulated.saturating_add(accelerated);
+            self.flow_wall_accumulator = Duration::ZERO;
+        }
+    }
 }
 
 struct App {
@@ -2370,16 +2401,15 @@ impl App {
         let Some(testing) = self.testing_cheats.as_mut() else {
             return;
         };
-        let accelerated = wall_delta.saturating_mul(testing.speed_multiplier);
-        testing.queued_simulated = testing.queued_simulated.saturating_add(accelerated);
-        if testing.engine.explicit_flow_active() {
-            testing.flow_wall_accumulator = testing
-                .flow_wall_accumulator
-                .saturating_add(wall_delta)
-                .min(TESTING_CHEATS_FLOW_WALL_TICK.saturating_mul(2));
-        } else {
-            testing.flow_wall_accumulator = Duration::ZERO;
-        }
+
+        // Drive/fast-forward time and avalanche playback are deliberately
+        // separate clocks. Once an explicit moving phase begins, preserve any
+        // already-requested synthetic-time debt but stop adding accelerated
+        // wall time to it. The avalanche then plays on the visual grain clock;
+        // once quiescent, ordinary accelerated draining resumes. This prevents
+        // the old 64x/128x runaway backlog where debt accumulated much faster
+        // than a deliberately throttled flow could consume it.
+        testing.accumulate_wall_time(wall_delta);
     }
 
     #[cfg(debug_assertions)]
@@ -2394,33 +2424,88 @@ impl App {
 
     #[cfg(debug_assertions)]
     fn process_testing_cheats_budget(&mut self) {
-        if self
-            .testing_cheats
-            .as_ref()
-            .is_none_or(|testing| testing.queued_simulated.is_zero())
-        {
+        let Some(testing) = self.testing_cheats.as_mut() else {
+            return;
+        };
+
+        let physics_rate = Duration::from_millis(TIME_SETTINGS.physics_ms);
+        let grain_visual_rate = physics_rate.saturating_mul(2);
+        let deadline = Instant::now() + TESTING_CHEATS_FRAME_BUDGET;
+        let mut changed = false;
+
+        // Presentation interpolation is a wall-clock substep, not another
+        // sediment event. Physics stays paused until every explicit rolling dot
+        // has visually reached the surface implied by its already-computed
+        // physical site. One vertical dot step uses the same 64 ms cadence as
+        // Oslo's existing falling-dot step (two 32 ms internal physics frames).
+        if testing.engine.rolling_visual_motion_active() {
+            if testing.flow_wall_accumulator < grain_visual_rate {
+                return;
+            }
+            testing.flow_wall_accumulator = Duration::ZERO;
+            changed |= testing.engine.advance_rolling_visual_motion();
+            if changed {
+                testing.visual_dirty = true;
+                self.render_needed = true;
+            }
             return;
         }
 
-        // The testing sandbox intentionally advances even while the real tracker
-        // is idle. In that case the current Drift/Idle category colors the
-        // synthetic grains; authoritative sediment remains untouched.
+        // Visible avalanche mass advances on a fixed wall-clock physics cadence,
+        // independent of host CPU cost and independent of fallspeed. Existing
+        // falling dots are advanced by the same engine event, so rain and
+        // avalanche motion share one visible clock while the drive clock pauses.
+        if testing.engine.visible_flow_active() {
+            if testing.flow_wall_accumulator < physics_rate {
+                return;
+            }
+            testing.flow_wall_accumulator = Duration::ZERO;
+            changed |= testing.engine.update_deferred();
+            if changed {
+                testing.visual_dirty = true;
+                self.render_needed = true;
+            }
+            return;
+        }
+
+        // A fluidity field can remain active for a few internal steps without
+        // any visible moving grain. Do not make the UI appear frozen for an
+        // invisible order parameter: drain only that already-active relaxation
+        // cooperatively until it either releases visible mass or dies. Because
+        // explicit flow is still active, Oslo cannot commit the next drive grain.
+        if testing.engine.latent_flow_active() {
+            while Instant::now() < deadline
+                && testing.engine.latent_flow_active()
+                && !testing.engine.rolling_visual_motion_active()
+                && !testing.engine.visible_flow_active()
+            {
+                changed |= testing.engine.update_deferred();
+            }
+            if testing.engine.rolling_visual_motion_active()
+                || testing.engine.visible_flow_active()
+            {
+                // A newly-visible front starts from a fresh wall-clock epoch;
+                // invisible field relaxation never grants it presentation debt.
+                testing.flow_wall_accumulator = Duration::ZERO;
+            }
+            if changed {
+                testing.visual_dirty = true;
+                self.render_needed = true;
+            }
+            return;
+        }
+
+        if testing.queued_simulated.is_zero() {
+            return;
+        }
+
+        // Outside an avalanche, keep the proven cooperative fast-forward path:
+        // use available CPU for synthetic time, but stop immediately if a
+        // physical flow phase begins. The remainder stays as requested debt and
+        // resumes only after the visible event reaches quiescence.
         let should_spawn = true;
         let category_id = self.time_tracker.active_category_id();
         let tick_rate = Duration::from_millis(TIME_SETTINGS.tick_ms);
-        let physics_rate = Duration::from_millis(TIME_SETTINGS.physics_ms);
-        let deadline = Instant::now() + TESTING_CHEATS_FRAME_BUDGET;
-        let testing = self
-            .testing_cheats
-            .as_mut()
-            .expect("testing preview exists");
-        let mut changed = false;
-        let flow_limited_at_start = testing.engine.explicit_flow_active();
-        if flow_limited_at_start
-            && testing.flow_wall_accumulator < TESTING_CHEATS_FLOW_WALL_TICK
-        {
-            return;
-        }
         while !testing.queued_simulated.is_zero() && Instant::now() < deadline {
             let spawn_left = tick_rate.saturating_sub(testing.spawn_accumulator);
             let physics_left = physics_rate.saturating_sub(testing.physics_accumulator);
@@ -2443,14 +2528,10 @@ impl App {
                 testing.physics_accumulator =
                     testing.physics_accumulator.saturating_sub(physics_rate);
                 changed |= testing.engine.update_deferred();
-                if flow_limited_at_start || testing.engine.explicit_flow_active() {
-                    if flow_limited_at_start {
-                        testing.flow_wall_accumulator = testing
-                            .flow_wall_accumulator
-                            .saturating_sub(TESTING_CHEATS_FLOW_WALL_TICK);
-                    } else {
-                        testing.flow_wall_accumulator = Duration::ZERO;
-                    }
+                if testing.engine.explicit_flow_active()
+                    || testing.engine.rolling_visual_motion_active()
+                {
+                    testing.flow_wall_accumulator = Duration::ZERO;
                     break;
                 }
             }
@@ -3461,5 +3542,50 @@ mod day_end_snapshot_tests {
             stage_pending_day_end_snapshot(&mut pending, day, boundary, state(5)).unwrap_err();
         assert!(error.contains("conflicting in-memory day-end snapshots"));
         assert_eq!(pending[0].snapshot.state, state(4));
+    }
+}
+
+#[cfg(all(test, debug_assertions))]
+mod testing_cheats_clock_tests {
+    use super::{TestingCheatsState, TestingSandEngine};
+    use crate::sand::OsloSandboxEngine;
+    use std::time::Duration;
+
+    fn state(engine: TestingSandEngine, speed_multiplier: u32) -> TestingCheatsState {
+        TestingCheatsState {
+            engine,
+            spawn_accumulator: Duration::ZERO,
+            physics_accumulator: Duration::ZERO,
+            speed_multiplier,
+            queued_simulated: Duration::from_secs(30),
+            flow_wall_accumulator: Duration::ZERO,
+            visual_dirty: false,
+        }
+    }
+
+    #[test]
+    fn accelerated_wall_time_grows_drive_debt_only_while_quiescent() {
+        let engine = TestingSandEngine::Oslo(Box::new(OsloSandboxEngine::new_front_vessel(
+            20, 10, 7,
+        )));
+        let mut testing = state(engine, 64);
+
+        testing.accumulate_wall_time(Duration::from_secs(1));
+
+        assert_eq!(testing.queued_simulated, Duration::from_secs(94));
+        assert_eq!(testing.flow_wall_accumulator, Duration::ZERO);
+    }
+
+    #[test]
+    fn explicit_flow_pauses_drive_debt_instead_of_building_a_64x_backlog() {
+        let mut engine = OsloSandboxEngine::new_front_vessel(20, 10, 7);
+        engine.test_seed_visible_flow();
+        let mut testing = state(TestingSandEngine::Oslo(Box::new(engine)), 64);
+        let debt_before = testing.queued_simulated;
+
+        testing.accumulate_wall_time(Duration::from_secs(1));
+
+        assert_eq!(testing.queued_simulated, debt_before);
+        assert!(testing.flow_wall_accumulator > Duration::ZERO);
     }
 }

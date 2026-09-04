@@ -672,3 +672,101 @@ fn rainbow_fill_populates_exactly_eighty_percent_of_current_visible_window() {
     assert!(engine.columns[..start].iter().all(Vec::is_empty));
     assert!(engine.columns[end..].iter().all(Vec::is_empty));
 }
+#[test]
+fn severe_front_release_preserves_source_elevation_then_descends_one_dot_per_visual_step() {
+    let mut engine = OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED);
+    let site = engine.lattice_size() / 2;
+    set_column_height(&mut engine, site - 1, 8);
+    set_column_height(&mut engine, site, 8);
+    set_column_height(&mut engine, site + 1, 2);
+    engine.columns[site].pop();
+    engine.columns[site].push(CategoryId(77));
+    engine.critical_slopes[site] = OSLO_THRESHOLD_HIGH;
+    let source_y = engine.top_grain_y(site).unwrap();
+
+    assert!(engine.topple_site_if_unstable(site));
+    let rolling = engine.rolling_grains.front().copied().unwrap();
+    assert_eq!(rolling.site, site + 1);
+    assert_eq!(rolling.category_id, CategoryId(77));
+    assert_eq!(rolling.visual_y, source_y);
+    assert!(engine.rolling_visual_motion_active());
+
+    let first_y = rolling.visual_y;
+    assert!(engine.advance_rolling_visual_motion());
+    assert_eq!(engine.rolling_grains.front().unwrap().visual_y, first_y + 1);
+
+    let mut guard = 0usize;
+    while engine.rolling_visual_motion_active() {
+        guard += 1;
+        assert!(guard < 100, "rolling visual transport did not converge");
+        assert!(engine.advance_rolling_visual_motion());
+    }
+    let target_y = engine.surface.grid_height_dots - engine.columns[site + 1].len() - 1;
+    assert_eq!(engine.rolling_grains.front().unwrap().visual_y, target_y);
+    assert_eq!(engine.grain_count(), 18);
+}
+
+#[test]
+fn rolling_physics_hop_changes_one_lattice_site_without_vertical_teleport() {
+    let mut engine = OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED);
+    for (site, height) in [6usize, 4, 2, 1].into_iter().enumerate() {
+        set_column_height(&mut engine, site, height);
+    }
+    engine.seed_rolling_grain(1, CategoryId(88), ToppleDirection::Right);
+    let start_y = engine.rolling_grains.front().unwrap().visual_y;
+
+    assert!(engine.advance_rolling_grains());
+    let rolling = engine.rolling_grains.front().unwrap();
+    assert_eq!(rolling.site, 2);
+    assert_eq!(rolling.visual_y, start_y);
+    assert_eq!(rolling.category_id, CategoryId(88));
+    assert!(engine.rolling_visual_motion_active());
+}
+
+#[test]
+fn rolling_visual_interpolation_is_semantically_inert_for_front_relaxation() {
+    fn run(mut engine: OsloSandboxEngine, interpolate: bool) -> OsloSandboxEngine {
+        let width = engine.lattice_size();
+        for site in 0..(width / 2) {
+            set_column_height(&mut engine, site, 12);
+        }
+        for site in (width / 2)..width {
+            set_column_height(&mut engine, site, 2);
+        }
+        engine.critical_slopes.fill(OSLO_THRESHOLD_HIGH);
+        engine.enqueue_neighborhood(width / 2 - 1);
+        engine.enqueue_neighborhood(width / 2);
+
+        let mut guard = 0usize;
+        loop {
+            guard = guard.saturating_add(1);
+            assert!(guard < 200_000, "front relaxation did not quiesce");
+            if interpolate {
+                while engine.rolling_visual_motion_active() {
+                    assert!(engine.advance_rolling_visual_motion());
+                }
+            }
+            let mut changed = engine.advance_rolling_grains();
+            changed |= engine.topple_one_active_site();
+            if !changed && engine.active_sites.is_empty() && !engine.explicit_flow_active() {
+                break;
+            }
+        }
+        engine
+    }
+
+    let direct = run(OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED), false);
+    let interpolated = run(OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED), true);
+
+    assert_eq!(interpolated.columns, direct.columns);
+    assert_eq!(interpolated.critical_slopes, direct.critical_slopes);
+    assert_eq!(interpolated.threshold_rng_state, direct.threshold_rng_state);
+    assert_eq!(interpolated.relax_rng_state, direct.relax_rng_state);
+    assert_eq!(interpolated.discharged_count(), direct.discharged_count());
+    assert_eq!(interpolated.momentum_hops(), direct.momentum_hops());
+    assert_eq!(interpolated.front_erosions(), direct.front_erosions());
+    assert_eq!(
+        interpolated.front_support_recruits(),
+        direct.front_support_recruits()
+    );
+}

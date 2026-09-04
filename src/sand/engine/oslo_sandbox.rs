@@ -88,6 +88,7 @@ pub(crate) struct FallingDrive {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct RollingGrain {
     site: usize,
+    visual_y: usize,
     category_id: CategoryId,
     direction: ToppleDirection,
     flat_coast_remaining: u8,
@@ -485,6 +486,22 @@ impl OsloSandboxEngine {
                     .clamp(new_visible_vertical.0, new_visible_vertical.1 - 1);
             }
         }
+        for rolling in &mut self.rolling_grains {
+            rolling.visual_y = rolling.visual_y.saturating_add(vertical_added);
+            if new_visible_height == 0 {
+                rolling.visual_y = 0;
+            } else if new_visible_height < old_visible_height {
+                rolling.visual_y = Self::project_site_between_bounds(
+                    rolling.visual_y,
+                    shifted_old_vertical,
+                    new_visible_vertical,
+                );
+            } else {
+                rolling.visual_y = rolling
+                    .visual_y
+                    .clamp(new_visible_vertical.0, new_visible_vertical.1 - 1);
+            }
+        }
 
         // Hidden canonical columns are custody only while the viewport is smaller.
         // Freeze their Oslo activity and rebuild the exact visible queue. On
@@ -658,6 +675,15 @@ impl OsloSandboxEngine {
         self.columns.len()
     }
 
+    #[cfg(test)]
+    pub(crate) fn test_seed_visible_flow(&mut self) {
+        let (visible_start, visible_end) = self.visible_lattice_bounds();
+        if visible_start >= visible_end {
+            return;
+        }
+        self.seed_rolling_grain(visible_start, CategoryId::new(1), ToppleDirection::Right);
+    }
+
     pub(crate) fn avalanche_peak_moves(&self) -> usize {
         self.avalanche_peak_moves
     }
@@ -712,6 +738,18 @@ impl OsloSandboxEngine {
         !self.rolling_grains.is_empty() || self.fluidity.iter().any(|value| *value > 0)
     }
 
+    pub(crate) fn visible_flow_active(&self) -> bool {
+        !self.rolling_grains.is_empty()
+            || (self.fluidity.iter().any(|value| *value > 0)
+                && !self.falling_drives.is_empty())
+    }
+
+    pub(crate) fn latent_flow_active(&self) -> bool {
+        self.fluidity.iter().any(|value| *value > 0)
+            && self.rolling_grains.is_empty()
+            && self.falling_drives.is_empty()
+    }
+
     pub(crate) fn fluid_active_sites(&self) -> usize {
         self.fluidity.iter().filter(|value| **value > 0).count()
     }
@@ -738,6 +776,10 @@ impl OsloSandboxEngine {
 
     pub(crate) fn rolling_count(&self) -> usize {
         self.rolling_grains.len()
+    }
+
+    pub(crate) fn rolling_in_transit_count(&self) -> usize {
+        self.rolling_visual_in_transit_count()
     }
 
     pub(crate) fn momentum_seeds(&self) -> usize {

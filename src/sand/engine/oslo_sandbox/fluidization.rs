@@ -94,11 +94,15 @@ impl OsloSandboxEngine {
         let mut next = previous.clone();
         let mut changed = false;
         let mut spread_activations = 0usize;
+        let mut rolling_depths = vec![0usize; self.columns.len()];
+        for rolling in &self.rolling_grains {
+            rolling_depths[rolling.site] = rolling_depths[rolling.site].saturating_add(1);
+        }
 
         for site in visible_start..visible_end {
             let relief = self.local_downhill_relief(site);
             let current = previous[site];
-            let rolling_here = self.rolling_depth_at(site) > 0;
+            let rolling_here = rolling_depths[site] > 0;
 
             let mut value = if current == 0 {
                 0
@@ -159,10 +163,18 @@ impl OsloSandboxEngine {
             .collect::<Vec<_>>();
 
         for (site, direction, destination) in release_sites {
+            let Some(visual_y) = self.top_grain_y(site) else {
+                continue;
+            };
             let Some(category_id) = self.columns[site].pop() else {
                 continue;
             };
-            self.push_recruited_rolling_grain(destination, category_id, direction);
+            self.push_recruited_rolling_grain_at_y(
+                destination,
+                category_id,
+                direction,
+                visual_y,
+            );
             self.record_fluid_release_move();
             self.enqueue_neighborhood(site);
             self.enqueue_neighborhood(destination);
