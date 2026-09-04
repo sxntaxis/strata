@@ -205,7 +205,7 @@ impl OsloSandboxEngine {
             .expect("over-critical Oslo site contains a grain");
         if let Some(destination) = destination {
             if self.should_seed_momentum(relief) {
-                self.record_flowviz_transfer(site, destination, category_id, visual_y);
+                self.record_flowviz_mobile_entry(site, destination, category_id, visual_y);
                 self.seed_rolling_grain_at_y(destination, category_id, direction, visual_y);
                 self.seed_fluidization_failure(site, destination);
             } else {
@@ -214,8 +214,10 @@ impl OsloSandboxEngine {
                     category_id,
                     Some(visual_y),
                 );
+                self.mirror_flowviz_settled_transfer(site, destination, category_id);
             }
         } else {
+            self.mirror_flowviz_settled_discharge(site, category_id);
             self.discharged = self.discharged.saturating_add(1);
         }
         self.critical_slopes[site] = self.sample_threshold();
@@ -331,6 +333,7 @@ impl OsloSandboxEngine {
             .pop_front()
             .expect("front falling Oslo drive exists");
         self.push_settled_grain_at_visual_y(falling.x, falling.category_id, Some(falling.y));
+        self.mirror_flowviz_settled_push(falling.x, falling.category_id);
         self.enqueue_neighborhood(falling.x);
         true
     }
@@ -345,30 +348,34 @@ impl OsloSandboxEngine {
         self.surface.pending_runs.clear();
 
         let grid_height = self.surface.grid_height_dots;
-        for (site, column) in self.columns.iter().enumerate() {
-            let x = site;
-            if x >= self.surface.grid_width_dots {
-                break;
-            }
-            for (depth, category_id) in column.iter().copied().enumerate() {
-                let Some(settled_y) = grid_height.checked_sub(depth + 1) else {
+        if self.flowviz_conservative {
+            self.render_conservative_shadow_into_surface();
+        } else {
+            for (site, column) in self.columns.iter().enumerate() {
+                let x = site;
+                if x >= self.surface.grid_width_dots {
                     break;
-                };
-                let visual_y = if self.flowviz_enabled {
-                    None
-                } else {
-                    self.column_visual_y
-                        .get(site)
-                        .and_then(|visual| visual.get(depth))
-                        .and_then(|value| *value)
-                };
-                let y = visual_y.unwrap_or(settled_y);
-                if y >= grid_height {
-                    continue;
                 }
-                self.surface.grid[y][x] = Some(category_id);
-                if visual_y.is_some() {
-                    self.surface.mobilized[y][x] = true;
+                for (depth, category_id) in column.iter().copied().enumerate() {
+                    let Some(settled_y) = grid_height.checked_sub(depth + 1) else {
+                        break;
+                    };
+                    let visual_y = if self.flowviz_enabled {
+                        None
+                    } else {
+                        self.column_visual_y
+                            .get(site)
+                            .and_then(|visual| visual.get(depth))
+                            .and_then(|value| *value)
+                    };
+                    let y = visual_y.unwrap_or(settled_y);
+                    if y >= grid_height {
+                        continue;
+                    }
+                    self.surface.grid[y][x] = Some(category_id);
+                    if visual_y.is_some() {
+                        self.surface.mobilized[y][x] = true;
+                    }
                 }
             }
         }

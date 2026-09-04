@@ -25,6 +25,7 @@ pub(super) struct FlowVizTracer {
 impl OsloSandboxEngine {
     pub(super) fn enable_flowviz(&mut self, seed: u64) {
         self.flowviz_enabled = true;
+        self.flowviz_conservative = false;
         self.flowviz_edge_flux = vec![0; self.columns.len()];
         self.flowviz_tracers.clear();
         self.flowviz_rng_state = seed ^ 0xB529_7A4D_1C68_E9D7;
@@ -42,6 +43,9 @@ impl OsloSandboxEngine {
         self.flowviz_spawned = 0;
         self.flowviz_peak_tracers = 0;
         self.flowviz_dropped_samples = 0;
+        if self.flowviz_conservative {
+            self.clear_conservative_flowviz();
+        }
     }
 
     pub(super) fn resize_flowviz_for_growth(&mut self, left_added: usize, new_width: usize) {
@@ -56,6 +60,9 @@ impl OsloSandboxEngine {
                 self.flowviz_edge_flux[shifted] = flux;
             }
         }
+        if self.flowviz_conservative {
+            self.resize_conservative_flowviz_for_growth(left_added, new_width);
+        }
         if left_added > 0 {
             let shift = left_added as f32;
             for tracer in &mut self.flowviz_tracers {
@@ -64,12 +71,26 @@ impl OsloSandboxEngine {
         }
     }
 
-    fn flowviz_rand_unit(&mut self) -> f32 {
+    pub(super) fn flowviz_rand_unit(&mut self) -> f32 {
         self.flowviz_rng_state ^= self.flowviz_rng_state << 13;
         self.flowviz_rng_state ^= self.flowviz_rng_state >> 7;
         self.flowviz_rng_state ^= self.flowviz_rng_state << 17;
         let sample = (self.flowviz_rng_state >> 40) as u32;
         sample as f32 / 0x00FF_FFFFu32 as f32
+    }
+
+    pub(super) fn record_flowviz_edge_flux(&mut self, source: usize, destination: usize) {
+        if !self.flowviz_enabled || source == destination {
+            return;
+        }
+        let right = destination > source;
+        let edge = source.min(destination);
+        if let Some(flux) = self.flowviz_edge_flux.get_mut(edge) {
+            let delta = if right { 1 } else { -1 };
+            *flux = flux
+                .saturating_add(delta)
+                .clamp(-FLOWVIZ_FLUX_CAP, FLOWVIZ_FLUX_CAP);
+        }
     }
 
     pub(super) fn record_flowviz_transfer(
@@ -82,12 +103,11 @@ impl OsloSandboxEngine {
         if !self.flowviz_enabled || source == destination || self.columns.is_empty() {
             return;
         }
-        let right = destination > source;
-        let edge = source.min(destination);
-        if let Some(flux) = self.flowviz_edge_flux.get_mut(edge) {
-            let delta = if right { 1 } else { -1 };
-            *flux = flux.saturating_add(delta).clamp(-FLOWVIZ_FLUX_CAP, FLOWVIZ_FLUX_CAP);
+        self.record_flowviz_edge_flux(source, destination);
+        if self.flowviz_conservative {
+            return;
         }
+        let right = destination > source;
 
         if self.flowviz_tracers.len() >= FLOWVIZ_TRACER_CAP {
             self.flowviz_dropped_samples = self.flowviz_dropped_samples.saturating_add(1);
@@ -123,7 +143,7 @@ impl OsloSandboxEngine {
         grid_height.saturating_sub(height) as f32
     }
 
-    fn flowviz_flux_bias(&self, site: usize) -> i16 {
+    pub(super) fn flowviz_flux_bias(&self, site: usize) -> i16 {
         let right = self.flowviz_edge_flux.get(site).copied().unwrap_or(0);
         let left = site
             .checked_sub(1)
@@ -160,15 +180,22 @@ impl OsloSandboxEngine {
         }
     }
 
-    pub(super) fn advance_flowviz_tracers(&mut self) -> bool {
-        if !self.flowviz_enabled {
-            return false;
-        }
-
+    pub(super) fn decay_flowviz_flux(&mut self) {
         for flux in &mut self.flowviz_edge_flux {
             *flux = (*flux as i32 * FLOWVIZ_FLUX_DECAY_NUM as i32
                 / FLOWVIZ_FLUX_DECAY_DEN as i32) as i16;
         }
+    }
+
+    pub(super) fn advance_flowviz_tracers(&mut self) -> bool {
+        if !self.flowviz_enabled {
+            return false;
+        }
+        if self.flowviz_conservative {
+            return self.advance_conservative_flowviz();
+        }
+
+        self.decay_flowviz_flux();
         if self.flowviz_tracers.is_empty() {
             self.flowviz_edge_flux.fill(0);
             return false;
@@ -261,6 +288,10 @@ impl OsloSandboxEngine {
         if !self.flowviz_enabled {
             return;
         }
+        if self.flowviz_conservative {
+            self.render_conservative_flowviz_parcels_into_surface();
+            return;
+        }
         let grid_height = self.surface.grid_height_dots;
         let grid_width = self.surface.grid_width_dots;
         for tracer in &self.flowviz_tracers {
@@ -283,12 +314,24 @@ impl OsloSandboxEngine {
         self.flowviz_enabled
     }
 
+    pub(crate) fn flowviz_conservative_enabled(&self) -> bool {
+        self.flowviz_conservative
+    }
+
     pub(crate) fn flowviz_tracer_count(&self) -> usize {
-        self.flowviz_tracers.len()
+        if self.flowviz_conservative {
+            self.flowviz_parcels.len()
+        } else {
+            self.flowviz_tracers.len()
+        }
     }
 
     pub(crate) fn flowviz_peak_tracers(&self) -> usize {
-        self.flowviz_peak_tracers
+        if self.flowviz_conservative {
+            self.flowviz_peak_parcels
+        } else {
+            self.flowviz_peak_tracers
+        }
     }
 
     pub(crate) fn flowviz_spawned(&self) -> usize {

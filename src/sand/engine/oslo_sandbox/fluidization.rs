@@ -166,6 +166,7 @@ impl OsloSandboxEngine {
             let Some((category_id, visual_y)) = self.pop_settled_grain(site) else {
                 continue;
             };
+            self.record_flowviz_mobile_entry(site, destination, category_id, visual_y);
             self.push_recruited_rolling_grain_at_y(
                 destination,
                 category_id,

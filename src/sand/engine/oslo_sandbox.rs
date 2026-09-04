@@ -6,6 +6,8 @@ use ratatui::prelude::Line;
 use super::{PendingGrainRun, SandEngine};
 
 mod flowviz;
+mod flowviz_conservative;
+mod flowviz_conservative_render;
 
 const OSLO_THRESHOLD_LOW: u8 = 1;
 const OSLO_THRESHOLD_HIGH: u8 = 2;
@@ -152,6 +154,7 @@ pub(crate) struct OsloSandboxEngine {
     front_enabled: bool,
     fluid_enabled: bool,
     flowviz_enabled: bool,
+    flowviz_conservative: bool,
     columns: Vec<Vec<CategoryId>>,
     // Presentation-only y overrides aligned one-for-one with `columns`.
     // A settled grain can already participate in authoritative physics while
@@ -161,10 +164,21 @@ pub(crate) struct OsloSandboxEngine {
     column_visual_y: Vec<Vec<Option<usize>>>,
     flowviz_edge_flux: Vec<i16>,
     flowviz_tracers: VecDeque<flowviz::FlowVizTracer>,
+    flowviz_parcels: VecDeque<flowviz_conservative::FlowVizParcel>,
+    flowviz_shadow_columns: Vec<Vec<CategoryId>>,
+    flowviz_deposit_due: Vec<Vec<(CategoryId, usize)>>,
     flowviz_rng_state: u64,
     flowviz_spawned: usize,
     flowviz_peak_tracers: usize,
     flowviz_dropped_samples: usize,
+    flowviz_peak_parcels: usize,
+    flowviz_mobile_mass: usize,
+    flowviz_peak_mobile_mass: usize,
+    flowviz_visual_withdrawals: usize,
+    flowviz_visual_deposits: usize,
+    flowviz_reused_deposits: usize,
+    flowviz_coalesced_mass: usize,
+    flowviz_shadow_misses: usize,
     critical_slopes: Vec<u8>,
     threshold_rng_state: u64,
     rain_rng_state: u64,
@@ -249,6 +263,17 @@ impl OsloSandboxEngine {
         sandbox
     }
 
+    pub(crate) fn new_front_conservative_flowviz_vessel(
+        width: u16,
+        height: u16,
+        seed: u64,
+    ) -> Self {
+        let mut sandbox = Self::new_front_vessel(width, height, seed);
+        sandbox.enable_conservative_flowviz(seed);
+        sandbox.sync_surface();
+        sandbox
+    }
+
     pub(crate) fn new_fluid_vessel(width: u16, height: u16, seed: u64) -> Self {
         Self::new_with_flow(
             width,
@@ -303,14 +328,26 @@ impl OsloSandboxEngine {
             front_enabled,
             fluid_enabled,
             flowviz_enabled: false,
+            flowviz_conservative: false,
             columns: vec![Vec::new(); lattice_size],
             column_visual_y: vec![Vec::new(); lattice_size],
             flowviz_edge_flux: vec![0; lattice_size],
             flowviz_tracers: VecDeque::new(),
+            flowviz_parcels: VecDeque::new(),
+            flowviz_shadow_columns: vec![Vec::new(); lattice_size],
+            flowviz_deposit_due: vec![Vec::new(); lattice_size],
             flowviz_rng_state: seed ^ 0xB529_7A4D_1C68_E9D7,
             flowviz_spawned: 0,
             flowviz_peak_tracers: 0,
             flowviz_dropped_samples: 0,
+            flowviz_peak_parcels: 0,
+            flowviz_mobile_mass: 0,
+            flowviz_peak_mobile_mass: 0,
+            flowviz_visual_withdrawals: 0,
+            flowviz_visual_deposits: 0,
+            flowviz_reused_deposits: 0,
+            flowviz_coalesced_mass: 0,
+            flowviz_shadow_misses: 0,
             critical_slopes: vec![OSLO_THRESHOLD_LOW; lattice_size],
             threshold_rng_state,
             rain_rng_state,
@@ -541,6 +578,14 @@ impl OsloSandboxEngine {
                     );
                     tracer.x = projected as f32 + 0.5;
                 }
+                for parcel in &mut self.flowviz_parcels {
+                    let projected = Self::project_site_between_bounds(
+                        parcel.x.max(0.0).floor() as usize,
+                        shifted_old_visible,
+                        new_visible,
+                    );
+                    parcel.x = projected as f32 + 0.5;
+                }
             }
         }
 
@@ -601,6 +646,23 @@ impl OsloSandboxEngine {
                     ) as f32;
                 } else {
                     tracer.y = y
+                        .clamp(new_visible_vertical.0, new_visible_vertical.1 - 1)
+                        as f32;
+                }
+            }
+            for parcel in &mut self.flowviz_parcels {
+                let mut y = parcel.y.max(0.0).floor() as usize;
+                y = y.saturating_add(vertical_added);
+                if new_visible_height == 0 {
+                    parcel.y = 0.0;
+                } else if new_visible_height < old_visible_height {
+                    parcel.y = Self::project_site_between_bounds(
+                        y,
+                        shifted_old_vertical,
+                        new_visible_vertical,
+                    ) as f32;
+                } else {
+                    parcel.y = y
                         .clamp(new_visible_vertical.0, new_visible_vertical.1 - 1)
                         as f32;
                 }
@@ -756,6 +818,7 @@ impl OsloSandboxEngine {
             self.column_visual_y[site] = vec![None; fill_height];
         }
         self.total_generated = self.settled_count();
+        self.reset_conservative_flowviz_from_physics();
         for site in visible_start..visible_end {
             self.enqueue_neighborhood(site);
         }
@@ -849,7 +912,9 @@ impl OsloSandboxEngine {
     }
 
     pub(crate) fn model_name(&self) -> &'static str {
-        if self.flowviz_enabled {
+        if self.flowviz_conservative {
+            "oslo-vessel-front-parcels"
+        } else if self.flowviz_enabled {
             "oslo-vessel-front-flowviz"
         } else if self.fluid_enabled {
             "oslo-vessel-fluid"

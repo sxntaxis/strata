@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-04
 authority: working
-summary: H4/v5 remains published production authority. SEDIMENT-008 oslo-vessel-front physics remains owner-frozen. SEDIMENT-013 supersedes rejected per-grain Transport2D presentation with a debug-only signed edge-flux field and bounded Lagrangian tracer cloud; tracers sample real CategoryId transfers but carry no mass or physics authority.
-next: Natively validate SEDIMENT-013, then human A/B frozen oslo-vessel-front versus oslo-vessel-front-flowviz with testingcheats fill. Require identical physics, stable live-rain/64x clock behavior, no ray/comb destination-path artifacts, and a dense local tracer flow that follows gravity/current bed rather than invented future endpoints.
+summary: H4/v5 remains published production authority. SEDIMENT-008 oslo-vessel-front physics remains owner-frozen. SEDIMENT-014 keeps SEDIMENT-013 local flux but replaces massless tracers with a conservative visual shadow surface and weighted CategoryId parcels so visible settlement can occur only by consuming mobile visual mass against real physical settlement credits.
+next: Natively validate SEDIMENT-014, then human A/B frozen oslo-vessel-front, SEDIMENT-013 flowviz, and oslo-vessel-front-parcels with testingcheats fill. Require exact frozen physics, zero visual custody misses, shadow+parcel mass conservation, progressive credit-backed deposition, stable live rain/64x clock behavior, and no serialization/ray/path artifacts.
 ---
 
 # NOW — Strata

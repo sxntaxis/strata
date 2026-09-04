@@ -205,6 +205,9 @@ impl OsloSandboxEngine {
     }
 
     pub(crate) fn rolling_visual_motion_active(&self) -> bool {
+        if self.flowviz_conservative {
+            return !self.flowviz_parcels.is_empty();
+        }
         if self.flowviz_enabled {
             return !self.flowviz_tracers.is_empty();
         }
@@ -212,6 +215,9 @@ impl OsloSandboxEngine {
     }
 
     pub(crate) fn rolling_visual_in_transit_count(&self) -> usize {
+        if self.flowviz_conservative {
+            return self.flowviz_parcel_mass();
+        }
         if self.flowviz_enabled {
             return self.flowviz_tracers.len();
         }
@@ -230,6 +236,9 @@ impl OsloSandboxEngine {
     }
 
     pub(crate) fn total_visual_in_transit_count(&self) -> usize {
+        if self.flowviz_conservative {
+            return self.flowviz_parcel_mass();
+        }
         if self.flowviz_enabled {
             return self.flowviz_tracers.len();
         }
@@ -289,6 +298,7 @@ impl OsloSandboxEngine {
             rolling.category_id,
             Some(rolling.visual_y),
         );
+        self.record_flowviz_settlement(rolling.site, rolling.category_id);
         self.momentum_settles = self.momentum_settles.saturating_add(1);
         self.enqueue_neighborhood(rolling.site);
     }
@@ -347,7 +357,7 @@ impl OsloSandboxEngine {
         let (category_id, visual_y) = self
             .pop_settled_grain(source)
             .expect("front erosion source was checked non-empty");
-        self.record_flowviz_transfer(source, destination, category_id, visual_y);
+        self.record_flowviz_mobile_entry(source, destination, category_id, visual_y);
         eroded_this_tick[source] = true;
         self.push_recruited_rolling_grain_at_y(destination, category_id, direction, visual_y);
         self.record_front_recruit_move(true);
@@ -387,7 +397,7 @@ impl OsloSandboxEngine {
         let (category_id, visual_y) = self
             .pop_settled_grain(uphill)
             .expect("support-loss source was checked non-empty");
-        self.record_flowviz_transfer(uphill, support_site, category_id, visual_y);
+        self.record_flowviz_mobile_entry(uphill, support_site, category_id, visual_y);
         self.push_recruited_rolling_grain_at_y(
             support_site,
             category_id,

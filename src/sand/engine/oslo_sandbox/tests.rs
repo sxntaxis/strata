@@ -9,10 +9,14 @@ fn grain() -> CategoryId {
 fn set_column_height(engine: &mut OsloSandboxEngine, site: usize, height: usize) {
     engine.columns[site] = vec![grain(); height];
     engine.column_visual_y[site] = vec![None; height];
+    if engine.flowviz_conservative {
+        engine.flowviz_shadow_columns[site] = vec![grain(); height];
+    }
 }
 
 fn direct_drive_and_relax(engine: &mut OsloSandboxEngine, site: usize) -> usize {
     engine.push_settled_grain_at_visual_y(site, grain(), None);
+    engine.mirror_flowviz_settled_push(site, grain());
     engine.total_generated = engine.total_generated.saturating_add(1);
     engine.enqueue_neighborhood(site);
     let mut moves = 0usize;
@@ -20,6 +24,55 @@ fn direct_drive_and_relax(engine: &mut OsloSandboxEngine, site: usize) -> usize 
         moves = moves.saturating_add(1);
     }
     moves
+}
+
+fn category_counts<I>(categories: I) -> std::collections::HashMap<CategoryId, usize>
+where
+    I: IntoIterator<Item = CategoryId>,
+{
+    let mut counts = std::collections::HashMap::new();
+    for category_id in categories {
+        *counts.entry(category_id).or_insert(0) += 1;
+    }
+    counts
+}
+
+fn physical_category_counts(engine: &OsloSandboxEngine) -> std::collections::HashMap<CategoryId, usize> {
+    category_counts(
+        engine
+            .columns
+            .iter()
+            .flatten()
+            .copied()
+            .chain(engine.rolling_grains.iter().map(|grain| grain.category_id)),
+    )
+}
+
+fn conservative_visual_category_counts(
+    engine: &OsloSandboxEngine,
+) -> std::collections::HashMap<CategoryId, usize> {
+    category_counts(
+        engine
+            .flowviz_shadow_columns
+            .iter()
+            .flatten()
+            .copied()
+            .chain(
+                engine
+                    .flowviz_parcels
+                    .iter()
+                    .flat_map(|parcel| std::iter::repeat(parcel.category_id).take(parcel.mass)),
+            ),
+    )
+}
+
+fn per_site_category_counts(
+    columns: &[Vec<CategoryId>],
+) -> Vec<std::collections::HashMap<CategoryId, usize>> {
+    columns
+        .iter()
+        .map(|column| category_counts(column.iter().copied()))
+        .collect()
 }
 
 fn p95(values: &mut [usize]) -> usize {
@@ -949,4 +1002,184 @@ fn flowviz_wall_failure_builds_a_concurrent_tracer_cloud_and_conserves_physics()
         let _ = flowviz.advance_flowviz_tracers();
     }
     assert_eq!(flowviz.grain_count(), frozen.grain_count());
+}
+
+#[test]
+fn conservative_flowviz_preserves_frozen_front_physics_on_ordinary_quiescent_drive() {
+    let mut frozen = OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED);
+    let mut parcels =
+        OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
+    let width = frozen.lattice_size();
+
+    for drive in 0..2_000usize {
+        let site = (drive.wrapping_mul(37).wrapping_add(11)) % width;
+        let frozen_moves = direct_drive_and_relax(&mut frozen, site);
+        let parcel_moves = direct_drive_and_relax(&mut parcels, site);
+        assert_eq!(parcel_moves, frozen_moves);
+    }
+
+    assert_eq!(parcels.columns, frozen.columns);
+    assert_eq!(parcels.critical_slopes, frozen.critical_slopes);
+    assert_eq!(parcels.threshold_rng_state, frozen.threshold_rng_state);
+    assert_eq!(parcels.relax_rng_state, frozen.relax_rng_state);
+    assert_eq!(parcels.discharged_count(), frozen.discharged_count());
+    assert_eq!(parcels.front_erosions(), frozen.front_erosions());
+    assert_eq!(
+        parcels.front_support_recruits(),
+        frozen.front_support_recruits()
+    );
+    assert_eq!(parcels.flowviz_shadow_misses(), 0);
+    assert!(parcels.flowviz_visual_mass_matches_physical_mobile_system());
+    assert_eq!(conservative_visual_category_counts(&parcels), physical_category_counts(&parcels));
+}
+
+#[test]
+fn conservative_flowviz_delays_visible_deposit_until_parcel_arrival() {
+    let mut engine =
+        OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
+    let source = engine.lattice_size() / 2;
+    let destination = source + 1;
+    set_column_height(&mut engine, source, 3);
+    set_column_height(&mut engine, destination, 0);
+    engine.reset_conservative_flowviz_from_physics();
+
+    let (category_id, visual_y) = engine.pop_settled_grain(source).unwrap();
+    engine.record_flowviz_mobile_entry(source, destination, category_id, visual_y);
+    engine.seed_rolling_grain_at_y(destination, category_id, ToppleDirection::Right, visual_y);
+    assert_eq!(engine.flowviz_shadow_columns[destination].len(), 0);
+    assert_eq!(engine.flowviz_parcel_mass(), 1);
+    assert!(engine.flowviz_visual_mass_matches_physical_mobile_system());
+
+    let rolling = engine.rolling_grains.pop_front().unwrap();
+    engine.push_settled_grain_at_visual_y(
+        destination,
+        rolling.category_id,
+        Some(rolling.visual_y),
+    );
+    engine.record_flowviz_settlement(destination, rolling.category_id);
+
+    // Physics already owns the destination grain, but the visual surface does
+    // not gain it until the conservative parcel reaches a real deposit credit.
+    assert_eq!(engine.columns[destination].len(), 1);
+    assert_eq!(engine.flowviz_shadow_columns[destination].len(), 0);
+    assert_eq!(engine.flowviz_total_deposit_due(), 1);
+    assert_eq!(engine.flowviz_parcel_mass(), 1);
+    assert!(engine.flowviz_visual_mass_matches_physical_mobile_system());
+
+    let mut guard = 0usize;
+    while engine.flowviz_parcel_mass() > 0 {
+        guard = guard.saturating_add(1);
+        assert!(guard < 2_000, "conservative parcel failed to deposit");
+        let _ = engine.advance_flowviz_tracers();
+    }
+
+    assert_eq!(engine.flowviz_shadow_columns[destination].len(), 1);
+    assert_eq!(engine.flowviz_total_deposit_due(), 0);
+    assert_eq!(engine.flowviz_visual_deposits(), 1);
+    assert_eq!(engine.flowviz_shadow_misses(), 0);
+    assert!(engine.flowviz_visual_mass_matches_physical_mobile_system());
+    assert_eq!(conservative_visual_category_counts(&engine), physical_category_counts(&engine));
+}
+
+#[test]
+fn conservative_flowviz_reuses_pending_deposit_when_mass_reenters_motion() {
+    let mut engine =
+        OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
+    let source = engine.lattice_size() / 2;
+    let middle = source + 1;
+    let destination = source + 2;
+    set_column_height(&mut engine, source, 3);
+    set_column_height(&mut engine, middle, 0);
+    set_column_height(&mut engine, destination, 0);
+    engine.reset_conservative_flowviz_from_physics();
+
+    let (category_id, visual_y) = engine.pop_settled_grain(source).unwrap();
+    engine.record_flowviz_mobile_entry(source, middle, category_id, visual_y);
+    engine.seed_rolling_grain_at_y(middle, category_id, ToppleDirection::Right, visual_y);
+    let rolling = engine.rolling_grains.pop_front().unwrap();
+    engine.push_settled_grain_at_visual_y(middle, category_id, Some(rolling.visual_y));
+    engine.record_flowviz_settlement(middle, category_id);
+
+    let (category_id, visual_y) = engine.pop_settled_grain(middle).unwrap();
+    engine.record_flowviz_mobile_entry(middle, destination, category_id, visual_y);
+    engine.seed_rolling_grain_at_y(destination, category_id, ToppleDirection::Right, visual_y);
+
+    assert_eq!(engine.flowviz_parcel_mass(), 1);
+    assert_eq!(engine.flowviz_total_deposit_due(), 0);
+    assert_eq!(engine.flowviz_reused_deposits(), 1);
+    assert_eq!(engine.flowviz_visual_withdrawals(), 1);
+    assert_eq!(engine.flowviz_shadow_misses(), 0);
+    assert!(engine.flowviz_visual_mass_matches_physical_mobile_system());
+    assert_eq!(conservative_visual_category_counts(&engine), physical_category_counts(&engine));
+}
+
+#[test]
+fn conservative_flowviz_wall_failure_conserves_visual_mass_and_drains_to_real_credits() {
+    fn prepare(mut engine: OsloSandboxEngine) -> OsloSandboxEngine {
+        let width = engine.lattice_size();
+        for site in 0..(width / 2) {
+            set_column_height(&mut engine, site, 12);
+        }
+        for site in (width / 2)..width {
+            set_column_height(&mut engine, site, 2);
+        }
+        engine.reset_conservative_flowviz_from_physics();
+        engine.critical_slopes.fill(OSLO_THRESHOLD_HIGH);
+        engine.enqueue_neighborhood(width / 2 - 1);
+        engine.enqueue_neighborhood(width / 2);
+        engine
+    }
+
+    fn relax(mut engine: OsloSandboxEngine) -> OsloSandboxEngine {
+        let mut guard = 0usize;
+        loop {
+            guard = guard.saturating_add(1);
+            assert!(guard < 250_000, "parcel wall relaxation did not quiesce");
+            let mut changed = engine.advance_rolling_grains();
+            changed |= engine.topple_one_active_site();
+            if !changed && engine.active_sites.is_empty() && !engine.explicit_flow_active() {
+                break;
+            }
+        }
+        engine
+    }
+
+    let frozen = relax(prepare(OsloSandboxEngine::new_front_vessel(
+        20, 10, TEST_SEED,
+    )));
+    let mut parcels = relax(prepare(
+        OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED),
+    ));
+
+    assert_eq!(parcels.columns, frozen.columns);
+    assert_eq!(parcels.critical_slopes, frozen.critical_slopes);
+    assert_eq!(parcels.threshold_rng_state, frozen.threshold_rng_state);
+    assert_eq!(parcels.relax_rng_state, frozen.relax_rng_state);
+    assert_eq!(parcels.discharged_count(), frozen.discharged_count());
+    assert!(parcels.flowviz_parcel_mass() > 8);
+    assert!(parcels.flowviz_peak_mobile_mass() > 8);
+    assert_eq!(parcels.flowviz_shadow_misses(), 0);
+    assert!(parcels.flowviz_visual_mass_matches_physical_mobile_system());
+
+    let mut visual_guard = 0usize;
+    while parcels.flowviz_parcel_mass() > 0 {
+        visual_guard = visual_guard.saturating_add(1);
+        assert!(
+            visual_guard < 20_000,
+            "conservative parcel cloud failed to drain"
+        );
+        let _ = parcels.advance_flowviz_tracers();
+        assert!(parcels.flowviz_visual_mass_matches_physical_mobile_system());
+        assert_eq!(conservative_visual_category_counts(&parcels), physical_category_counts(&parcels));
+    }
+
+    assert_eq!(parcels.flowviz_total_deposit_due(), 0);
+    assert_eq!(parcels.flowviz_shadow_mass(), frozen.settled_count());
+    assert_eq!(parcels.flowviz_shadow_misses(), 0);
+    assert!(parcels.flowviz_visual_mass_matches_physical_mobile_system());
+    assert_eq!(conservative_visual_category_counts(&parcels), physical_category_counts(&parcels));
+    assert_eq!(
+        per_site_category_counts(&parcels.flowviz_shadow_columns),
+        per_site_category_counts(&parcels.columns)
+    );
 }

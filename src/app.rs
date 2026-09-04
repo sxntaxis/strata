@@ -670,7 +670,23 @@ impl TestingSandEngine {
                 let (canonical_w, canonical_h) = engine.canonical_dimensions();
                 let (min_h, max_h, left_h, right_h) = engine.visible_profile();
                 let (rain_left, rain_center, rain_right) = engine.rain_region_counts();
-                let flowviz = if engine.flowviz_enabled() {
+                let flowviz = if engine.flowviz_conservative_enabled() {
+                    format!(
+                        " · parcels=count:{} mass:{} shadow:{} due:{} flux_edges:{} peak_count:{} peak_mass:{} withdrawals:{} deposits:{} reused:{} coalesced:{} misses:{}",
+                        engine.flowviz_tracer_count(),
+                        engine.flowviz_parcel_mass(),
+                        engine.flowviz_shadow_mass(),
+                        engine.flowviz_total_deposit_due(),
+                        engine.flowviz_active_flux_edges(),
+                        engine.flowviz_peak_tracers(),
+                        engine.flowviz_peak_mobile_mass(),
+                        engine.flowviz_visual_withdrawals(),
+                        engine.flowviz_visual_deposits(),
+                        engine.flowviz_reused_deposits(),
+                        engine.flowviz_coalesced_mass(),
+                        engine.flowviz_shadow_misses()
+                    )
+                } else if engine.flowviz_enabled() {
                     format!(
                         " · flowviz=tracers:{} flux_edges:{} spawned:{} peak:{} dropped:{}",
                         engine.flowviz_tracer_count(),
@@ -2384,6 +2400,13 @@ impl App {
                     self.sand_engine.snapshot_state().rng_state,
                 ),
             ))),
+            "oslo-vessel-front-parcels" => Ok(TestingSandEngine::Oslo(Box::new(
+                OsloSandboxEngine::new_front_conservative_flowviz_vessel(
+                    self.sand_engine.cell_width,
+                    self.sand_engine.cell_height,
+                    self.sand_engine.snapshot_state().rng_state,
+                ),
+            ))),
             "oslo-vessel-fluid" => Ok(TestingSandEngine::Oslo(Box::new(
                 OsloSandboxEngine::new_fluid_vessel(
                     self.sand_engine.cell_width,
@@ -2392,7 +2415,7 @@ impl App {
                 ),
             ))),
             _ => Err(
-                "testingcheats model must be h4, classic, hybrid, oslo-zero, oslo-box, oslo-vessel, oslo-vessel-momentum, oslo-vessel-front, oslo-vessel-front-flowviz, or oslo-vessel-fluid"
+                "testingcheats model must be h4, classic, hybrid, oslo-zero, oslo-box, oslo-vessel, oslo-vessel-momentum, oslo-vessel-front, oslo-vessel-front-flowviz, oslo-vessel-front-parcels, or oslo-vessel-fluid"
                     .to_string(),
             ),
         }
