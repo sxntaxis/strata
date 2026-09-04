@@ -5,6 +5,8 @@ use ratatui::prelude::Line;
 
 use super::{PendingGrainRun, SandEngine};
 
+mod flowviz;
+
 const OSLO_THRESHOLD_LOW: u8 = 1;
 const OSLO_THRESHOLD_HIGH: u8 = 2;
 const OSLO_THRESHOLD_RNG_XOR: u64 = 0xA24B_AED4_963E_E407;
@@ -149,6 +151,7 @@ pub(crate) struct OsloSandboxEngine {
     momentum_enabled: bool,
     front_enabled: bool,
     fluid_enabled: bool,
+    flowviz_enabled: bool,
     columns: Vec<Vec<CategoryId>>,
     // Presentation-only y overrides aligned one-for-one with `columns`.
     // A settled grain can already participate in authoritative physics while
@@ -156,6 +159,12 @@ pub(crate) struct OsloSandboxEngine {
     // This keeps avalanche physics exact without globally blocking on render
     // interpolation or visually teleporting colored grains down tall cliffs.
     column_visual_y: Vec<Vec<Option<usize>>>,
+    flowviz_edge_flux: Vec<i16>,
+    flowviz_tracers: VecDeque<flowviz::FlowVizTracer>,
+    flowviz_rng_state: u64,
+    flowviz_spawned: usize,
+    flowviz_peak_tracers: usize,
+    flowviz_dropped_samples: usize,
     critical_slopes: Vec<u8>,
     threshold_rng_state: u64,
     rain_rng_state: u64,
@@ -233,6 +242,13 @@ impl OsloSandboxEngine {
         )
     }
 
+    pub(crate) fn new_front_flowviz_vessel(width: u16, height: u16, seed: u64) -> Self {
+        let mut sandbox = Self::new_front_vessel(width, height, seed);
+        sandbox.enable_flowviz(seed);
+        sandbox.sync_surface();
+        sandbox
+    }
+
     pub(crate) fn new_fluid_vessel(width: u16, height: u16, seed: u64) -> Self {
         Self::new_with_flow(
             width,
@@ -286,8 +302,15 @@ impl OsloSandboxEngine {
             momentum_enabled,
             front_enabled,
             fluid_enabled,
+            flowviz_enabled: false,
             columns: vec![Vec::new(); lattice_size],
             column_visual_y: vec![Vec::new(); lattice_size],
+            flowviz_edge_flux: vec![0; lattice_size],
+            flowviz_tracers: VecDeque::new(),
+            flowviz_rng_state: seed ^ 0xB529_7A4D_1C68_E9D7,
+            flowviz_spawned: 0,
+            flowviz_peak_tracers: 0,
+            flowviz_dropped_samples: 0,
             critical_slopes: vec![OSLO_THRESHOLD_LOW; lattice_size],
             threshold_rng_state,
             rain_rng_state,
@@ -452,6 +475,7 @@ impl OsloSandboxEngine {
                 column_visual_y[left_added + index] = visual;
             }
             self.column_visual_y = column_visual_y;
+            self.resize_flowviz_for_growth(left_added, new_width);
 
             let old_fluidity = std::mem::take(&mut self.fluidity);
             self.fluidity = vec![0; new_width];
@@ -508,6 +532,16 @@ impl OsloSandboxEngine {
                     new_visible,
                 );
             }
+            if self.flowviz_enabled {
+                for tracer in &mut self.flowviz_tracers {
+                    let projected = Self::project_site_between_bounds(
+                        tracer.x.max(0.0).floor() as usize,
+                        shifted_old_visible,
+                        new_visible,
+                    );
+                    tracer.x = projected as f32 + 0.5;
+                }
+            }
         }
 
         let shifted_old_vertical = (
@@ -551,6 +585,25 @@ impl OsloSandboxEngine {
                 rolling.visual_y = rolling
                     .visual_y
                     .clamp(new_visible_vertical.0, new_visible_vertical.1 - 1);
+            }
+        }
+        if self.flowviz_enabled {
+            for tracer in &mut self.flowviz_tracers {
+                let mut y = tracer.y.max(0.0).floor() as usize;
+                y = y.saturating_add(vertical_added);
+                if new_visible_height == 0 {
+                    tracer.y = 0.0;
+                } else if new_visible_height < old_visible_height {
+                    tracer.y = Self::project_site_between_bounds(
+                        y,
+                        shifted_old_vertical,
+                        new_visible_vertical,
+                    ) as f32;
+                } else {
+                    tracer.y = y
+                        .clamp(new_visible_vertical.0, new_visible_vertical.1 - 1)
+                        as f32;
+                }
             }
         }
         for column in &mut self.column_visual_y {
@@ -638,6 +691,7 @@ impl OsloSandboxEngine {
         self.critical_slopes = vec![OSLO_THRESHOLD_LOW; lattice_size];
         self.falling_drives.clear();
         self.rolling_grains.clear();
+        self.clear_flowviz();
         self.pending_runs.clear();
         self.active_sites.clear();
         self.queued_sites = vec![false; lattice_size];
@@ -795,7 +849,9 @@ impl OsloSandboxEngine {
     }
 
     pub(crate) fn model_name(&self) -> &'static str {
-        if self.fluid_enabled {
+        if self.flowviz_enabled {
+            "oslo-vessel-front-flowviz"
+        } else if self.fluid_enabled {
             "oslo-vessel-fluid"
         } else if self.front_enabled {
             "oslo-vessel-front"

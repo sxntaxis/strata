@@ -3,10 +3,10 @@ id: NOW-001
 kind: status
 state: active
 created: 2026-08-01
-updated: 2026-09-03
+updated: 2026-09-04
 authority: working
-summary: H4/v5 remains published production authority. SEDIMENT-008 oslo-vessel-front physics remains owner-frozen at 8817e19. SEDIMENT-011 supersedes the rejected SEDIMENT-010 presentation barrier: authoritative front/fluid physics stays frozen while CategoryId presentation travels in parallel, baseline live rain continues during wall-clock avalanches, and latent fluidity no longer treats ordinary falling rain as visible flow.
-next: Natively validate SEDIMENT-011, then human-test frozen oslo-vessel-front and curiosity-only oslo-vessel-fluid with testingcheats fill. Require many simultaneous colored transports, live baseline rain during flow, stable 64x/128x avalanche cadence, preserved queued advance debt, and no low-CPU latent-fluid stall.
+summary: H4/v5 remains published production authority. SEDIMENT-008 oslo-vessel-front physics remains owner-frozen. SEDIMENT-013 supersedes rejected per-grain Transport2D presentation with a debug-only signed edge-flux field and bounded Lagrangian tracer cloud; tracers sample real CategoryId transfers but carry no mass or physics authority.
+next: Natively validate SEDIMENT-013, then human A/B frozen oslo-vessel-front versus oslo-vessel-front-flowviz with testingcheats fill. Require identical physics, stable live-rain/64x clock behavior, no ray/comb destination-path artifacts, and a dense local tracer flow that follows gravity/current bed rather than invented future endpoints.
 ---
 
 # NOW — Strata
@@ -73,6 +73,8 @@ SEDIMENT-009 is the current bounded experiment. It leaves frozen SEDIMENT-008 ph
 SEDIMENT-010 supersedes SEDIMENT-009 only at the debug transport/scheduler layer. The rainbow fixture exposed that rolling grains had no vertical presentation coordinate, so category mass could appear many rows lower in one frame. It also exposed that SEDIMENT-009 kept adding 64x/128x synthetic debt while visible flow was deliberately throttled, making fluid look frozen at low CPU use. SEDIMENT-010 adds presentation-only rolling elevation, pauses the drive clock during explicit flow, drains invisible fluid-only relaxation cooperatively, and resumes preserved fast-forward debt only at quiescence. SEDIMENT-008 front and SEDIMENT-009 fluid thresholds remain frozen. See `notebook/work/SEDIMENT-010-TRANSPORT-CLOCK.md`.
 
 SEDIMENT-011 supersedes SEDIMENT-010's **presentation barrier**, not its frozen physics. Human rainbow testing showed the barrier serialized the entire collapse behind one-row visual convergence and made rain appear to stop. SEDIMENT-011 keeps authoritative column mutations immediate, adds per-settled-grain presentation coordinates aligned with the CategoryId stacks, advances all transports concurrently, keeps one baseline live rain grain per wall-clock second during special playback, and drains truly latent fluidity even when ordinary falling dots exist. See `notebook/work/SEDIMENT-011-PARALLEL-TRANSPORT-CLOCK.md`.
+
+SEDIMENT-012 attempted true per-grain Transport2D identities/paths, but owner rainbow evidence rejected the result: local paths remained visually mechanical because the front solver does not actually define a unique continuous grain trajectory. SEDIMENT-013 therefore abandons destination queues and exact visual grain identity. `oslo-vessel-front-flowviz` records only real adjacent front/moving-layer edge flux and renders a bounded, presentation-only category-colored tracer cloud advected by recent local flux, gravity, and current bed relief. Frozen front physics remains unchanged. See `notebook/work/SEDIMENT-013-OSLO-VESSEL-FLOWVIZ.md`.
 
 `notebook/work/PLATEAU-001.md` is the durable roadmap for the remaining core-development arc. The owner has accepted the existing day-end snapshot behavior as baseline and does not want an artificial re-certification gate before continuing.
 

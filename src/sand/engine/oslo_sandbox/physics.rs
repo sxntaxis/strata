@@ -205,6 +205,7 @@ impl OsloSandboxEngine {
             .expect("over-critical Oslo site contains a grain");
         if let Some(destination) = destination {
             if self.should_seed_momentum(relief) {
+                self.record_flowviz_transfer(site, destination, category_id, visual_y);
                 self.seed_rolling_grain_at_y(destination, category_id, direction, visual_y);
                 self.seed_fluidization_failure(site, destination);
             } else {
@@ -353,11 +354,14 @@ impl OsloSandboxEngine {
                 let Some(settled_y) = grid_height.checked_sub(depth + 1) else {
                     break;
                 };
-                let visual_y = self
-                    .column_visual_y
-                    .get(site)
-                    .and_then(|visual| visual.get(depth))
-                    .and_then(|value| *value);
+                let visual_y = if self.flowviz_enabled {
+                    None
+                } else {
+                    self.column_visual_y
+                        .get(site)
+                        .and_then(|visual| visual.get(depth))
+                        .and_then(|value| *value)
+                };
                 let y = visual_y.unwrap_or(settled_y);
                 if y >= grid_height {
                     continue;
@@ -376,15 +380,18 @@ impl OsloSandboxEngine {
             }
         }
 
-        for rolling in &self.rolling_grains {
-            let x = rolling.site;
-            let y = rolling.visual_y;
-            if x >= self.surface.grid_width_dots || y >= grid_height {
-                continue;
+        if !self.flowviz_enabled {
+            for rolling in &self.rolling_grains {
+                let x = rolling.site;
+                let y = rolling.visual_y;
+                if x >= self.surface.grid_width_dots || y >= grid_height {
+                    continue;
+                }
+                self.surface.grid[y][x] = Some(rolling.category_id);
+                self.surface.mobilized[y][x] = true;
             }
-            self.surface.grid[y][x] = Some(rolling.category_id);
-            self.surface.mobilized[y][x] = true;
         }
+        self.render_flowviz_tracers_into_surface();
         self.surface.grain_count = self
             .settled_count()
             .saturating_add(self.falling_drives.len())

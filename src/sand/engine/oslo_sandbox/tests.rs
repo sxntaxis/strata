@@ -837,3 +837,116 @@ fn falling_rain_does_not_turn_a_latent_fluid_field_into_visible_flow() {
     assert!(engine.latent_flow_active());
     assert!(!engine.visible_flow_active());
 }
+
+
+#[test]
+fn flowviz_front_preserves_frozen_front_physics_on_ordinary_quiescent_drive() {
+    let mut frozen = OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED);
+    let mut flowviz = OsloSandboxEngine::new_front_flowviz_vessel(20, 10, TEST_SEED);
+    let width = frozen.lattice_size();
+
+    for drive in 0..2_000usize {
+        let site = (drive.wrapping_mul(37).wrapping_add(11)) % width;
+        let frozen_moves = direct_drive_and_relax(&mut frozen, site);
+        let flowviz_moves = direct_drive_and_relax(&mut flowviz, site);
+        assert_eq!(flowviz_moves, frozen_moves);
+    }
+
+    assert_eq!(flowviz.columns, frozen.columns);
+    assert_eq!(flowviz.critical_slopes, frozen.critical_slopes);
+    assert_eq!(flowviz.threshold_rng_state, frozen.threshold_rng_state);
+    assert_eq!(flowviz.relax_rng_state, frozen.relax_rng_state);
+    assert_eq!(flowviz.discharged_count(), frozen.discharged_count());
+    assert_eq!(flowviz.front_erosions(), frozen.front_erosions());
+    assert_eq!(
+        flowviz.front_support_recruits(),
+        frozen.front_support_recruits()
+    );
+}
+
+#[test]
+fn flowviz_transfer_creates_visual_flux_without_changing_physical_mass() {
+    let mut engine = OsloSandboxEngine::new_front_flowviz_vessel(20, 10, TEST_SEED);
+    let site = engine.lattice_size() / 2;
+    set_column_height(&mut engine, site, 8);
+    set_column_height(&mut engine, site + 1, 2);
+    let mass_before = engine.grain_count();
+    let source_y = engine.top_grain_y(site).unwrap();
+
+    engine.record_flowviz_transfer(site, site + 1, CategoryId(91), source_y);
+
+    assert_eq!(engine.grain_count(), mass_before);
+    assert_eq!(engine.flowviz_tracer_count(), 1);
+    assert_eq!(engine.flowviz_active_flux_edges(), 1);
+    assert_eq!(engine.flowviz_spawned(), 1);
+}
+
+#[test]
+fn flowviz_tracers_move_as_bounded_local_samples_not_long_destination_paths() {
+    let mut engine = OsloSandboxEngine::new_front_flowviz_vessel(20, 10, TEST_SEED);
+    let site = engine.lattice_size() / 2;
+    set_column_height(&mut engine, site, 10);
+    set_column_height(&mut engine, site + 1, 2);
+    let source_y = engine.top_grain_y(site).unwrap();
+    engine.record_flowviz_transfer(site, site + 1, CategoryId(92), source_y);
+
+    let before = *engine.flowviz_tracers.front().unwrap();
+    assert!(engine.advance_flowviz_tracers());
+    let after = *engine.flowviz_tracers.front().unwrap();
+
+    assert!((after.x - before.x).abs() <= 1.0);
+    assert!((after.y - before.y).abs() <= 1.0);
+    assert_eq!(after.category_id, before.category_id);
+}
+
+#[test]
+fn flowviz_wall_failure_builds_a_concurrent_tracer_cloud_and_conserves_physics() {
+    fn prepare(mut engine: OsloSandboxEngine) -> OsloSandboxEngine {
+        let width = engine.lattice_size();
+        for site in 0..(width / 2) {
+            set_column_height(&mut engine, site, 12);
+        }
+        for site in (width / 2)..width {
+            set_column_height(&mut engine, site, 2);
+        }
+        engine.critical_slopes.fill(OSLO_THRESHOLD_HIGH);
+        engine.enqueue_neighborhood(width / 2 - 1);
+        engine.enqueue_neighborhood(width / 2);
+        engine
+    }
+
+    fn relax(mut engine: OsloSandboxEngine) -> OsloSandboxEngine {
+        let mut guard = 0usize;
+        loop {
+            guard = guard.saturating_add(1);
+            assert!(guard < 250_000, "flowviz wall relaxation did not quiesce");
+            let mut changed = engine.advance_rolling_grains();
+            changed |= engine.topple_one_active_site();
+            if !changed && engine.active_sites.is_empty() && !engine.explicit_flow_active() {
+                break;
+            }
+        }
+        engine
+    }
+
+    let frozen = relax(prepare(OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED)));
+    let mut flowviz = relax(prepare(OsloSandboxEngine::new_front_flowviz_vessel(
+        20, 10, TEST_SEED,
+    )));
+
+    assert_eq!(flowviz.columns, frozen.columns);
+    assert_eq!(flowviz.critical_slopes, frozen.critical_slopes);
+    assert_eq!(flowviz.threshold_rng_state, frozen.threshold_rng_state);
+    assert_eq!(flowviz.relax_rng_state, frozen.relax_rng_state);
+    assert_eq!(flowviz.discharged_count(), frozen.discharged_count());
+    assert!(flowviz.flowviz_spawned() > 16);
+    assert!(flowviz.flowviz_peak_tracers() > 8);
+
+    let mut visual_guard = 0usize;
+    while flowviz.rolling_visual_motion_active() {
+        visual_guard = visual_guard.saturating_add(1);
+        assert!(visual_guard < 2_000, "flowviz tracer cloud failed to drain");
+        let _ = flowviz.advance_flowviz_tracers();
+    }
+    assert_eq!(flowviz.grain_count(), frozen.grain_count());
+}

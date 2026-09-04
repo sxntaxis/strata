@@ -670,6 +670,18 @@ impl TestingSandEngine {
                 let (canonical_w, canonical_h) = engine.canonical_dimensions();
                 let (min_h, max_h, left_h, right_h) = engine.visible_profile();
                 let (rain_left, rain_center, rain_right) = engine.rain_region_counts();
+                let flowviz = if engine.flowviz_enabled() {
+                    format!(
+                        " · flowviz=tracers:{} flux_edges:{} spawned:{} peak:{} dropped:{}",
+                        engine.flowviz_tracer_count(),
+                        engine.flowviz_active_flux_edges(),
+                        engine.flowviz_spawned(),
+                        engine.flowviz_peak_tracers(),
+                        engine.flowviz_dropped_samples()
+                    )
+                } else {
+                    String::new()
+                };
                 let momentum = if engine.momentum_enabled() {
                     let front = if engine.front_enabled() {
                         format!(
@@ -713,7 +725,7 @@ impl TestingSandEngine {
                     String::new()
                 };
                 format!(
-                    "{} · current={} generated={} settled={} pending={} discharged={} · canonical={}x{} visible-h={} wall={} · profile={}..{} edges={}/{} · avalanches={} last={} p95={} peak={} · rain={}/{}/{}{}",
+                    "{} · current={} generated={} settled={} pending={} discharged={} · canonical={}x{} visible-h={} wall={} · profile={}..{} edges={}/{} · avalanches={} last={} p95={} peak={} · rain={}/{}/{}{}{}",
                     engine.model_name(),
                     engine.grain_count(),
                     engine.generated_count(),
@@ -735,7 +747,8 @@ impl TestingSandEngine {
                     rain_left,
                     rain_center,
                     rain_right,
-                    momentum
+                    momentum,
+                    flowviz
                 )
             }
         }
@@ -2364,6 +2377,13 @@ impl App {
                     self.sand_engine.snapshot_state().rng_state,
                 ),
             ))),
+            "oslo-vessel-front-flowviz" => Ok(TestingSandEngine::Oslo(Box::new(
+                OsloSandboxEngine::new_front_flowviz_vessel(
+                    self.sand_engine.cell_width,
+                    self.sand_engine.cell_height,
+                    self.sand_engine.snapshot_state().rng_state,
+                ),
+            ))),
             "oslo-vessel-fluid" => Ok(TestingSandEngine::Oslo(Box::new(
                 OsloSandboxEngine::new_fluid_vessel(
                     self.sand_engine.cell_width,
@@ -2372,7 +2392,7 @@ impl App {
                 ),
             ))),
             _ => Err(
-                "testingcheats model must be h4, classic, hybrid, oslo-zero, oslo-box, oslo-vessel, oslo-vessel-momentum, oslo-vessel-front, or oslo-vessel-fluid"
+                "testingcheats model must be h4, classic, hybrid, oslo-zero, oslo-box, oslo-vessel, oslo-vessel-momentum, oslo-vessel-front, oslo-vessel-front-flowviz, or oslo-vessel-fluid"
                     .to_string(),
             ),
         }

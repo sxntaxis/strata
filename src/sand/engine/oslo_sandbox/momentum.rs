@@ -82,12 +82,16 @@ impl OsloSandboxEngine {
     pub(super) fn pop_settled_grain(&mut self, site: usize) -> Option<(CategoryId, usize)> {
         self.normalize_column_visual_shape(site);
         let physical_y = self.top_grain_y(site)?;
-        let visual_y = self
-            .column_visual_y
-            .get_mut(site)?
-            .pop()
-            .flatten()
-            .unwrap_or(physical_y);
+        let visual_y = if self.flowviz_enabled {
+            let _ = self.column_visual_y.get_mut(site)?.pop();
+            physical_y
+        } else {
+            self.column_visual_y
+                .get_mut(site)?
+                .pop()
+                .flatten()
+                .unwrap_or(physical_y)
+        };
         let category_id = self.columns.get_mut(site)?.pop()?;
         Some((category_id, visual_y))
     }
@@ -108,7 +112,11 @@ impl OsloSandboxEngine {
             .surface
             .grid_height_dots
             .saturating_sub(self.columns[site].len());
-        let visual_y = visual_y.filter(|value| *value != target_y);
+        let visual_y = if self.flowviz_enabled {
+            None
+        } else {
+            visual_y.filter(|value| *value != target_y)
+        };
         self.column_visual_y[site].push(visual_y);
     }
 
@@ -197,10 +205,16 @@ impl OsloSandboxEngine {
     }
 
     pub(crate) fn rolling_visual_motion_active(&self) -> bool {
+        if self.flowviz_enabled {
+            return !self.flowviz_tracers.is_empty();
+        }
         self.rolling_visual_in_transit_count() > 0 || self.settled_visual_in_transit_count() > 0
     }
 
     pub(crate) fn rolling_visual_in_transit_count(&self) -> usize {
+        if self.flowviz_enabled {
+            return self.flowviz_tracers.len();
+        }
         if self.rolling_grains.is_empty() {
             return 0;
         }
@@ -216,11 +230,17 @@ impl OsloSandboxEngine {
     }
 
     pub(crate) fn total_visual_in_transit_count(&self) -> usize {
+        if self.flowviz_enabled {
+            return self.flowviz_tracers.len();
+        }
         self.rolling_visual_in_transit_count()
             .saturating_add(self.settled_visual_in_transit_count())
     }
 
     pub(crate) fn advance_rolling_visual_motion(&mut self) -> bool {
+        if self.flowviz_enabled {
+            return self.advance_flowviz_tracers();
+        }
         let grid_height = self.surface.grid_height_dots;
         let settled_heights = self.columns.iter().map(Vec::len).collect::<Vec<_>>();
         let mut offsets = vec![0usize; self.columns.len()];
@@ -274,6 +294,11 @@ impl OsloSandboxEngine {
     }
 
     fn move_rolling_grain(&mut self, rolling: &mut RollingGrain, next_site: usize) {
+        let source = rolling.site;
+        let source_y = self
+            .top_grain_y(source)
+            .unwrap_or(rolling.visual_y);
+        self.record_flowviz_transfer(source, next_site, rolling.category_id, source_y);
         rolling.site = next_site;
         self.momentum_hops = self.momentum_hops.saturating_add(1);
         self.momentum_event_hops = self.momentum_event_hops.saturating_add(1);
@@ -322,6 +347,7 @@ impl OsloSandboxEngine {
         let (category_id, visual_y) = self
             .pop_settled_grain(source)
             .expect("front erosion source was checked non-empty");
+        self.record_flowviz_transfer(source, destination, category_id, visual_y);
         eroded_this_tick[source] = true;
         self.push_recruited_rolling_grain_at_y(destination, category_id, direction, visual_y);
         self.record_front_recruit_move(true);
@@ -361,6 +387,7 @@ impl OsloSandboxEngine {
         let (category_id, visual_y) = self
             .pop_settled_grain(uphill)
             .expect("support-loss source was checked non-empty");
+        self.record_flowviz_transfer(uphill, support_site, category_id, visual_y);
         self.push_recruited_rolling_grain_at_y(
             support_site,
             category_id,
