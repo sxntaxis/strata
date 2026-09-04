@@ -50,7 +50,7 @@ impl OsloSandboxEngine {
         self.next_relax_random_u64() & 1 == 0
     }
 
-    fn sample_threshold(&mut self) -> u8 {
+    pub(super) fn sample_threshold(&mut self) -> u8 {
         if self.next_threshold_random_u64() & 1 == 0 {
             OSLO_THRESHOLD_LOW
         } else {
@@ -113,7 +113,7 @@ impl OsloSandboxEngine {
         }
     }
 
-    fn enqueue_site(&mut self, site: usize) {
+    pub(super) fn enqueue_site(&mut self, site: usize) {
         let (visible_start, visible_end) = self.visible_lattice_bounds();
         if site < visible_start
             || site >= visible_end
@@ -175,8 +175,12 @@ impl OsloSandboxEngine {
 
         let (visible_start, visible_end) = self.visible_lattice_bounds();
         let destination = match direction {
-            ToppleDirection::Left => (site > visible_start).then_some(site - 1),
-            ToppleDirection::Right => (site + 1 < visible_end).then_some(site + 1),
+            ToppleDirection::Left => site
+                .checked_sub(1)
+                .filter(|destination| *destination >= visible_start),
+            ToppleDirection::Right => site
+                .checked_add(1)
+                .filter(|destination| *destination < visible_end),
         };
 
         if destination.is_none() && self.boundary == OsloBoundaryMode::ClosedBox {
@@ -198,7 +202,7 @@ impl OsloSandboxEngine {
         true
     }
 
-    fn append_pending_run(&mut self, category_id: CategoryId, count: usize) {
+    pub(super) fn append_pending_run(&mut self, category_id: CategoryId, count: usize) {
         if count == 0 {
             return;
         }
@@ -229,7 +233,11 @@ impl OsloSandboxEngine {
         if let Some(front) = self.pending_runs.front_mut() {
             front.count -= 1;
         }
-        if self.pending_runs.front().is_some_and(|front| front.count == 0) {
+        if self
+            .pending_runs
+            .front()
+            .is_some_and(|front| front.count == 0)
+        {
             self.pending_runs.pop_front();
         }
         true

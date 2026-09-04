@@ -16,7 +16,10 @@ impl OsloSandboxEngine {
         let viewport_height =
             (self.surface.cell_height as usize).saturating_mul(SAND_ENGINE.dot_height);
         let visible_height = viewport_height.min(canonical_height);
-        (canonical_height.saturating_sub(visible_height), canonical_height)
+        (
+            canonical_height.saturating_sub(visible_height),
+            canonical_height,
+        )
     }
 
     pub(super) fn clamp_focus_to_visible_corridor(&mut self) {
@@ -90,9 +93,7 @@ impl OsloSandboxEngine {
                 continue;
             }
             let distance = site.abs_diff(target);
-            if distance < best_distance
-                || (distance == best_distance && self.rain_random_bool())
-            {
+            if distance < best_distance || (distance == best_distance && self.rain_random_bool()) {
                 best = Some(site);
                 best_distance = distance;
             }
@@ -231,5 +232,4 @@ impl OsloSandboxEngine {
             }
         }
     }
-
 }

@@ -29,16 +29,17 @@ fn p95(values: &mut [usize]) -> usize {
 #[test]
 fn thresholds_are_exactly_one_or_two() {
     let engine = OsloSandboxEngine::new(20, 10, TEST_SEED, OsloBoundaryMode::ClosedBox);
-    assert!(engine
-        .critical_slopes
-        .iter()
-        .all(|threshold| matches!(*threshold, OSLO_THRESHOLD_LOW | OSLO_THRESHOLD_HIGH)));
+    assert!(
+        engine
+            .critical_slopes
+            .iter()
+            .all(|threshold| matches!(*threshold, OSLO_THRESHOLD_LOW | OSLO_THRESHOLD_HIGH))
+    );
 }
 
 #[test]
 fn zero_outside_control_discharges_at_the_visible_edge() {
-    let mut engine =
-        OsloSandboxEngine::new(20, 10, TEST_SEED, OsloBoundaryMode::ZeroOutside);
+    let mut engine = OsloSandboxEngine::new(20, 10, TEST_SEED, OsloBoundaryMode::ZeroOutside);
     set_column_height(&mut engine, 0, 3);
     set_column_height(&mut engine, 1, 2);
     engine.critical_slopes[0] = 1;
@@ -63,12 +64,8 @@ fn closed_box_removes_the_missing_neighbor_from_edge_relief() {
 
 #[test]
 fn canonical_vessel_is_closed_below_the_wall_top() {
-    let mut engine = OsloSandboxEngine::new(
-        20,
-        10,
-        TEST_SEED,
-        OsloBoundaryMode::CanonicalWallOverflow,
-    );
+    let mut engine =
+        OsloSandboxEngine::new(20, 10, TEST_SEED, OsloBoundaryMode::CanonicalWallOverflow);
     let wall = engine.canonical_wall_height();
     set_column_height(&mut engine, 0, wall.saturating_sub(1));
     set_column_height(&mut engine, 1, wall.saturating_sub(1));
@@ -80,12 +77,8 @@ fn canonical_vessel_is_closed_below_the_wall_top() {
 
 #[test]
 fn canonical_vessel_overflows_only_above_the_wall_top() {
-    let mut engine = OsloSandboxEngine::new(
-        20,
-        10,
-        TEST_SEED,
-        OsloBoundaryMode::CanonicalWallOverflow,
-    );
+    let mut engine =
+        OsloSandboxEngine::new(20, 10, TEST_SEED, OsloBoundaryMode::CanonicalWallOverflow);
     let wall = engine.canonical_wall_height();
     set_column_height(&mut engine, 0, wall + 3);
     set_column_height(&mut engine, 1, wall + 3);
@@ -99,12 +92,8 @@ fn canonical_vessel_overflows_only_above_the_wall_top() {
 
 #[test]
 fn canonical_wall_height_does_not_shrink_with_the_viewport() {
-    let mut engine = OsloSandboxEngine::new(
-        20,
-        10,
-        TEST_SEED,
-        OsloBoundaryMode::CanonicalWallOverflow,
-    );
+    let mut engine =
+        OsloSandboxEngine::new(20, 10, TEST_SEED, OsloBoundaryMode::CanonicalWallOverflow);
     let wall = engine.canonical_wall_height();
     engine.resize(20, 5);
 
@@ -156,12 +145,8 @@ fn closed_box_never_discharges_under_long_conservative_drive() {
 
 #[test]
 fn canonical_vessel_recovers_a_broad_avalanche_tail_after_filling() {
-    let mut engine = OsloSandboxEngine::new(
-        20,
-        10,
-        TEST_SEED,
-        OsloBoundaryMode::CanonicalWallOverflow,
-    );
+    let mut engine =
+        OsloSandboxEngine::new(20, 10, TEST_SEED, OsloBoundaryMode::CanonicalWallOverflow);
     let width = engine.lattice_size();
     let mut tail = Vec::new();
 
@@ -172,15 +157,23 @@ fn canonical_vessel_recovers_a_broad_avalanche_tail_after_filling() {
         }
     }
 
-    assert!(engine.discharged_count() > 0, "vessel never reached overflow");
+    assert!(
+        engine.discharged_count() > 0,
+        "vessel never reached overflow"
+    );
     assert_eq!(
         engine.generated_count(),
-        engine.grain_count().saturating_add(engine.discharged_count())
+        engine
+            .grain_count()
+            .saturating_add(engine.discharged_count())
     );
     assert!(tail.len() > 100, "too few post-fill avalanche events");
     let percentile = p95(&mut tail);
     let maximum = tail.iter().copied().max().unwrap_or(0);
-    assert!(percentile >= 3, "expected a non-microscopic tail, got p95={percentile}");
+    assert!(
+        percentile >= 3,
+        "expected a non-microscopic tail, got p95={percentile}"
+    );
     assert!(
         maximum >= percentile.saturating_mul(3),
         "expected a broad tail, got p95={percentile}, max={maximum}"
@@ -189,10 +182,8 @@ fn canonical_vessel_recovers_a_broad_avalanche_tail_after_filling() {
 
 #[test]
 fn deferred_updates_match_eager_oslo_state_after_surface_sync() {
-    let mut eager =
-        OsloSandboxEngine::new(40, 20, TEST_SEED, OsloBoundaryMode::ZeroOutside);
-    let mut deferred =
-        OsloSandboxEngine::new(40, 20, TEST_SEED, OsloBoundaryMode::ZeroOutside);
+    let mut eager = OsloSandboxEngine::new(40, 20, TEST_SEED, OsloBoundaryMode::ZeroOutside);
+    let mut deferred = OsloSandboxEngine::new(40, 20, TEST_SEED, OsloBoundaryMode::ZeroOutside);
     for _ in 0..128 {
         eager.spawn(grain());
         deferred.spawn(grain());
@@ -211,8 +202,14 @@ fn deferred_updates_match_eager_oslo_state_after_surface_sync() {
     assert_eq!(deferred.rain_rng_state, eager.rain_rng_state);
     assert_eq!(deferred.relax_rng_state, eager.relax_rng_state);
     assert_eq!(deferred.rain_focus_site, eager.rain_focus_site);
-    assert_eq!(deferred.rain_focus_target_site, eager.rain_focus_target_site);
-    assert_eq!(deferred.rain_focus_move_counter, eager.rain_focus_move_counter);
+    assert_eq!(
+        deferred.rain_focus_target_site,
+        eager.rain_focus_target_site
+    );
+    assert_eq!(
+        deferred.rain_focus_move_counter,
+        eager.rain_focus_move_counter
+    );
     assert_eq!(deferred.rain_region_counts(), eager.rain_region_counts());
     assert_eq!(deferred.falling_drives, eager.falling_drives);
     assert_eq!(deferred.active_sites, eager.active_sites);
@@ -230,8 +227,7 @@ fn deferred_updates_match_eager_oslo_state_after_surface_sync() {
 
 #[test]
 fn zero_outside_control_reproduces_the_low_edge_wedge_pressure() {
-    let mut engine =
-        OsloSandboxEngine::new(20, 10, TEST_SEED, OsloBoundaryMode::ZeroOutside);
+    let mut engine = OsloSandboxEngine::new(20, 10, TEST_SEED, OsloBoundaryMode::ZeroOutside);
     let width = engine.lattice_size();
     for drive in 0..6_000usize {
         direct_drive_and_relax(&mut engine, drive % width);
@@ -240,11 +236,19 @@ fn zero_outside_control_reproduces_the_low_edge_wedge_pressure() {
     let center = engine.columns[width / 2].len();
     let left = engine.columns[0].len();
     let right = engine.columns[width - 1].len();
-    assert!(center > left + 10, "left edge no longer exhibits wedge pressure");
-    assert!(center > right + 10, "right edge no longer exhibits wedge pressure");
+    assert!(
+        center > left + 10,
+        "left edge no longer exhibits wedge pressure"
+    );
+    assert!(
+        center > right + 10,
+        "right edge no longer exhibits wedge pressure"
+    );
     assert!(engine.discharged_count() > 0);
     assert_eq!(
         engine.generated_count(),
-        engine.grain_count().saturating_add(engine.discharged_count())
+        engine
+            .grain_count()
+            .saturating_add(engine.discharged_count())
     );
 }

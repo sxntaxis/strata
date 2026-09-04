@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
-use ratatui::prelude::Line;
 use crate::domain::{Category, CategoryId};
+use ratatui::prelude::Line;
 
 use super::{PendingGrainRun, SandEngine};
 
@@ -109,12 +109,7 @@ pub(crate) struct OsloSandboxEngine {
     recent_avalanches: VecDeque<usize>,
 }
 impl OsloSandboxEngine {
-    pub(crate) fn new(
-        width: u16,
-        height: u16,
-        seed: u64,
-        boundary: OsloBoundaryMode,
-    ) -> Self {
+    pub(crate) fn new(width: u16, height: u16, seed: u64, boundary: OsloBoundaryMode) -> Self {
         let surface = SandEngine::new(width, height);
         let lattice_size = Self::lattice_size_for(&surface);
         let mut threshold_rng_state = seed ^ OSLO_THRESHOLD_RNG_XOR;
@@ -263,15 +258,11 @@ impl OsloSandboxEngine {
         // deposition. Canonical settled columns never move on shrink.
         if new_visible_width > 0 && new_visible_width < old_visible_width {
             for falling in &mut self.falling_drives {
-                falling.x = Self::project_site_between_bounds(
-                    falling.x,
-                    shifted_old_visible,
-                    new_visible,
-                );
+                falling.x =
+                    Self::project_site_between_bounds(falling.x, shifted_old_visible, new_visible);
             }
         }
 
-        let grid_height = self.surface.grid_height_dots;
         let shifted_old_vertical = (
             old_visible_vertical.0.saturating_add(vertical_added),
             old_visible_vertical.1.saturating_add(vertical_added),
@@ -475,7 +466,6 @@ impl OsloSandboxEngine {
     fn lattice_size_for(surface: &SandEngine) -> usize {
         surface.grid_width_dots
     }
-
 }
 
 mod physics;

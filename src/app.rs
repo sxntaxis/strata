@@ -42,9 +42,7 @@ mod ui_helpers;
 mod view_style;
 
 #[cfg(debug_assertions)]
-use crate::sand::{
-    ClassicRainMode, ClassicSandboxEngine, OsloBoundaryMode, OsloSandboxEngine,
-};
+use crate::sand::{ClassicRainMode, ClassicSandboxEngine, OsloBoundaryMode, OsloSandboxEngine};
 use persistence_recovery::{PersistenceOperation, PersistenceRecoveryState, RecoveryAction};
 use terminal_lifecycle::{ManagedTerminal, TerminalSession};
 
@@ -525,7 +523,7 @@ struct SimulationState {
 enum TestingSandEngine {
     H4(SandEngine),
     Classic(ClassicSandboxEngine),
-    Oslo(OsloSandboxEngine),
+    Oslo(Box<OsloSandboxEngine>),
 }
 
 #[cfg(debug_assertions)]
@@ -2223,12 +2221,12 @@ impl App {
                     "oslo-vessel" => OsloBoundaryMode::CanonicalWallOverflow,
                     _ => unreachable!("matched Oslo sandbox model"),
                 };
-                Ok(TestingSandEngine::Oslo(OsloSandboxEngine::new(
+                Ok(TestingSandEngine::Oslo(Box::new(OsloSandboxEngine::new(
                     self.sand_engine.cell_width,
                     self.sand_engine.cell_height,
                     self.sand_engine.snapshot_state().rng_state,
                     boundary,
-                )))
+                ))))
             }
             _ => Err(
                 "testingcheats model must be h4, classic, hybrid, oslo-zero, oslo-box, or oslo-vessel"
