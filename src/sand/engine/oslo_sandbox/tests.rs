@@ -8,10 +8,11 @@ fn grain() -> CategoryId {
 
 fn set_column_height(engine: &mut OsloSandboxEngine, site: usize, height: usize) {
     engine.columns[site] = vec![grain(); height];
+    engine.column_visual_y[site] = vec![None; height];
 }
 
 fn direct_drive_and_relax(engine: &mut OsloSandboxEngine, site: usize) -> usize {
-    engine.columns[site].push(grain());
+    engine.push_settled_grain_at_visual_y(site, grain(), None);
     engine.total_generated = engine.total_generated.saturating_add(1);
     engine.enqueue_neighborhood(site);
     let mut moves = 0usize;
@@ -679,8 +680,8 @@ fn severe_front_release_preserves_source_elevation_then_descends_one_dot_per_vis
     set_column_height(&mut engine, site - 1, 8);
     set_column_height(&mut engine, site, 8);
     set_column_height(&mut engine, site + 1, 2);
-    engine.columns[site].pop();
-    engine.columns[site].push(CategoryId(77));
+    let _ = engine.pop_settled_grain(site).unwrap();
+    engine.push_settled_grain_at_visual_y(site, CategoryId(77), None);
     engine.critical_slopes[site] = OSLO_THRESHOLD_HIGH;
     let source_y = engine.top_grain_y(site).unwrap();
 
@@ -741,13 +742,14 @@ fn rolling_visual_interpolation_is_semantically_inert_for_front_relaxation() {
         loop {
             guard = guard.saturating_add(1);
             assert!(guard < 200_000, "front relaxation did not quiesce");
-            if interpolate {
-                while engine.rolling_visual_motion_active() {
-                    assert!(engine.advance_rolling_visual_motion());
-                }
-            }
             let mut changed = engine.advance_rolling_grains();
             changed |= engine.topple_one_active_site();
+            // SEDIMENT-011 deliberately lets presentation move concurrently
+            // instead of draining every colored dot before the next physics
+            // event. Neither choice may influence the authoritative columns.
+            if interpolate {
+                let _ = engine.advance_rolling_visual_motion();
+            }
             if !changed && engine.active_sites.is_empty() && !engine.explicit_flow_active() {
                 break;
             }
@@ -769,4 +771,69 @@ fn rolling_visual_interpolation_is_semantically_inert_for_front_relaxation() {
         interpolated.front_support_recruits(),
         direct.front_support_recruits()
     );
+}
+
+#[test]
+fn visual_transit_never_globally_blocks_front_physics() {
+    let mut engine = OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED);
+    let site = engine.lattice_size() / 2;
+    set_column_height(&mut engine, site - 1, 10);
+    set_column_height(&mut engine, site, 10);
+    set_column_height(&mut engine, site + 1, 2);
+    engine.critical_slopes[site] = OSLO_THRESHOLD_HIGH;
+
+    assert!(engine.topple_site_if_unstable(site));
+    assert!(engine.rolling_visual_motion_active());
+    let before_hops = engine.momentum_hops();
+
+    // A single full frame must advance authoritative rolling physics even while
+    // the released CategoryId is still many visual rows above its target.
+    let _ = engine.advance_testing_flow_frame();
+    assert!(engine.momentum_hops() > before_hops);
+}
+
+#[test]
+fn settled_category_transport_moves_in_parallel_without_adding_mass() {
+    let mut engine = OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED);
+    let (start, _) = engine.visible_lattice_bounds();
+    let top = engine.visible_vertical_bounds().0;
+    engine.push_settled_grain_at_visual_y(start, CategoryId(71), Some(top));
+    engine.push_settled_grain_at_visual_y(start + 1, CategoryId(72), Some(top));
+    let mass_before = engine.grain_count();
+    let before_a = engine.column_visual_y[start][0].unwrap();
+    let before_b = engine.column_visual_y[start + 1][0].unwrap();
+
+    assert!(engine.advance_rolling_visual_motion());
+
+    assert_eq!(engine.grain_count(), mass_before);
+    assert_eq!(engine.column_visual_y[start][0], Some(before_a + 1));
+    assert_eq!(engine.column_visual_y[start + 1][0], Some(before_b + 1));
+}
+
+#[test]
+fn moving_a_settled_category_again_uses_its_current_visible_elevation() {
+    let mut engine = OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED);
+    let site = engine.visible_lattice_bounds().0;
+    let top = engine.visible_vertical_bounds().0;
+    engine.push_settled_grain_at_visual_y(site, CategoryId(73), Some(top));
+    assert!(engine.advance_rolling_visual_motion());
+    let current_y = engine.column_visual_y[site][0].unwrap();
+
+    let (category_id, visual_y) = engine.pop_settled_grain(site).unwrap();
+
+    assert_eq!(category_id, CategoryId(73));
+    assert_eq!(visual_y, current_y);
+    assert_eq!(engine.grain_count(), 0);
+}
+
+#[test]
+fn falling_rain_does_not_turn_a_latent_fluid_field_into_visible_flow() {
+    let mut engine = OsloSandboxEngine::new_fluid_vessel(20, 10, TEST_SEED);
+    let site = engine.visible_lattice_bounds().0;
+    engine.fluidity[site] = 1;
+    engine.spawn(CategoryId(74));
+
+    assert!(engine.explicit_flow_active());
+    assert!(engine.latent_flow_active());
+    assert!(!engine.visible_flow_active());
 }

@@ -60,6 +60,88 @@ impl OsloSandboxEngine {
         (height > 0).then(|| self.surface.grid_height_dots.saturating_sub(height))
     }
 
+    fn normalize_column_visual_shape(&mut self, site: usize) {
+        let Some(column) = self.columns.get(site) else {
+            return;
+        };
+        let target = column.len();
+        let Some(visual) = self.column_visual_y.get_mut(site) else {
+            return;
+        };
+        if visual.len() < target {
+            visual.resize(target, None);
+        } else if visual.len() > target {
+            visual.truncate(target);
+        }
+    }
+
+    /// Pop the authoritative top grain while preserving its current presentation
+    /// elevation. `column_visual_y` is presentation-only and aligned with the
+    /// settled CategoryId stack; physics continues to mutate `columns` at the
+    /// same event as before SEDIMENT-010.
+    pub(super) fn pop_settled_grain(&mut self, site: usize) -> Option<(CategoryId, usize)> {
+        self.normalize_column_visual_shape(site);
+        let physical_y = self.top_grain_y(site)?;
+        let visual_y = self
+            .column_visual_y
+            .get_mut(site)?
+            .pop()
+            .flatten()
+            .unwrap_or(physical_y);
+        let category_id = self.columns.get_mut(site)?.pop()?;
+        Some((category_id, visual_y))
+    }
+
+    /// Push authoritative settled mass immediately, exactly as the frozen front
+    /// solver did, while optionally keeping that grain's CategoryId at a prior
+    /// visual elevation until the presentation catches up. This avoids changing
+    /// support/relief timing merely to animate a tall drop.
+    pub(super) fn push_settled_grain_at_visual_y(
+        &mut self,
+        site: usize,
+        category_id: CategoryId,
+        visual_y: Option<usize>,
+    ) {
+        self.normalize_column_visual_shape(site);
+        self.columns[site].push(category_id);
+        let target_y = self
+            .surface
+            .grid_height_dots
+            .saturating_sub(self.columns[site].len());
+        let visual_y = visual_y.filter(|value| *value != target_y);
+        self.column_visual_y[site].push(visual_y);
+    }
+
+    pub(super) fn settled_visual_in_transit_count(&self) -> usize {
+        self.column_visual_y
+            .iter()
+            .map(|column| column.iter().filter(|value| value.is_some()).count())
+            .sum()
+    }
+
+    pub(super) fn advance_settled_visual_motion(&mut self) -> bool {
+        let (visible_start, visible_end) = self.visible_lattice_bounds();
+        let grid_height = self.surface.grid_height_dots;
+        let mut changed = false;
+        for site in visible_start..visible_end.min(self.columns.len()) {
+            self.normalize_column_visual_shape(site);
+            for (depth, visual_y) in self.column_visual_y[site].iter_mut().enumerate() {
+                let Some(current) = *visual_y else {
+                    continue;
+                };
+                let target = grid_height.saturating_sub(depth.saturating_add(1));
+                let next = match current.cmp(&target) {
+                    std::cmp::Ordering::Less => current.saturating_add(1),
+                    std::cmp::Ordering::Greater => current.saturating_sub(1),
+                    std::cmp::Ordering::Equal => current,
+                };
+                changed |= next != current;
+                *visual_y = (next != target).then_some(next);
+            }
+        }
+        changed
+    }
+
     fn rolling_target_y(&self, site: usize, offset: usize) -> usize {
         self.surface
             .grid_height_dots
@@ -115,7 +197,7 @@ impl OsloSandboxEngine {
     }
 
     pub(crate) fn rolling_visual_motion_active(&self) -> bool {
-        self.rolling_visual_in_transit_count() > 0
+        self.rolling_visual_in_transit_count() > 0 || self.settled_visual_in_transit_count() > 0
     }
 
     pub(crate) fn rolling_visual_in_transit_count(&self) -> usize {
@@ -133,10 +215,12 @@ impl OsloSandboxEngine {
             .count()
     }
 
+    pub(crate) fn total_visual_in_transit_count(&self) -> usize {
+        self.rolling_visual_in_transit_count()
+            .saturating_add(self.settled_visual_in_transit_count())
+    }
+
     pub(crate) fn advance_rolling_visual_motion(&mut self) -> bool {
-        if self.rolling_grains.is_empty() {
-            return false;
-        }
         let grid_height = self.surface.grid_height_dots;
         let settled_heights = self.columns.iter().map(Vec::len).collect::<Vec<_>>();
         let mut offsets = vec![0usize; self.columns.len()];
@@ -157,7 +241,7 @@ impl OsloSandboxEngine {
             changed |= next != rolling.visual_y;
             rolling.visual_y = next;
         }
-        changed
+        changed | self.advance_settled_visual_motion()
     }
 
     fn record_rolling_peak(&mut self) {
@@ -180,7 +264,11 @@ impl OsloSandboxEngine {
     }
 
     fn settle_rolling_grain(&mut self, rolling: RollingGrain) {
-        self.columns[rolling.site].push(rolling.category_id);
+        self.push_settled_grain_at_visual_y(
+            rolling.site,
+            rolling.category_id,
+            Some(rolling.visual_y),
+        );
         self.momentum_settles = self.momentum_settles.saturating_add(1);
         self.enqueue_neighborhood(rolling.site);
     }
@@ -231,11 +319,8 @@ impl OsloSandboxEngine {
             return false;
         }
 
-        let visual_y = self
-            .top_grain_y(source)
-            .expect("front erosion source was checked non-empty");
-        let category_id = self.columns[source]
-            .pop()
+        let (category_id, visual_y) = self
+            .pop_settled_grain(source)
             .expect("front erosion source was checked non-empty");
         eroded_this_tick[source] = true;
         self.push_recruited_rolling_grain_at_y(destination, category_id, direction, visual_y);
@@ -273,11 +358,8 @@ impl OsloSandboxEngine {
             return false;
         }
 
-        let visual_y = self
-            .top_grain_y(uphill)
-            .expect("support-loss source was checked non-empty");
-        let category_id = self.columns[uphill]
-            .pop()
+        let (category_id, visual_y) = self
+            .pop_settled_grain(uphill)
             .expect("support-loss source was checked non-empty");
         self.push_recruited_rolling_grain_at_y(
             support_site,

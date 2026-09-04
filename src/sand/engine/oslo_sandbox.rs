@@ -150,6 +150,12 @@ pub(crate) struct OsloSandboxEngine {
     front_enabled: bool,
     fluid_enabled: bool,
     columns: Vec<Vec<CategoryId>>,
+    // Presentation-only y overrides aligned one-for-one with `columns`.
+    // A settled grain can already participate in authoritative physics while
+    // its CategoryId continues travelling visibly toward the settled row.
+    // This keeps avalanche physics exact without globally blocking on render
+    // interpolation or visually teleporting colored grains down tall cliffs.
+    column_visual_y: Vec<Vec<Option<usize>>>,
     critical_slopes: Vec<u8>,
     threshold_rng_state: u64,
     rain_rng_state: u64,
@@ -281,6 +287,7 @@ impl OsloSandboxEngine {
             front_enabled,
             fluid_enabled,
             columns: vec![Vec::new(); lattice_size],
+            column_visual_y: vec![Vec::new(); lattice_size],
             critical_slopes: vec![OSLO_THRESHOLD_LOW; lattice_size],
             threshold_rng_state,
             rain_rng_state,
@@ -365,17 +372,55 @@ impl OsloSandboxEngine {
         if !self.frame_count.is_multiple_of(2) {
             return false;
         }
+        self.advance_full_physics_frame()
+    }
 
+    /// One *effective* 64 ms Oslo frame used by testingcheats while visible flow
+    /// is playing on the wall clock. This bypasses the historical every-other
+    /// 32 ms wrapper without changing the order or content of the actual frame.
+    pub(crate) fn advance_testing_flow_frame(&mut self) -> bool {
+        self.frame_count = if self.frame_count.is_multiple_of(2) {
+            self.frame_count.wrapping_add(2)
+        } else {
+            self.frame_count.wrapping_add(1)
+        };
+        self.advance_full_physics_frame()
+    }
+
+    fn advance_full_physics_frame(&mut self) -> bool {
         let mut changed = self.launch_one_pending();
         changed |= self.advance_falling_drives();
         changed |= self.advance_fluidization_field();
         changed |= self.advance_rolling_grains();
+        // Presentation follows every physical frame concurrently. Crucially,
+        // physics never waits for all colored grains to finish their vertical
+        // interpolation; all active transports move together.
+        changed |= self.advance_rolling_visual_motion();
         if self.topple_one_active_site() {
             return true;
         }
 
         changed |= self.commit_next_drive_if_quiescent();
         changed
+    }
+
+    /// Advance only visible presentation while authoritative physics is already
+    /// quiescent. Used to let settled CategoryId transport finish at a steady
+    /// grain clock without turning that animation into new sediment events.
+    pub(crate) fn advance_testing_visual_frame(&mut self) -> bool {
+        let mut changed = self.advance_falling_drives();
+        changed |= self.advance_rolling_visual_motion();
+        changed
+    }
+
+    /// Drain an invisible partial-fluidization order field cooperatively only
+    /// when no rolling grain and no queued Oslo site can interleave with it.
+    /// Falling dots are presentation/drive custody at this point and cannot be
+    /// committed while the fluid field remains explicit flow.
+    pub(crate) fn advance_testing_latent_fluid_once(&mut self) -> bool {
+        debug_assert!(self.rolling_grains.is_empty());
+        debug_assert!(self.active_sites.is_empty());
+        self.advance_fluidization_field()
     }
 
     pub(crate) fn sync_for_render(&mut self) {
@@ -401,6 +446,12 @@ impl OsloSandboxEngine {
                 columns[left_added + index] = column;
             }
             self.columns = columns;
+
+            let mut column_visual_y = vec![Vec::new(); new_width];
+            for (index, visual) in self.column_visual_y.drain(..).enumerate() {
+                column_visual_y[left_added + index] = visual;
+            }
+            self.column_visual_y = column_visual_y;
 
             let old_fluidity = std::mem::take(&mut self.fluidity);
             self.fluidity = vec![0; new_width];
@@ -502,6 +553,23 @@ impl OsloSandboxEngine {
                     .clamp(new_visible_vertical.0, new_visible_vertical.1 - 1);
             }
         }
+        for column in &mut self.column_visual_y {
+            for visual_y in column.iter_mut().flatten() {
+                *visual_y = visual_y.saturating_add(vertical_added);
+                if new_visible_height == 0 {
+                    *visual_y = 0;
+                } else if new_visible_height < old_visible_height {
+                    *visual_y = Self::project_site_between_bounds(
+                        *visual_y,
+                        shifted_old_vertical,
+                        new_visible_vertical,
+                    );
+                } else {
+                    *visual_y = (*visual_y)
+                        .clamp(new_visible_vertical.0, new_visible_vertical.1 - 1);
+                }
+            }
+        }
 
         // Hidden canonical columns are custody only while the viewport is smaller.
         // Freeze their Oslo activity and rebuild the exact visible queue. On
@@ -566,6 +634,7 @@ impl OsloSandboxEngine {
         self.surface.clear();
         let lattice_size = Self::lattice_size_for(&self.surface);
         self.columns = vec![Vec::new(); lattice_size];
+        self.column_visual_y = vec![Vec::new(); lattice_size];
         self.critical_slopes = vec![OSLO_THRESHOLD_LOW; lattice_size];
         self.falling_drives.clear();
         self.rolling_grains.clear();
@@ -623,13 +692,14 @@ impl OsloSandboxEngine {
         if fill_height == 0 || visible_start >= visible_end {
             return Ok(0);
         }
-        for column in &mut self.columns[visible_start..visible_end] {
+        for site in visible_start..visible_end {
             let mut filled = Vec::with_capacity(fill_height);
             for depth in 0..fill_height {
                 let layer = depth.saturating_mul(category_ids.len()) / fill_height;
                 filled.push(category_ids[layer.min(category_ids.len() - 1)]);
             }
-            *column = filled;
+            self.columns[site] = filled;
+            self.column_visual_y[site] = vec![None; fill_height];
         }
         self.total_generated = self.settled_count();
         for site in visible_start..visible_end {
@@ -682,6 +752,20 @@ impl OsloSandboxEngine {
             return;
         }
         self.seed_rolling_grain(visible_start, CategoryId::new(1), ToppleDirection::Right);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_seed_visual_transit(&mut self) {
+        let (visible_start, visible_end) = self.visible_lattice_bounds();
+        if visible_start >= visible_end || self.surface.grid_height_dots == 0 {
+            return;
+        }
+        let visual_y = self.visible_vertical_bounds().0;
+        self.push_settled_grain_at_visual_y(
+            visible_start,
+            CategoryId::new(1),
+            Some(visual_y),
+        );
     }
 
     pub(crate) fn avalanche_peak_moves(&self) -> usize {
@@ -738,16 +822,17 @@ impl OsloSandboxEngine {
         !self.rolling_grains.is_empty() || self.fluidity.iter().any(|value| *value > 0)
     }
 
+    /// Visible avalanche physics, distinct from ordinary falling rain. A latent
+    /// fluidity field with no rolling mass is not a reason to wall-clock-throttle
+    /// every invisible order-field step.
     pub(crate) fn visible_flow_active(&self) -> bool {
-        !self.rolling_grains.is_empty()
-            || (self.fluidity.iter().any(|value| *value > 0)
-                && !self.falling_drives.is_empty())
+        !self.rolling_grains.is_empty() || !self.active_sites.is_empty()
     }
 
     pub(crate) fn latent_flow_active(&self) -> bool {
         self.fluidity.iter().any(|value| *value > 0)
             && self.rolling_grains.is_empty()
-            && self.falling_drives.is_empty()
+            && self.active_sites.is_empty()
     }
 
     pub(crate) fn fluid_active_sites(&self) -> usize {
@@ -779,7 +864,7 @@ impl OsloSandboxEngine {
     }
 
     pub(crate) fn rolling_in_transit_count(&self) -> usize {
-        self.rolling_visual_in_transit_count()
+        self.total_visual_in_transit_count()
     }
 
     pub(crate) fn momentum_seeds(&self) -> usize {

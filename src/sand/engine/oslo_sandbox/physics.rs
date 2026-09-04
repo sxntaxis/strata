@@ -200,18 +200,19 @@ impl OsloSandboxEngine {
             return false;
         }
 
-        let visual_y = self
-            .top_grain_y(site)
-            .expect("over-critical Oslo site contains a grain");
-        let category_id = self.columns[site]
-            .pop()
+        let (category_id, visual_y) = self
+            .pop_settled_grain(site)
             .expect("over-critical Oslo site contains a grain");
         if let Some(destination) = destination {
             if self.should_seed_momentum(relief) {
                 self.seed_rolling_grain_at_y(destination, category_id, direction, visual_y);
                 self.seed_fluidization_failure(site, destination);
             } else {
-                self.columns[destination].push(category_id);
+                self.push_settled_grain_at_visual_y(
+                    destination,
+                    category_id,
+                    Some(visual_y),
+                );
             }
         } else {
             self.discharged = self.discharged.saturating_add(1);
@@ -328,7 +329,7 @@ impl OsloSandboxEngine {
             .falling_drives
             .pop_front()
             .expect("front falling Oslo drive exists");
-        self.columns[falling.x].push(falling.category_id);
+        self.push_settled_grain_at_visual_y(falling.x, falling.category_id, Some(falling.y));
         self.enqueue_neighborhood(falling.x);
         true
     }
@@ -349,10 +350,22 @@ impl OsloSandboxEngine {
                 break;
             }
             for (depth, category_id) in column.iter().copied().enumerate() {
-                let Some(y) = grid_height.checked_sub(depth + 1) else {
+                let Some(settled_y) = grid_height.checked_sub(depth + 1) else {
                     break;
                 };
+                let visual_y = self
+                    .column_visual_y
+                    .get(site)
+                    .and_then(|visual| visual.get(depth))
+                    .and_then(|value| *value);
+                let y = visual_y.unwrap_or(settled_y);
+                if y >= grid_height {
+                    continue;
+                }
                 self.surface.grid[y][x] = Some(category_id);
+                if visual_y.is_some() {
+                    self.surface.mobilized[y][x] = true;
+                }
             }
         }
 

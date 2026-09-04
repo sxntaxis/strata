@@ -163,10 +163,7 @@ impl OsloSandboxEngine {
             .collect::<Vec<_>>();
 
         for (site, direction, destination) in release_sites {
-            let Some(visual_y) = self.top_grain_y(site) else {
-                continue;
-            };
-            let Some(category_id) = self.columns[site].pop() else {
+            let Some((category_id, visual_y)) = self.pop_settled_grain(site) else {
                 continue;
             };
             self.push_recruited_rolling_grain_at_y(

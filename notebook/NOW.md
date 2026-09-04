@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-03
 authority: working
-summary: H4/v5 remains published production authority. SEDIMENT-008 oslo-vessel-front physics remains owner-frozen at 8817e19. SEDIMENT-010 preserves front/fluid physics, removes rainbow-visible category teleport with explicit rolling elevation, and separates accelerated drive time from stable avalanche playback so latent fluid work cannot create a low-CPU apparent freeze.
-next: Natively validate SEDIMENT-010, then human-test frozen oslo-vessel-front and curiosity-only oslo-vessel-fluid with testingcheats fill. Require visible category transport, stable avalanche cadence, no accelerated-debt growth during flow, and no latent-fluid apparent freeze before any further physics work.
+summary: H4/v5 remains published production authority. SEDIMENT-008 oslo-vessel-front physics remains owner-frozen at 8817e19. SEDIMENT-011 supersedes the rejected SEDIMENT-010 presentation barrier: authoritative front/fluid physics stays frozen while CategoryId presentation travels in parallel, baseline live rain continues during wall-clock avalanches, and latent fluidity no longer treats ordinary falling rain as visible flow.
+next: Natively validate SEDIMENT-011, then human-test frozen oslo-vessel-front and curiosity-only oslo-vessel-fluid with testingcheats fill. Require many simultaneous colored transports, live baseline rain during flow, stable 64x/128x avalanche cadence, preserved queued advance debt, and no low-CPU latent-fluid stall.
 ---
 
 # NOW — Strata
@@ -71,6 +71,8 @@ SEDIMENT-008 is now **OWNER-FROZEN DEBUG PHYSICS** at `8817e1990188c76b50246e6d8
 SEDIMENT-009 is the current bounded experiment. It leaves frozen SEDIMENT-008 physics intact, fixes the testing harness so explicit moving phases advance at a stable 32 ms wall-clock physics cadence even during accelerated synthetic time, adds `testingcheats fill` for an 80%-visible-window horizontal category-layer fixture, and introduces `oslo-vessel-fluid`: a curiosity-only discrete partial-fluidization/order-field fork inspired by BCRE and Aranson-Tsimring. See `notebook/work/SEDIMENT-009-OSLO-VESSEL-PARTIAL-FLUIDIZATION.md`.
 
 SEDIMENT-010 supersedes SEDIMENT-009 only at the debug transport/scheduler layer. The rainbow fixture exposed that rolling grains had no vertical presentation coordinate, so category mass could appear many rows lower in one frame. It also exposed that SEDIMENT-009 kept adding 64x/128x synthetic debt while visible flow was deliberately throttled, making fluid look frozen at low CPU use. SEDIMENT-010 adds presentation-only rolling elevation, pauses the drive clock during explicit flow, drains invisible fluid-only relaxation cooperatively, and resumes preserved fast-forward debt only at quiescence. SEDIMENT-008 front and SEDIMENT-009 fluid thresholds remain frozen. See `notebook/work/SEDIMENT-010-TRANSPORT-CLOCK.md`.
+
+SEDIMENT-011 supersedes SEDIMENT-010's **presentation barrier**, not its frozen physics. Human rainbow testing showed the barrier serialized the entire collapse behind one-row visual convergence and made rain appear to stop. SEDIMENT-011 keeps authoritative column mutations immediate, adds per-settled-grain presentation coordinates aligned with the CategoryId stacks, advances all transports concurrently, keeps one baseline live rain grain per wall-clock second during special playback, and drains truly latent fluidity even when ordinary falling dots exist. See `notebook/work/SEDIMENT-011-PARALLEL-TRANSPORT-CLOCK.md`.
 
 `notebook/work/PLATEAU-001.md` is the durable roadmap for the remaining core-development arc. The owner has accepted the existing day-end snapshot behavior as baseline and does not want an artificial re-certification gate before continuing.
 
