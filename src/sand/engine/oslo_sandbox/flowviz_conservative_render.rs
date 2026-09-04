@@ -1,5 +1,5 @@
-use super::*;
 use super::flowviz_conservative::PARCEL_RENDER_MASS_CAP;
+use super::*;
 
 impl OsloSandboxEngine {
     pub(super) fn render_conservative_shadow_into_surface(&mut self) {
@@ -106,11 +106,17 @@ impl OsloSandboxEngine {
         if !self.flowviz_conservative {
             return true;
         }
-        let parcel_sum = self.flowviz_parcels.iter().map(|parcel| parcel.mass).sum::<usize>();
+        let parcel_sum = self
+            .flowviz_parcels
+            .iter()
+            .map(|parcel| parcel.mass)
+            .sum::<usize>();
         parcel_sum == self.flowviz_mobile_mass
             && self
                 .flowviz_shadow_mass()
                 .saturating_add(self.flowviz_parcel_mass())
-                == self.settled_count().saturating_add(self.rolling_grains.len())
+                == self
+                    .settled_count()
+                    .saturating_add(self.rolling_grains.len())
     }
 }

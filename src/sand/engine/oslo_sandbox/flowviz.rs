@@ -183,8 +183,8 @@ impl OsloSandboxEngine {
 
     pub(super) fn decay_flowviz_flux(&mut self) {
         for flux in &mut self.flowviz_edge_flux {
-            *flux = (*flux as i32 * FLOWVIZ_FLUX_DECAY_NUM as i32
-                / FLOWVIZ_FLUX_DECAY_DEN as i32) as i16;
+            *flux = (*flux as i32 * FLOWVIZ_FLUX_DECAY_NUM as i32 / FLOWVIZ_FLUX_DECAY_DEN as i32)
+                as i16;
         }
     }
 
@@ -220,7 +220,10 @@ impl OsloSandboxEngine {
             }
 
             let mut site = tracer.x.floor() as isize;
-            site = site.clamp(visible_start as isize, visible_end.saturating_sub(1) as isize);
+            site = site.clamp(
+                visible_start as isize,
+                visible_end.saturating_sub(1) as isize,
+            );
             let site = site as usize;
             let contact_y = Self::flowviz_contact_y_from_heights(grid_height, heights[site]);
 
@@ -344,6 +347,9 @@ impl OsloSandboxEngine {
     }
 
     pub(crate) fn flowviz_active_flux_edges(&self) -> usize {
-        self.flowviz_edge_flux.iter().filter(|flux| **flux != 0).count()
+        self.flowviz_edge_flux
+            .iter()
+            .filter(|flux| **flux != 0)
+            .count()
     }
 }

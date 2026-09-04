@@ -43,7 +43,7 @@ impl OsloSandboxEngine {
             .count()
     }
 
-    fn flat_coast_budget(&self, site: usize) -> u8 {
+    pub(super) fn flat_coast_budget(&self, site: usize) -> u8 {
         if !self.front_enabled {
             return MOMENTUM_FLAT_COAST_STEPS;
         }
@@ -151,11 +151,15 @@ impl OsloSandboxEngine {
     }
 
     fn rolling_target_y(&self, site: usize, offset: usize) -> usize {
-        self.surface
-            .grid_height_dots
-            .saturating_sub(self.columns[site].len().saturating_add(offset).saturating_add(1))
+        self.surface.grid_height_dots.saturating_sub(
+            self.columns[site]
+                .len()
+                .saturating_add(offset)
+                .saturating_add(1),
+        )
     }
 
+    #[cfg(test)]
     pub(super) fn seed_rolling_grain(
         &mut self,
         site: usize,
@@ -287,7 +291,7 @@ impl OsloSandboxEngine {
             .filter(|site| *site >= visible_start && *site < visible_end)
     }
 
-    fn visible_site(&self, site: usize) -> bool {
+    pub(super) fn visible_site(&self, site: usize) -> bool {
         let (visible_start, visible_end) = self.visible_lattice_bounds();
         site >= visible_start && site < visible_end
     }
@@ -305,9 +309,7 @@ impl OsloSandboxEngine {
 
     fn move_rolling_grain(&mut self, rolling: &mut RollingGrain, next_site: usize) {
         let source = rolling.site;
-        let source_y = self
-            .top_grain_y(source)
-            .unwrap_or(rolling.visual_y);
+        let source_y = self.top_grain_y(source).unwrap_or(rolling.visual_y);
         self.record_flowviz_transfer(source, next_site, rolling.category_id, source_y);
         rolling.site = next_site;
         self.momentum_hops = self.momentum_hops.saturating_add(1);
@@ -324,8 +326,7 @@ impl OsloSandboxEngine {
             self.front_event_erosions = self.front_event_erosions.saturating_add(1);
         } else {
             self.front_support_recruits = self.front_support_recruits.saturating_add(1);
-            self.front_event_support_recruits =
-                self.front_event_support_recruits.saturating_add(1);
+            self.front_event_support_recruits = self.front_event_support_recruits.saturating_add(1);
         }
     }
 
@@ -398,12 +399,7 @@ impl OsloSandboxEngine {
             .pop_settled_grain(uphill)
             .expect("support-loss source was checked non-empty");
         self.record_flowviz_mobile_entry(uphill, support_site, category_id, visual_y);
-        self.push_recruited_rolling_grain_at_y(
-            support_site,
-            category_id,
-            direction,
-            visual_y,
-        );
+        self.push_recruited_rolling_grain_at_y(support_site, category_id, direction, visual_y);
         self.record_front_recruit_move(false);
         self.enqueue_neighborhood(uphill);
         self.enqueue_neighborhood(support_site);
@@ -444,12 +440,8 @@ impl OsloSandboxEngine {
                 self.move_rolling_grain(&mut rolling, next_site);
                 self.rolling_grains.push_back(rolling);
                 changed = true;
-                changed |= self.front_erode_after_hop(
-                    source,
-                    next_site,
-                    direction,
-                    &mut eroded_this_tick,
-                );
+                changed |=
+                    self.front_erode_after_hop(source, next_site, direction, &mut eroded_this_tick);
             } else if next_height == current_height && rolling.flat_coast_remaining > 0 {
                 rolling.flat_coast_remaining -= 1;
                 self.move_rolling_grain(&mut rolling, next_site);

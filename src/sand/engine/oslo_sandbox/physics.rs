@@ -209,11 +209,7 @@ impl OsloSandboxEngine {
                 self.seed_rolling_grain_at_y(destination, category_id, direction, visual_y);
                 self.seed_fluidization_failure(site, destination);
             } else {
-                self.push_settled_grain_at_visual_y(
-                    destination,
-                    category_id,
-                    Some(visual_y),
-                );
+                self.push_settled_grain_at_visual_y(destination, category_id, Some(visual_y));
                 self.mirror_flowviz_settled_transfer(site, destination, category_id);
             }
         } else {
@@ -293,10 +289,7 @@ impl OsloSandboxEngine {
     }
 
     pub(super) fn commit_next_drive_if_quiescent(&mut self) -> bool {
-        if !self.active_sites.is_empty()
-            || self.explicit_flow_active()
-            || self.columns.is_empty()
-        {
+        if !self.active_sites.is_empty() || self.explicit_flow_active() || self.columns.is_empty() {
             return false;
         }
         let Some(mut falling) = self.falling_drives.front().copied() else {

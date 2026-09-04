@@ -39,11 +39,23 @@ impl OsloSandboxEngine {
         let left = site
             .checked_sub(1)
             .filter(|left| *left >= visible_start)
-            .map(|left| (ToppleDirection::Left, left, height.saturating_sub(self.columns[left].len())));
+            .map(|left| {
+                (
+                    ToppleDirection::Left,
+                    left,
+                    height.saturating_sub(self.columns[left].len()),
+                )
+            });
         let right = site
             .checked_add(1)
             .filter(|right| *right < visible_end)
-            .map(|right| (ToppleDirection::Right, right, height.saturating_sub(self.columns[right].len())));
+            .map(|right| {
+                (
+                    ToppleDirection::Right,
+                    right,
+                    height.saturating_sub(self.columns[right].len()),
+                )
+            });
 
         match (left, right) {
             (None, None) => None,
@@ -167,12 +179,7 @@ impl OsloSandboxEngine {
                 continue;
             };
             self.record_flowviz_mobile_entry(site, destination, category_id, visual_y);
-            self.push_recruited_rolling_grain_at_y(
-                destination,
-                category_id,
-                direction,
-                visual_y,
-            );
+            self.push_recruited_rolling_grain_at_y(destination, category_id, direction, visual_y);
             self.record_fluid_release_move();
             self.enqueue_neighborhood(site);
             self.enqueue_neighborhood(destination);

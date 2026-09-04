@@ -37,7 +37,9 @@ where
     counts
 }
 
-fn physical_category_counts(engine: &OsloSandboxEngine) -> std::collections::HashMap<CategoryId, usize> {
+fn physical_category_counts(
+    engine: &OsloSandboxEngine,
+) -> std::collections::HashMap<CategoryId, usize> {
     category_counts(
         engine
             .columns
@@ -61,7 +63,7 @@ fn conservative_visual_category_counts(
                 engine
                     .flowviz_parcels
                     .iter()
-                    .flat_map(|parcel| std::iter::repeat(parcel.category_id).take(parcel.mass)),
+                    .flat_map(|parcel| std::iter::repeat_n(parcel.category_id, parcel.mass)),
             ),
     )
 }
@@ -444,7 +446,10 @@ fn horizontal_reconnection_can_seed_momentum_on_the_first_steep_seam_topple() {
     let mut guard = 0usize;
     while engine.momentum_seeds() == 0 {
         guard = guard.saturating_add(1);
-        assert!(guard < canonical_width * 4, "reconnected seam never reached the active queue");
+        assert!(
+            guard < canonical_width * 4,
+            "reconnected seam never reached the active queue"
+        );
         let _ = engine.topple_one_active_site();
     }
 
@@ -472,7 +477,10 @@ fn steep_wall_relaxation_creates_a_concurrent_mobile_front_and_conserves_mass() 
     let mut guard = 0usize;
     loop {
         guard = guard.saturating_add(1);
-        assert!(guard < 100_000, "momentum wall relaxation failed to quiesce");
+        assert!(
+            guard < 100_000,
+            "momentum wall relaxation failed to quiesce"
+        );
         let mut changed = engine.advance_rolling_grains();
         changed |= engine.topple_one_active_site();
         if !changed && engine.active_sites.is_empty() && engine.rolling_grains.is_empty() {
@@ -529,10 +537,19 @@ fn front_moving_layer_erodes_a_steep_static_bed_one_grain_per_site_per_tick() {
 
     assert_eq!(engine.front_erosion_relief(), 2);
     assert!(engine.advance_rolling_grains());
-    assert_eq!(engine.columns[1].len(), 4, "one static grain should be entrained");
+    assert_eq!(
+        engine.columns[1].len(),
+        4,
+        "one static grain should be entrained"
+    );
     assert_eq!(engine.front_erosions(), 1);
     assert_eq!(engine.rolling_grains.len(), 2);
-    assert!(engine.rolling_grains.iter().all(|rolling| rolling.site == 2));
+    assert!(
+        engine
+            .rolling_grains
+            .iter()
+            .all(|rolling| rolling.site == 2)
+    );
     assert_eq!(engine.settled_count(), settled_before - 1);
     assert_eq!(engine.grain_count(), mass_before);
 }
@@ -550,10 +567,12 @@ fn front_loss_of_support_recruits_the_immediately_uphill_column() {
     assert!(engine.front_recruit_support_after_loss(2, ToppleDirection::Right));
     assert_eq!(engine.columns[1].len(), 6);
     assert_eq!(engine.front_support_recruits(), 1);
-    assert!(engine
-        .rolling_grains
-        .iter()
-        .any(|rolling| rolling.site == 2 && rolling.direction == ToppleDirection::Right));
+    assert!(
+        engine
+            .rolling_grains
+            .iter()
+            .any(|rolling| rolling.site == 2 && rolling.direction == ToppleDirection::Right)
+    );
     assert_eq!(engine.grain_count(), mass_before);
 }
 
@@ -608,7 +627,10 @@ fn front_wall_failure_erodes_propagates_uphill_and_quiesces_with_mass_conserved(
     }
 
     assert!(engine.momentum_seeds() > 0);
-    assert!(engine.front_erosions() > 0, "moving layer never eroded the bed");
+    assert!(
+        engine.front_erosions() > 0,
+        "moving layer never eroded the bed"
+    );
     assert!(
         engine.front_support_recruits() > 0,
         "wall failure never propagated uphill by support loss"
@@ -712,7 +734,12 @@ fn fluid_wall_failure_releases_mass_collectively_then_reaches_quiescence() {
 #[test]
 fn rainbow_fill_populates_exactly_eighty_percent_of_current_visible_window() {
     let mut engine = OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED);
-    let categories = [CategoryId(11), CategoryId(22), CategoryId(33), CategoryId(44)];
+    let categories = [
+        CategoryId(11),
+        CategoryId(22),
+        CategoryId(33),
+        CategoryId(44),
+    ];
     let (start, end) = engine.visible_lattice_bounds();
     let expected_height = engine.visible_height() * 4 / 5;
     let grains = engine.debug_fill_rainbow_80(&categories).unwrap();
@@ -810,7 +837,10 @@ fn rolling_visual_interpolation_is_semantically_inert_for_front_relaxation() {
         engine
     }
 
-    let direct = run(OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED), false);
+    let direct = run(
+        OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED),
+        false,
+    );
     let interpolated = run(OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED), true);
 
     assert_eq!(interpolated.columns, direct.columns);
@@ -890,7 +920,6 @@ fn falling_rain_does_not_turn_a_latent_fluid_field_into_visible_flow() {
     assert!(engine.latent_flow_active());
     assert!(!engine.visible_flow_active());
 }
-
 
 #[test]
 fn flowviz_front_preserves_frozen_front_physics_on_ordinary_quiescent_drive() {
@@ -982,7 +1011,9 @@ fn flowviz_wall_failure_builds_a_concurrent_tracer_cloud_and_conserves_physics()
         engine
     }
 
-    let frozen = relax(prepare(OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED)));
+    let frozen = relax(prepare(OsloSandboxEngine::new_front_vessel(
+        20, 10, TEST_SEED,
+    )));
     let mut flowviz = relax(prepare(OsloSandboxEngine::new_front_flowviz_vessel(
         20, 10, TEST_SEED,
     )));
@@ -1007,8 +1038,7 @@ fn flowviz_wall_failure_builds_a_concurrent_tracer_cloud_and_conserves_physics()
 #[test]
 fn conservative_flowviz_preserves_frozen_front_physics_on_ordinary_quiescent_drive() {
     let mut frozen = OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED);
-    let mut parcels =
-        OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
+    let mut parcels = OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
     let width = frozen.lattice_size();
 
     for drive in 0..2_000usize {
@@ -1030,13 +1060,15 @@ fn conservative_flowviz_preserves_frozen_front_physics_on_ordinary_quiescent_dri
     );
     assert_eq!(parcels.flowviz_shadow_misses(), 0);
     assert!(parcels.flowviz_visual_mass_matches_physical_mobile_system());
-    assert_eq!(conservative_visual_category_counts(&parcels), physical_category_counts(&parcels));
+    assert_eq!(
+        conservative_visual_category_counts(&parcels),
+        physical_category_counts(&parcels)
+    );
 }
 
 #[test]
 fn conservative_flowviz_fungible_discharge_consumes_nearest_shadow_surplus() {
-    let mut engine =
-        OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
+    let mut engine = OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
     let source = engine.lattice_size() / 2;
     let surplus_site = source.saturating_add(2);
 
@@ -1070,8 +1102,7 @@ fn conservative_flowviz_fungible_discharge_consumes_nearest_shadow_surplus() {
 
 #[test]
 fn conservative_flowviz_offscreen_discharge_withdrawal_is_still_custody_success() {
-    let mut engine =
-        OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
+    let mut engine = OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
     let source = 0usize;
     let viewport_height = engine.surface.grid_height_dots;
 
@@ -1092,8 +1123,7 @@ fn conservative_flowviz_offscreen_discharge_withdrawal_is_still_custody_success(
     // depth has no representable positive y, but withdrawal must still report
     // success rather than mutating the shadow and then returning `None`.
     engine.columns[source] = vec![grain(); viewport_height.saturating_add(1)];
-    engine.flowviz_shadow_columns[source] =
-        vec![grain(); viewport_height.saturating_add(2)];
+    engine.flowviz_shadow_columns[source] = vec![grain(); viewport_height.saturating_add(2)];
 
     engine.mirror_flowviz_settled_discharge(source, grain());
 
@@ -1113,8 +1143,7 @@ fn conservative_flowviz_offscreen_discharge_withdrawal_is_still_custody_success(
 
 #[test]
 fn conservative_flowviz_offscreen_mobile_entry_creates_real_parcel_custody() {
-    let mut engine =
-        OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
+    let mut engine = OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
     let source = 1usize;
     let destination = source + 1;
     let viewport_height = engine.surface.grid_height_dots;
@@ -1136,8 +1165,7 @@ fn conservative_flowviz_offscreen_mobile_entry_creates_real_parcel_custody() {
     // viewport; that affects only its projected source y, not whether custody
     // exists and must become parcel mass.
     engine.columns[source] = vec![grain(); viewport_height.saturating_add(1)];
-    engine.flowviz_shadow_columns[source] =
-        vec![grain(); viewport_height.saturating_add(2)];
+    engine.flowviz_shadow_columns[source] = vec![grain(); viewport_height.saturating_add(2)];
 
     engine.record_flowviz_mobile_entry(source, destination, grain(), 0);
     engine.seed_rolling_grain_at_y(destination, grain(), ToppleDirection::Right, 0);
@@ -1155,8 +1183,7 @@ fn conservative_flowviz_offscreen_mobile_entry_creates_real_parcel_custody() {
 
 #[test]
 fn conservative_flowviz_offscreen_settled_transfer_mirrors_custody() {
-    let mut engine =
-        OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
+    let mut engine = OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
     let source = 1usize;
     let destination = source + 1;
     let viewport_height = engine.surface.grid_height_dots;
@@ -1175,8 +1202,7 @@ fn conservative_flowviz_offscreen_settled_transfer_mirrors_custody() {
     // unit lives above the viewport and must still be recognized as present.
     engine.columns[source] = vec![grain(); viewport_height.saturating_add(1)];
     engine.columns[destination].push(grain());
-    engine.flowviz_shadow_columns[source] =
-        vec![grain(); viewport_height.saturating_add(2)];
+    engine.flowviz_shadow_columns[source] = vec![grain(); viewport_height.saturating_add(2)];
 
     engine.mirror_flowviz_settled_transfer(source, destination, grain());
 
@@ -1198,8 +1224,7 @@ fn conservative_flowviz_offscreen_settled_transfer_mirrors_custody() {
 
 #[test]
 fn conservative_flowviz_delays_visible_deposit_until_parcel_arrival() {
-    let mut engine =
-        OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
+    let mut engine = OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
     let source = engine.lattice_size() / 2;
     let destination = source + 1;
     set_column_height(&mut engine, source, 3);
@@ -1214,11 +1239,7 @@ fn conservative_flowviz_delays_visible_deposit_until_parcel_arrival() {
     assert!(engine.flowviz_visual_mass_matches_physical_mobile_system());
 
     let rolling = engine.rolling_grains.pop_front().unwrap();
-    engine.push_settled_grain_at_visual_y(
-        destination,
-        rolling.category_id,
-        Some(rolling.visual_y),
-    );
+    engine.push_settled_grain_at_visual_y(destination, rolling.category_id, Some(rolling.visual_y));
     engine.record_flowviz_settlement(destination, rolling.category_id);
 
     // Physics already owns the destination grain, but the visual surface does
@@ -1241,13 +1262,15 @@ fn conservative_flowviz_delays_visible_deposit_until_parcel_arrival() {
     assert_eq!(engine.flowviz_visual_deposits(), 1);
     assert_eq!(engine.flowviz_shadow_misses(), 0);
     assert!(engine.flowviz_visual_mass_matches_physical_mobile_system());
-    assert_eq!(conservative_visual_category_counts(&engine), physical_category_counts(&engine));
+    assert_eq!(
+        conservative_visual_category_counts(&engine),
+        physical_category_counts(&engine)
+    );
 }
 
 #[test]
 fn conservative_flowviz_reuses_pending_deposit_when_mass_reenters_motion() {
-    let mut engine =
-        OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
+    let mut engine = OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
     let source = engine.lattice_size() / 2;
     let middle = source + 1;
     let destination = source + 2;
@@ -1273,14 +1296,15 @@ fn conservative_flowviz_reuses_pending_deposit_when_mass_reenters_motion() {
     assert_eq!(engine.flowviz_visual_withdrawals(), 1);
     assert_eq!(engine.flowviz_shadow_misses(), 0);
     assert!(engine.flowviz_visual_mass_matches_physical_mobile_system());
-    assert_eq!(conservative_visual_category_counts(&engine), physical_category_counts(&engine));
+    assert_eq!(
+        conservative_visual_category_counts(&engine),
+        physical_category_counts(&engine)
+    );
 }
-
 
 #[test]
 fn conservative_flowviz_fungible_reentry_drains_through_real_adjacent_transport() {
-    let mut engine =
-        OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
+    let mut engine = OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
     let source = engine.lattice_size() / 2;
     let middle = source + 1;
     let destination = source + 2;
@@ -1302,11 +1326,7 @@ fn conservative_flowviz_fungible_reentry_drains_through_real_adjacent_transport(
     engine.seed_rolling_grain_at_y(destination, category_id, ToppleDirection::Right, visual_y);
 
     let rolling = engine.rolling_grains.pop_front().unwrap();
-    engine.push_settled_grain_at_visual_y(
-        destination,
-        rolling.category_id,
-        Some(rolling.visual_y),
-    );
+    engine.push_settled_grain_at_visual_y(destination, rolling.category_id, Some(rolling.visual_y));
     engine.record_flowviz_settlement(destination, rolling.category_id);
 
     assert_eq!(engine.flowviz_shadow_misses(), 0);
@@ -1392,7 +1412,10 @@ fn conservative_flowviz_wall_failure_conserves_visual_mass_and_drains_to_real_cr
         );
         let _ = parcels.advance_flowviz_tracers();
         assert!(parcels.flowviz_visual_mass_matches_physical_mobile_system());
-        assert_eq!(conservative_visual_category_counts(&parcels), physical_category_counts(&parcels));
+        assert_eq!(
+            conservative_visual_category_counts(&parcels),
+            physical_category_counts(&parcels)
+        );
     }
 
     assert_eq!(parcels.flowviz_total_deposit_due(), 0);
@@ -1400,7 +1423,10 @@ fn conservative_flowviz_wall_failure_conserves_visual_mass_and_drains_to_real_cr
     assert_eq!(parcels.flowviz_shadow_mass(), frozen.settled_count());
     assert_eq!(parcels.flowviz_shadow_misses(), 0);
     assert!(parcels.flowviz_visual_mass_matches_physical_mobile_system());
-    assert_eq!(conservative_visual_category_counts(&parcels), physical_category_counts(&parcels));
+    assert_eq!(
+        conservative_visual_category_counts(&parcels),
+        physical_category_counts(&parcels)
+    );
     assert_eq!(
         per_site_category_counts(&parcels.flowviz_shadow_columns),
         per_site_category_counts(&parcels.columns)

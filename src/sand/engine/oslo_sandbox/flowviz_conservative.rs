@@ -175,7 +175,10 @@ impl OsloSandboxEngine {
         if !self.flowviz_conservative {
             return;
         }
-        if self.withdraw_flowviz_shadow_grain(source, category_id).is_some() {
+        if self
+            .withdraw_flowviz_shadow_grain(source, category_id)
+            .is_some()
+        {
             if let Some(column) = self.flowviz_shadow_columns.get_mut(destination) {
                 column.push(category_id);
             }
@@ -195,7 +198,10 @@ impl OsloSandboxEngine {
         if !self.flowviz_conservative {
             return;
         }
-        if self.withdraw_flowviz_shadow_grain(source, category_id).is_some() {
+        if self
+            .withdraw_flowviz_shadow_grain(source, category_id)
+            .is_some()
+        {
             return;
         }
         if self.consume_flowviz_parcel_mass(category_id, 1) {
@@ -244,7 +250,9 @@ impl OsloSandboxEngine {
         category_id: CategoryId,
     ) -> Option<usize> {
         let column = self.flowviz_shadow_columns.get_mut(site)?;
-        let depth = column.iter().rposition(|category| *category == category_id)?;
+        let depth = column
+            .iter()
+            .rposition(|category| *category == category_id)?;
         column.remove(depth);
         // Withdrawal success is a custody fact; render-space projection is not.
         // A shadow column may legitimately extend above the current viewport.
@@ -375,12 +383,7 @@ impl OsloSandboxEngine {
                 count,
             );
         } else {
-            Self::add_category_count(
-                &mut self.flowviz_transport_left,
-                source,
-                category_id,
-                count,
-            );
+            Self::add_category_count(&mut self.flowviz_transport_left, source, category_id, count);
         }
     }
 
@@ -391,16 +394,8 @@ impl OsloSandboxEngine {
         category_id: CategoryId,
     ) -> usize {
         match direction {
-            -1 => Self::category_count_in_ledger(
-                &self.flowviz_transport_left,
-                source,
-                category_id,
-            ),
-            1 => Self::category_count_in_ledger(
-                &self.flowviz_transport_right,
-                source,
-                category_id,
-            ),
+            -1 => Self::category_count_in_ledger(&self.flowviz_transport_left, source, category_id),
+            1 => Self::category_count_in_ledger(&self.flowviz_transport_right, source, category_id),
             _ => 0,
         }
     }
@@ -488,8 +483,7 @@ impl OsloSandboxEngine {
                     && parcel.mass < PARCEL_MAX_MASS
                     && parcel.x.floor() as usize == source_site
                     && (parcel.y - start_y).abs() <= 2.0
-            })
-        {
+            }) {
             parcel.mass = parcel.mass.saturating_add(1);
             true
         } else {
@@ -543,13 +537,7 @@ impl OsloSandboxEngine {
             std::cmp::Ordering::Less => 1,
             std::cmp::Ordering::Equal if left > 0 => {
                 let flux = self.flowviz_flux_bias(site);
-                if flux < 0 {
-                    -1
-                } else if flux > 0 {
-                    1
-                } else {
-                    1
-                }
+                if flux < 0 { -1 } else { 1 }
             }
             _ => 0,
         }
@@ -576,9 +564,10 @@ impl OsloSandboxEngine {
 
         while let Some(mut parcel) = self.flowviz_parcels.pop_front() {
             parcel.age = parcel.age.saturating_add(1);
-            let site = (parcel.x.floor() as isize)
-                .clamp(visible_start as isize, visible_end.saturating_sub(1) as isize)
-                as usize;
+            let site = (parcel.x.floor() as isize).clamp(
+                visible_start as isize,
+                visible_end.saturating_sub(1) as isize,
+            ) as usize;
             let contact_y = Self::shadow_contact_y(grid_height, heights[site]);
 
             if parcel.y + 0.05 < contact_y {
@@ -593,10 +582,7 @@ impl OsloSandboxEngine {
             parcel.vy = 0.0;
 
             let demand_here = self.flowviz_deposit_demand(site, parcel.category_id);
-            let deposit = parcel
-                .mass
-                .min(demand_here)
-                .min(PARCEL_DEPOSIT_PER_FRAME);
+            let deposit = parcel.mass.min(demand_here).min(PARCEL_DEPOSIT_PER_FRAME);
             if deposit > 0 {
                 for _ in 0..deposit {
                     self.flowviz_shadow_columns[site].push(parcel.category_id);
@@ -604,8 +590,7 @@ impl OsloSandboxEngine {
                 heights[site] = heights[site].saturating_add(deposit);
                 parcel.mass -= deposit;
                 self.flowviz_mobile_mass = self.flowviz_mobile_mass.saturating_sub(deposit);
-                self.flowviz_visual_deposits =
-                    self.flowviz_visual_deposits.saturating_add(deposit);
+                self.flowviz_visual_deposits = self.flowviz_visual_deposits.saturating_add(deposit);
                 changed = true;
             }
             if parcel.mass == 0 {
@@ -635,12 +620,8 @@ impl OsloSandboxEngine {
                 continue;
             }
 
-            let consumed = self.consume_flowviz_transport_due(
-                site,
-                direction,
-                parcel.category_id,
-                transfer,
-            );
+            let consumed =
+                self.consume_flowviz_transport_due(site, direction, parcel.category_id, transfer);
             if consumed == 0 {
                 survivors.push_back(parcel);
                 continue;

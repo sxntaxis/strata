@@ -589,11 +589,17 @@ impl TestingSandEngine {
     }
 
     fn advance_testing_visual_frame(&mut self) -> bool {
-        matches!(self, Self::Oslo(engine) if engine.advance_testing_visual_frame())
+        match self {
+            Self::Oslo(engine) => engine.advance_testing_visual_frame(),
+            _ => false,
+        }
     }
 
     fn advance_testing_latent_fluid_once(&mut self) -> bool {
-        matches!(self, Self::Oslo(engine) if engine.advance_testing_latent_fluid_once())
+        match self {
+            Self::Oslo(engine) => engine.advance_testing_latent_fluid_once(),
+            _ => false,
+        }
     }
 
     fn fill_rainbow_80(&mut self, category_ids: &[CategoryId]) -> Result<usize, String> {
@@ -802,7 +808,9 @@ impl TestingCheatsState {
             self.flow_spawn_wall_accumulator = self
                 .flow_spawn_wall_accumulator
                 .saturating_add(wall_delta)
-                .min(Duration::from_millis(TIME_SETTINGS.tick_ms.saturating_mul(2)));
+                .min(Duration::from_millis(
+                    TIME_SETTINGS.tick_ms.saturating_mul(2),
+                ));
         } else {
             let accelerated = wall_delta.saturating_mul(self.speed_multiplier);
             self.queued_simulated = self.queued_simulated.saturating_add(accelerated);
@@ -3662,9 +3670,8 @@ mod testing_cheats_clock_tests {
 
     #[test]
     fn accelerated_wall_time_grows_drive_debt_only_while_quiescent() {
-        let engine = TestingSandEngine::Oslo(Box::new(OsloSandboxEngine::new_front_vessel(
-            20, 10, 7,
-        )));
+        let engine =
+            TestingSandEngine::Oslo(Box::new(OsloSandboxEngine::new_front_vessel(20, 10, 7)));
         let mut testing = state(engine, 64);
 
         testing.accumulate_wall_time(Duration::from_secs(1));
@@ -3698,6 +3705,9 @@ mod testing_cheats_clock_tests {
 
         assert_eq!(testing.queued_simulated, debt_before);
         assert!(testing.flow_wall_accumulator > Duration::ZERO);
-        assert_eq!(testing.flow_spawn_wall_accumulator, Duration::from_millis(500));
+        assert_eq!(
+            testing.flow_spawn_wall_accumulator,
+            Duration::from_millis(500)
+        );
     }
 }

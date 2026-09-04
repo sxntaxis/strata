@@ -647,9 +647,7 @@ impl OsloSandboxEngine {
                         new_visible_vertical,
                     ) as f32;
                 } else {
-                    tracer.y = y
-                        .clamp(new_visible_vertical.0, new_visible_vertical.1 - 1)
-                        as f32;
+                    tracer.y = y.clamp(new_visible_vertical.0, new_visible_vertical.1 - 1) as f32;
                 }
             }
             for parcel in &mut self.flowviz_parcels {
@@ -664,9 +662,7 @@ impl OsloSandboxEngine {
                         new_visible_vertical,
                     ) as f32;
                 } else {
-                    parcel.y = y
-                        .clamp(new_visible_vertical.0, new_visible_vertical.1 - 1)
-                        as f32;
+                    parcel.y = y.clamp(new_visible_vertical.0, new_visible_vertical.1 - 1) as f32;
                 }
             }
         }
@@ -682,8 +678,8 @@ impl OsloSandboxEngine {
                         new_visible_vertical,
                     );
                 } else {
-                    *visual_y = (*visual_y)
-                        .clamp(new_visible_vertical.0, new_visible_vertical.1 - 1);
+                    *visual_y =
+                        (*visual_y).clamp(new_visible_vertical.0, new_visible_vertical.1 - 1);
                 }
             }
         }
@@ -800,7 +796,10 @@ impl OsloSandboxEngine {
         self.sync_surface();
     }
 
-    pub(crate) fn debug_fill_rainbow_80(&mut self, category_ids: &[CategoryId]) -> Result<usize, String> {
+    pub(crate) fn debug_fill_rainbow_80(
+        &mut self,
+        category_ids: &[CategoryId],
+    ) -> Result<usize, String> {
         if category_ids.is_empty() {
             return Err("testingcheats fill requires at least one configured layer".to_string());
         }
@@ -880,11 +879,7 @@ impl OsloSandboxEngine {
             return;
         }
         let visual_y = self.visible_vertical_bounds().0;
-        self.push_settled_grain_at_visual_y(
-            visible_start,
-            CategoryId::new(1),
-            Some(visual_y),
-        );
+        self.push_settled_grain_at_visual_y(visible_start, CategoryId::new(1), Some(visual_y));
     }
 
     pub(crate) fn avalanche_peak_moves(&self) -> usize {
