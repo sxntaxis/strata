@@ -24,6 +24,16 @@ const RECENT_AVALANCHE_WINDOW: usize = 512;
 // lower dynamic friction of material that is already in motion.
 const MOMENTUM_TRIGGER_RELIEF: usize = 4;
 const MOMENTUM_FLAT_COAST_STEPS: u8 = 2;
+// SEDIMENT-008 adds a BCRE/Daerr-Douady-inspired exchange layer on top of
+// causal rolling grains. Static material needs a larger loss-of-support slope
+// to join the flow than already-moving material needs to continue. A moving
+// layer erodes at relief >= 2, while uphill support failure recruits at relief
+// >= 3. Flat runout is deliberately shorter than momentum-v1 and grows only
+// slightly with local moving-layer thickness.
+const FRONT_EROSION_RELIEF: usize = 2;
+const FRONT_SUPPORT_LOSS_RELIEF: usize = 3;
+const FRONT_BASE_FLAT_COAST_STEPS: u8 = 1;
+const FRONT_MAX_FLAT_COAST_STEPS: u8 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ToppleDirection {
@@ -93,6 +103,16 @@ pub(super) struct RollingGrain {
 /// continue. Many such grains may roll concurrently. This is a physical sandbox
 /// change, not presentation batching and not a global avalanche-size gate.
 ///
+/// `oslo-vessel-front` keeps the same severe-failure seed, then adds a discrete
+/// static/rolling exchange layer inspired by BCRE and granular-avalanche
+/// experiments. Moving material can entrain one settled grain while crossing a
+/// relief >= 2, and loss of support can recruit the immediately uphill column at
+/// relief >= 3. The moving layer therefore has a lower stopping threshold than
+/// the static start threshold: thin events can die downhill, while a sufficiently
+/// developed wall failure can propagate uphill as support is removed. Exchange is
+/// bounded to one erosion per source site per rolling tick; this remains a debug
+/// product experiment rather than a claim of numerical fidelity to a paper.
+///
 /// Strata's rain remains full-width. Only the slowly wandering statistical focus
 /// is constrained to a centered corridor whose side padding is one additional
 /// golden-ratio subdivision of the earlier ~19.1% margin: about 11.8% on each
@@ -107,6 +127,7 @@ pub(crate) struct OsloSandboxEngine {
     surface: SandEngine,
     boundary: OsloBoundaryMode,
     momentum_enabled: bool,
+    front_enabled: bool,
     columns: Vec<Vec<CategoryId>>,
     critical_slopes: Vec<u8>,
     threshold_rng_state: u64,
@@ -141,32 +162,55 @@ pub(crate) struct OsloSandboxEngine {
     momentum_last_seeds: usize,
     momentum_last_hops: usize,
     momentum_last_peak_active: usize,
+    front_erosions: usize,
+    front_support_recruits: usize,
+    front_event_erosions: usize,
+    front_event_support_recruits: usize,
+    front_last_erosions: usize,
+    front_last_support_recruits: usize,
 }
 impl OsloSandboxEngine {
     pub(crate) fn new(width: u16, height: u16, seed: u64, boundary: OsloBoundaryMode) -> Self {
-        Self::new_with_momentum(width, height, seed, boundary, false)
+        Self::new_with_flow(width, height, seed, boundary, false, false)
     }
 
     pub(crate) fn new_momentum_vessel(width: u16, height: u16, seed: u64) -> Self {
-        Self::new_with_momentum(
+        Self::new_with_flow(
             width,
             height,
             seed,
             OsloBoundaryMode::CanonicalWallOverflow,
             true,
+            false,
         )
     }
 
-    fn new_with_momentum(
+    pub(crate) fn new_front_vessel(width: u16, height: u16, seed: u64) -> Self {
+        Self::new_with_flow(
+            width,
+            height,
+            seed,
+            OsloBoundaryMode::CanonicalWallOverflow,
+            true,
+            true,
+        )
+    }
+
+    fn new_with_flow(
         width: u16,
         height: u16,
         seed: u64,
         boundary: OsloBoundaryMode,
         momentum_enabled: bool,
+        front_enabled: bool,
     ) -> Self {
         debug_assert!(
             !momentum_enabled || boundary == OsloBoundaryMode::CanonicalWallOverflow,
-            "momentum Oslo is defined only for the canonical vessel sandbox"
+            "moving-phase Oslo is defined only for the canonical vessel sandbox"
+        );
+        debug_assert!(
+            !front_enabled || momentum_enabled,
+            "front exchange requires the causal rolling phase"
         );
         let surface = SandEngine::new(width, height);
         let lattice_size = Self::lattice_size_for(&surface);
@@ -186,6 +230,7 @@ impl OsloSandboxEngine {
             surface,
             boundary,
             momentum_enabled,
+            front_enabled,
             columns: vec![Vec::new(); lattice_size],
             critical_slopes: vec![OSLO_THRESHOLD_LOW; lattice_size],
             threshold_rng_state,
@@ -220,6 +265,12 @@ impl OsloSandboxEngine {
             momentum_last_seeds: 0,
             momentum_last_hops: 0,
             momentum_last_peak_active: 0,
+            front_erosions: 0,
+            front_support_recruits: 0,
+            front_event_erosions: 0,
+            front_event_support_recruits: 0,
+            front_last_erosions: 0,
+            front_last_support_recruits: 0,
         };
         sandbox.randomize_all_thresholds();
         sandbox.sync_surface();
@@ -451,6 +502,12 @@ impl OsloSandboxEngine {
         self.momentum_last_seeds = 0;
         self.momentum_last_hops = 0;
         self.momentum_last_peak_active = 0;
+        self.front_erosions = 0;
+        self.front_support_recruits = 0;
+        self.front_event_erosions = 0;
+        self.front_event_support_recruits = 0;
+        self.front_last_erosions = 0;
+        self.front_last_support_recruits = 0;
         self.rain_focus_site = None;
         self.rain_focus_target_site = None;
         self.rain_focus_move_counter = 0;
@@ -524,7 +581,9 @@ impl OsloSandboxEngine {
     }
 
     pub(crate) fn model_name(&self) -> &'static str {
-        if self.momentum_enabled {
+        if self.front_enabled {
+            "oslo-vessel-front"
+        } else if self.momentum_enabled {
             "oslo-vessel-momentum"
         } else {
             self.boundary.model_name()
@@ -533,6 +592,10 @@ impl OsloSandboxEngine {
 
     pub(crate) fn momentum_enabled(&self) -> bool {
         self.momentum_enabled
+    }
+
+    pub(crate) fn front_enabled(&self) -> bool {
+        self.front_enabled
     }
 
     pub(crate) fn rolling_count(&self) -> usize {
@@ -565,6 +628,22 @@ impl OsloSandboxEngine {
 
     pub(crate) fn momentum_last_peak_active(&self) -> usize {
         self.momentum_last_peak_active
+    }
+
+    pub(crate) fn front_erosions(&self) -> usize {
+        self.front_erosions
+    }
+
+    pub(crate) fn front_support_recruits(&self) -> usize {
+        self.front_support_recruits
+    }
+
+    pub(crate) fn front_last_erosions(&self) -> usize {
+        self.front_last_erosions
+    }
+
+    pub(crate) fn front_last_support_recruits(&self) -> usize {
+        self.front_last_support_recruits
     }
 
     pub(crate) fn canonical_wall_height(&self) -> usize {

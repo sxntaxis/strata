@@ -626,8 +626,19 @@ impl TestingSandEngine {
                 let (min_h, max_h, left_h, right_h) = engine.visible_profile();
                 let (rain_left, rain_center, rain_right) = engine.rain_region_counts();
                 let momentum = if engine.momentum_enabled() {
+                    let front = if engine.front_enabled() {
+                        format!(
+                            " front=erosion:{} uphill:{} last={}/{}",
+                            engine.front_erosions(),
+                            engine.front_support_recruits(),
+                            engine.front_last_erosions(),
+                            engine.front_last_support_recruits()
+                        )
+                    } else {
+                        String::new()
+                    };
                     format!(
-                        " · momentum=rolling:{} seeds:{} hops:{} settles:{} peak:{} last={}/{}/{}",
+                        " · momentum=rolling:{} seeds:{} hops:{} settles:{} peak:{} last={}/{}/{}{}",
                         engine.rolling_count(),
                         engine.momentum_seeds(),
                         engine.momentum_hops(),
@@ -635,7 +646,8 @@ impl TestingSandEngine {
                         engine.momentum_peak_active(),
                         engine.momentum_last_seeds(),
                         engine.momentum_last_hops(),
-                        engine.momentum_last_peak_active()
+                        engine.momentum_last_peak_active(),
+                        front
                     )
                 } else {
                     String::new()
@@ -2255,8 +2267,15 @@ impl App {
                     self.sand_engine.snapshot_state().rng_state,
                 ),
             ))),
+            "oslo-vessel-front" => Ok(TestingSandEngine::Oslo(Box::new(
+                OsloSandboxEngine::new_front_vessel(
+                    self.sand_engine.cell_width,
+                    self.sand_engine.cell_height,
+                    self.sand_engine.snapshot_state().rng_state,
+                ),
+            ))),
             _ => Err(
-                "testingcheats model must be h4, classic, hybrid, oslo-zero, oslo-box, oslo-vessel, or oslo-vessel-momentum"
+                "testingcheats model must be h4, classic, hybrid, oslo-zero, oslo-box, oslo-vessel, oslo-vessel-momentum, or oslo-vessel-front"
                     .to_string(),
             ),
         }

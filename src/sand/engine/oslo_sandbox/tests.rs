@@ -436,3 +436,134 @@ fn steep_wall_relaxation_creates_a_concurrent_mobile_front_and_conserves_mass() 
     assert!(engine.momentum_last_seeds() > 0);
     assert!(engine.momentum_last_hops() > 0);
 }
+
+#[test]
+fn front_vessel_preserves_ordinary_oslo_and_never_fluidizes_normal_drive() {
+    let mut standard =
+        OsloSandboxEngine::new(20, 10, TEST_SEED, OsloBoundaryMode::CanonicalWallOverflow);
+    let mut front = OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED);
+    let width = standard.lattice_size();
+
+    for drive in 0..2_000usize {
+        let site = drive % width;
+        assert_eq!(
+            direct_drive_and_relax(&mut front, site),
+            direct_drive_and_relax(&mut standard, site)
+        );
+    }
+
+    assert_eq!(front.momentum_seeds(), 0);
+    assert_eq!(front.front_erosions(), 0);
+    assert_eq!(front.front_support_recruits(), 0);
+    assert!(front.rolling_grains.is_empty());
+    assert_eq!(front.columns, standard.columns);
+    assert_eq!(front.critical_slopes, standard.critical_slopes);
+    assert_eq!(front.threshold_rng_state, standard.threshold_rng_state);
+    assert_eq!(front.relax_rng_state, standard.relax_rng_state);
+    assert_eq!(front.discharged_count(), standard.discharged_count());
+}
+
+#[test]
+fn front_moving_layer_erodes_a_steep_static_bed_one_grain_per_site_per_tick() {
+    let mut engine = OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED);
+    for (site, height) in [4usize, 5, 3, 2, 2].into_iter().enumerate() {
+        set_column_height(&mut engine, site, height);
+    }
+    let settled_before = engine.settled_count();
+    engine.seed_rolling_grain(1, grain(), ToppleDirection::Right);
+    let mass_before = engine.grain_count();
+
+    assert_eq!(engine.front_erosion_relief(), 2);
+    assert!(engine.advance_rolling_grains());
+    assert_eq!(engine.columns[1].len(), 4, "one static grain should be entrained");
+    assert_eq!(engine.front_erosions(), 1);
+    assert_eq!(engine.rolling_grains.len(), 2);
+    assert!(engine.rolling_grains.iter().all(|rolling| rolling.site == 2));
+    assert_eq!(engine.settled_count(), settled_before - 1);
+    assert_eq!(engine.grain_count(), mass_before);
+}
+
+#[test]
+fn front_loss_of_support_recruits_the_immediately_uphill_column() {
+    let mut engine = OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED);
+    set_column_height(&mut engine, 1, 7);
+    set_column_height(&mut engine, 2, 4);
+    set_column_height(&mut engine, 3, 2);
+    engine.seed_rolling_grain(3, grain(), ToppleDirection::Right);
+    let mass_before = engine.grain_count();
+
+    assert_eq!(engine.front_support_loss_relief(), 3);
+    assert!(engine.front_recruit_support_after_loss(2, ToppleDirection::Right));
+    assert_eq!(engine.columns[1].len(), 6);
+    assert_eq!(engine.front_support_recruits(), 1);
+    assert!(engine
+        .rolling_grains
+        .iter()
+        .any(|rolling| rolling.site == 2 && rolling.direction == ToppleDirection::Right));
+    assert_eq!(engine.grain_count(), mass_before);
+}
+
+#[test]
+fn front_flat_runout_is_shorter_than_momentum_v1_but_thick_flow_can_coast_more() {
+    let mut front = OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED);
+    for site in 0..8 {
+        set_column_height(&mut front, site, 3);
+    }
+    front.seed_rolling_grain(1, grain(), ToppleDirection::Right);
+    assert_eq!(
+        front.rolling_grains.front().unwrap().flat_coast_remaining,
+        FRONT_BASE_FLAT_COAST_STEPS
+    );
+
+    let mut thick = OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED);
+    for site in 0..8 {
+        set_column_height(&mut thick, site, 3);
+    }
+    for _ in 0..7 {
+        thick.seed_rolling_grain(1, grain(), ToppleDirection::Right);
+    }
+    let budget = thick.flat_coast_budget(1);
+    assert!(budget > FRONT_BASE_FLAT_COAST_STEPS);
+    assert!(budget <= FRONT_MAX_FLAT_COAST_STEPS);
+}
+
+#[test]
+fn front_wall_failure_erodes_propagates_uphill_and_quiesces_with_mass_conserved() {
+    let mut engine = OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED);
+    let width = engine.lattice_size();
+    for site in 0..(width / 2) {
+        set_column_height(&mut engine, site, 12);
+    }
+    for site in (width / 2)..width {
+        set_column_height(&mut engine, site, 2);
+    }
+    engine.critical_slopes.fill(OSLO_THRESHOLD_HIGH);
+    let mass_before = engine.grain_count();
+    engine.enqueue_neighborhood(width / 2 - 1);
+    engine.enqueue_neighborhood(width / 2);
+
+    let mut guard = 0usize;
+    loop {
+        guard = guard.saturating_add(1);
+        assert!(guard < 200_000, "front wall relaxation failed to quiesce");
+        let mut changed = engine.advance_rolling_grains();
+        changed |= engine.topple_one_active_site();
+        if !changed && engine.active_sites.is_empty() && engine.rolling_grains.is_empty() {
+            break;
+        }
+    }
+
+    assert!(engine.momentum_seeds() > 0);
+    assert!(engine.front_erosions() > 0, "moving layer never eroded the bed");
+    assert!(
+        engine.front_support_recruits() > 0,
+        "wall failure never propagated uphill by support loss"
+    );
+    assert!(engine.momentum_peak_active() >= 3);
+    assert_eq!(engine.discharged_count(), 0);
+    assert_eq!(engine.grain_count(), mass_before);
+    assert_eq!(engine.settled_count(), mass_before);
+    assert!(engine.avalanche_last_moves() > 0);
+    assert!(engine.front_last_erosions() > 0);
+    assert!(engine.front_last_support_recruits() > 0);
+}

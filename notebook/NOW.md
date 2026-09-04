@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-03
 authority: working
-summary: H4/v5 remains the published production sediment authority; SEDIMENT-007 is a debug-only Oslo-vessel causal-momentum experiment driven by owner evidence that global inertia gates and presentation batching do not produce the desired wall-collapse motion.
-next: Natively validate SEDIMENT-007, then visually A/B oslo-vessel against oslo-vessel-momentum under ordinary matched-age rain and a large horizontal shrink/re-expansion seam. Do not change production sediment authority until owner evidence selects a direction.
+summary: H4/v5 remains the published production sediment authority; SEDIMENT-008 is a debug-only Oslo-vessel erosion/support-front experiment informed by granular-flow hysteresis, static/rolling exchange, and uphill propagation by loss of support.
+next: Natively validate SEDIMENT-008, then visually A/B oslo-vessel, oslo-vessel-momentum, and oslo-vessel-front on the same narrow-build/re-expansion wall failure under ordinary matched-age rain and a large horizontal shrink/re-expansion seam. Do not change production sediment authority until owner evidence selects a direction.
 ---
 
 # NOW — Strata
@@ -65,6 +65,8 @@ test suite, build, help smoke, diff hygiene, and the long-profile dangling-symli
 ## Current plateau program
 
 SEDIMENT-007 is the current bounded experiment. Owner evidence now selects `oslo-vessel` as the strongest ordinary topology, while Classic remains the reference for dramatic wall-collapse motion. WaveView presentation batching was rejected because it only accelerated unchanged local topplings. Inertia v1 was rejected because its global size/span gate required the avalanche to already be large before the mechanism that was supposed to make it large could engage. SEDIMENT-007 therefore keeps ordinary quiescent vessel evolution exact and introduces a local moving-grain phase only when a single topple sees relief `>= 4` — a discontinuity ordinary one-grain Oslo drive cannot create from a quiescent `{1,2}` surface but horizontal canonical reconnection can. See `notebook/work/SEDIMENT-007-OSLO-VESSEL-MOMENTUM.md`.
+
+SEDIMENT-008 is the current debug-only refinement: it keeps Oslo-vessel static topology and SEDIMENT-007 rolling grains, but adds bounded erosion/deposition exchange and uphill support-loss recruitment so a structural wall failure can propagate through the static mass rather than only shedding independent rolling grains. See `notebook/work/SEDIMENT-008-OSLO-VESSEL-FRONT.md`.
 
 `notebook/work/PLATEAU-001.md` is the durable roadmap for the remaining core-development arc. The owner has accepted the existing day-end snapshot behavior as baseline and does not want an artificial re-certification gate before continuing.
 

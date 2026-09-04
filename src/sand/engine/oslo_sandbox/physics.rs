@@ -214,6 +214,9 @@ impl OsloSandboxEngine {
         self.critical_slopes[site] = self.sample_threshold();
         self.enqueue_after_topple(site, destination);
         self.avalanche_moves = self.avalanche_moves.saturating_add(1);
+        if self.front_enabled && !self.rolling_grains.is_empty() {
+            let _ = self.front_recruit_support_after_loss(site, direction);
+        }
         true
     }
 
