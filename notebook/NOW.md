@@ -3,10 +3,10 @@ id: NOW-001
 kind: status
 state: active
 created: 2026-08-01
-updated: 2026-09-02
+updated: 2026-09-03
 authority: working
-summary: H4/v5 remains the published production sediment authority; SEDIMENT-004 is an isolated Oslo boundary laboratory comparing the legacy zero-outside control, a literal closed box, and canonical-height vessel overflow on the modern visible basin.
-next: Natively validate and visually compare H4, oslo-zero, oslo-box, and oslo-vessel at matched ages, including multi-hour vessel fill/overflow and horizontal shrink/re-expansion. Do not change production sediment authority until owner evidence selects a direction.
+summary: H4/v5 remains the published production sediment authority; SEDIMENT-004 is an isolated Oslo boundary laboratory with native-green boundary contracts and a restored known-good testing-cheats render cadence for owner visual comparison.
+next: Natively validate the restored 4ba1751-style testing-cheats visual cadence, then visually compare H4, oslo-zero, oslo-box, and oslo-vessel at matched ages, including vessel fill/overflow and horizontal shrink/re-expansion. Do not change production sediment authority until owner evidence selects a direction.
 ---
 
 # NOW — Strata

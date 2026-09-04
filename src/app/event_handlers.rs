@@ -495,8 +495,9 @@ impl App {
                         )
                     },
                 );
+                self.render_needed = true;
                 Ok(format!(
-                    "Testing sandbox {model} queued {} ({} grains; {} remains queued; authoritative sediment unchanged)",
+                    "Testing sandbox {model} advancing {} ({} grains now; {} simulated remains; authoritative sediment unchanged)",
                     command::format_hms(duration_seconds as usize),
                     grains,
                     command::format_hms(queued.as_secs() as usize)
@@ -511,6 +512,7 @@ impl App {
                 testing.spawn_accumulator = std::time::Duration::ZERO;
                 testing.physics_accumulator = std::time::Duration::ZERO;
                 testing.queued_simulated = std::time::Duration::ZERO;
+                testing.visual_dirty = false;
                 self.render_needed = true;
                 Ok(format!(
                     "Testing sandbox {model} cleared (authoritative sediment unchanged)"

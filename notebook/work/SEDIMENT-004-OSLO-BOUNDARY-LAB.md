@@ -3,7 +3,7 @@ id: SEDIMENT-004
 kind: work
 state: active
 created: 2026-09-02
-updated: 2026-09-02
+updated: 2026-09-03
 authority: working
 summary: Re-evaluate the visually strongest Oslo-derived sediment on Strata's canonical visible-basin architecture by isolating three boundary conditions: legacy zero-outside, closed box, and canonical-height vessel overflow.
 ---
@@ -96,16 +96,19 @@ The Oslo representation is a column heightfield rather than H4's explicit 2-D co
 
 ## Harness review
 
-The local validation agent's responsive-harness commit `91e8effcdf0eccd2d3540ec03715819035d40f64` is retained as useful experimental infrastructure:
+The responsive-harness work is retained, but owner recollection prompted a history audit before visual acceptance. That audit found that commit `4ba1751fe55e8cb9a68ae674c172f951b40f35e7` was the last known-good testing-cheats cadence where accelerated Oslo still showed the intended falling-dot rain while remaining responsive.
 
-- simulated advance is queued rather than monopolizing the UI thread;
-- work is processed in approximately 6 ms cooperative chunks;
-- `128x` is available;
-- long explicit advances are permitted;
-- `status` exposes remaining queued simulated time;
-- model switch / clear reset the queued experiment.
+The important distinction is not simply “direct advance versus queued advance”: `4ba1751` already kept synthetic-time debt internally. Its useful scheduler contract was:
 
-SEDIMENT-004 further keeps Oslo lattice state authoritative during each acceleration chunk and synchronizes the Ratatui surface only once after the chunk, avoiding a full presentation-grid rebuild on every simulated physics tick.
+- explicit advance and accelerated wall time add synthetic-time debt without executing a large synchronous simulation inside the command handler;
+- debt drains cooperatively in approximately 4 ms CPU slices;
+- Oslo lattice/falling-drive state advances during those slices, but the Ratatui surface is marked dirty rather than rebuilt at every slice;
+- presentation synchronization happens at the actual render boundary, so transient falling drives are not needlessly consumed behind repeated non-render surface rebuilds;
+- authoritative catch-up progress UI is suppressed while a testing-cheats preview owns the visible synthetic timeline;
+- `128x` and long explicit advances remain available;
+- `status` still exposes remaining synthetic time for diagnosis.
+
+SEDIMENT-004 restores that proven `4ba1751` scheduler/presentation split on top of the newer multi-model harness and boundary lab. The internal debt remains an implementation detail required for TUI responsiveness; the user-facing action remains “advance the sandbox,” not a separate physical queue model.
 
 An additional FIFO robustness rule re-homes an in-flight drive to the nearest accepting visible site if an earlier drive filled its original landing column before it committed. This prevents one stale landing target from blocking the entire accelerated ingress stream and does not change Oslo relaxation.
 

@@ -30,6 +30,10 @@ impl App {
         let testing_sand = self.testing_cheats.as_mut().map(|testing| {
             if testing.engine.dimensions() != (inner_width, inner_height) {
                 testing.engine.resize(inner_width, inner_height);
+                testing.visual_dirty = false;
+            } else if testing.visual_dirty {
+                testing.engine.sync_for_render();
+                testing.visual_dirty = false;
             }
             testing.engine.render(&categories)
         });

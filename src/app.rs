@@ -47,7 +47,7 @@ use persistence_recovery::{PersistenceOperation, PersistenceRecoveryState, Recov
 use terminal_lifecycle::{ManagedTerminal, TerminalSession};
 
 #[cfg(debug_assertions)]
-const TESTING_CHEATS_FRAME_BUDGET: Duration = Duration::from_millis(6);
+const TESTING_CHEATS_FRAME_BUDGET: Duration = Duration::from_millis(4);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum UiMode {
@@ -558,7 +558,7 @@ impl TestingSandEngine {
         }
     }
 
-    fn sync_after_batch(&mut self) {
+    fn sync_for_render(&mut self) {
         if let Self::Oslo(engine) = self {
             engine.sync_for_render();
         }
@@ -661,6 +661,7 @@ struct TestingCheatsState {
     physics_accumulator: Duration,
     speed_multiplier: u32,
     queued_simulated: Duration,
+    visual_dirty: bool,
 }
 
 struct App {
@@ -1938,6 +1939,9 @@ impl App {
         }
         self.simulation.catchup_was_active = now_catching;
         self.commit_checkpoint_recovery_if_ready();
+
+        #[cfg(debug_assertions)]
+        self.process_testing_cheats_budget();
     }
 
     fn finalize_catchup_transition(&mut self) {
@@ -2250,7 +2254,10 @@ impl App {
             physics_accumulator: self.simulation.physics_accumulator,
             speed_multiplier: 1,
             queued_simulated: Duration::ZERO,
+            visual_dirty: false,
         });
+        self.simulation.catchup_progress_anchor = None;
+        self.simulation.catchup_gauge_hold_until = None;
         self.render_needed = true;
         Ok(())
     }
@@ -2271,34 +2278,31 @@ impl App {
             physics_accumulator: self.simulation.physics_accumulator,
             speed_multiplier,
             queued_simulated: Duration::ZERO,
+            visual_dirty: false,
         });
+        self.simulation.catchup_progress_anchor = None;
+        self.simulation.catchup_gauge_hold_until = None;
         self.render_needed = true;
         Ok(())
     }
 
     #[cfg(debug_assertions)]
     fn advance_testing_cheats_wall_time(&mut self, wall_delta: Duration) {
-        let Some(multiplier) = self
-            .testing_cheats
-            .as_ref()
-            .map(|testing| testing.speed_multiplier)
-        else {
+        let Some(testing) = self.testing_cheats.as_mut() else {
             return;
         };
-        self.queue_testing_cheats_simulated(wall_delta.saturating_mul(multiplier));
+        let accelerated = wall_delta.saturating_mul(testing.speed_multiplier);
+        testing.queued_simulated = testing.queued_simulated.saturating_add(accelerated);
     }
 
     #[cfg(debug_assertions)]
     fn queue_testing_cheats_simulated(&mut self, delta: Duration) {
-        if delta.is_zero() || self.testing_cheats.is_none() {
+        if delta.is_zero() {
             return;
         }
-        let testing = self
-            .testing_cheats
-            .as_mut()
-            .expect("testing preview exists");
-        testing.queued_simulated = testing.queued_simulated.saturating_add(delta);
-        self.process_testing_cheats_budget();
+        if let Some(testing) = self.testing_cheats.as_mut() {
+            testing.queued_simulated = testing.queued_simulated.saturating_add(delta);
+        }
     }
 
     #[cfg(debug_assertions)]
@@ -2353,7 +2357,7 @@ impl App {
             }
         }
         if changed {
-            testing.engine.sync_after_batch();
+            testing.visual_dirty = true;
             self.render_needed = true;
         }
     }
@@ -2374,6 +2378,16 @@ impl App {
     }
 
     fn catchup_progress_ratio(&mut self) -> Option<f64> {
+        #[cfg(debug_assertions)]
+        if self.testing_cheats.is_some() {
+            // The testing sandbox owns a synthetic clock. Authoritative catch-up
+            // may continue in the background, but its gauge must not leak into a
+            // preview that is intentionally rendering a different timeline.
+            self.simulation.catchup_progress_anchor = None;
+            self.simulation.catchup_gauge_hold_until = None;
+            return None;
+        }
+
         let target_utc = Utc::now();
         let backlog = self.simulation_backlog_duration_at(target_utc);
 
