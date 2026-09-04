@@ -124,7 +124,7 @@ pub(crate) fn parse(input: &str) -> Result<CommandIntent, String> {
 #[cfg(debug_assertions)]
 fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
     let Some((subcommand, rest)) = args.split_first() else {
-        return Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel> | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | clear | status | reset".to_string());
+        return Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum> | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | clear | status | reset".to_string());
     };
 
     match subcommand.to_ascii_lowercase().as_str() {
@@ -153,10 +153,16 @@ fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
             let model = rest[0].trim().to_ascii_lowercase();
             if !matches!(
                 model.as_str(),
-                "h4" | "classic" | "hybrid" | "oslo-zero" | "oslo-box" | "oslo-vessel"
+                "h4"
+                    | "classic"
+                    | "hybrid"
+                    | "oslo-zero"
+                    | "oslo-box"
+                    | "oslo-vessel"
+                    | "oslo-vessel-momentum"
             ) {
                 return Err(
-                    "testingcheats model must be h4, classic, hybrid, oslo-zero, oslo-box, or oslo-vessel"
+                    "testingcheats model must be h4, classic, hybrid, oslo-zero, oslo-box, oslo-vessel, or oslo-vessel-momentum"
                         .to_string(),
                 );
             }
@@ -165,7 +171,7 @@ fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
         "clear" if rest.is_empty() => Ok(CommandIntent::TestingCheatsClear),
         "status" if rest.is_empty() => Ok(CommandIntent::TestingCheatsStatus),
         "reset" if rest.is_empty() => Ok(CommandIntent::TestingCheatsReset),
-        _ => Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel> | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | clear | status | reset".to_string()),
+        _ => Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum> | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | clear | status | reset".to_string()),
     }
 }
 
@@ -586,6 +592,12 @@ mod tests {
             parse("testingcheats model oslo-vessel").unwrap(),
             CommandIntent::TestingCheatsModel {
                 model: "oslo-vessel".into()
+            }
+        );
+        assert_eq!(
+            parse("testingcheats model oslo-vessel-momentum").unwrap(),
+            CommandIntent::TestingCheatsModel {
+                model: "oslo-vessel-momentum".into()
             }
         );
         assert_eq!(

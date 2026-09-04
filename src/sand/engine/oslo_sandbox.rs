@@ -18,9 +18,15 @@ const RAIN_FOCUS_BIAS_ONE_IN: usize = 10;
 // while the exact destination remains stochastic instead of diffusing in place.
 const RAIN_FOCUS_EDGE_TO_EDGE_INGRESSES: usize = 43_200;
 const RECENT_AVALANCHE_WINDOW: usize = 512;
+// Catastrophic local relief enters a transient moving-grain phase. Ordinary
+// Oslo slips remain unchanged below this threshold. A rolling grain keeps
+// moving down-slope and may coast briefly across level terrain, modelling the
+// lower dynamic friction of material that is already in motion.
+const MOMENTUM_TRIGGER_RELIEF: usize = 4;
+const MOMENTUM_FLAT_COAST_STEPS: u8 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ToppleDirection {
+pub(super) enum ToppleDirection {
     Left,
     Right,
 }
@@ -57,6 +63,14 @@ pub(crate) struct FallingDrive {
     category_id: CategoryId,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct RollingGrain {
+    site: usize,
+    category_id: CategoryId,
+    direction: ToppleDirection,
+    flat_coast_remaining: u8,
+}
+
 /// Debug-only Strata-rain-driven Oslo boundary laboratory.
 ///
 /// The relaxation law keeps the Oslo model's local stochastic-slope character:
@@ -67,9 +81,17 @@ pub(crate) struct FallingDrive {
 /// - the toppled column redraws only its own threshold;
 /// - relaxation remains nearest-neighbour/local and runs to quiescence before
 ///   the next drive grain is committed;
-/// - the relaxation law is identical across all three variants; only the
-///   missing-neighbour boundary condition changes (`oslo-zero`, `oslo-box`,
+/// - the relaxation law is identical across the three boundary controls; only
+///   the missing-neighbour boundary condition changes (`oslo-zero`, `oslo-box`,
 ///   `oslo-vessel`).
+///
+/// `oslo-vessel-momentum` keeps that exact static Oslo law until a single local
+/// topple crosses a deliberately high relief. The released top grain then enters
+/// a transient rolling phase: it preserves its downhill direction, continues on
+/// descending terrain, can coast a bounded distance across flat terrain, and
+/// settles back into the Oslo heightfield when dynamic motion can no longer
+/// continue. Many such grains may roll concurrently. This is a physical sandbox
+/// change, not presentation batching and not a global avalanche-size gate.
 ///
 /// Strata's rain remains full-width. Only the slowly wandering statistical focus
 /// is constrained to a centered corridor whose side padding is one additional
@@ -84,6 +106,7 @@ pub(crate) struct FallingDrive {
 pub(crate) struct OsloSandboxEngine {
     surface: SandEngine,
     boundary: OsloBoundaryMode,
+    momentum_enabled: bool,
     columns: Vec<Vec<CategoryId>>,
     critical_slopes: Vec<u8>,
     threshold_rng_state: u64,
@@ -96,6 +119,7 @@ pub(crate) struct OsloSandboxEngine {
     rain_corridor_targets: usize,
     rain_right_padding_targets: usize,
     falling_drives: VecDeque<FallingDrive>,
+    rolling_grains: VecDeque<RollingGrain>,
     pending_runs: VecDeque<PendingGrainRun>,
     active_sites: VecDeque<usize>,
     queued_sites: Vec<bool>,
@@ -107,9 +131,43 @@ pub(crate) struct OsloSandboxEngine {
     avalanche_last_moves: usize,
     avalanche_completed: usize,
     recent_avalanches: VecDeque<usize>,
+    momentum_seeds: usize,
+    momentum_hops: usize,
+    momentum_settles: usize,
+    momentum_peak_active: usize,
+    momentum_event_seeds: usize,
+    momentum_event_hops: usize,
+    momentum_event_peak_active: usize,
+    momentum_last_seeds: usize,
+    momentum_last_hops: usize,
+    momentum_last_peak_active: usize,
 }
 impl OsloSandboxEngine {
     pub(crate) fn new(width: u16, height: u16, seed: u64, boundary: OsloBoundaryMode) -> Self {
+        Self::new_with_momentum(width, height, seed, boundary, false)
+    }
+
+    pub(crate) fn new_momentum_vessel(width: u16, height: u16, seed: u64) -> Self {
+        Self::new_with_momentum(
+            width,
+            height,
+            seed,
+            OsloBoundaryMode::CanonicalWallOverflow,
+            true,
+        )
+    }
+
+    fn new_with_momentum(
+        width: u16,
+        height: u16,
+        seed: u64,
+        boundary: OsloBoundaryMode,
+        momentum_enabled: bool,
+    ) -> Self {
+        debug_assert!(
+            !momentum_enabled || boundary == OsloBoundaryMode::CanonicalWallOverflow,
+            "momentum Oslo is defined only for the canonical vessel sandbox"
+        );
         let surface = SandEngine::new(width, height);
         let lattice_size = Self::lattice_size_for(&surface);
         let mut threshold_rng_state = seed ^ OSLO_THRESHOLD_RNG_XOR;
@@ -127,6 +185,7 @@ impl OsloSandboxEngine {
         let mut sandbox = Self {
             surface,
             boundary,
+            momentum_enabled,
             columns: vec![Vec::new(); lattice_size],
             critical_slopes: vec![OSLO_THRESHOLD_LOW; lattice_size],
             threshold_rng_state,
@@ -139,6 +198,7 @@ impl OsloSandboxEngine {
             rain_corridor_targets: 0,
             rain_right_padding_targets: 0,
             falling_drives: VecDeque::new(),
+            rolling_grains: VecDeque::new(),
             pending_runs: VecDeque::new(),
             active_sites: VecDeque::new(),
             queued_sites: vec![false; lattice_size],
@@ -150,6 +210,16 @@ impl OsloSandboxEngine {
             avalanche_last_moves: 0,
             avalanche_completed: 0,
             recent_avalanches: VecDeque::with_capacity(RECENT_AVALANCHE_WINDOW),
+            momentum_seeds: 0,
+            momentum_hops: 0,
+            momentum_settles: 0,
+            momentum_peak_active: 0,
+            momentum_event_seeds: 0,
+            momentum_event_hops: 0,
+            momentum_event_peak_active: 0,
+            momentum_last_seeds: 0,
+            momentum_last_hops: 0,
+            momentum_last_peak_active: 0,
         };
         sandbox.randomize_all_thresholds();
         sandbox.sync_surface();
@@ -190,6 +260,7 @@ impl OsloSandboxEngine {
 
         let mut changed = self.launch_one_pending();
         changed |= self.advance_falling_drives();
+        changed |= self.advance_rolling_grains();
         if self.topple_one_active_site() {
             return true;
         }
@@ -237,6 +308,9 @@ impl OsloSandboxEngine {
             for falling in &mut self.falling_drives {
                 falling.x = falling.x.saturating_add(left_added);
             }
+            for rolling in &mut self.rolling_grains {
+                rolling.site = rolling.site.saturating_add(left_added);
+            }
             for site in &mut self.active_sites {
                 *site = site.saturating_add(left_added);
             }
@@ -260,6 +334,13 @@ impl OsloSandboxEngine {
             for falling in &mut self.falling_drives {
                 falling.x =
                     Self::project_site_between_bounds(falling.x, shifted_old_visible, new_visible);
+            }
+            for rolling in &mut self.rolling_grains {
+                rolling.site = Self::project_site_between_bounds(
+                    rolling.site,
+                    shifted_old_visible,
+                    new_visible,
+                );
             }
         }
 
@@ -349,6 +430,7 @@ impl OsloSandboxEngine {
         self.columns = vec![Vec::new(); lattice_size];
         self.critical_slopes = vec![OSLO_THRESHOLD_LOW; lattice_size];
         self.falling_drives.clear();
+        self.rolling_grains.clear();
         self.pending_runs.clear();
         self.active_sites.clear();
         self.queued_sites = vec![false; lattice_size];
@@ -359,6 +441,16 @@ impl OsloSandboxEngine {
         self.avalanche_last_moves = 0;
         self.avalanche_completed = 0;
         self.recent_avalanches.clear();
+        self.momentum_seeds = 0;
+        self.momentum_hops = 0;
+        self.momentum_settles = 0;
+        self.momentum_peak_active = 0;
+        self.momentum_event_seeds = 0;
+        self.momentum_event_hops = 0;
+        self.momentum_event_peak_active = 0;
+        self.momentum_last_seeds = 0;
+        self.momentum_last_hops = 0;
+        self.momentum_last_peak_active = 0;
         self.rain_focus_site = None;
         self.rain_focus_target_site = None;
         self.rain_focus_move_counter = 0;
@@ -392,6 +484,7 @@ impl OsloSandboxEngine {
     pub(crate) fn pending_count(&self) -> usize {
         self.falling_drives
             .len()
+            .saturating_add(self.rolling_grains.len())
             .saturating_add(self.pending_runs.iter().map(|run| run.count).sum::<usize>())
     }
 
@@ -430,8 +523,48 @@ impl OsloSandboxEngine {
         bottom.saturating_sub(top)
     }
 
-    pub(crate) fn boundary_mode(&self) -> OsloBoundaryMode {
-        self.boundary
+    pub(crate) fn model_name(&self) -> &'static str {
+        if self.momentum_enabled {
+            "oslo-vessel-momentum"
+        } else {
+            self.boundary.model_name()
+        }
+    }
+
+    pub(crate) fn momentum_enabled(&self) -> bool {
+        self.momentum_enabled
+    }
+
+    pub(crate) fn rolling_count(&self) -> usize {
+        self.rolling_grains.len()
+    }
+
+    pub(crate) fn momentum_seeds(&self) -> usize {
+        self.momentum_seeds
+    }
+
+    pub(crate) fn momentum_hops(&self) -> usize {
+        self.momentum_hops
+    }
+
+    pub(crate) fn momentum_settles(&self) -> usize {
+        self.momentum_settles
+    }
+
+    pub(crate) fn momentum_peak_active(&self) -> usize {
+        self.momentum_peak_active
+    }
+
+    pub(crate) fn momentum_last_seeds(&self) -> usize {
+        self.momentum_last_seeds
+    }
+
+    pub(crate) fn momentum_last_hops(&self) -> usize {
+        self.momentum_last_hops
+    }
+
+    pub(crate) fn momentum_last_peak_active(&self) -> usize {
+        self.momentum_last_peak_active
     }
 
     pub(crate) fn canonical_wall_height(&self) -> usize {
@@ -468,6 +601,7 @@ impl OsloSandboxEngine {
     }
 }
 
+mod momentum;
 mod physics;
 mod rain;
 #[cfg(test)]

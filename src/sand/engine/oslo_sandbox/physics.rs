@@ -91,26 +91,33 @@ impl OsloSandboxEngine {
         ))
     }
 
-    fn unstable_direction(&mut self, site: usize) -> Option<ToppleDirection> {
+    fn unstable_direction(&mut self, site: usize) -> Option<(ToppleDirection, usize)> {
         let (left_relief, right_relief) = self.downhill_reliefs(site)?;
         let threshold = usize::from(self.critical_slopes[site]);
         let left_unstable = left_relief > threshold;
         let right_unstable = right_relief > threshold;
 
-        match (left_unstable, right_unstable) {
-            (false, false) => None,
-            (true, false) => Some(ToppleDirection::Left),
-            (false, true) => Some(ToppleDirection::Right),
+        let direction = match (left_unstable, right_unstable) {
+            (false, false) => return None,
+            (true, false) => ToppleDirection::Left,
+            (false, true) => ToppleDirection::Right,
             (true, true) => match left_relief.cmp(&right_relief) {
-                std::cmp::Ordering::Greater => Some(ToppleDirection::Left),
-                std::cmp::Ordering::Less => Some(ToppleDirection::Right),
-                std::cmp::Ordering::Equal => Some(if self.relax_random_bool() {
-                    ToppleDirection::Left
-                } else {
-                    ToppleDirection::Right
-                }),
+                std::cmp::Ordering::Greater => ToppleDirection::Left,
+                std::cmp::Ordering::Less => ToppleDirection::Right,
+                std::cmp::Ordering::Equal => {
+                    if self.relax_random_bool() {
+                        ToppleDirection::Left
+                    } else {
+                        ToppleDirection::Right
+                    }
+                }
             },
-        }
+        };
+        let relief = match direction {
+            ToppleDirection::Left => left_relief,
+            ToppleDirection::Right => right_relief,
+        };
+        Some((direction, relief))
     }
 
     pub(super) fn enqueue_site(&mut self, site: usize) {
@@ -155,7 +162,10 @@ impl OsloSandboxEngine {
             }
         }
 
-        if self.active_sites.is_empty() && self.avalanche_moves > 0 {
+        if self.active_sites.is_empty()
+            && self.rolling_grains.is_empty()
+            && self.avalanche_moves > 0
+        {
             self.avalanche_last_moves = self.avalanche_moves;
             self.avalanche_peak_moves = self.avalanche_peak_moves.max(self.avalanche_moves);
             self.avalanche_completed = self.avalanche_completed.saturating_add(1);
@@ -163,13 +173,14 @@ impl OsloSandboxEngine {
             if self.recent_avalanches.len() > RECENT_AVALANCHE_WINDOW {
                 self.recent_avalanches.pop_front();
             }
+            self.finalize_momentum_event();
             self.avalanche_moves = 0;
         }
         false
     }
 
     pub(super) fn topple_site_if_unstable(&mut self, site: usize) -> bool {
-        let Some(direction) = self.unstable_direction(site) else {
+        let Some((direction, relief)) = self.unstable_direction(site) else {
             return false;
         };
 
@@ -192,7 +203,11 @@ impl OsloSandboxEngine {
             .pop()
             .expect("over-critical Oslo site contains a grain");
         if let Some(destination) = destination {
-            self.columns[destination].push(category_id);
+            if self.should_seed_momentum(relief) {
+                self.seed_rolling_grain(destination, category_id, direction);
+            } else {
+                self.columns[destination].push(category_id);
+            }
         } else {
             self.discharged = self.discharged.saturating_add(1);
         }
@@ -266,7 +281,10 @@ impl OsloSandboxEngine {
     }
 
     pub(super) fn commit_next_drive_if_quiescent(&mut self) -> bool {
-        if !self.active_sites.is_empty() || self.columns.is_empty() {
+        if !self.active_sites.is_empty()
+            || !self.rolling_grains.is_empty()
+            || self.columns.is_empty()
+        {
             return false;
         }
         let Some(mut falling) = self.falling_drives.front().copied() else {
@@ -336,9 +354,26 @@ impl OsloSandboxEngine {
                 self.surface.grid[falling.y][x] = Some(falling.category_id);
             }
         }
+
+        let mut rolling_per_site = vec![0usize; self.columns.len()];
+        for rolling in &self.rolling_grains {
+            let x = rolling.site;
+            if x >= self.surface.grid_width_dots {
+                continue;
+            }
+            let offset = rolling_per_site[x];
+            rolling_per_site[x] = rolling_per_site[x].saturating_add(1);
+            let occupied_height = self.columns[x].len().saturating_add(offset);
+            let Some(y) = grid_height.checked_sub(occupied_height.saturating_add(1)) else {
+                continue;
+            };
+            self.surface.grid[y][x] = Some(rolling.category_id);
+            self.surface.mobilized[y][x] = true;
+        }
         self.surface.grain_count = self
             .settled_count()
             .saturating_add(self.falling_drives.len())
+            .saturating_add(self.rolling_grains.len())
             .saturating_add(self.pending_runs.iter().map(|run| run.count).sum::<usize>());
     }
 }

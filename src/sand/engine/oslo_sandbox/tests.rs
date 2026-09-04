@@ -252,3 +252,187 @@ fn zero_outside_control_reproduces_the_low_edge_wedge_pressure() {
             .saturating_add(engine.discharged_count())
     );
 }
+
+#[test]
+fn momentum_vessel_is_exact_oslo_below_the_local_relief_trigger() {
+    let mut standard =
+        OsloSandboxEngine::new(20, 10, TEST_SEED, OsloBoundaryMode::CanonicalWallOverflow);
+    let mut momentum = OsloSandboxEngine::new_momentum_vessel(20, 10, TEST_SEED);
+    let site = standard.lattice_size() / 2;
+
+    for engine in [&mut standard, &mut momentum] {
+        set_column_height(engine, site - 1, 5);
+        set_column_height(engine, site, 5);
+        set_column_height(engine, site + 1, 2);
+        engine.critical_slopes[site] = 2;
+    }
+
+    assert_eq!(momentum.momentum_trigger_relief(), 4);
+    assert!(standard.topple_site_if_unstable(site));
+    assert!(momentum.topple_site_if_unstable(site));
+    assert_eq!(momentum.columns, standard.columns);
+    assert_eq!(momentum.critical_slopes, standard.critical_slopes);
+    assert_eq!(momentum.threshold_rng_state, standard.threshold_rng_state);
+    assert_eq!(momentum.relax_rng_state, standard.relax_rng_state);
+    assert!(momentum.rolling_grains.is_empty());
+    assert_eq!(momentum.momentum_seeds(), 0);
+}
+
+#[test]
+fn ordinary_quiescent_driving_never_enters_momentum_and_matches_vessel_exactly() {
+    let mut standard =
+        OsloSandboxEngine::new(20, 10, TEST_SEED, OsloBoundaryMode::CanonicalWallOverflow);
+    let mut momentum = OsloSandboxEngine::new_momentum_vessel(20, 10, TEST_SEED);
+    let width = standard.lattice_size();
+
+    for drive in 0..2_000usize {
+        let site = drive % width;
+        assert_eq!(
+            direct_drive_and_relax(&mut momentum, site),
+            direct_drive_and_relax(&mut standard, site)
+        );
+    }
+
+    assert_eq!(momentum.momentum_seeds(), 0);
+    assert!(momentum.rolling_grains.is_empty());
+    assert_eq!(momentum.columns, standard.columns);
+    assert_eq!(momentum.critical_slopes, standard.critical_slopes);
+    assert_eq!(momentum.threshold_rng_state, standard.threshold_rng_state);
+    assert_eq!(momentum.relax_rng_state, standard.relax_rng_state);
+    assert_eq!(momentum.discharged_count(), standard.discharged_count());
+}
+
+#[test]
+fn steep_local_oslo_failure_immediately_seeds_a_moving_grain() {
+    let mut engine = OsloSandboxEngine::new_momentum_vessel(20, 10, TEST_SEED);
+    let site = engine.lattice_size() / 2;
+    set_column_height(&mut engine, site - 1, 6);
+    set_column_height(&mut engine, site, 6);
+    set_column_height(&mut engine, site + 1, 2);
+    engine.critical_slopes[site] = 2;
+    let mass_before = engine.grain_count();
+
+    assert!(engine.topple_site_if_unstable(site));
+    assert_eq!(engine.columns[site].len(), 5);
+    assert_eq!(engine.columns[site + 1].len(), 2);
+    assert_eq!(engine.rolling_grains.len(), 1);
+    let rolling = engine.rolling_grains.front().copied().unwrap();
+    assert_eq!(rolling.site, site + 1);
+    assert_eq!(rolling.direction, ToppleDirection::Right);
+    assert_eq!(rolling.flat_coast_remaining, MOMENTUM_FLAT_COAST_STEPS);
+    assert_eq!(engine.momentum_seeds(), 1);
+    assert_eq!(engine.grain_count(), mass_before);
+}
+
+#[test]
+fn moving_grain_runs_downhill_coasts_briefly_and_then_settles() {
+    let mut engine = OsloSandboxEngine::new_momentum_vessel(20, 10, TEST_SEED);
+    for (site, height) in [4usize, 4, 3, 2, 2, 2, 3].into_iter().enumerate() {
+        set_column_height(&mut engine, site, height);
+    }
+    let settled_before = engine.settled_count();
+    engine.seed_rolling_grain(1, grain(), ToppleDirection::Right);
+
+    assert!(engine.advance_rolling_grains());
+    assert_eq!(engine.rolling_grains.front().unwrap().site, 2);
+    assert!(engine.advance_rolling_grains());
+    assert_eq!(engine.rolling_grains.front().unwrap().site, 3);
+    assert!(engine.advance_rolling_grains());
+    assert_eq!(engine.rolling_grains.front().unwrap().site, 4);
+    assert!(engine.advance_rolling_grains());
+    assert_eq!(engine.rolling_grains.front().unwrap().site, 5);
+    assert!(engine.advance_rolling_grains());
+
+    assert!(engine.rolling_grains.is_empty());
+    assert_eq!(engine.columns[5].len(), 3);
+    assert_eq!(engine.momentum_hops(), 4);
+    assert_eq!(engine.momentum_settles(), 1);
+    assert_eq!(engine.settled_count(), settled_before + 1);
+}
+
+#[test]
+fn moving_grain_cannot_cross_a_visible_vessel_wall() {
+    let mut engine = OsloSandboxEngine::new_momentum_vessel(20, 10, TEST_SEED);
+    let (_, visible_end) = engine.visible_lattice_bounds();
+    let edge = visible_end - 1;
+    set_column_height(&mut engine, edge, 3);
+    let mass_before = engine.grain_count();
+    engine.seed_rolling_grain(edge, grain(), ToppleDirection::Right);
+
+    assert!(engine.advance_rolling_grains());
+    assert!(engine.rolling_grains.is_empty());
+    assert_eq!(engine.columns[edge].len(), 4);
+    assert_eq!(engine.discharged_count(), 0);
+    assert_eq!(engine.grain_count(), mass_before + 1);
+}
+
+#[test]
+fn horizontal_reconnection_can_seed_momentum_on_the_first_steep_seam_topple() {
+    let mut engine = OsloSandboxEngine::new_momentum_vessel(20, 10, TEST_SEED);
+    let canonical_width = engine.lattice_size();
+    engine.resize(10, 10);
+    let (visible_start, visible_end) = engine.visible_lattice_bounds();
+    assert!(visible_start > 0);
+    assert!(visible_end < canonical_width);
+
+    let source = visible_start;
+    let hidden_left = source - 1;
+    set_column_height(&mut engine, source, 8);
+    set_column_height(&mut engine, source + 1, 8);
+    set_column_height(&mut engine, hidden_left, 0);
+    engine.critical_slopes[source] = 2;
+    engine.active_sites.clear();
+    engine.queued_sites.fill(false);
+    assert!(!engine.topple_site_if_unstable(source));
+
+    let mass_before = engine.grain_count();
+    engine.resize(20, 10);
+    let mut guard = 0usize;
+    while engine.momentum_seeds() == 0 {
+        guard = guard.saturating_add(1);
+        assert!(guard < canonical_width * 4, "reconnected seam never reached the active queue");
+        let _ = engine.topple_one_active_site();
+    }
+
+    assert_eq!(engine.momentum_seeds(), 1);
+    assert_eq!(engine.rolling_grains.len(), 1);
+    assert_eq!(engine.rolling_grains.front().unwrap().site, hidden_left);
+    assert_eq!(engine.grain_count(), mass_before);
+}
+
+#[test]
+fn steep_wall_relaxation_creates_a_concurrent_mobile_front_and_conserves_mass() {
+    let mut engine = OsloSandboxEngine::new_momentum_vessel(20, 10, TEST_SEED);
+    let width = engine.lattice_size();
+    for site in 0..(width / 2) {
+        set_column_height(&mut engine, site, 12);
+    }
+    for site in (width / 2)..width {
+        set_column_height(&mut engine, site, 2);
+    }
+    engine.critical_slopes.fill(OSLO_THRESHOLD_HIGH);
+    let mass_before = engine.settled_count();
+    engine.enqueue_neighborhood(width / 2 - 1);
+    engine.enqueue_neighborhood(width / 2);
+
+    let mut guard = 0usize;
+    loop {
+        guard = guard.saturating_add(1);
+        assert!(guard < 100_000, "momentum wall relaxation failed to quiesce");
+        let mut changed = engine.advance_rolling_grains();
+        changed |= engine.topple_one_active_site();
+        if !changed && engine.active_sites.is_empty() && engine.rolling_grains.is_empty() {
+            break;
+        }
+    }
+
+    assert!(engine.momentum_seeds() > 0);
+    assert!(engine.momentum_hops() > 0);
+    assert!(engine.momentum_peak_active() >= 2);
+    assert_eq!(engine.discharged_count(), 0);
+    assert_eq!(engine.settled_count(), mass_before);
+    assert_eq!(engine.grain_count(), mass_before);
+    assert!(engine.avalanche_last_moves() > 0);
+    assert!(engine.momentum_last_seeds() > 0);
+    assert!(engine.momentum_last_hops() > 0);
+}

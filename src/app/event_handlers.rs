@@ -451,7 +451,7 @@ impl App {
             }
             #[cfg(debug_assertions)]
             CommandIntent::TestingCheatsHelp => Ok(
-                "testingcheats: model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel> · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · clear · status · reset"
+                "testingcheats: model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum> · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · clear · status · reset"
                     .to_string(),
             ),
             #[cfg(debug_assertions)]
@@ -461,6 +461,9 @@ impl App {
                     "h4" => "fresh clone of authoritative sediment",
                     "classic" => "fresh empty pre-pause grain physics + modern canonical/VW walls",
                     "hybrid" => "classic physics + 90/10 slow wandering-focus rain",
+                    "oslo-vessel-momentum" => {
+                        "oslo-vessel + causal moving-grain momentum phase on steep local failures"
+                    }
                     _ => "testing sandbox",
                 };
                 Ok(format!(

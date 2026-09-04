@@ -532,7 +532,7 @@ impl TestingSandEngine {
         match self {
             Self::H4(_) => "h4",
             Self::Classic(engine) => engine.model_name(),
-            Self::Oslo(engine) => engine.boundary_mode().model_name(),
+            Self::Oslo(engine) => engine.model_name(),
         }
     }
 
@@ -625,9 +625,24 @@ impl TestingSandEngine {
                 let (canonical_w, canonical_h) = engine.canonical_dimensions();
                 let (min_h, max_h, left_h, right_h) = engine.visible_profile();
                 let (rain_left, rain_center, rain_right) = engine.rain_region_counts();
+                let momentum = if engine.momentum_enabled() {
+                    format!(
+                        " · momentum=rolling:{} seeds:{} hops:{} settles:{} peak:{} last={}/{}/{}",
+                        engine.rolling_count(),
+                        engine.momentum_seeds(),
+                        engine.momentum_hops(),
+                        engine.momentum_settles(),
+                        engine.momentum_peak_active(),
+                        engine.momentum_last_seeds(),
+                        engine.momentum_last_hops(),
+                        engine.momentum_last_peak_active()
+                    )
+                } else {
+                    String::new()
+                };
                 format!(
-                    "{} · current={} generated={} settled={} pending={} discharged={} · canonical={}x{} visible-h={} wall={} · profile={}..{} edges={}/{} · avalanches={} last={} p95={} peak={} · rain={}/{}/{}",
-                    engine.boundary_mode().model_name(),
+                    "{} · current={} generated={} settled={} pending={} discharged={} · canonical={}x{} visible-h={} wall={} · profile={}..{} edges={}/{} · avalanches={} last={} p95={} peak={} · rain={}/{}/{}{}",
+                    engine.model_name(),
                     engine.grain_count(),
                     engine.generated_count(),
                     engine.settled_count(),
@@ -647,7 +662,8 @@ impl TestingSandEngine {
                     engine.avalanche_peak_moves(),
                     rain_left,
                     rain_center,
-                    rain_right
+                    rain_right,
+                    momentum
                 )
             }
         }
@@ -2232,8 +2248,15 @@ impl App {
                     boundary,
                 ))))
             }
+            "oslo-vessel-momentum" => Ok(TestingSandEngine::Oslo(Box::new(
+                OsloSandboxEngine::new_momentum_vessel(
+                    self.sand_engine.cell_width,
+                    self.sand_engine.cell_height,
+                    self.sand_engine.snapshot_state().rng_state,
+                ),
+            ))),
             _ => Err(
-                "testingcheats model must be h4, classic, hybrid, oslo-zero, oslo-box, or oslo-vessel"
+                "testingcheats model must be h4, classic, hybrid, oslo-zero, oslo-box, oslo-vessel, or oslo-vessel-momentum"
                     .to_string(),
             ),
         }

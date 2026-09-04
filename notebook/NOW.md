@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-03
 authority: working
-summary: H4/v5 remains the published production sediment authority; SEDIMENT-004 is an isolated Oslo boundary laboratory with native-green boundary contracts and a restored known-good testing-cheats render cadence for owner visual comparison.
-next: Natively validate the restored 4ba1751-style testing-cheats visual cadence, then visually compare H4, oslo-zero, oslo-box, and oslo-vessel at matched ages, including vessel fill/overflow and horizontal shrink/re-expansion. Do not change production sediment authority until owner evidence selects a direction.
+summary: H4/v5 remains the published production sediment authority; SEDIMENT-007 is a debug-only Oslo-vessel causal-momentum experiment driven by owner evidence that global inertia gates and presentation batching do not produce the desired wall-collapse motion.
+next: Natively validate SEDIMENT-007, then visually A/B oslo-vessel against oslo-vessel-momentum under ordinary matched-age rain and a large horizontal shrink/re-expansion seam. Do not change production sediment authority until owner evidence selects a direction.
 ---
 
 # NOW — Strata
@@ -64,7 +64,7 @@ test suite, build, help smoke, diff hygiene, and the long-profile dangling-symli
 
 ## Current plateau program
 
-SEDIMENT-004 is the current bounded experiment. SEDIMENT-003 established useful negative owner evidence: classic/hybrid topography is too bland, H4 remains visually better but its cascades are not legible enough, and the earlier Oslo-derived sandbox remains the strongest observed topology/avalanche behavior despite its pyramid envelope. The new debug-only lab keeps H4 untouched and holds Oslo rain/relaxation constant while comparing `oslo-zero` (historical height-zero/discharge control), `oslo-box` (literal closed side wall), and `oslo-vessel` (closed below the monotonic canonical wall top, overflow only above it). The local agent's cooperative 6 ms / 128x / queued-advance harness is retained and Oslo batching avoids per-tick presentation rebuilds. See `notebook/work/SEDIMENT-004-OSLO-BOUNDARY-LAB.md`.
+SEDIMENT-007 is the current bounded experiment. Owner evidence now selects `oslo-vessel` as the strongest ordinary topology, while Classic remains the reference for dramatic wall-collapse motion. WaveView presentation batching was rejected because it only accelerated unchanged local topplings. Inertia v1 was rejected because its global size/span gate required the avalanche to already be large before the mechanism that was supposed to make it large could engage. SEDIMENT-007 therefore keeps ordinary quiescent vessel evolution exact and introduces a local moving-grain phase only when a single topple sees relief `>= 4` — a discontinuity ordinary one-grain Oslo drive cannot create from a quiescent `{1,2}` surface but horizontal canonical reconnection can. See `notebook/work/SEDIMENT-007-OSLO-VESSEL-MOMENTUM.md`.
 
 `notebook/work/PLATEAU-001.md` is the durable roadmap for the remaining core-development arc. The owner has accepted the existing day-end snapshot behavior as baseline and does not want an artificial re-certification gate before continuing.
 
