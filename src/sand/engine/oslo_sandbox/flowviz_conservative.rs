@@ -201,9 +201,27 @@ impl OsloSandboxEngine {
         if self.consume_flowviz_parcel_mass(category_id, 1) {
             self.flowviz_mobile_mass = self.flowviz_mobile_mass.saturating_sub(1);
             self.flowviz_reused_deposits = self.flowviz_reused_deposits.saturating_add(1);
-        } else {
-            self.flowviz_shadow_misses = self.flowviz_shadow_misses.saturating_add(1);
+            return;
         }
+        if self
+            .withdraw_nearest_flowviz_shadow_surplus(source, category_id)
+            .is_some()
+        {
+            // CategoryId is fungible material identity. After a sequence of
+            // anonymous settle/re-entry/local-topple cycles, the shadow can
+            // legally own the category surplus at a different site than the
+            // physical unit that is now discharging. Consume only a *current
+            // physical-vs-shadow surplus* so total/category custody stays exact
+            // without inventing persistent grain identity.
+            self.flowviz_reused_deposits = self.flowviz_reused_deposits.saturating_add(1);
+            return;
+        }
+
+        // Reaching this point means the physical discharge removed one unit
+        // for which conservative visual custody has neither matching parcel
+        // mass nor any same-category settled surplus. That is a true custody
+        // invariant failure rather than an exact-site mismatch.
+        self.flowviz_shadow_misses = self.flowviz_shadow_misses.saturating_add(1);
     }
 
     pub(super) fn mirror_flowviz_settled_push(&mut self, site: usize, category_id: CategoryId) {
@@ -231,6 +249,29 @@ impl OsloSandboxEngine {
         self.surface
             .grid_height_dots
             .checked_sub(depth.saturating_add(1))
+    }
+
+    fn withdraw_nearest_flowviz_shadow_surplus(
+        &mut self,
+        preferred_site: usize,
+        category_id: CategoryId,
+    ) -> Option<usize> {
+        let candidate = (0..self.flowviz_shadow_columns.len())
+            .filter_map(|site| {
+                let physical = self
+                    .columns
+                    .get(site)
+                    .map_or(0, |column| Self::category_count(column, category_id));
+                let visual = self
+                    .flowviz_shadow_columns
+                    .get(site)
+                    .map_or(0, |column| Self::category_count(column, category_id));
+                (visual > physical).then_some((site.abs_diff(preferred_site), site))
+            })
+            .min();
+
+        let (_, site) = candidate?;
+        self.withdraw_flowviz_shadow_grain(site, category_id)
     }
 
     fn category_count(column: &[CategoryId], category_id: CategoryId) -> usize {

@@ -1034,6 +1034,41 @@ fn conservative_flowviz_preserves_frozen_front_physics_on_ordinary_quiescent_dri
 }
 
 #[test]
+fn conservative_flowviz_fungible_discharge_consumes_nearest_shadow_surplus() {
+    let mut engine =
+        OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
+    let source = engine.lattice_size() / 2;
+    let surplus_site = source.saturating_add(2);
+
+    for column in &mut engine.columns {
+        column.clear();
+    }
+    for column in &mut engine.flowviz_shadow_columns {
+        column.clear();
+    }
+    engine.flowviz_parcels.clear();
+    engine.flowviz_mobile_mass = 0;
+    engine.flowviz_shadow_misses = 0;
+
+    // Model the state *after* an anonymous same-category physical unit has
+    // discharged at `source`: no exact-source visual unit remains, but the
+    // fungible shadow still owns one same-category surplus elsewhere.
+    engine.flowviz_shadow_columns[surplus_site].push(grain());
+
+    engine.mirror_flowviz_settled_discharge(source, grain());
+
+    assert_eq!(engine.flowviz_shadow_mass(), 0);
+    assert_eq!(engine.flowviz_parcel_mass(), 0);
+    assert_eq!(engine.flowviz_shadow_misses(), 0);
+    assert_eq!(engine.flowviz_reused_deposits(), 1);
+    assert!(engine.flowviz_visual_mass_matches_physical_mobile_system());
+    assert_eq!(
+        conservative_visual_category_counts(&engine),
+        physical_category_counts(&engine)
+    );
+}
+
+#[test]
 fn conservative_flowviz_delays_visible_deposit_until_parcel_arrival() {
     let mut engine =
         OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);

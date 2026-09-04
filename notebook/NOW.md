@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-04
 authority: working
-summary: H4/v5 remains published production authority. SEDIMENT-008 oslo-vessel-front physics remains owner-frozen. SEDIMENT-014 v1 failed native custody/drain gates; SEDIMENT-014R1 keeps conservative weighted parcels but replaces exact-site settlement credits with fungible CategoryId custody, dynamic physical-vs-shadow settlement demand, and real directional adjacent-transfer quotas.
-next: Natively validate SEDIMENT-014R1 before any human A/B. Require frozen-front equivalence, zero true custody misses, exact total/category conservation, zero residual dynamic settlement demand and directional transport quota after wall-drain, stable live rain/64x clock behavior, and no persistent grain identity or prescribed path architecture.
+summary: H4/v5 remains published production authority. SEDIMENT-008 oslo-vessel-front physics remains owner-frozen. SEDIMENT-014R1 closed delayed-deposit, re-entry and wall-drain failures but retained 11 false ordinary-drive discharge misses. SEDIMENT-014R2 narrows the remaining identity leak: discharge may consume only current same-CategoryId visual surplus when exact-source shadow and parcel custody are absent.
+next: Natively validate SEDIMENT-014R2 before any human A/B. Require the 2,000-drive false-miss regression to reach zero, retain the already-green R1 delayed-deposit/re-entry/wall-drain contracts, prove anonymous discharge consumes only real same-CategoryId shadow surplus, then complete full native gates.
 ---
 
 # NOW — Strata
