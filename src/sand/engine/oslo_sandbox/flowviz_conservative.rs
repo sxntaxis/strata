@@ -246,9 +246,15 @@ impl OsloSandboxEngine {
         let column = self.flowviz_shadow_columns.get_mut(site)?;
         let depth = column.iter().rposition(|category| *category == category_id)?;
         column.remove(depth);
-        self.surface
-            .grid_height_dots
-            .checked_sub(depth.saturating_add(1))
+        // Withdrawal success is a custody fact; render-space projection is not.
+        // A shadow column may legitimately extend above the current viewport.
+        // Saturate such a source to the top visible row rather than returning
+        // `None` after already removing the CategoryId from conservative custody.
+        Some(
+            self.surface
+                .grid_height_dots
+                .saturating_sub(depth.saturating_add(1)),
+        )
     }
 
     fn withdraw_nearest_flowviz_shadow_surplus(

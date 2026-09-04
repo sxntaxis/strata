@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-04
 authority: working
-summary: H4/v5 remains published production authority. SEDIMENT-008 oslo-vessel-front physics remains owner-frozen. SEDIMENT-014R1 closed delayed-deposit, re-entry and wall-drain failures but retained 11 false ordinary-drive discharge misses. SEDIMENT-014R2 narrows the remaining identity leak: discharge may consume only current same-CategoryId visual surplus when exact-source shadow and parcel custody are absent.
-next: Natively validate SEDIMENT-014R2 before any human A/B. Require the 2,000-drive false-miss regression to reach zero, retain the already-green R1 delayed-deposit/re-entry/wall-drain contracts, prove anonymous discharge consumes only real same-CategoryId shadow surplus, then complete full native gates.
+summary: H4/v5 remains published production authority and SEDIMENT-008 oslo-vessel-front physics remains owner-frozen. SEDIMENT-014R2 retained the same 11 ordinary-drive false misses. SEDIMENT-014R3 identifies the narrower root cause: shadow withdrawal removed real CategoryId custody and then returned None when its source depth was above the viewport, conflating custody success with render-y projection.
+next: Natively validate SEDIMENT-014R3 before any human A/B. Run the exact former 11-miss regression first, then the new over-height discharge/mobile-entry/settled-transfer custody regressions, retain R2 fungible discharge and all already-green R1 parcel contracts, then complete full native gates.
 ---
 
 # NOW — Strata

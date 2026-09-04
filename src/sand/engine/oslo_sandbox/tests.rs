@@ -1069,6 +1069,134 @@ fn conservative_flowviz_fungible_discharge_consumes_nearest_shadow_surplus() {
 }
 
 #[test]
+fn conservative_flowviz_offscreen_discharge_withdrawal_is_still_custody_success() {
+    let mut engine =
+        OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
+    let source = 0usize;
+    let viewport_height = engine.surface.grid_height_dots;
+
+    for column in &mut engine.columns {
+        column.clear();
+    }
+    for column in &mut engine.flowviz_shadow_columns {
+        column.clear();
+    }
+    engine.flowviz_parcels.clear();
+    engine.flowviz_mobile_mass = 0;
+    engine.flowviz_shadow_misses = 0;
+    engine.flowviz_reused_deposits = 0;
+
+    // Model the state immediately after a physical discharge from a column
+    // whose visual stack extends above the current viewport. Conservative
+    // custody still owns exactly one extra same-category shadow unit. Its
+    // depth has no representable positive y, but withdrawal must still report
+    // success rather than mutating the shadow and then returning `None`.
+    engine.columns[source] = vec![grain(); viewport_height.saturating_add(1)];
+    engine.flowviz_shadow_columns[source] =
+        vec![grain(); viewport_height.saturating_add(2)];
+
+    engine.mirror_flowviz_settled_discharge(source, grain());
+
+    assert_eq!(
+        engine.flowviz_shadow_columns[source].len(),
+        engine.columns[source].len()
+    );
+    assert_eq!(engine.flowviz_parcel_mass(), 0);
+    assert_eq!(engine.flowviz_shadow_misses(), 0);
+    assert_eq!(engine.flowviz_reused_deposits(), 0);
+    assert!(engine.flowviz_visual_mass_matches_physical_mobile_system());
+    assert_eq!(
+        conservative_visual_category_counts(&engine),
+        physical_category_counts(&engine)
+    );
+}
+
+#[test]
+fn conservative_flowviz_offscreen_mobile_entry_creates_real_parcel_custody() {
+    let mut engine =
+        OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
+    let source = 1usize;
+    let destination = source + 1;
+    let viewport_height = engine.surface.grid_height_dots;
+
+    for column in &mut engine.columns {
+        column.clear();
+    }
+    for column in &mut engine.flowviz_shadow_columns {
+        column.clear();
+    }
+    engine.flowviz_parcels.clear();
+    engine.flowviz_mobile_mass = 0;
+    engine.flowviz_shadow_misses = 0;
+    engine.flowviz_reused_deposits = 0;
+    engine.flowviz_visual_withdrawals = 0;
+
+    // Model state immediately after physics popped the top source grain but
+    // before it is inserted into rolling custody. The shadow unit is above the
+    // viewport; that affects only its projected source y, not whether custody
+    // exists and must become parcel mass.
+    engine.columns[source] = vec![grain(); viewport_height.saturating_add(1)];
+    engine.flowviz_shadow_columns[source] =
+        vec![grain(); viewport_height.saturating_add(2)];
+
+    engine.record_flowviz_mobile_entry(source, destination, grain(), 0);
+    engine.seed_rolling_grain_at_y(destination, grain(), ToppleDirection::Right, 0);
+
+    assert_eq!(engine.flowviz_parcel_mass(), 1);
+    assert_eq!(engine.flowviz_visual_withdrawals(), 1);
+    assert_eq!(engine.flowviz_reused_deposits(), 0);
+    assert_eq!(engine.flowviz_shadow_misses(), 0);
+    assert!(engine.flowviz_visual_mass_matches_physical_mobile_system());
+    assert_eq!(
+        conservative_visual_category_counts(&engine),
+        physical_category_counts(&engine)
+    );
+}
+
+#[test]
+fn conservative_flowviz_offscreen_settled_transfer_mirrors_custody() {
+    let mut engine =
+        OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
+    let source = 1usize;
+    let destination = source + 1;
+    let viewport_height = engine.surface.grid_height_dots;
+
+    for column in &mut engine.columns {
+        column.clear();
+    }
+    for column in &mut engine.flowviz_shadow_columns {
+        column.clear();
+    }
+    engine.flowviz_parcels.clear();
+    engine.flowviz_mobile_mass = 0;
+
+    // Model state after the authoritative ordinary settled transfer has already
+    // moved one unit from source to destination. The corresponding shadow source
+    // unit lives above the viewport and must still be recognized as present.
+    engine.columns[source] = vec![grain(); viewport_height.saturating_add(1)];
+    engine.columns[destination].push(grain());
+    engine.flowviz_shadow_columns[source] =
+        vec![grain(); viewport_height.saturating_add(2)];
+
+    engine.mirror_flowviz_settled_transfer(source, destination, grain());
+
+    assert_eq!(
+        engine.flowviz_shadow_columns[source].len(),
+        engine.columns[source].len()
+    );
+    assert_eq!(
+        engine.flowviz_shadow_columns[destination],
+        engine.columns[destination]
+    );
+    assert_eq!(engine.flowviz_total_transport_due_status(), 0);
+    assert!(engine.flowviz_visual_mass_matches_physical_mobile_system());
+    assert_eq!(
+        conservative_visual_category_counts(&engine),
+        physical_category_counts(&engine)
+    );
+}
+
+#[test]
 fn conservative_flowviz_delays_visible_deposit_until_parcel_arrival() {
     let mut engine =
         OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
