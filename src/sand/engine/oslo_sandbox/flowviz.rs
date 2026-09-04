@@ -105,6 +105,7 @@ impl OsloSandboxEngine {
         }
         self.record_flowviz_edge_flux(source, destination);
         if self.flowviz_conservative {
+            self.add_flowviz_transport_due(source, destination, category_id, 1);
             return;
         }
         let right = destination > source;

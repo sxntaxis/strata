@@ -262,3 +262,55 @@ Judge primarily:
 - live rain and stable visual cadence remain intact.
 
 If conservative parcels establish convincing mass continuity but their local sink/reconciliation motion is too artificial, the next bounded problem is **how to advect conservative mobile mass**, not whether to return to token identity or immediate authoritative rendering.
+
+## Native failure of authored v1
+
+Local native validation of authored candidate `47b75594d8ff2f6bca51f34442abec111920866b`
+failed semantically after transport/scope verification:
+
+```text
+conservative_flowviz_preserves_frozen_front_physics_on_ordinary_quiescent_drive
+    flowviz_shadow_misses = 64, expected 0
+
+conservative_flowviz_wall_failure_conserves_visual_mass_and_drains_to_real_credits
+    conservative parcel cloud failed to drain
+```
+
+The failures expose one conceptual mistake in the v1 custody design rather than a
+reason to retune frozen front physics:
+
+- `CategoryId` is material identity, not persistent grain identity;
+- exact `(site, CategoryId)` settlement credits implicitly tried to recover a
+  grain-to-grain association that SEDIMENT-014 explicitly intended to avoid;
+- once same-category material settles, re-enters motion, and crosses other
+  anonymous same-category material, a greedy exact-site credit can report a
+  false shadow miss even while global/category mass remains conserved;
+- a parcel can also be stranded because its stale exact sink lies behind visual
+  geometry it cannot locally traverse.
+
+## R1 semantic repair direction
+
+SEDIMENT-014R1 keeps the conservative shadow + weighted parcel idea but replaces
+persistent settlement credits with two state-derived / Eulerian quantities:
+
+```text
+DYNAMIC SETTLEMENT DEMAND
+    physical settled CategoryId count at site
+  - visual shadow CategoryId count at site
+
+DIRECTIONAL TRANSPORT DUE
+    real adjacent CategoryId mass crossings recorded per source site/direction
+```
+
+A physically settled grain no longer creates a durable exact-site token. The
+current physical-vs-shadow deficit is the settlement target and therefore
+automatically disappears/reappears when anonymous same-category material
+re-enters motion.
+
+Visual parcels are still weighted, CategoryId-conservative, and identity-free.
+They consume only real local adjacent transport quotas. A parcel therefore does
+not own a future destination or an invented path; the Eulerian transfer ledger
+is the conservative routing evidence.
+
+The failed v1 exact-credit mechanism is superseded by this R1 design. Frozen
+SEDIMENT-008 physics remains unchanged.

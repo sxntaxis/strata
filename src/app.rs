@@ -672,11 +672,12 @@ impl TestingSandEngine {
                 let (rain_left, rain_center, rain_right) = engine.rain_region_counts();
                 let flowviz = if engine.flowviz_conservative_enabled() {
                     format!(
-                        " · parcels=count:{} mass:{} shadow:{} due:{} flux_edges:{} peak_count:{} peak_mass:{} withdrawals:{} deposits:{} reused:{} coalesced:{} misses:{}",
+                        " · parcels=count:{} mass:{} shadow:{} due:{} route_due:{} flux_edges:{} peak_count:{} peak_mass:{} withdrawals:{} deposits:{} reused:{} coalesced:{} misses:{}",
                         engine.flowviz_tracer_count(),
                         engine.flowviz_parcel_mass(),
                         engine.flowviz_shadow_mass(),
                         engine.flowviz_total_deposit_due(),
+                        engine.flowviz_total_transport_due_status(),
                         engine.flowviz_active_flux_edges(),
                         engine.flowviz_peak_tracers(),
                         engine.flowviz_peak_mobile_mass(),

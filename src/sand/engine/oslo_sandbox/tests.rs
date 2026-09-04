@@ -1113,6 +1113,65 @@ fn conservative_flowviz_reuses_pending_deposit_when_mass_reenters_motion() {
     assert_eq!(conservative_visual_category_counts(&engine), physical_category_counts(&engine));
 }
 
+
+#[test]
+fn conservative_flowviz_fungible_reentry_drains_through_real_adjacent_transport() {
+    let mut engine =
+        OsloSandboxEngine::new_front_conservative_flowviz_vessel(20, 10, TEST_SEED);
+    let source = engine.lattice_size() / 2;
+    let middle = source + 1;
+    let destination = source + 2;
+    set_column_height(&mut engine, source, 3);
+    set_column_height(&mut engine, middle, 0);
+    set_column_height(&mut engine, destination, 0);
+    engine.reset_conservative_flowviz_from_physics();
+
+    let (category_id, visual_y) = engine.pop_settled_grain(source).unwrap();
+    engine.record_flowviz_mobile_entry(source, middle, category_id, visual_y);
+    engine.seed_rolling_grain_at_y(middle, category_id, ToppleDirection::Right, visual_y);
+
+    let rolling = engine.rolling_grains.pop_front().unwrap();
+    engine.push_settled_grain_at_visual_y(middle, category_id, Some(rolling.visual_y));
+    engine.record_flowviz_settlement(middle, category_id);
+
+    let (category_id, visual_y) = engine.pop_settled_grain(middle).unwrap();
+    engine.record_flowviz_mobile_entry(middle, destination, category_id, visual_y);
+    engine.seed_rolling_grain_at_y(destination, category_id, ToppleDirection::Right, visual_y);
+
+    let rolling = engine.rolling_grains.pop_front().unwrap();
+    engine.push_settled_grain_at_visual_y(
+        destination,
+        rolling.category_id,
+        Some(rolling.visual_y),
+    );
+    engine.record_flowviz_settlement(destination, rolling.category_id);
+
+    assert_eq!(engine.flowviz_shadow_misses(), 0);
+    assert_eq!(engine.flowviz_parcel_mass(), 1);
+    assert_eq!(engine.flowviz_total_transport_due_status(), 2);
+    assert_eq!(engine.flowviz_total_deposit_due(), 1);
+
+    let mut guard = 0usize;
+    while engine.flowviz_parcel_mass() > 0 {
+        guard = guard.saturating_add(1);
+        assert!(guard < 2_000, "fungible two-edge parcel failed to drain");
+        let _ = engine.advance_flowviz_tracers();
+        assert!(engine.flowviz_visual_mass_matches_physical_mobile_system());
+        assert_eq!(
+            conservative_visual_category_counts(&engine),
+            physical_category_counts(&engine)
+        );
+    }
+
+    assert_eq!(engine.flowviz_total_transport_due_status(), 0);
+    assert_eq!(engine.flowviz_total_deposit_due(), 0);
+    assert_eq!(engine.flowviz_shadow_misses(), 0);
+    assert_eq!(
+        per_site_category_counts(&engine.flowviz_shadow_columns),
+        per_site_category_counts(&engine.columns)
+    );
+}
+
 #[test]
 fn conservative_flowviz_wall_failure_conserves_visual_mass_and_drains_to_real_credits() {
     fn prepare(mut engine: OsloSandboxEngine) -> OsloSandboxEngine {
@@ -1174,6 +1233,7 @@ fn conservative_flowviz_wall_failure_conserves_visual_mass_and_drains_to_real_cr
     }
 
     assert_eq!(parcels.flowviz_total_deposit_due(), 0);
+    assert_eq!(parcels.flowviz_total_transport_due_status(), 0);
     assert_eq!(parcels.flowviz_shadow_mass(), frozen.settled_count());
     assert_eq!(parcels.flowviz_shadow_misses(), 0);
     assert!(parcels.flowviz_visual_mass_matches_physical_mobile_system());

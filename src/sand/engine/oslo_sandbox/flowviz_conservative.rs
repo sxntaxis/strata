@@ -5,14 +5,18 @@ const PARCEL_MERGE_LOOKBACK: usize = 48;
 const PARCEL_MAX_MASS: usize = 16;
 pub(super) const PARCEL_RENDER_MASS_CAP: usize = 16;
 const PARCEL_DEPOSIT_PER_FRAME: usize = 4;
-const SINK_SEARCH_RADIUS: usize = 128;
-const SURFACE_SPEED: f32 = 0.55;
-const AIRBORNE_X_SPEED: f32 = 0.30;
+const PARCEL_EDGE_TRANSFER_PER_FRAME: usize = 4;
 const GRAVITY: f32 = 0.20;
 const MAX_FALL_SPEED: f32 = 0.95;
 
 /// Presentation custody for real CategoryId mass that has left the visual
 /// settled surface but has not yet been shown depositing again.
+///
+/// Parcels are deliberately *fungible by CategoryId*. They are not grain
+/// identity and do not carry a prescribed future path. Physical adjacent
+/// transfers accumulate directional, category-specific Eulerian transport
+/// quotas; parcels consume those quotas locally while the visual shadow surface
+/// remains mass-conservative.
 ///
 /// Parcels have no sediment authority. They do not enter relief, support,
 /// threshold, RNG, persistence, or physical mass accounting.
@@ -20,7 +24,6 @@ const MAX_FALL_SPEED: f32 = 0.95;
 pub(super) struct FlowVizParcel {
     pub(super) x: f32,
     pub(super) y: f32,
-    vx: f32,
     vy: f32,
     pub(super) category_id: CategoryId,
     pub(super) mass: usize,
@@ -35,7 +38,8 @@ impl OsloSandboxEngine {
         self.flowviz_tracers.clear();
         self.flowviz_parcels.clear();
         self.flowviz_shadow_columns = self.columns.clone();
-        self.flowviz_deposit_due = vec![Vec::new(); self.columns.len()];
+        self.flowviz_transport_left = vec![Vec::new(); self.columns.len()];
+        self.flowviz_transport_right = vec![Vec::new(); self.columns.len()];
         self.flowviz_spawned = 0;
         self.flowviz_peak_tracers = 0;
         self.flowviz_dropped_samples = 0;
@@ -49,7 +53,8 @@ impl OsloSandboxEngine {
     pub(super) fn clear_conservative_flowviz(&mut self) {
         self.flowviz_parcels.clear();
         self.flowviz_shadow_columns = self.columns.clone();
-        self.flowviz_deposit_due = vec![Vec::new(); self.columns.len()];
+        self.flowviz_transport_left = vec![Vec::new(); self.columns.len()];
+        self.flowviz_transport_right = vec![Vec::new(); self.columns.len()];
         self.reset_conservative_flowviz_diagnostics();
     }
 
@@ -61,7 +66,8 @@ impl OsloSandboxEngine {
         self.flowviz_tracers.clear();
         self.flowviz_parcels.clear();
         self.flowviz_shadow_columns = self.columns.clone();
-        self.flowviz_deposit_due = vec![Vec::new(); self.columns.len()];
+        self.flowviz_transport_left = vec![Vec::new(); self.columns.len()];
+        self.flowviz_transport_right = vec![Vec::new(); self.columns.len()];
         self.flowviz_spawned = 0;
         self.flowviz_peak_tracers = 0;
         self.flowviz_dropped_samples = 0;
@@ -93,12 +99,21 @@ impl OsloSandboxEngine {
             }
         }
 
-        let old_due = std::mem::take(&mut self.flowviz_deposit_due);
-        self.flowviz_deposit_due = vec![Vec::new(); new_width];
-        for (index, due) in old_due.into_iter().enumerate() {
+        let old_left = std::mem::take(&mut self.flowviz_transport_left);
+        self.flowviz_transport_left = vec![Vec::new(); new_width];
+        for (index, due) in old_left.into_iter().enumerate() {
             let shifted = index.saturating_add(left_added);
             if shifted < new_width {
-                self.flowviz_deposit_due[shifted] = due;
+                self.flowviz_transport_left[shifted] = due;
+            }
+        }
+
+        let old_right = std::mem::take(&mut self.flowviz_transport_right);
+        self.flowviz_transport_right = vec![Vec::new(); new_width];
+        for (index, due) in old_right.into_iter().enumerate() {
+            let shifted = index.saturating_add(left_added);
+            if shifted < new_width {
+                self.flowviz_transport_right[shifted] = due;
             }
         }
 
@@ -112,9 +127,11 @@ impl OsloSandboxEngine {
 
     /// Enter one unit of real CategoryId mass into visual mobile custody.
     ///
-    /// A physically settled grain may re-enter motion before its earlier parcel
-    /// has visually deposited. In that case, consume the outstanding settlement
-    /// credit and keep the already-mobile parcel mass instead of duplicating it.
+    /// CategoryId is material identity, not persistent grain identity. If the
+    /// visual shadow no longer contains a matching unit at this exact physical
+    /// source, that physical unit is already represented by fungible same-color
+    /// mobile custody. In that case we add only the newly observed local
+    /// transport quota and do not manufacture a second parcel.
     pub(super) fn record_flowviz_mobile_entry(
         &mut self,
         source: usize,
@@ -131,13 +148,13 @@ impl OsloSandboxEngine {
         }
 
         self.record_flowviz_edge_flux(source, destination);
-        if self.consume_flowviz_deposit_due(source, category_id, 1) == 1 {
-            self.flowviz_reused_deposits = self.flowviz_reused_deposits.saturating_add(1);
-            return;
-        }
+        self.add_flowviz_transport_due(source, destination, category_id, 1);
 
         let Some(source_y) = self.withdraw_flowviz_shadow_grain(source, category_id) else {
-            self.flowviz_shadow_misses = self.flowviz_shadow_misses.saturating_add(1);
+            // Anonymous same-category material can already be visually mobile
+            // while physical custody has temporarily settled/re-entered at a
+            // different site. This is reuse, not a conservation miss.
+            self.flowviz_reused_deposits = self.flowviz_reused_deposits.saturating_add(1);
             return;
         };
         self.flowviz_visual_withdrawals = self.flowviz_visual_withdrawals.saturating_add(1);
@@ -145,9 +162,10 @@ impl OsloSandboxEngine {
         self.spawn_or_merge_flowviz_parcel(source, source_y, destination, category_id);
     }
 
-    /// Mirror ordinary non-moving-phase Oslo one-site transfers immediately.
-    /// Only mass that enters the explicit rolling/front phase is delayed behind
-    /// the conservative visual surface.
+    /// Mirror ordinary non-moving-phase Oslo one-site transfers immediately
+    /// when the visual shadow still owns the local unit. If that same-category
+    /// unit is already under mobile visual custody, preserve custody and record
+    /// only the physical local transport quota for the existing parcel field.
     pub(super) fn mirror_flowviz_settled_transfer(
         &mut self,
         source: usize,
@@ -157,22 +175,16 @@ impl OsloSandboxEngine {
         if !self.flowviz_conservative {
             return;
         }
-        if self.consume_flowviz_deposit_due(source, category_id, 1) == 1 {
-            // This physically settled unit is still represented by mobile visual
-            // custody. Reroute its real settlement credit locally and expose
-            // that adjacent transfer to the parcel flow field without creating
-            // a second unit of visual mass.
-            self.record_flowviz_edge_flux(source, destination);
-            self.add_flowviz_deposit_due(destination, category_id, 1);
+        if self.withdraw_flowviz_shadow_grain(source, category_id).is_some() {
+            if let Some(column) = self.flowviz_shadow_columns.get_mut(destination) {
+                column.push(category_id);
+            }
             return;
         }
-        if self.withdraw_flowviz_shadow_grain(source, category_id).is_none() {
-            self.flowviz_shadow_misses = self.flowviz_shadow_misses.saturating_add(1);
-            return;
-        }
-        if let Some(column) = self.flowviz_shadow_columns.get_mut(destination) {
-            column.push(category_id);
-        }
+
+        self.record_flowviz_edge_flux(source, destination);
+        self.add_flowviz_transport_due(source, destination, category_id, 1);
+        self.flowviz_reused_deposits = self.flowviz_reused_deposits.saturating_add(1);
     }
 
     pub(super) fn mirror_flowviz_settled_discharge(
@@ -183,15 +195,13 @@ impl OsloSandboxEngine {
         if !self.flowviz_conservative {
             return;
         }
-        if self.consume_flowviz_deposit_due(source, category_id, 1) == 1 {
-            if self.consume_flowviz_parcel_mass(category_id, 1) {
-                self.flowviz_mobile_mass = self.flowviz_mobile_mass.saturating_sub(1);
-            } else {
-                self.flowviz_shadow_misses = self.flowviz_shadow_misses.saturating_add(1);
-            }
+        if self.withdraw_flowviz_shadow_grain(source, category_id).is_some() {
             return;
         }
-        if self.withdraw_flowviz_shadow_grain(source, category_id).is_none() {
+        if self.consume_flowviz_parcel_mass(category_id, 1) {
+            self.flowviz_mobile_mass = self.flowviz_mobile_mass.saturating_sub(1);
+            self.flowviz_reused_deposits = self.flowviz_reused_deposits.saturating_add(1);
+        } else {
             self.flowviz_shadow_misses = self.flowviz_shadow_misses.saturating_add(1);
         }
     }
@@ -205,11 +215,10 @@ impl OsloSandboxEngine {
         }
     }
 
-    pub(super) fn record_flowviz_settlement(&mut self, site: usize, category_id: CategoryId) {
-        if self.flowviz_conservative {
-            self.add_flowviz_deposit_due(site, category_id, 1);
-        }
-    }
+    /// Physical settlement is intentionally not mirrored immediately. It
+    /// changes the dynamic per-site CategoryId demand seen by parcels; visible
+    /// settlement occurs only when mobile visual mass reaches that demand.
+    pub(super) fn record_flowviz_settlement(&mut self, _site: usize, _category_id: CategoryId) {}
 
     fn withdraw_flowviz_shadow_grain(
         &mut self,
@@ -224,43 +233,177 @@ impl OsloSandboxEngine {
             .checked_sub(depth.saturating_add(1))
     }
 
-    fn add_flowviz_deposit_due(&mut self, site: usize, category_id: CategoryId, count: usize) {
-        if count == 0 || site >= self.flowviz_deposit_due.len() {
+    fn category_count(column: &[CategoryId], category_id: CategoryId) -> usize {
+        column
+            .iter()
+            .filter(|category| **category == category_id)
+            .count()
+    }
+
+    fn flowviz_deposit_demand(&self, site: usize, category_id: CategoryId) -> usize {
+        let physical = self
+            .columns
+            .get(site)
+            .map_or(0, |column| Self::category_count(column, category_id));
+        let visual = self
+            .flowviz_shadow_columns
+            .get(site)
+            .map_or(0, |column| Self::category_count(column, category_id));
+        physical.saturating_sub(visual)
+    }
+
+    fn add_category_count(
+        ledger: &mut [Vec<(CategoryId, usize)>],
+        site: usize,
+        category_id: CategoryId,
+        count: usize,
+    ) {
+        if count == 0 || site >= ledger.len() {
             return;
         }
-        let due = &mut self.flowviz_deposit_due[site];
-        if let Some((_, existing)) = due.iter_mut().find(|(category, _)| *category == category_id) {
+        let entries = &mut ledger[site];
+        if let Some((_, existing)) = entries
+            .iter_mut()
+            .find(|(category, _)| *category == category_id)
+        {
             *existing = existing.saturating_add(count);
         } else {
-            due.push((category_id, count));
+            entries.push((category_id, count));
         }
     }
 
-    fn flowviz_due_count(&self, site: usize, category_id: CategoryId) -> usize {
-        self.flowviz_deposit_due
+    fn category_count_in_ledger(
+        ledger: &[Vec<(CategoryId, usize)>],
+        site: usize,
+        category_id: CategoryId,
+    ) -> usize {
+        ledger
             .get(site)
-            .and_then(|due| due.iter().find(|(category, _)| *category == category_id))
+            .and_then(|entries| {
+                entries
+                    .iter()
+                    .find(|(category, _)| *category == category_id)
+            })
             .map_or(0, |(_, count)| *count)
     }
 
-    fn consume_flowviz_deposit_due(
-        &mut self,
+    fn consume_category_count(
+        ledger: &mut [Vec<(CategoryId, usize)>],
         site: usize,
         category_id: CategoryId,
         requested: usize,
     ) -> usize {
-        let Some(due) = self.flowviz_deposit_due.get_mut(site) else {
+        let Some(entries) = ledger.get_mut(site) else {
             return 0;
         };
-        let Some(index) = due.iter().position(|(category, _)| *category == category_id) else {
+        let Some(index) = entries
+            .iter()
+            .position(|(category, _)| *category == category_id)
+        else {
             return 0;
         };
-        let consumed = requested.min(due[index].1);
-        due[index].1 -= consumed;
-        if due[index].1 == 0 {
-            due.swap_remove(index);
+        let consumed = requested.min(entries[index].1);
+        entries[index].1 -= consumed;
+        if entries[index].1 == 0 {
+            entries.swap_remove(index);
         }
         consumed
+    }
+
+    pub(super) fn add_flowviz_transport_due(
+        &mut self,
+        source: usize,
+        destination: usize,
+        category_id: CategoryId,
+        count: usize,
+    ) {
+        if !self.flowviz_conservative || source == destination || count == 0 {
+            return;
+        }
+        if destination > source {
+            Self::add_category_count(
+                &mut self.flowviz_transport_right,
+                source,
+                category_id,
+                count,
+            );
+        } else {
+            Self::add_category_count(
+                &mut self.flowviz_transport_left,
+                source,
+                category_id,
+                count,
+            );
+        }
+    }
+
+    fn flowviz_transport_due(
+        &self,
+        source: usize,
+        direction: i8,
+        category_id: CategoryId,
+    ) -> usize {
+        match direction {
+            -1 => Self::category_count_in_ledger(
+                &self.flowviz_transport_left,
+                source,
+                category_id,
+            ),
+            1 => Self::category_count_in_ledger(
+                &self.flowviz_transport_right,
+                source,
+                category_id,
+            ),
+            _ => 0,
+        }
+    }
+
+    fn consume_flowviz_transport_due(
+        &mut self,
+        source: usize,
+        direction: i8,
+        category_id: CategoryId,
+        requested: usize,
+    ) -> usize {
+        match direction {
+            -1 => Self::consume_category_count(
+                &mut self.flowviz_transport_left,
+                source,
+                category_id,
+                requested,
+            ),
+            1 => Self::consume_category_count(
+                &mut self.flowviz_transport_right,
+                source,
+                category_id,
+                requested,
+            ),
+            _ => 0,
+        }
+    }
+
+    pub(crate) fn flowviz_total_transport_due(&self) -> usize {
+        self.flowviz_transport_left
+            .iter()
+            .chain(self.flowviz_transport_right.iter())
+            .flat_map(|entries| entries.iter())
+            .map(|(_, count)| *count)
+            .sum()
+    }
+
+    pub(crate) fn flowviz_total_dynamic_deposit_demand(&self) -> usize {
+        let mut total = 0usize;
+        for site in 0..self.columns.len() {
+            let mut seen = Vec::<CategoryId>::new();
+            for category_id in self.columns[site].iter().copied() {
+                if seen.contains(&category_id) {
+                    continue;
+                }
+                seen.push(category_id);
+                total = total.saturating_add(self.flowviz_deposit_demand(site, category_id));
+            }
+        }
+        total
     }
 
     fn consume_flowviz_parcel_mass(&mut self, category_id: CategoryId, requested: usize) -> bool {
@@ -281,11 +424,12 @@ impl OsloSandboxEngine {
         &mut self,
         source: usize,
         source_y: usize,
-        destination: usize,
+        _destination: usize,
         category_id: CategoryId,
     ) {
-        let start_x = source as f32 + (self.flowviz_rand_unit() - 0.5) * 0.16;
+        let start_x = source as f32;
         let start_y = source_y as f32;
+        let source_site = source;
 
         let merged_nearby = if let Some(parcel) = self
             .flowviz_parcels
@@ -295,7 +439,7 @@ impl OsloSandboxEngine {
             .find(|parcel| {
                 parcel.category_id == category_id
                     && parcel.mass < PARCEL_MAX_MASS
-                    && (parcel.x - start_x).abs() <= 1.0
+                    && parcel.x.floor() as usize == source_site
                     && (parcel.y - start_y).abs() <= 2.0
             })
         {
@@ -310,32 +454,17 @@ impl OsloSandboxEngine {
             return;
         }
 
-        let merged_at_cap = if self.flowviz_parcels.len() >= PARCEL_CAP {
-            if let Some(parcel) = self
-                .flowviz_parcels
-                .iter_mut()
-                .find(|parcel| parcel.category_id == category_id)
-            {
-                parcel.mass = parcel.mass.saturating_add(1);
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-        if merged_at_cap {
-            self.flowviz_coalesced_mass = self.flowviz_coalesced_mass.saturating_add(1);
-            self.record_flowviz_parcel_peaks();
-            return;
+        if self.flowviz_parcels.len() >= PARCEL_CAP {
+            // The cap is soft for conservative mode. Exact visual mass custody
+            // outranks bounded sample count; never merge across unrelated sites
+            // and never drop mass merely to satisfy a presentation cap.
+            self.flowviz_dropped_samples = self.flowviz_dropped_samples.saturating_add(1);
         }
 
-        let direction = if destination > source { 1.0 } else { -1.0 };
         let initial_vy = self.flowviz_rand_unit() * 0.12;
         self.flowviz_parcels.push_back(FlowVizParcel {
             x: start_x,
             y: start_y,
-            vx: direction * AIRBORNE_X_SPEED,
             vy: initial_vy,
             category_id,
             mass: 1,
@@ -359,50 +488,24 @@ impl OsloSandboxEngine {
         }
     }
 
-    fn shadow_downhill_direction(&self, heights: &[usize], site: usize) -> i8 {
-        let (visible_start, visible_end) = self.visible_lattice_bounds();
-        let here = heights.get(site).copied().unwrap_or(0);
-        let left = site
-            .checked_sub(1)
-            .filter(|candidate| *candidate >= visible_start)
-            .and_then(|candidate| heights.get(candidate).copied());
-        let right = site
-            .checked_add(1)
-            .filter(|candidate| *candidate < visible_end)
-            .and_then(|candidate| heights.get(candidate).copied());
-        match (left, right) {
-            (Some(l), Some(r)) if l < here || r < here => {
-                if l < r {
+    fn preferred_transport_direction(&self, site: usize, category_id: CategoryId) -> i8 {
+        let left = self.flowviz_transport_due(site, -1, category_id);
+        let right = self.flowviz_transport_due(site, 1, category_id);
+        match left.cmp(&right) {
+            std::cmp::Ordering::Greater => -1,
+            std::cmp::Ordering::Less => 1,
+            std::cmp::Ordering::Equal if left > 0 => {
+                let flux = self.flowviz_flux_bias(site);
+                if flux < 0 {
                     -1
-                } else if r < l {
+                } else if flux > 0 {
                     1
                 } else {
-                    0
+                    1
                 }
             }
-            (Some(l), None) if l < here => -1,
-            (None, Some(r)) if r < here => 1,
             _ => 0,
         }
-    }
-
-    fn sink_direction(&self, site: usize, category_id: CategoryId) -> i8 {
-        let (visible_start, visible_end) = self.visible_lattice_bounds();
-        for distance in 1..=SINK_SEARCH_RADIUS {
-            let left = site.checked_sub(distance).filter(|candidate| *candidate >= visible_start);
-            let right = site
-                .checked_add(distance)
-                .filter(|candidate| *candidate < visible_end);
-            let left_due = left.map_or(0, |candidate| self.flowviz_due_count(candidate, category_id));
-            let right_due = right.map_or(0, |candidate| self.flowviz_due_count(candidate, category_id));
-            match (left_due > 0, right_due > 0) {
-                (true, false) => return -1,
-                (false, true) => return 1,
-                (true, true) => return self.flowviz_flux_bias(site).signum() as i8,
-                (false, false) => {}
-            }
-        }
-        0
     }
 
     pub(super) fn advance_conservative_flowviz(&mut self) -> bool {
@@ -433,79 +536,86 @@ impl OsloSandboxEngine {
 
             if parcel.y + 0.05 < contact_y {
                 parcel.vy = (parcel.vy + GRAVITY).min(MAX_FALL_SPEED);
-                parcel.x = (parcel.x + parcel.vx)
-                    .clamp(visible_start as f32, visible_end.saturating_sub(1) as f32 + 0.999);
                 parcel.y = (parcel.y + parcel.vy).min(contact_y);
                 changed = true;
-            } else {
-                parcel.y = contact_y;
-                parcel.vy = 0.0;
-
-                let due_here = self.flowviz_due_count(site, parcel.category_id);
-                let deposit = parcel
-                    .mass
-                    .min(due_here)
-                    .min(PARCEL_DEPOSIT_PER_FRAME);
-                if deposit > 0 {
-                    let consumed =
-                        self.consume_flowviz_deposit_due(site, parcel.category_id, deposit);
-                    for _ in 0..consumed {
-                        self.flowviz_shadow_columns[site].push(parcel.category_id);
-                    }
-                    heights[site] = heights[site].saturating_add(consumed);
-                    parcel.mass -= consumed;
-                    self.flowviz_mobile_mass = self.flowviz_mobile_mass.saturating_sub(consumed);
-                    self.flowviz_visual_deposits =
-                        self.flowviz_visual_deposits.saturating_add(consumed);
-                    changed = true;
-                }
-                if parcel.mass == 0 {
-                    continue;
-                }
-
-                let flux = self.flowviz_flux_bias(site);
-                let sink = self.sink_direction(site, parcel.category_id);
-                let downhill = self.shadow_downhill_direction(&heights, site);
-                let direction = if flux > 0 {
-                    1
-                } else if flux < 0 {
-                    -1
-                } else if sink != 0 {
-                    sink
-                } else {
-                    downhill
-                };
-                let next_site = match direction {
-                    -1 => site.checked_sub(1),
-                    1 => site.checked_add(1),
-                    _ => None,
-                }
-                .filter(|candidate| *candidate >= visible_start && *candidate < visible_end);
-
-                if let Some(next_site) = next_site {
-                    let next_contact = Self::shadow_contact_y(grid_height, heights[next_site]);
-                    if next_contact >= contact_y {
-                        parcel.vx = if next_site > site {
-                            SURFACE_SPEED
-                        } else {
-                            -SURFACE_SPEED
-                        };
-                        parcel.x = (parcel.x + parcel.vx).clamp(
-                            visible_start as f32,
-                            visible_end.saturating_sub(1) as f32 + 0.999,
-                        );
-                        parcel.y = (parcel.y + GRAVITY).min(next_contact);
-                        changed = true;
-                    } else {
-                        // A visual parcel never climbs through a higher shadow bed
-                        // merely to reconcile a distant credit. If the target is
-                        // not reachable by local flow, wait for bed/flux evolution.
-                        parcel.vx = 0.0;
-                    }
-                } else {
-                    parcel.vx = 0.0;
-                }
+                survivors.push_back(parcel);
+                continue;
             }
+
+            parcel.y = contact_y;
+            parcel.vy = 0.0;
+
+            let demand_here = self.flowviz_deposit_demand(site, parcel.category_id);
+            let deposit = parcel
+                .mass
+                .min(demand_here)
+                .min(PARCEL_DEPOSIT_PER_FRAME);
+            if deposit > 0 {
+                for _ in 0..deposit {
+                    self.flowviz_shadow_columns[site].push(parcel.category_id);
+                }
+                heights[site] = heights[site].saturating_add(deposit);
+                parcel.mass -= deposit;
+                self.flowviz_mobile_mass = self.flowviz_mobile_mass.saturating_sub(deposit);
+                self.flowviz_visual_deposits =
+                    self.flowviz_visual_deposits.saturating_add(deposit);
+                changed = true;
+            }
+            if parcel.mass == 0 {
+                continue;
+            }
+
+            let direction = self.preferred_transport_direction(site, parcel.category_id);
+            let next_site = match direction {
+                -1 => site.checked_sub(1),
+                1 => site.checked_add(1),
+                _ => None,
+            }
+            .filter(|candidate| *candidate >= visible_start && *candidate < visible_end);
+
+            let Some(next_site) = next_site else {
+                survivors.push_back(parcel);
+                continue;
+            };
+
+            let available = self.flowviz_transport_due(site, direction, parcel.category_id);
+            let transfer = parcel
+                .mass
+                .min(available)
+                .min(PARCEL_EDGE_TRANSFER_PER_FRAME);
+            if transfer == 0 {
+                survivors.push_back(parcel);
+                continue;
+            }
+
+            let consumed = self.consume_flowviz_transport_due(
+                site,
+                direction,
+                parcel.category_id,
+                transfer,
+            );
+            if consumed == 0 {
+                survivors.push_back(parcel);
+                continue;
+            }
+
+            if consumed < parcel.mass {
+                let mut moving = parcel.clone();
+                moving.mass = consumed;
+                parcel.mass -= consumed;
+                survivors.push_back(parcel);
+                parcel = moving;
+            }
+
+            let next_contact = Self::shadow_contact_y(grid_height, heights[next_site]);
+            parcel.x = next_site as f32;
+            // Authoritative adjacent flux says this material really crossed the
+            // edge. Keep the visual move local and let gravity settle toward the
+            // current shadow bed instead of blocking on stale shadow geometry.
+            if next_contact >= contact_y {
+                parcel.y = (parcel.y + GRAVITY).min(next_contact);
+            }
+            changed = true;
             survivors.push_back(parcel);
         }
 

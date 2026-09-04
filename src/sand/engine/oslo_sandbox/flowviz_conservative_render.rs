@@ -70,11 +70,11 @@ impl OsloSandboxEngine {
     }
 
     pub(crate) fn flowviz_total_deposit_due(&self) -> usize {
-        self.flowviz_deposit_due
-            .iter()
-            .flat_map(|due| due.iter())
-            .map(|(_, count)| *count)
-            .sum()
+        self.flowviz_total_dynamic_deposit_demand()
+    }
+
+    pub(crate) fn flowviz_total_transport_due_status(&self) -> usize {
+        self.flowviz_total_transport_due()
     }
 
     pub(crate) fn flowviz_peak_mobile_mass(&self) -> usize {
