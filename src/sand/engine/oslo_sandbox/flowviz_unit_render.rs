@@ -113,6 +113,7 @@ impl OsloSandboxEngine {
         let settled_targets = self.unit_settled_targets(grid_height);
         let micro = self.flowviz_unit_micro;
         let perceptual = self.flowviz_unit_perceptual;
+        let visual_support = self.flowviz_unit_visual_support;
         let mut changed = false;
         let mut discharged_done = Vec::new();
         let mut missing_settled_targets = 0usize;
@@ -124,6 +125,10 @@ impl OsloSandboxEngine {
                 debug_assert!(
                     segment.sequence > 0 && segment.sequence < observed_sequence_limit,
                     "unit carrier can replay only an already-observed physical segment"
+                );
+                debug_assert!(
+                    !visual_support || segment.observed_target_y.is_some(),
+                    "015G visual-support segment must be batch-finalized before replay"
                 );
                 let (target_x, target_y) = Self::unit_segment_target(
                     carrier,

@@ -156,9 +156,16 @@ impl OsloSandboxEngine {
         existing: Option<FlowVizMotionId>,
     ) -> Option<FlowVizMotionId> {
         if self.flowviz_unit {
-            let observed_target_y = self
-                .flowviz_unit_perceptual
-                .then(|| self.unit_observed_rolling_target_y(destination));
+            // 015G finalizes direct rolling lanes only after the complete
+            // authoritative quantum, when the final rolling occupancy is known.
+            // This prevents a grain that will leave later in the same quantum
+            // from temporarily lifting a newly-arrived carrier into a hollow rail.
+            let observed_target_y = if self.flowviz_unit_visual_support {
+                None
+            } else {
+                self.flowviz_unit_perceptual
+                    .then(|| self.unit_observed_rolling_target_y(destination))
+            };
             self.begin_unit_motion_with_geometry(
                 source,
                 Some(destination),
@@ -325,6 +332,77 @@ impl OsloSandboxEngine {
             Some(observed_source_y),
             Some(observed_target_y),
         );
+    }
+
+    pub(super) fn append_unit_rolling_segment_pending_target(
+        &mut self,
+        id: FlowVizMotionId,
+        source: usize,
+        destination: usize,
+        observed_source_y: f32,
+    ) {
+        self.append_unit_segment_with_geometry(
+            id,
+            source,
+            Some(destination),
+            Some(observed_source_y),
+            None,
+        );
+    }
+
+    /// Finalize every direct rolling lane against one coherent post-quantum
+    /// visual state. Lanes are contiguous immediately above the *visible* shadow
+    /// and are assigned only to rolling grains that actually remain at the site
+    /// after the authoritative quantum. This removes the transient-depth holes
+    /// produced when sequential physics processing counted grains that later
+    /// moved away or settled in the same quantum.
+    pub(super) fn finalize_direct_rolling_batch_geometry(&mut self) {
+        if !self.flowviz_unit_visual_support {
+            return;
+        }
+
+        let grid_height = self.surface.grid_height_dots as f32;
+        let shadow_heights = self
+            .flowviz_shadow_columns
+            .iter()
+            .map(Vec::len)
+            .collect::<Vec<_>>();
+        let mut depths = vec![0usize; self.columns.len()];
+        let mut misses = 0usize;
+        let (rolling_grains, carriers) =
+            (&mut self.rolling_grains, &mut self.flowviz_unit_carriers);
+
+        for rolling in rolling_grains.iter_mut() {
+            let site = rolling.site;
+            let depth = depths.get(site).copied().unwrap_or(0);
+            if let Some(value) = depths.get_mut(site) {
+                *value = value.saturating_add(1);
+            }
+            let target_y = grid_height
+                - shadow_heights.get(site).copied().unwrap_or(0) as f32
+                - depth as f32
+                - 1.0;
+
+            let Some(id) = rolling.motion_id else {
+                misses = misses.saturating_add(1);
+                continue;
+            };
+            let Some(carrier) = carriers.get_mut(&id) else {
+                misses = misses.saturating_add(1);
+                continue;
+            };
+            let Some(segment) = carrier.queued.back_mut() else {
+                // A caught-up rolling grain may be present between physical
+                // quanta. Only a newly observed hop/recruit owns a pending lane.
+                continue;
+            };
+            if segment.destination != Some(site) || segment.observed_target_y.is_some() {
+                continue;
+            }
+            segment.observed_target_y = Some(target_y);
+            rolling.unit_observed_y = Some(target_y);
+        }
+        self.flowviz_unit_misses = self.flowviz_unit_misses.saturating_add(misses);
     }
 
     pub(super) fn append_unit_rolling_segment(

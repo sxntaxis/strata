@@ -34,6 +34,10 @@ impl OsloSandboxEngine {
         self.flowviz_unit_direct_geometry
     }
 
+    pub(crate) fn flowviz_unit_visual_support_enabled(&self) -> bool {
+        self.flowviz_unit_visual_support
+    }
+
     /// SEDIMENT-015E presentation barrier. A rolling carrier that has already
     /// replayed every observed segment is caught up even though its physical
     /// grain remains mobile. New authoritative Oslo work is blocked only while
@@ -144,6 +148,7 @@ impl OsloSandboxEngine {
     pub(crate) fn advance_testing_coherent_flow_frame(&mut self) -> bool {
         debug_assert!(self.flowviz_unit_coherent);
         if self.flowviz_unit_coherent_batch_pending() {
+            self.finalize_direct_rolling_batch_geometry();
             return self.advance_testing_truthful_visual_frame();
         }
 
@@ -156,6 +161,7 @@ impl OsloSandboxEngine {
         changed |= self.advance_fluidization_field();
         changed |= self.advance_rolling_grains();
         changed |= self.topple_one_active_site();
+        self.finalize_direct_rolling_batch_geometry();
         // Presentation advances only after the complete authoritative quantum.
         // The next authoritative quantum is forbidden until this newly observed
         // batch is visually caught up.

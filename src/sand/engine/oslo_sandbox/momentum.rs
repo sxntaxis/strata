@@ -216,9 +216,12 @@ impl OsloSandboxEngine {
         visual_y: usize,
         motion_id: Option<flowviz_unit::FlowVizMotionId>,
     ) {
-        let unit_observed_y = self
-            .flowviz_unit_direct_geometry
-            .then(|| self.unit_observed_rolling_target_y(site));
+        let unit_observed_y = if self.flowviz_unit_visual_support {
+            Some(visual_y as f32)
+        } else {
+            self.flowviz_unit_direct_geometry
+                .then(|| self.unit_observed_rolling_target_y(site))
+        };
         let flat_coast_remaining = self.flat_coast_budget(site);
         self.rolling_grains.push_back(RollingGrain {
             site,
@@ -242,9 +245,12 @@ impl OsloSandboxEngine {
         visual_y: usize,
         motion_id: Option<flowviz_unit::FlowVizMotionId>,
     ) {
-        let unit_observed_y = self
-            .flowviz_unit_direct_geometry
-            .then(|| self.unit_observed_rolling_target_y(site));
+        let unit_observed_y = if self.flowviz_unit_visual_support {
+            Some(visual_y as f32)
+        } else {
+            self.flowviz_unit_direct_geometry
+                .then(|| self.unit_observed_rolling_target_y(site))
+        };
         let flat_coast_remaining = self.flat_coast_budget(site);
         self.rolling_grains.push_back(RollingGrain {
             site,
@@ -385,7 +391,17 @@ impl OsloSandboxEngine {
         let source_y = self.top_grain_y(source).unwrap_or(rolling.visual_y);
         if self.flowviz_unit {
             if let Some(id) = rolling.motion_id {
-                if self.flowviz_unit_direct_geometry {
+                if self.flowviz_unit_visual_support {
+                    let observed_source_y = rolling
+                        .unit_observed_y
+                        .unwrap_or(rolling.visual_y as f32);
+                    self.append_unit_rolling_segment_pending_target(
+                        id,
+                        source,
+                        next_site,
+                        observed_source_y,
+                    );
+                } else if self.flowviz_unit_direct_geometry {
                     let observed_source_y = rolling
                         .unit_observed_y
                         .unwrap_or(rolling.visual_y as f32);
