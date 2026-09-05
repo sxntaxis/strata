@@ -137,3 +137,23 @@ Only after machine green:
 ## R1 native-gate correction
 
 The first native run stopped at `unit_visual_support_final_batch_lanes_are_contiguous_above_visible_bed` before exercising 015G semantics. The synthetic fixture attempted to recruit `source_a -> destination` across two lattice sites, so `record_flowviz_mobile_entry_with_custody` correctly returned `None` under the existing adjacent-edge contract. R1 changes only the fixture: the two sources are now the immediate left and right neighbours of one destination, with matching Right/Left directions. Runtime source is unchanged. The contiguous-lane expectation remains exactly `base, base - 1, ...`.
+
+## R2 — finalized playback is the rendered position
+
+R1 passed the corrected contiguous-lane fixture, constructor control, and visible-support gate, then failed `unit_visual_support_playback_uses_finalized_target_after_shadow_changes`. The failure was semantic, not another fixture error.
+
+The finalized `active.target_y` remained correct, but the 015G constructor inherits `flowviz_unit_micro = true`; `advance_unit_flowviz()` therefore applied `UNIT_MICRO_TRACK_BLEND` after computing the coherent segment interpolation. The carrier's rendered `x/y` lagged behind `ideal_x/ideal_y`, even though 015G had already finalized a visual-support lane. A later shadow mutation could therefore expose a hole between the delayed visual bed and the lagging carrier.
+
+R2 changes only the 015G visual-support profile:
+
+```text
+finalized segment geometry
+        ↓
+coherent interpolation (ideal_x, ideal_y)
+        ↓
+rendered carrier x/y exactly
+```
+
+The inherited micro tracking blend remains unchanged for 015F and all earlier control profiles. 015G still uses the truthful raster, coherent physical-quantum barrier, live-rain policy, exact MotionId/CategoryId custody, and batch-final lane assignment. Oslo physics, thresholds, RNG, settlement/discharge authority, persistence and schema remain untouched.
+
+R2 native validation must first close the exact immutable-playback failure, then re-run all 015G support semantics and earlier controls.

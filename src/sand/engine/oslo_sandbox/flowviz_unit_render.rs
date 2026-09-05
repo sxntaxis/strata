@@ -183,10 +183,14 @@ impl OsloSandboxEngine {
                 let t = active.progress;
                 carrier.ideal_x = active.start_x + (target_x - active.start_x) * t;
                 carrier.ideal_y = active.start_y + (target_y - active.start_y) * t;
-                if micro {
+                if micro && !visual_support {
                     carrier.x += (carrier.ideal_x - carrier.x) * UNIT_MICRO_TRACK_BLEND;
                     carrier.y += (carrier.ideal_y - carrier.y) * UNIT_MICRO_TRACK_BLEND;
                 } else {
+                    // 015G already finalized one coherent visual-support lane for
+                    // this segment. Do not add a second smoothing clock that
+                    // leaves the rendered carrier behind that interpolation and
+                    // exposes unsupported holes in the delayed visual shadow.
                     carrier.x = carrier.ideal_x;
                     carrier.y = carrier.ideal_y;
                 }
