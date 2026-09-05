@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-04
 authority: working
-summary: H4/v5 remains published production authority and SEDIMENT-008 oslo-vessel-front physics remains owner-frozen. SEDIMENT-014R3 is machine-green but owner human rainbow evidence rejects aggregate weighted-parcel transport. SEDIMENT-015A opens a sibling unit-carrier experiment. Its first certified-base native run exposed a test-gate defect: the ordinary-drive gate paused authoritative RollingGrain physics and then incorrectly demanded the presentation-only clock drain a still-physical carrier. R2 repairs only that gate, requires full frozen-front physical quiescence before visual drain, and adds an anti-fabrication regression that presentation cannot invent settlement/egress.
-next: Natively validate SEDIMENT-015A-R2 on the certified R3 base. Run the anti-fabrication rolling-carrier regression first, then the corrected fully-quiescent ordinary-drive parity/exact-stack gate, followed by the remaining unit custody, wall-failure, resize, legacy conservative, and full repository gates. Human aesthetic acceptance still waits for SEDIMENT-015B local-separation microdynamics.
+summary: H4/v5 remains published production authority and SEDIMENT-008 oslo-vessel-front physics remains owner-frozen. SEDIMENT-014R3 is machine-green but owner-rejected for aggregate parcel fidelity. SEDIMENT-015A-R2 is machine-green on the certified R3 base with one-unit carriers, observed-edge-only routing, exact re-entry custody, exact stack order, and frozen-front parity. SEDIMENT-015B now adds presentation-only local separation, exact pending-depth approach, and bounded unique raster placement before the deferred human rainbow-collapse gate.
+next: Natively validate SEDIMENT-015B from certified 015A-R2 HEAD 0e791a8d10de838cd3b085a944ba4a973bc704b2. Run the 015B physics-parity/exact-stack gate, local-separation corridor gate, dense raster/category-visibility gate, and micro non-authority gate first; then re-run all 015A unit, legacy conservative, Oslo, repository, and help gates. Only if machine-green return to the owner human rainbow-collapse visual gate.
 ---
 
 # NOW — Strata

@@ -9,7 +9,10 @@ mod flowviz;
 mod flowviz_conservative;
 mod flowviz_conservative_render;
 mod flowviz_unit;
+mod flowviz_unit_micro;
 mod flowviz_unit_render;
+#[cfg(test)]
+mod flowviz_unit_micro_tests;
 
 const OSLO_THRESHOLD_LOW: u8 = 1;
 const OSLO_THRESHOLD_HIGH: u8 = 2;
@@ -159,6 +162,7 @@ pub(crate) struct OsloSandboxEngine {
     flowviz_enabled: bool,
     flowviz_conservative: bool,
     flowviz_unit: bool,
+    flowviz_unit_micro: bool,
     columns: Vec<Vec<CategoryId>>,
     // Presentation-only y overrides aligned one-for-one with `columns`.
     // A settled grain can already participate in authoritative physics while
@@ -288,9 +292,18 @@ impl OsloSandboxEngine {
         sandbox
     }
 
+    #[cfg(test)]
     pub(crate) fn new_front_unit_flowviz_vessel(width: u16, height: u16, seed: u64) -> Self {
         let mut sandbox = Self::new_front_vessel(width, height, seed);
         sandbox.enable_unit_flowviz();
+        sandbox.sync_surface();
+        sandbox
+    }
+
+    pub(crate) fn new_front_unit_micro_flowviz_vessel(width: u16, height: u16, seed: u64) -> Self {
+        let mut sandbox = Self::new_front_vessel(width, height, seed);
+        sandbox.enable_unit_flowviz();
+        sandbox.flowviz_unit_micro = true;
         sandbox.sync_surface();
         sandbox
     }
@@ -351,6 +364,7 @@ impl OsloSandboxEngine {
             flowviz_enabled: false,
             flowviz_conservative: false,
             flowviz_unit: false,
+            flowviz_unit_micro: false,
             columns: vec![Vec::new(); lattice_size],
             column_visual_y: vec![Vec::new(); lattice_size],
             flowviz_edge_flux: vec![0; lattice_size],
@@ -628,8 +642,20 @@ impl OsloSandboxEngine {
                             new_visible,
                         );
                         carrier.x = projected as f32 + 0.5;
+                        let ideal_projected = Self::project_site_between_bounds(
+                            carrier.ideal_x.max(0.0).floor() as usize,
+                            shifted_old_visible,
+                            new_visible,
+                        );
+                        carrier.ideal_x = ideal_projected as f32 + 0.5;
                         if let Some(active) = &mut carrier.active {
-                            active.start_x = carrier.x;
+                            active.start_x = carrier.ideal_x;
+                            let target_projected = Self::project_site_between_bounds(
+                                active.target_x.max(0.0).floor() as usize,
+                                shifted_old_visible,
+                                new_visible,
+                            );
+                            active.target_x = target_projected as f32 + 0.5;
                             active.segment.source = Self::project_site_between_bounds(
                                 active.segment.source,
                                 shifted_old_visible,
@@ -751,6 +777,19 @@ impl OsloSandboxEngine {
                     } else {
                         y.clamp(new_visible_vertical.0, new_visible_vertical.1 - 1) as f32
                     };
+                    let mut ideal_y = carrier.ideal_y.max(0.0).floor() as usize;
+                    ideal_y = ideal_y.saturating_add(vertical_added);
+                    carrier.ideal_y = if new_visible_height == 0 {
+                        0.0
+                    } else if new_visible_height < old_visible_height {
+                        Self::project_site_between_bounds(
+                            ideal_y,
+                            shifted_old_vertical,
+                            new_visible_vertical,
+                        ) as f32
+                    } else {
+                        ideal_y.clamp(new_visible_vertical.0, new_visible_vertical.1 - 1) as f32
+                    };
                     if let Some(active) = &mut carrier.active {
                         let mut start_y = active.start_y.max(0.0).floor() as usize;
                         start_y = start_y.saturating_add(vertical_added);
@@ -764,6 +803,19 @@ impl OsloSandboxEngine {
                             ) as f32
                         } else {
                             start_y.clamp(new_visible_vertical.0, new_visible_vertical.1 - 1) as f32
+                        };
+                        let mut target_y = active.target_y.max(0.0).floor() as usize;
+                        target_y = target_y.saturating_add(vertical_added);
+                        active.target_y = if new_visible_height == 0 {
+                            0.0
+                        } else if new_visible_height < old_visible_height {
+                            Self::project_site_between_bounds(
+                                target_y,
+                                shifted_old_vertical,
+                                new_visible_vertical,
+                            ) as f32
+                        } else {
+                            target_y.clamp(new_visible_vertical.0, new_visible_vertical.1 - 1) as f32
                         };
                     }
                 }

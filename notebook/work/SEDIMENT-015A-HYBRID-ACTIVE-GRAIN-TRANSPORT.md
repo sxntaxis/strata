@@ -1,11 +1,11 @@
 ---
 id: SEDIMENT-015A
 kind: work
-state: active
+state: complete
 created: 2026-09-04
 updated: 2026-09-04
 authority: working
-summary: Replace SEDIMENT-014 weighted/fungible transit only in a new debug model with one ephemeral visual carrier per physically active CategoryId unit, replaying only already-observed adjacent physical transport and revealing settled mass in exact physical stack order. Frozen SEDIMENT-008 front physics remains authoritative and untouched.
+summary: Machine-green hybrid active-grain foundation: one ephemeral visual carrier per physically active CategoryId unit, observed-edge-only replay, exact MotionId re-entry custody, exact stack-order reconciliation, and frozen SEDIMENT-008 front parity. Human aesthetic acceptance is intentionally deferred to SEDIMENT-015B micro-motion.
 ---
 
 # SEDIMENT-015A — Hybrid active-grain transport
@@ -270,3 +270,23 @@ physical RollingGrain still exists
 ```
 
 This is a strengthening of the acceptance test, not a relaxation: R1 could compare only the direct-topple prefix before explicit front flow finished; R2 compares the fully quiescent authoritative front state on every drive, then separately proves exact visual drain.
+
+## Native closure — 015A-R2
+
+SEDIMENT-015A-R2 is machine-green on the certified R3 base. The native validator returned final HEAD `0e791a8d10de838cd3b085a944ba4a973bc704b2`, tree `2bdb63db22357c4a933854f7ae223a34907da8b5`, and complete-history return-bundle SHA256 `1914816d1ed8737f89f0c3bc77496cf154aa62ef14507dd12f4bcd3650c8618d`.
+
+Certified properties include:
+
+- anti-fabrication rolling custody;
+- fully quiescent frozen-front parity;
+- no future-edge prediction;
+- same-MotionId re-entry continuity;
+- exact colored stack order;
+- exact-once discharge egress;
+- wall-failure unit concurrency;
+- resize round trip;
+- unit mass and CategoryId conservation;
+- 8 focused unit-FlowViz tests, 9 legacy conservative tests, 55 Oslo tests, and the full 334-unit + 23-integration suite;
+- unchanged persistence/schema and canonical production profile.
+
+The human visual gate remains deliberately unclaimed. SEDIMENT-015B owns local separation, carrier legibility, and exact pending-depth presentation before the owner judges the rainbow-collapse result.

@@ -24,6 +24,8 @@ pub(super) struct UnitActiveSegment {
     pub(super) segment: UnitSegment,
     pub(super) start_x: f32,
     pub(super) start_y: f32,
+    pub(super) target_x: f32,
+    pub(super) target_y: f32,
     pub(super) progress: f32,
 }
 
@@ -33,6 +35,8 @@ pub(super) struct FlowVizUnitCarrier {
     pub(super) category_id: CategoryId,
     pub(super) x: f32,
     pub(super) y: f32,
+    pub(super) ideal_x: f32,
+    pub(super) ideal_y: f32,
     pub(super) queued: VecDeque<UnitSegment>,
     pub(super) active: Option<UnitActiveSegment>,
     pub(super) physical: UnitPhysicalState,
@@ -108,11 +112,13 @@ impl OsloSandboxEngine {
         let shift = left_added as f32;
         for carrier in self.flowviz_unit_carriers.values_mut() {
             carrier.x += shift;
+            carrier.ideal_x += shift;
             if let UnitPhysicalState::Settled(site) = &mut carrier.physical {
                 *site += left_added;
             }
             if let Some(active) = &mut carrier.active {
                 active.start_x += shift;
+                active.target_x += shift;
                 active.segment.source += left_added;
                 active.segment.destination =
                     active.segment.destination.map(|site| site + left_added);
@@ -201,6 +207,8 @@ impl OsloSandboxEngine {
                     category_id,
                     x: source as f32,
                     y: source_y as f32,
+                    ideal_x: source as f32,
+                    ideal_y: source_y as f32,
                     queued: VecDeque::new(),
                     active: None,
                     physical: UnitPhysicalState::Rolling,
@@ -235,6 +243,8 @@ impl OsloSandboxEngine {
                 category_id,
                 x: site as f32,
                 y: visual_y as f32,
+                ideal_x: site as f32,
+                ideal_y: visual_y as f32,
                 queued: VecDeque::new(),
                 active: None,
                 physical: UnitPhysicalState::Settled(site),
