@@ -676,7 +676,18 @@ impl TestingSandEngine {
                 let (canonical_w, canonical_h) = engine.canonical_dimensions();
                 let (min_h, max_h, left_h, right_h) = engine.visible_profile();
                 let (rain_left, rain_center, rain_right) = engine.rain_region_counts();
-                let flowviz = if engine.flowviz_conservative_enabled() {
+                let flowviz = if engine.flowviz_unit_enabled() {
+                    format!(
+                        " · grains=active:{} peak:{} segments:{} reveals:{} egress:{} misses:{} shadow:{}",
+                        engine.flowviz_unit_carrier_count(),
+                        engine.flowviz_unit_peak(),
+                        engine.flowviz_unit_segments(),
+                        engine.flowviz_unit_reveals(),
+                        engine.flowviz_unit_egress_pending(),
+                        engine.flowviz_unit_misses(),
+                        engine.flowviz_shadow_mass()
+                    )
+                } else if engine.flowviz_conservative_enabled() {
                     format!(
                         " · parcels=count:{} mass:{} shadow:{} due:{} route_due:{} flux_edges:{} peak_count:{} peak_mass:{} withdrawals:{} deposits:{} reused:{} coalesced:{} misses:{}",
                         engine.flowviz_tracer_count(),
@@ -2416,6 +2427,13 @@ impl App {
                     self.sand_engine.snapshot_state().rng_state,
                 ),
             ))),
+            "oslo-vessel-front-grains" => Ok(TestingSandEngine::Oslo(Box::new(
+                OsloSandboxEngine::new_front_unit_flowviz_vessel(
+                    self.sand_engine.cell_width,
+                    self.sand_engine.cell_height,
+                    self.sand_engine.snapshot_state().rng_state,
+                ),
+            ))),
             "oslo-vessel-fluid" => Ok(TestingSandEngine::Oslo(Box::new(
                 OsloSandboxEngine::new_fluid_vessel(
                     self.sand_engine.cell_width,
@@ -2424,7 +2442,7 @@ impl App {
                 ),
             ))),
             _ => Err(
-                "testingcheats model must be h4, classic, hybrid, oslo-zero, oslo-box, oslo-vessel, oslo-vessel-momentum, oslo-vessel-front, oslo-vessel-front-flowviz, oslo-vessel-front-parcels, or oslo-vessel-fluid"
+                "testingcheats model must be h4, classic, hybrid, oslo-zero, oslo-box, oslo-vessel, oslo-vessel-momentum, oslo-vessel-front, oslo-vessel-front-flowviz, oslo-vessel-front-parcels, oslo-vessel-front-grains, or oslo-vessel-fluid"
                     .to_string(),
             ),
         }

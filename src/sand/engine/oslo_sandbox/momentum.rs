@@ -80,6 +80,14 @@ impl OsloSandboxEngine {
     /// settled CategoryId stack; physics continues to mutate `columns` at the
     /// same event as before SEDIMENT-010.
     pub(super) fn pop_settled_grain(&mut self, site: usize) -> Option<(CategoryId, usize)> {
+        let (category_id, visual_y, _) = self.pop_settled_grain_with_custody(site)?;
+        Some((category_id, visual_y))
+    }
+
+    pub(super) fn pop_settled_grain_with_custody(
+        &mut self,
+        site: usize,
+    ) -> Option<(CategoryId, usize, Option<flowviz_unit::FlowVizMotionId>)> {
         self.normalize_column_visual_shape(site);
         let physical_y = self.top_grain_y(site)?;
         let visual_y = if self.flowviz_enabled {
@@ -92,8 +100,9 @@ impl OsloSandboxEngine {
                 .flatten()
                 .unwrap_or(physical_y)
         };
+        let custody = self.flowviz_unit.then(|| self.pop_unit_custody(site)).flatten();
         let category_id = self.columns.get_mut(site)?.pop()?;
-        Some((category_id, visual_y))
+        Some((category_id, visual_y, custody))
     }
 
     /// Push authoritative settled mass immediately, exactly as the frozen front
@@ -105,6 +114,16 @@ impl OsloSandboxEngine {
         site: usize,
         category_id: CategoryId,
         visual_y: Option<usize>,
+    ) {
+        self.push_settled_grain_at_visual_y_with_custody(site, category_id, visual_y, None);
+    }
+
+    pub(super) fn push_settled_grain_at_visual_y_with_custody(
+        &mut self,
+        site: usize,
+        category_id: CategoryId,
+        visual_y: Option<usize>,
+        custody: Option<flowviz_unit::FlowVizMotionId>,
     ) {
         self.normalize_column_visual_shape(site);
         self.columns[site].push(category_id);
@@ -118,6 +137,9 @@ impl OsloSandboxEngine {
             visual_y.filter(|value| *value != target_y)
         };
         self.column_visual_y[site].push(visual_y);
+        if self.flowviz_unit {
+            self.push_unit_custody(site, custody);
+        }
     }
 
     pub(super) fn settled_visual_in_transit_count(&self) -> usize {
@@ -177,6 +199,17 @@ impl OsloSandboxEngine {
         direction: ToppleDirection,
         visual_y: usize,
     ) {
+        self.seed_rolling_grain_at_y_with_motion(site, category_id, direction, visual_y, None);
+    }
+
+    pub(super) fn seed_rolling_grain_at_y_with_motion(
+        &mut self,
+        site: usize,
+        category_id: CategoryId,
+        direction: ToppleDirection,
+        visual_y: usize,
+        motion_id: Option<flowviz_unit::FlowVizMotionId>,
+    ) {
         let flat_coast_remaining = self.flat_coast_budget(site);
         self.rolling_grains.push_back(RollingGrain {
             site,
@@ -184,6 +217,7 @@ impl OsloSandboxEngine {
             category_id,
             direction,
             flat_coast_remaining,
+            motion_id,
         });
         self.momentum_seeds = self.momentum_seeds.saturating_add(1);
         self.momentum_event_seeds = self.momentum_event_seeds.saturating_add(1);
@@ -197,6 +231,19 @@ impl OsloSandboxEngine {
         direction: ToppleDirection,
         visual_y: usize,
     ) {
+        self.push_recruited_rolling_grain_at_y_with_motion(
+            site, category_id, direction, visual_y, None,
+        );
+    }
+
+    pub(super) fn push_recruited_rolling_grain_at_y_with_motion(
+        &mut self,
+        site: usize,
+        category_id: CategoryId,
+        direction: ToppleDirection,
+        visual_y: usize,
+        motion_id: Option<flowviz_unit::FlowVizMotionId>,
+    ) {
         let flat_coast_remaining = self.flat_coast_budget(site);
         self.rolling_grains.push_back(RollingGrain {
             site,
@@ -204,11 +251,15 @@ impl OsloSandboxEngine {
             category_id,
             direction,
             flat_coast_remaining,
+            motion_id,
         });
         self.record_rolling_peak();
     }
 
     pub(crate) fn rolling_visual_motion_active(&self) -> bool {
+        if self.flowviz_unit {
+            return !self.flowviz_unit_carriers.is_empty();
+        }
         if self.flowviz_conservative {
             return !self.flowviz_parcels.is_empty();
         }
@@ -219,6 +270,9 @@ impl OsloSandboxEngine {
     }
 
     pub(crate) fn rolling_visual_in_transit_count(&self) -> usize {
+        if self.flowviz_unit {
+            return self.flowviz_unit_carriers.len();
+        }
         if self.flowviz_conservative {
             return self.flowviz_parcel_mass();
         }
@@ -240,6 +294,9 @@ impl OsloSandboxEngine {
     }
 
     pub(crate) fn total_visual_in_transit_count(&self) -> usize {
+        if self.flowviz_unit {
+            return self.flowviz_unit_carriers.len();
+        }
         if self.flowviz_conservative {
             return self.flowviz_parcel_mass();
         }
@@ -297,12 +354,26 @@ impl OsloSandboxEngine {
     }
 
     fn settle_rolling_grain(&mut self, rolling: RollingGrain) {
-        self.push_settled_grain_at_visual_y(
-            rolling.site,
-            rolling.category_id,
-            Some(rolling.visual_y),
-        );
-        self.record_flowviz_settlement(rolling.site, rolling.category_id);
+        if self.flowviz_unit {
+            self.push_settled_grain_at_visual_y_with_custody(
+                rolling.site,
+                rolling.category_id,
+                Some(rolling.visual_y),
+                rolling.motion_id,
+            );
+            if let Some(id) = rolling.motion_id {
+                self.mark_unit_settled(id, rolling.site);
+            } else {
+                self.flowviz_unit_misses = self.flowviz_unit_misses.saturating_add(1);
+            }
+        } else {
+            self.push_settled_grain_at_visual_y(
+                rolling.site,
+                rolling.category_id,
+                Some(rolling.visual_y),
+            );
+            self.record_flowviz_settlement(rolling.site, rolling.category_id);
+        }
         self.momentum_settles = self.momentum_settles.saturating_add(1);
         self.enqueue_neighborhood(rolling.site);
     }
@@ -310,7 +381,15 @@ impl OsloSandboxEngine {
     fn move_rolling_grain(&mut self, rolling: &mut RollingGrain, next_site: usize) {
         let source = rolling.site;
         let source_y = self.top_grain_y(source).unwrap_or(rolling.visual_y);
-        self.record_flowviz_transfer(source, next_site, rolling.category_id, source_y);
+        if self.flowviz_unit {
+            if let Some(id) = rolling.motion_id {
+                self.append_unit_segment(id, source, Some(next_site));
+            } else {
+                self.flowviz_unit_misses = self.flowviz_unit_misses.saturating_add(1);
+            }
+        } else {
+            self.record_flowviz_transfer(source, next_site, rolling.category_id, source_y);
+        }
         rolling.site = next_site;
         self.momentum_hops = self.momentum_hops.saturating_add(1);
         self.momentum_event_hops = self.momentum_event_hops.saturating_add(1);
@@ -355,12 +434,24 @@ impl OsloSandboxEngine {
             return false;
         }
 
-        let (category_id, visual_y) = self
-            .pop_settled_grain(source)
+        let (category_id, visual_y, custody) = self
+            .pop_settled_grain_with_custody(source)
             .expect("front erosion source was checked non-empty");
-        self.record_flowviz_mobile_entry(source, destination, category_id, visual_y);
+        let motion_id = self.record_flowviz_mobile_entry_with_custody(
+            source,
+            destination,
+            category_id,
+            visual_y,
+            custody,
+        );
         eroded_this_tick[source] = true;
-        self.push_recruited_rolling_grain_at_y(destination, category_id, direction, visual_y);
+        self.push_recruited_rolling_grain_at_y_with_motion(
+            destination,
+            category_id,
+            direction,
+            visual_y,
+            motion_id,
+        );
         self.record_front_recruit_move(true);
         self.enqueue_neighborhood(source);
         self.enqueue_neighborhood(destination);
@@ -395,11 +486,23 @@ impl OsloSandboxEngine {
             return false;
         }
 
-        let (category_id, visual_y) = self
-            .pop_settled_grain(uphill)
+        let (category_id, visual_y, custody) = self
+            .pop_settled_grain_with_custody(uphill)
             .expect("support-loss source was checked non-empty");
-        self.record_flowviz_mobile_entry(uphill, support_site, category_id, visual_y);
-        self.push_recruited_rolling_grain_at_y(support_site, category_id, direction, visual_y);
+        let motion_id = self.record_flowviz_mobile_entry_with_custody(
+            uphill,
+            support_site,
+            category_id,
+            visual_y,
+            custody,
+        );
+        self.push_recruited_rolling_grain_at_y_with_motion(
+            support_site,
+            category_id,
+            direction,
+            visual_y,
+            motion_id,
+        );
         self.record_front_recruit_move(false);
         self.enqueue_neighborhood(uphill);
         self.enqueue_neighborhood(support_site);

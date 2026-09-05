@@ -9,8 +9,11 @@ fn grain() -> CategoryId {
 fn set_column_height(engine: &mut OsloSandboxEngine, site: usize, height: usize) {
     engine.columns[site] = vec![grain(); height];
     engine.column_visual_y[site] = vec![None; height];
-    if engine.flowviz_conservative {
+    if engine.flowviz_conservative || engine.flowviz_unit {
         engine.flowviz_shadow_columns[site] = vec![grain(); height];
+    }
+    if engine.flowviz_unit {
+        engine.flowviz_unit_custody[site] = vec![None; height];
     }
 }
 
@@ -64,6 +67,46 @@ fn conservative_visual_category_counts(
                     .flowviz_parcels
                     .iter()
                     .flat_map(|parcel| std::iter::repeat_n(parcel.category_id, parcel.mass)),
+            ),
+    )
+}
+
+fn unit_visual_category_counts(
+    engine: &OsloSandboxEngine,
+) -> std::collections::HashMap<CategoryId, usize> {
+    category_counts(
+        engine
+            .flowviz_shadow_columns
+            .iter()
+            .flatten()
+            .copied()
+            .chain(
+                engine
+                    .flowviz_unit_carriers
+                    .values()
+                    .map(|carrier| carrier.category_id),
+            ),
+    )
+}
+
+fn unit_authoritative_category_counts(
+    engine: &OsloSandboxEngine,
+) -> std::collections::HashMap<CategoryId, usize> {
+    category_counts(
+        engine
+            .columns
+            .iter()
+            .flatten()
+            .copied()
+            .chain(engine.rolling_grains.iter().map(|grain| grain.category_id))
+            .chain(
+                engine
+                    .flowviz_unit_carriers
+                    .values()
+                    .filter(|carrier| {
+                        carrier.physical == flowviz_unit::UnitPhysicalState::Discharged
+                    })
+                    .map(|carrier| carrier.category_id),
             ),
     )
 }
@@ -1431,4 +1474,433 @@ fn conservative_flowviz_wall_failure_conserves_visual_mass_and_drains_to_real_cr
         per_site_category_counts(&parcels.flowviz_shadow_columns),
         per_site_category_counts(&parcels.columns)
     );
+}
+
+
+#[test]
+fn unit_flowviz_preserves_frozen_front_physics_and_exact_stack_on_ordinary_drive() {
+    let mut frozen = OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED);
+    let mut grains = OsloSandboxEngine::new_front_unit_flowviz_vessel(20, 10, TEST_SEED);
+    let width = frozen.lattice_size();
+
+    for drive in 0..2_000usize {
+        let site = (drive.wrapping_mul(37).wrapping_add(11)) % width;
+        let frozen_moves = direct_drive_and_relax(&mut frozen, site);
+        let grain_moves = direct_drive_and_relax(&mut grains, site);
+        assert_eq!(grain_moves, frozen_moves);
+
+        let mut visual_guard = 0usize;
+        while grains.rolling_visual_motion_active() {
+            visual_guard = visual_guard.saturating_add(1);
+            assert!(visual_guard < 20_000, "unit visual transport failed to drain");
+            let _ = grains.advance_flowviz_tracers();
+            assert!(grains.flowviz_unit_mass_matches_physics());
+            assert_eq!(
+                unit_visual_category_counts(&grains),
+                unit_authoritative_category_counts(&grains)
+            );
+        }
+        assert_eq!(grains.flowviz_shadow_columns, grains.columns);
+    }
+
+    assert_eq!(grains.columns, frozen.columns);
+    assert_eq!(grains.critical_slopes, frozen.critical_slopes);
+    assert_eq!(grains.threshold_rng_state, frozen.threshold_rng_state);
+    assert_eq!(grains.relax_rng_state, frozen.relax_rng_state);
+    assert_eq!(grains.discharged_count(), frozen.discharged_count());
+    assert_eq!(grains.front_erosions(), frozen.front_erosions());
+    assert_eq!(grains.front_support_recruits(), frozen.front_support_recruits());
+    assert_eq!(grains.flowviz_unit_misses(), 0);
+}
+
+#[test]
+fn unit_flowviz_reentry_keeps_one_motion_id_and_reveals_exact_stack() {
+    let mut engine = OsloSandboxEngine::new_front_unit_flowviz_vessel(20, 10, TEST_SEED);
+    let source = engine.lattice_size() / 2;
+    let middle = source + 1;
+    let destination = source + 2;
+    set_column_height(&mut engine, source, 3);
+    set_column_height(&mut engine, middle, 0);
+    set_column_height(&mut engine, destination, 0);
+    engine.reset_unit_flowviz_from_physics();
+
+    let (category_id, visual_y, custody) = engine.pop_settled_grain_with_custody(source).unwrap();
+    assert!(custody.is_none());
+    let motion_id = engine
+        .begin_unit_motion(source, Some(middle), category_id, visual_y, custody)
+        .unwrap();
+    engine.push_settled_grain_at_visual_y_with_custody(
+        middle,
+        category_id,
+        Some(visual_y),
+        Some(motion_id),
+    );
+    engine.mark_unit_settled(motion_id, middle);
+
+    let (category_id, visual_y, custody) = engine.pop_settled_grain_with_custody(middle).unwrap();
+    assert_eq!(custody, Some(motion_id));
+    let reused = engine
+        .begin_unit_motion(middle, Some(destination), category_id, visual_y, custody)
+        .unwrap();
+    assert_eq!(reused, motion_id);
+    engine.push_settled_grain_at_visual_y_with_custody(
+        destination,
+        category_id,
+        Some(visual_y),
+        Some(motion_id),
+    );
+    engine.mark_unit_settled(motion_id, destination);
+
+    assert_eq!(engine.flowviz_unit_carrier_count(), 1);
+    assert_eq!(engine.flowviz_unit_segments(), 2);
+    assert!(engine.flowviz_unit_mass_matches_physics());
+
+    let mut guard = 0usize;
+    while engine.rolling_visual_motion_active() {
+        guard = guard.saturating_add(1);
+        assert!(guard < 1_000, "unit re-entry carrier failed to drain");
+        let _ = engine.advance_flowviz_tracers();
+        assert!(engine.flowviz_unit_mass_matches_physics());
+        assert_eq!(
+            unit_visual_category_counts(&engine),
+            unit_authoritative_category_counts(&engine)
+        );
+    }
+
+    assert_eq!(engine.flowviz_shadow_columns, engine.columns);
+    assert_eq!(engine.flowviz_unit_reveals(), 1);
+    assert_eq!(engine.flowviz_unit_misses(), 0);
+}
+
+#[test]
+fn unit_flowviz_wall_failure_replays_unit_transport_and_drains_to_exact_stack() {
+    fn prepare(mut engine: OsloSandboxEngine) -> OsloSandboxEngine {
+        let width = engine.lattice_size();
+        for site in 0..(width / 2) {
+            set_column_height(&mut engine, site, 12);
+        }
+        for site in (width / 2)..width {
+            set_column_height(&mut engine, site, 2);
+        }
+        engine.reset_unit_flowviz_from_physics();
+        engine.critical_slopes.fill(OSLO_THRESHOLD_HIGH);
+        engine.enqueue_neighborhood(width / 2 - 1);
+        engine.enqueue_neighborhood(width / 2);
+        engine
+    }
+
+    fn relax(mut engine: OsloSandboxEngine) -> OsloSandboxEngine {
+        let mut guard = 0usize;
+        loop {
+            guard = guard.saturating_add(1);
+            assert!(guard < 250_000, "unit wall relaxation did not quiesce");
+            let mut changed = engine.advance_rolling_grains();
+            changed |= engine.topple_one_active_site();
+            if !changed && engine.active_sites.is_empty() && !engine.explicit_flow_active() {
+                break;
+            }
+        }
+        engine
+    }
+
+    let frozen = relax(prepare(OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED)));
+    let mut grains = relax(prepare(OsloSandboxEngine::new_front_unit_flowviz_vessel(
+        20, 10, TEST_SEED,
+    )));
+
+    assert_eq!(grains.columns, frozen.columns);
+    assert_eq!(grains.critical_slopes, frozen.critical_slopes);
+    assert_eq!(grains.threshold_rng_state, frozen.threshold_rng_state);
+    assert_eq!(grains.relax_rng_state, frozen.relax_rng_state);
+    assert_eq!(grains.discharged_count(), frozen.discharged_count());
+    assert!(grains.flowviz_unit_peak() > 8);
+    assert!(grains.flowviz_unit_segments() > grains.flowviz_unit_peak());
+    assert_eq!(grains.flowviz_unit_misses(), 0);
+    assert!(grains.flowviz_unit_mass_matches_physics());
+
+    let mut visual_guard = 0usize;
+    while grains.rolling_visual_motion_active() {
+        visual_guard = visual_guard.saturating_add(1);
+        assert!(visual_guard < 100_000, "unit wall transport failed to drain");
+        let _ = grains.advance_flowviz_tracers();
+        assert!(grains.flowviz_unit_mass_matches_physics());
+        assert_eq!(
+            unit_visual_category_counts(&grains),
+            unit_authoritative_category_counts(&grains)
+        );
+    }
+
+    assert_eq!(grains.flowviz_unit_carrier_count(), 0);
+    assert_eq!(grains.flowviz_unit_egress_pending(), 0);
+    assert_eq!(grains.flowviz_shadow_columns, grains.columns);
+    assert!(grains
+        .flowviz_unit_custody
+        .iter()
+        .flatten()
+        .all(Option::is_none));
+    assert_eq!(grains.flowviz_unit_misses(), 0);
+}
+
+
+#[test]
+fn unit_flowviz_never_predicts_an_unobserved_edge() {
+    let mut engine = OsloSandboxEngine::new_front_unit_flowviz_vessel(20, 10, TEST_SEED);
+    let source = engine.lattice_size() / 2;
+    let middle = source + 1;
+    let destination = source + 2;
+    set_column_height(&mut engine, source, 3);
+    set_column_height(&mut engine, middle, 0);
+    set_column_height(&mut engine, destination, 0);
+    engine.reset_unit_flowviz_from_physics();
+
+    let (category_id, visual_y, custody) = engine.pop_settled_grain_with_custody(source).unwrap();
+    let id = engine
+        .begin_unit_motion(source, Some(middle), category_id, visual_y, custody)
+        .unwrap();
+    engine.seed_rolling_grain_at_y_with_motion(
+        middle,
+        category_id,
+        ToppleDirection::Right,
+        visual_y,
+        Some(id),
+    );
+
+    assert_eq!(engine.flowviz_unit_segments(), 1);
+    let carrier = engine.flowviz_unit_carriers.get(&id).unwrap();
+    assert_eq!(carrier.queued.len(), 1);
+    assert!(carrier.active.is_none());
+    assert_eq!(carrier.queued.front().unwrap().sequence, 1);
+    assert_eq!(carrier.queued.front().unwrap().source, source);
+    assert_eq!(carrier.queued.front().unwrap().destination, Some(middle));
+
+    for _ in 0..8 {
+        let _ = engine.advance_flowviz_tracers();
+    }
+    let carrier = engine.flowviz_unit_carriers.get(&id).unwrap();
+    assert_eq!(engine.flowviz_unit_segments(), 1);
+    assert!(carrier.queued.is_empty());
+    assert!(carrier.active.is_none());
+    assert_eq!(carrier.physical, flowviz_unit::UnitPhysicalState::Rolling);
+
+    engine.append_unit_segment(id, middle, Some(destination));
+    assert_eq!(engine.flowviz_unit_segments(), 2);
+    let second = engine
+        .flowviz_unit_carriers
+        .get(&id)
+        .unwrap()
+        .queued
+        .front()
+        .unwrap();
+    assert_eq!(second.sequence, 2);
+    assert_eq!(second.destination, Some(destination));
+    assert_eq!(engine.flowviz_unit_misses(), 0);
+}
+
+#[test]
+fn unit_flowviz_resize_round_trip_preserves_custody_and_exact_stack() {
+    let mut engine = OsloSandboxEngine::new_front_unit_flowviz_vessel(20, 10, TEST_SEED);
+    let source = engine.lattice_size() / 2;
+    let destination = source + 1;
+    set_column_height(&mut engine, source, 4);
+    set_column_height(&mut engine, destination, 1);
+    engine.reset_unit_flowviz_from_physics();
+
+    let (category_id, visual_y, custody) = engine.pop_settled_grain_with_custody(source).unwrap();
+    let id = engine
+        .begin_unit_motion(source, Some(destination), category_id, visual_y, custody)
+        .unwrap();
+    engine.seed_rolling_grain_at_y_with_motion(
+        destination,
+        category_id,
+        ToppleDirection::Right,
+        visual_y,
+        Some(id),
+    );
+    assert!(engine.flowviz_unit_mass_matches_physics());
+    assert_eq!(
+        unit_visual_category_counts(&engine),
+        unit_authoritative_category_counts(&engine)
+    );
+
+    engine.resize(10, 8);
+    assert!(engine.flowviz_unit_carriers.contains_key(&id));
+    assert!(engine.flowviz_unit_mass_matches_physics());
+    assert_eq!(
+        unit_visual_category_counts(&engine),
+        unit_authoritative_category_counts(&engine)
+    );
+
+    engine.resize(20, 10);
+    assert!(engine.flowviz_unit_carriers.contains_key(&id));
+    assert!(engine.flowviz_unit_mass_matches_physics());
+    assert_eq!(
+        unit_visual_category_counts(&engine),
+        unit_authoritative_category_counts(&engine)
+    );
+
+    let rolling = engine.rolling_grains.pop_front().unwrap();
+    engine.push_settled_grain_at_visual_y_with_custody(
+        rolling.site,
+        rolling.category_id,
+        Some(rolling.visual_y),
+        rolling.motion_id,
+    );
+    engine.mark_unit_settled(id, rolling.site);
+
+    let mut guard = 0usize;
+    while engine.rolling_visual_motion_active() {
+        guard = guard.saturating_add(1);
+        assert!(guard < 1_000, "unit resize carrier failed to drain");
+        let _ = engine.advance_flowviz_tracers();
+        assert!(engine.flowviz_unit_mass_matches_physics());
+        assert_eq!(
+            unit_visual_category_counts(&engine),
+            unit_authoritative_category_counts(&engine)
+        );
+    }
+
+    assert_eq!(engine.flowviz_shadow_columns, engine.columns);
+    assert!(engine
+        .flowviz_unit_custody
+        .iter()
+        .flatten()
+        .all(Option::is_none));
+    assert_eq!(engine.flowviz_unit_misses(), 0);
+}
+
+#[test]
+fn unit_flowviz_colored_settlement_waits_for_exact_stack_order() {
+    let mut engine = OsloSandboxEngine::new_front_unit_flowviz_vessel(20, 10, TEST_SEED);
+    let destination = engine.lattice_size() / 2;
+    let first_source = destination - 2;
+    let middle = destination - 1;
+    let second_source = destination + 1;
+    let base = CategoryId::new(31);
+    let lower = CategoryId::new(41);
+    let upper = CategoryId::new(51);
+
+    engine.columns[first_source] = vec![lower];
+    engine.column_visual_y[first_source] = vec![None];
+    engine.columns[second_source] = vec![upper];
+    engine.column_visual_y[second_source] = vec![None];
+    engine.columns[destination] = vec![base];
+    engine.column_visual_y[destination] = vec![None];
+    engine.reset_unit_flowviz_from_physics();
+
+    let (lower_category, lower_y, lower_custody) =
+        engine.pop_settled_grain_with_custody(first_source).unwrap();
+    let lower_id = engine
+        .begin_unit_motion(
+            first_source,
+            Some(middle),
+            lower_category,
+            lower_y,
+            lower_custody,
+        )
+        .unwrap();
+    engine.append_unit_segment(lower_id, middle, Some(destination));
+    engine.push_settled_grain_at_visual_y_with_custody(
+        destination,
+        lower_category,
+        Some(lower_y),
+        Some(lower_id),
+    );
+    engine.mark_unit_settled(lower_id, destination);
+
+    let (upper_category, upper_y, upper_custody) =
+        engine.pop_settled_grain_with_custody(second_source).unwrap();
+    let upper_id = engine
+        .begin_unit_motion(
+            second_source,
+            Some(destination),
+            upper_category,
+            upper_y,
+            upper_custody,
+        )
+        .unwrap();
+    engine.push_settled_grain_at_visual_y_with_custody(
+        destination,
+        upper_category,
+        Some(upper_y),
+        Some(upper_id),
+    );
+    engine.mark_unit_settled(upper_id, destination);
+
+    assert_eq!(engine.columns[destination], vec![base, lower, upper]);
+    assert_eq!(engine.flowviz_shadow_columns[destination], vec![base]);
+    assert_eq!(engine.flowviz_unit_carrier_count(), 2);
+
+    for _ in 0..5 {
+        let _ = engine.advance_flowviz_tracers();
+    }
+    assert!(engine.flowviz_unit_carriers.get(&upper_id).unwrap().arrived);
+    assert!(!engine.flowviz_unit_carriers.get(&lower_id).unwrap().arrived);
+    assert_eq!(
+        engine.flowviz_shadow_columns[destination],
+        vec![base],
+        "upper CategoryId must not reveal through a lower pending stack depth"
+    );
+    assert_eq!(
+        unit_visual_category_counts(&engine),
+        unit_authoritative_category_counts(&engine)
+    );
+
+    let mut guard = 0usize;
+    while engine.rolling_visual_motion_active() {
+        guard = guard.saturating_add(1);
+        assert!(guard < 1_000, "colored ordered settlement failed to drain");
+        let _ = engine.advance_flowviz_tracers();
+        assert!(engine.flowviz_unit_mass_matches_physics());
+        assert_eq!(
+            unit_visual_category_counts(&engine),
+            unit_authoritative_category_counts(&engine)
+        );
+    }
+
+    assert_eq!(engine.flowviz_shadow_columns, engine.columns);
+    assert_eq!(engine.flowviz_unit_reveals(), 2);
+    assert_eq!(engine.flowviz_unit_misses(), 0);
+}
+
+#[test]
+fn unit_flowviz_discharge_keeps_one_visible_unit_until_observed_egress_finishes() {
+    let mut engine = OsloSandboxEngine::new_front_unit_flowviz_vessel(20, 10, TEST_SEED);
+    let (visible_start, _) = engine.visible_lattice_bounds();
+    let category_id = CategoryId::new(61);
+    engine.columns[visible_start] = vec![category_id];
+    engine.column_visual_y[visible_start] = vec![None];
+    engine.reset_unit_flowviz_from_physics();
+
+    let (category_id, visual_y, custody) =
+        engine.pop_settled_grain_with_custody(visible_start).unwrap();
+    let id = engine
+        .begin_unit_motion(visible_start, None, category_id, visual_y, custody)
+        .unwrap();
+    engine.mark_unit_discharged(id);
+
+    assert_eq!(engine.flowviz_unit_carrier_count(), 1);
+    assert_eq!(engine.flowviz_unit_egress_pending(), 1);
+    assert_eq!(engine.flowviz_unit_segments(), 1);
+    assert!(engine.flowviz_unit_mass_matches_physics());
+    assert_eq!(
+        unit_visual_category_counts(&engine),
+        unit_authoritative_category_counts(&engine)
+    );
+
+    let mut guard = 0usize;
+    while engine.rolling_visual_motion_active() {
+        guard = guard.saturating_add(1);
+        assert!(guard < 100, "unit egress carrier failed to leave the viewport");
+        let _ = engine.advance_flowviz_tracers();
+        assert!(engine.flowviz_unit_mass_matches_physics());
+        assert_eq!(
+            unit_visual_category_counts(&engine),
+            unit_authoritative_category_counts(&engine)
+        );
+    }
+
+    assert_eq!(engine.flowviz_unit_carrier_count(), 0);
+    assert_eq!(engine.flowviz_unit_egress_pending(), 0);
+    assert_eq!(engine.flowviz_shadow_columns, engine.columns);
+    assert_eq!(engine.flowviz_unit_misses(), 0);
 }

@@ -1,7 +1,7 @@
 ---
 id: SEDIMENT-014R3
 kind: work
-state: active
+state: superseded
 created: 2026-09-04
 updated: 2026-09-04
 authority: working
@@ -108,9 +108,15 @@ Unchanged:
 - persistence/schema;
 - scheduler/live-rain clocks.
 
-## Acceptance
+## Outcome
 
-Native validation must prove, in order:
+Local native validation passed the complete R3 machine contract after permitted mechanical-only fallout. The certified local result is HEAD `a3837773e067aa0b3ff4fcb15b58ceeafbe92f59`, TREE `23e6c83be6af9a003cb2762fee50755165501fb0`; its complete-history return bundle SHA256 is `6aa9fa5bfa09c100a83d0324a4d2eef34acc8035e0d4f21c167412d33812f383`. The former ordinary-drive failure reached `flowviz_shadow_misses == 0`; over-height discharge/mobile-entry/settled-transfer, R2 fungible discharge, R1 delayed-deposit/re-entry/two-edge/wall-drain, focused Oslo/conservative tests, fmt, strict Clippy, full tests, and help smoke were green. Frozen front physics remained unchanged.
+
+The subsequent owner rainbow human gate did **not** accept SEDIMENT-014 as the final visual solution. Weighted/fungible parcels preserve accounting but aggregate too much CategoryId timing and spatial progression; the collapse still develops visually strange color regions and settlement progression. That human rejection supersedes further parcel tuning. SEDIMENT-015A replaces only the experimental transit representation with ephemeral unit carriers.
+
+## Acceptance (completed machine gate)
+
+Native validation proved, in order:
 
 - the exact former 11-miss ordinary regression reaches zero;
 - all three new over-height custody/projection regressions pass;

@@ -175,11 +175,23 @@ impl OsloSandboxEngine {
             .collect::<Vec<_>>();
 
         for (site, direction, destination) in release_sites {
-            let Some((category_id, visual_y)) = self.pop_settled_grain(site) else {
+            let Some((category_id, visual_y, custody)) = self.pop_settled_grain_with_custody(site) else {
                 continue;
             };
-            self.record_flowviz_mobile_entry(site, destination, category_id, visual_y);
-            self.push_recruited_rolling_grain_at_y(destination, category_id, direction, visual_y);
+            let motion_id = self.record_flowviz_mobile_entry_with_custody(
+                site,
+                destination,
+                category_id,
+                visual_y,
+                custody,
+            );
+            self.push_recruited_rolling_grain_at_y_with_motion(
+                destination,
+                category_id,
+                direction,
+                visual_y,
+                motion_id,
+            );
             self.record_fluid_release_move();
             self.enqueue_neighborhood(site);
             self.enqueue_neighborhood(destination);

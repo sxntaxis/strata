@@ -3,7 +3,7 @@ use super::*;
 
 impl OsloSandboxEngine {
     pub(super) fn render_conservative_shadow_into_surface(&mut self) {
-        if !self.flowviz_conservative {
+        if !self.flowviz_conservative && !self.flowviz_unit {
             return;
         }
         let grid_height = self.surface.grid_height_dots;

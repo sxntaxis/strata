@@ -451,7 +451,7 @@ impl App {
             }
             #[cfg(debug_assertions)]
             CommandIntent::TestingCheatsHelp => Ok(
-                "testingcheats: model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-fluid> · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · fill · clear · status · reset"
+                "testingcheats: model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · fill · clear · status · reset"
                     .to_string(),
             ),
             #[cfg(debug_assertions)]
@@ -472,6 +472,9 @@ impl App {
                     }
                     "oslo-vessel-front-parcels" => {
                         "frozen oslo-vessel-front physics + conservative visual shadow surface and weighted local-flow parcels"
+                    }
+                    "oslo-vessel-front-grains" => {
+                        "frozen oslo-vessel-front physics + one visual carrier per active CategoryId unit and causal observed-edge replay"
                     }
                     "oslo-vessel-fluid" => {
                         "oslo-vessel-front + explicit partial-fluidization order field with start/stop hysteresis"

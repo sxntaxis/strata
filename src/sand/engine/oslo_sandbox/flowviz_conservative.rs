@@ -34,6 +34,7 @@ impl OsloSandboxEngine {
     pub(super) fn enable_conservative_flowviz(&mut self, seed: u64) {
         self.flowviz_enabled = true;
         self.flowviz_conservative = true;
+        self.flowviz_unit = false;
         self.flowviz_edge_flux = vec![0; self.columns.len()];
         self.flowviz_tracers.clear();
         self.flowviz_parcels.clear();
@@ -231,7 +232,7 @@ impl OsloSandboxEngine {
     }
 
     pub(super) fn mirror_flowviz_settled_push(&mut self, site: usize, category_id: CategoryId) {
-        if !self.flowviz_conservative {
+        if !self.flowviz_conservative && !self.flowviz_unit {
             return;
         }
         if let Some(column) = self.flowviz_shadow_columns.get_mut(site) {

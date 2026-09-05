@@ -26,6 +26,7 @@ impl OsloSandboxEngine {
     pub(super) fn enable_flowviz(&mut self, seed: u64) {
         self.flowviz_enabled = true;
         self.flowviz_conservative = false;
+        self.flowviz_unit = false;
         self.flowviz_edge_flux = vec![0; self.columns.len()];
         self.flowviz_tracers.clear();
         self.flowviz_rng_state = seed ^ 0xB529_7A4D_1C68_E9D7;
@@ -46,6 +47,9 @@ impl OsloSandboxEngine {
         if self.flowviz_conservative {
             self.clear_conservative_flowviz();
         }
+        if self.flowviz_unit {
+            self.clear_unit_flowviz();
+        }
     }
 
     pub(super) fn resize_flowviz_for_growth(&mut self, left_added: usize, new_width: usize) {
@@ -62,6 +66,9 @@ impl OsloSandboxEngine {
         }
         if self.flowviz_conservative {
             self.resize_conservative_flowviz_for_growth(left_added, new_width);
+        }
+        if self.flowviz_unit {
+            self.resize_unit_flowviz_for_growth(left_added, new_width);
         }
         if left_added > 0 {
             let shift = left_added as f32;
@@ -192,6 +199,9 @@ impl OsloSandboxEngine {
         if !self.flowviz_enabled {
             return false;
         }
+        if self.flowviz_unit {
+            return self.advance_unit_flowviz();
+        }
         if self.flowviz_conservative {
             return self.advance_conservative_flowviz();
         }
@@ -292,6 +302,10 @@ impl OsloSandboxEngine {
         if !self.flowviz_enabled {
             return;
         }
+        if self.flowviz_unit {
+            self.render_unit_flowviz_into_surface();
+            return;
+        }
         if self.flowviz_conservative {
             self.render_conservative_flowviz_parcels_into_surface();
             return;
@@ -323,7 +337,9 @@ impl OsloSandboxEngine {
     }
 
     pub(crate) fn flowviz_tracer_count(&self) -> usize {
-        if self.flowviz_conservative {
+        if self.flowviz_unit {
+            self.flowviz_unit_carriers.len()
+        } else if self.flowviz_conservative {
             self.flowviz_parcels.len()
         } else {
             self.flowviz_tracers.len()
@@ -331,7 +347,9 @@ impl OsloSandboxEngine {
     }
 
     pub(crate) fn flowviz_peak_tracers(&self) -> usize {
-        if self.flowviz_conservative {
+        if self.flowviz_unit {
+            self.flowviz_unit_peak
+        } else if self.flowviz_conservative {
             self.flowviz_peak_parcels
         } else {
             self.flowviz_peak_tracers

@@ -200,20 +200,61 @@ impl OsloSandboxEngine {
             return false;
         }
 
-        let (category_id, visual_y) = self
-            .pop_settled_grain(site)
+        let (category_id, visual_y, custody) = self
+            .pop_settled_grain_with_custody(site)
             .expect("over-critical Oslo site contains a grain");
         if let Some(destination) = destination {
             if self.should_seed_momentum(relief) {
-                self.record_flowviz_mobile_entry(site, destination, category_id, visual_y);
-                self.seed_rolling_grain_at_y(destination, category_id, direction, visual_y);
+                let motion_id = self.record_flowviz_mobile_entry_with_custody(
+                    site,
+                    destination,
+                    category_id,
+                    visual_y,
+                    custody,
+                );
+                self.seed_rolling_grain_at_y_with_motion(
+                    destination,
+                    category_id,
+                    direction,
+                    visual_y,
+                    motion_id,
+                );
                 self.seed_fluidization_failure(site, destination);
+            } else if self.flowviz_unit {
+                let motion_id = self.begin_unit_motion(
+                    site,
+                    Some(destination),
+                    category_id,
+                    visual_y,
+                    custody,
+                );
+                self.push_settled_grain_at_visual_y_with_custody(
+                    destination,
+                    category_id,
+                    Some(visual_y),
+                    motion_id,
+                );
+                if let Some(id) = motion_id {
+                    self.mark_unit_settled(id, destination);
+                }
             } else {
                 self.push_settled_grain_at_visual_y(destination, category_id, Some(visual_y));
                 self.mirror_flowviz_settled_transfer(site, destination, category_id);
             }
         } else {
-            self.mirror_flowviz_settled_discharge(site, category_id);
+            if self.flowviz_unit {
+                if let Some(id) = self.begin_unit_motion(
+                    site,
+                    None,
+                    category_id,
+                    visual_y,
+                    custody,
+                ) {
+                    self.mark_unit_discharged(id);
+                }
+            } else {
+                self.mirror_flowviz_settled_discharge(site, category_id);
+            }
             self.discharged = self.discharged.saturating_add(1);
         }
         self.critical_slopes[site] = self.sample_threshold();
@@ -325,8 +366,25 @@ impl OsloSandboxEngine {
             .falling_drives
             .pop_front()
             .expect("front falling Oslo drive exists");
-        self.push_settled_grain_at_visual_y(falling.x, falling.category_id, Some(falling.y));
-        self.mirror_flowviz_settled_push(falling.x, falling.category_id);
+        if self.flowviz_unit {
+            let custody = self.adopt_unit_visible_settlement(
+                falling.x,
+                falling.category_id,
+                falling.y,
+            );
+            self.push_settled_grain_at_visual_y_with_custody(
+                falling.x,
+                falling.category_id,
+                Some(falling.y),
+                custody,
+            );
+            if custody.is_none() {
+                self.mirror_flowviz_settled_push(falling.x, falling.category_id);
+            }
+        } else {
+            self.push_settled_grain_at_visual_y(falling.x, falling.category_id, Some(falling.y));
+            self.mirror_flowviz_settled_push(falling.x, falling.category_id);
+        }
         self.enqueue_neighborhood(falling.x);
         true
     }
@@ -341,7 +399,7 @@ impl OsloSandboxEngine {
         self.surface.pending_runs.clear();
 
         let grid_height = self.surface.grid_height_dots;
-        if self.flowviz_conservative {
+        if self.flowviz_conservative || self.flowviz_unit {
             self.render_conservative_shadow_into_surface();
         } else {
             for (site, column) in self.columns.iter().enumerate() {
