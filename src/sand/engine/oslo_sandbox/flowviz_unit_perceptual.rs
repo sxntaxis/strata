@@ -79,14 +79,12 @@ impl OsloSandboxEngine {
             return false;
         }
         self.flowviz_unit_carriers.values().all(|carrier| {
-            carrier
-                .queued
-                .iter()
-                .all(|segment| segment.observed_source_y.is_some() && segment.observed_target_y.is_some())
-                && carrier.active.is_none_or(|active| {
-                    active.segment.observed_source_y.is_some()
-                        && active.segment.observed_target_y.is_some()
-                })
+            carrier.queued.iter().all(|segment| {
+                segment.observed_source_y.is_some() && segment.observed_target_y.is_some()
+            }) && carrier.active.is_none_or(|active| {
+                active.segment.observed_source_y.is_some()
+                    && active.segment.observed_target_y.is_some()
+            })
         })
     }
 }

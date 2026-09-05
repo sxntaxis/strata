@@ -10,12 +10,12 @@ mod flowviz_conservative;
 mod flowviz_conservative_render;
 mod flowviz_unit;
 mod flowviz_unit_micro;
-mod flowviz_unit_perceptual;
-mod flowviz_unit_render;
 #[cfg(test)]
 mod flowviz_unit_micro_tests;
+mod flowviz_unit_perceptual;
 #[cfg(test)]
 mod flowviz_unit_perceptual_tests;
+mod flowviz_unit_render;
 
 const OSLO_THRESHOLD_LOW: u8 = 1;
 const OSLO_THRESHOLD_HIGH: u8 = 2;
@@ -304,6 +304,7 @@ impl OsloSandboxEngine {
         sandbox
     }
 
+    #[cfg(test)]
     pub(crate) fn new_front_unit_micro_flowviz_vessel(width: u16, height: u16, seed: u64) -> Self {
         let mut sandbox = Self::new_front_vessel(width, height, seed);
         sandbox.enable_unit_flowviz();

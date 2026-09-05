@@ -2607,10 +2607,7 @@ impl App {
         // independent of 64x/128x. Deposition is still guarded by the engine's
         // quiescence contract, so these grains can coexist visibly in flight
         // without driving the static pile through the active avalanche.
-        if special_phase
-            && !perceptual
-            && testing.flow_spawn_wall_accumulator >= tick_rate
-        {
+        if special_phase && !perceptual && testing.flow_spawn_wall_accumulator >= tick_rate {
             testing.flow_spawn_wall_accumulator = testing
                 .flow_spawn_wall_accumulator
                 .saturating_sub(tick_rate);
@@ -3819,8 +3816,7 @@ mod testing_cheats_clock_tests {
 
     #[test]
     fn perceptual_flow_spends_acceleration_on_presentation_without_spawning_waiting_rain() {
-        let mut engine =
-            OsloSandboxEngine::new_front_unit_perceptual_flowviz_vessel(20, 10, 7);
+        let mut engine = OsloSandboxEngine::new_front_unit_perceptual_flowviz_vessel(20, 10, 7);
         engine.test_seed_visible_flow();
         let mut testing = state(TestingSandEngine::Oslo(Box::new(engine)), 64);
         let debt_before = testing.queued_simulated;

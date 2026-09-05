@@ -136,9 +136,7 @@ impl OsloSandboxEngine {
                 }
             }
 
-            for (sample, (correction_x, correction_y)) in
-                samples.iter().zip(corrections.into_iter())
-            {
+            for (sample, (correction_x, correction_y)) in samples.iter().zip(corrections) {
                 if correction_x.abs() <= UNIT_MICRO_EPSILON
                     && correction_y.abs() <= UNIT_MICRO_EPSILON
                 {

@@ -14,24 +14,19 @@ impl OsloSandboxEngine {
         grid_height.saturating_sub(shadow_height.saturating_add(1)) as f32
     }
 
-    fn unit_settled_targets(
-        &self,
-        grid_height: usize,
-    ) -> BTreeMap<FlowVizMotionId, (usize, f32)> {
+    fn unit_settled_targets(&self, grid_height: usize) -> BTreeMap<FlowVizMotionId, (usize, f32)> {
         let mut targets = BTreeMap::new();
         for (site, custody_column) in self.flowviz_unit_custody.iter().enumerate() {
             for (depth, custody) in custody_column.iter().copied().enumerate() {
                 if let Some(id) = custody {
-                    targets.insert(
-                        id,
-                        (site, grid_height as f32 - depth as f32 - 1.0),
-                    );
+                    targets.insert(id, (site, grid_height as f32 - depth as f32 - 1.0));
                 }
             }
         }
         targets
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn unit_segment_target(
         carrier: &flowviz_unit::FlowVizUnitCarrier,
         segment: flowviz_unit::UnitSegment,
@@ -172,10 +167,7 @@ impl OsloSandboxEngine {
                         |site| site as f32,
                     );
                     let target_y = active.segment.destination.map_or_else(
-                        || {
-                            (active.start_y + 1.0)
-                                .min(grid_height.saturating_sub(1) as f32)
-                        },
+                        || (active.start_y + 1.0).min(grid_height.saturating_sub(1) as f32),
                         |site| {
                             let height = heights.get(site).copied().unwrap_or(0);
                             Self::unit_target_y(grid_height, height)
@@ -368,10 +360,7 @@ impl OsloSandboxEngine {
     }
 
     #[cfg(test)]
-    pub(super) fn flowviz_unit_settled_target_y(
-        &self,
-        id: FlowVizMotionId,
-    ) -> Option<f32> {
+    pub(super) fn flowviz_unit_settled_target_y(&self, id: FlowVizMotionId) -> Option<f32> {
         self.unit_settled_targets(self.surface.grid_height_dots)
             .get(&id)
             .map(|(_, y)| *y)

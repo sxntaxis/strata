@@ -35,8 +35,7 @@ fn direct_front_drive_and_quiesce(engine: &mut OsloSandboxEngine, site: usize) {
 #[test]
 fn unit_perceptual_constructor_is_a_presentation_only_extension_of_015b() {
     let micro = OsloSandboxEngine::new_front_unit_micro_flowviz_vessel(20, 10, TEST_SEED);
-    let perceptual =
-        OsloSandboxEngine::new_front_unit_perceptual_flowviz_vessel(20, 10, TEST_SEED);
+    let perceptual = OsloSandboxEngine::new_front_unit_perceptual_flowviz_vessel(20, 10, TEST_SEED);
 
     assert!(micro.flowviz_unit_micro_enabled());
     assert!(!micro.flowviz_unit_perceptual_enabled());
@@ -50,16 +49,18 @@ fn unit_perceptual_constructor_is_a_presentation_only_extension_of_015b() {
 
 #[test]
 fn unit_perceptual_freezes_observed_segment_geometry_before_shadow_changes() {
-    let mut engine =
-        OsloSandboxEngine::new_front_unit_perceptual_flowviz_vessel(20, 10, TEST_SEED);
+    let mut engine = OsloSandboxEngine::new_front_unit_perceptual_flowviz_vessel(20, 10, TEST_SEED);
     let source = engine.columns.len() / 2;
     let destination = source + 1;
     set_column(&mut engine, source, vec![grain(11)]);
-    set_column(&mut engine, destination, vec![grain(21), grain(22), grain(23)]);
+    set_column(
+        &mut engine,
+        destination,
+        vec![grain(21), grain(22), grain(23)],
+    );
     engine.reset_unit_flowviz_from_physics();
 
-    let (category_id, visual_y, custody) =
-        engine.pop_settled_grain_with_custody(source).unwrap();
+    let (category_id, visual_y, custody) = engine.pop_settled_grain_with_custody(source).unwrap();
     let expected_target = engine.unit_observed_settled_target_y(destination);
     let id = engine
         .begin_unit_motion(source, Some(destination), category_id, visual_y, custody)
@@ -76,14 +77,18 @@ fn unit_perceptual_freezes_observed_segment_geometry_before_shadow_changes() {
 
     engine.flowviz_shadow_columns[destination].clear();
     let _ = engine.advance_flowviz_tracers();
-    let active = engine.flowviz_unit_carriers.get(&id).unwrap().active.unwrap();
+    let active = engine
+        .flowviz_unit_carriers
+        .get(&id)
+        .unwrap()
+        .active
+        .unwrap();
     assert_eq!(active.target_y, expected_target);
 }
 
 #[test]
 fn unit_perceptual_rolling_entry_records_distinct_observed_lanes() {
-    let mut engine =
-        OsloSandboxEngine::new_front_unit_perceptual_flowviz_vessel(20, 10, TEST_SEED);
+    let mut engine = OsloSandboxEngine::new_front_unit_perceptual_flowviz_vessel(20, 10, TEST_SEED);
     let source = engine.columns.len() / 2;
     let destination = source + 1;
     set_column(&mut engine, source, vec![grain(31), grain(32)]);
@@ -128,8 +133,7 @@ fn unit_perceptual_rolling_entry_records_distinct_observed_lanes() {
 
 #[test]
 fn unit_perceptual_second_rolling_hop_starts_from_the_previous_observed_lane() {
-    let mut engine =
-        OsloSandboxEngine::new_front_unit_perceptual_flowviz_vessel(20, 10, TEST_SEED);
+    let mut engine = OsloSandboxEngine::new_front_unit_perceptual_flowviz_vessel(20, 10, TEST_SEED);
     let source = engine.columns.len() / 2;
     let middle = source + 1;
     let destination = middle + 1;
@@ -138,16 +142,9 @@ fn unit_perceptual_second_rolling_hop_starts_from_the_previous_observed_lane() {
     set_column(&mut engine, destination, vec![grain(74)]);
     engine.reset_unit_flowviz_from_physics();
 
-    let (category_id, visual_y, custody) =
-        engine.pop_settled_grain_with_custody(source).unwrap();
+    let (category_id, visual_y, custody) = engine.pop_settled_grain_with_custody(source).unwrap();
     let id = engine
-        .record_flowviz_mobile_entry_with_custody(
-            source,
-            middle,
-            category_id,
-            visual_y,
-            custody,
-        )
+        .record_flowviz_mobile_entry_with_custody(source, middle, category_id, visual_y, custody)
         .unwrap();
     let first_target = engine
         .flowviz_unit_carriers
@@ -173,8 +170,7 @@ fn unit_perceptual_second_rolling_hop_starts_from_the_previous_observed_lane() {
 
 #[test]
 fn unit_perceptual_dense_raster_uses_full_local_vertical_capacity() {
-    let mut engine =
-        OsloSandboxEngine::new_front_unit_perceptual_flowviz_vessel(20, 10, TEST_SEED);
+    let mut engine = OsloSandboxEngine::new_front_unit_perceptual_flowviz_vessel(20, 10, TEST_SEED);
     let source = engine.columns.len() / 2;
     let destination = source + 1;
     let count = 20usize;
@@ -228,29 +224,37 @@ fn unit_perceptual_dense_raster_uses_full_local_vertical_capacity() {
 
 #[test]
 fn unit_perceptual_resize_preserves_bottom_relative_observed_geometry() {
-    let mut engine =
-        OsloSandboxEngine::new_front_unit_perceptual_flowviz_vessel(20, 10, TEST_SEED);
+    let mut engine = OsloSandboxEngine::new_front_unit_perceptual_flowviz_vessel(20, 10, TEST_SEED);
     let source = engine.columns.len() / 2;
     let destination = source + 1;
     set_column(&mut engine, source, vec![grain(181)]);
     set_column(&mut engine, destination, vec![grain(182), grain(183)]);
     engine.reset_unit_flowviz_from_physics();
 
-    let (category_id, visual_y, custody) =
-        engine.pop_settled_grain_with_custody(source).unwrap();
+    let (category_id, visual_y, custody) = engine.pop_settled_grain_with_custody(source).unwrap();
     let id = engine
         .begin_unit_motion(source, Some(destination), category_id, visual_y, custody)
         .unwrap();
     let _ = engine.advance_flowviz_tracers();
     let before_height = engine.surface.grid_height_dots as f32;
     let before_top = engine.visible_vertical_bounds().0 as f32;
-    let before = engine.flowviz_unit_carriers.get(&id).unwrap().active.unwrap();
+    let before = engine
+        .flowviz_unit_carriers
+        .get(&id)
+        .unwrap()
+        .active
+        .unwrap();
 
     engine.resize(20, 14);
     let expanded_height = engine.surface.grid_height_dots as f32;
     let expanded_top = engine.visible_vertical_bounds().0 as f32;
     let shift = expanded_height - before_height;
-    let expanded = engine.flowviz_unit_carriers.get(&id).unwrap().active.unwrap();
+    let expanded = engine
+        .flowviz_unit_carriers
+        .get(&id)
+        .unwrap()
+        .active
+        .unwrap();
     assert_eq!(expanded.start_y, before.start_y + shift);
     assert_eq!(expanded.target_y, before.target_y + shift);
     assert_eq!(
@@ -278,7 +282,12 @@ fn unit_perceptual_resize_preserves_bottom_relative_observed_geometry() {
     engine.resize(20, 10);
     let restored_height = engine.surface.grid_height_dots as f32;
     let restored_top = engine.visible_vertical_bounds().0 as f32;
-    let restored = engine.flowviz_unit_carriers.get(&id).unwrap().active.unwrap();
+    let restored = engine
+        .flowviz_unit_carriers
+        .get(&id)
+        .unwrap()
+        .active
+        .unwrap();
 
     // Shrinking the terminal does not shrink the canonical canvas, so the raw
     // canonical y values must remain at the expanded positions. What returns
@@ -296,20 +305,40 @@ fn unit_perceptual_resize_preserves_bottom_relative_observed_geometry() {
         expanded.segment.observed_target_y
     );
     assert_eq!(restored.start_y - restored_top, before.start_y - before_top);
-    assert_eq!(restored.target_y - restored_top, before.target_y - before_top);
     assert_eq!(
-        restored.segment.observed_source_y.map(|value| value - restored_top),
-        before.segment.observed_source_y.map(|value| value - before_top)
+        restored.target_y - restored_top,
+        before.target_y - before_top
     );
     assert_eq!(
-        restored.segment.observed_target_y.map(|value| value - restored_top),
-        before.segment.observed_target_y.map(|value| value - before_top)
+        restored
+            .segment
+            .observed_source_y
+            .map(|value| value - restored_top),
+        before
+            .segment
+            .observed_source_y
+            .map(|value| value - before_top)
+    );
+    assert_eq!(
+        restored
+            .segment
+            .observed_target_y
+            .map(|value| value - restored_top),
+        before
+            .segment
+            .observed_target_y
+            .map(|value| value - before_top)
     );
 
     // Re-expanding merely exposes the existing canonical canvas again; it must
     // not apply the vertical growth shift a second time.
     engine.resize(20, 14);
-    let reexpanded = engine.flowviz_unit_carriers.get(&id).unwrap().active.unwrap();
+    let reexpanded = engine
+        .flowviz_unit_carriers
+        .get(&id)
+        .unwrap()
+        .active
+        .unwrap();
     assert_eq!(reexpanded.start_y, expanded.start_y);
     assert_eq!(reexpanded.target_y, expanded.target_y);
     assert_eq!(
@@ -324,16 +353,14 @@ fn unit_perceptual_resize_preserves_bottom_relative_observed_geometry() {
 
 #[test]
 fn unit_perceptual_flow_frame_freezes_waiting_ingress_presentation() {
-    let mut engine =
-        OsloSandboxEngine::new_front_unit_perceptual_flowviz_vessel(20, 10, TEST_SEED);
+    let mut engine = OsloSandboxEngine::new_front_unit_perceptual_flowviz_vessel(20, 10, TEST_SEED);
     let source = engine.columns.len() / 2;
     let destination = source + 1;
     set_column(&mut engine, source, vec![grain(201)]);
     set_column(&mut engine, destination, Vec::new());
     engine.reset_unit_flowviz_from_physics();
 
-    let (category_id, visual_y, custody) =
-        engine.pop_settled_grain_with_custody(source).unwrap();
+    let (category_id, visual_y, custody) = engine.pop_settled_grain_with_custody(source).unwrap();
     let id = engine
         .record_flowviz_mobile_entry_with_custody(
             source,

@@ -112,7 +112,10 @@ fn unit_micro_flowviz_preserves_frozen_front_physics_and_exact_stack() {
         assert_eq!(micro.relax_rng_state, frozen.relax_rng_state);
         assert_eq!(micro.discharged_count(), frozen.discharged_count());
         assert_eq!(micro.front_erosions(), frozen.front_erosions());
-        assert_eq!(micro.front_support_recruits(), frozen.front_support_recruits());
+        assert_eq!(
+            micro.front_support_recruits(),
+            frozen.front_support_recruits()
+        );
         assert_eq!(micro.avalanche_moves, frozen.avalanche_moves);
         assert!(micro.flowviz_unit_mass_matches_physics());
 
@@ -197,7 +200,10 @@ fn unit_micro_local_projection_separates_coincident_carriers_without_route_escap
 
     assert!(engine.relax_unit_micro_positions());
     let minimum = engine.flowviz_unit_micro_min_pair_distance().unwrap();
-    assert!(minimum > 0.45, "coincident carriers remained visually collapsed: {minimum}");
+    assert!(
+        minimum > 0.45,
+        "coincident carriers remained visually collapsed: {minimum}"
+    );
 
     for id in ids {
         let carrier = engine.flowviz_unit_carriers.get(&id).unwrap();
@@ -278,13 +284,17 @@ fn unit_micro_resize_round_trip_preserves_active_geometry_custody_and_exact_stac
     set_column(
         &mut engine,
         source,
-        vec![CategoryId::new(11), CategoryId::new(12), CategoryId::new(13), CategoryId::new(14)],
+        vec![
+            CategoryId::new(11),
+            CategoryId::new(12),
+            CategoryId::new(13),
+            CategoryId::new(14),
+        ],
     );
     set_column(&mut engine, destination, vec![CategoryId::new(21)]);
     engine.reset_unit_flowviz_from_physics();
 
-    let (category_id, visual_y, custody) =
-        engine.pop_settled_grain_with_custody(source).unwrap();
+    let (category_id, visual_y, custody) = engine.pop_settled_grain_with_custody(source).unwrap();
     let id = engine
         .begin_unit_motion(source, Some(destination), category_id, visual_y, custody)
         .unwrap();
@@ -297,7 +307,12 @@ fn unit_micro_resize_round_trip_preserves_active_geometry_custody_and_exact_stac
     );
 
     let _ = engine.advance_flowviz_tracers();
-    let active_before = engine.flowviz_unit_carriers.get(&id).unwrap().active.unwrap();
+    let active_before = engine
+        .flowviz_unit_carriers
+        .get(&id)
+        .unwrap()
+        .active
+        .unwrap();
     assert!(active_before.progress > 0.0);
     assert!(engine.flowviz_unit_mass_matches_physics());
 
