@@ -263,11 +263,7 @@ impl OsloSandboxEngine {
             for (dx, dy) in STENCIL {
                 let x = base_x + dx;
                 let y = base_y + dy;
-                if x < min_x as isize
-                    || x > max_x as isize
-                    || y < 0
-                    || y >= height as isize
-                {
+                if x < min_x as isize || x > max_x as isize || y < 0 || y >= height as isize {
                     continue;
                 }
                 let x = x as usize;

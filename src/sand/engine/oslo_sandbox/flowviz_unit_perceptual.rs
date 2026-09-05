@@ -69,7 +69,6 @@ impl OsloSandboxEngine {
         changed
     }
 
-
     /// SEDIMENT-015D testing frame. Rain remains visually alive while the
     /// avalanche is active, but commit is still impossible until authoritative
     /// flow is quiescent. This spends presentation CPU without allowing ingress

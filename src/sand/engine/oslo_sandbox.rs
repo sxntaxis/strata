@@ -15,9 +15,9 @@ mod flowviz_unit_micro_tests;
 mod flowviz_unit_perceptual;
 #[cfg(test)]
 mod flowviz_unit_perceptual_tests;
+mod flowviz_unit_render;
 #[cfg(test)]
 mod flowviz_unit_truthful_tests;
-mod flowviz_unit_render;
 
 const OSLO_THRESHOLD_LOW: u8 = 1;
 const OSLO_THRESHOLD_HIGH: u8 = 2;

@@ -6,7 +6,6 @@ fn grain(id: u64) -> CategoryId {
     CategoryId::new(id)
 }
 
-
 fn direct_front_drive_and_quiesce(engine: &mut OsloSandboxEngine, site: usize) {
     engine.push_settled_grain_at_visual_y(site, grain(1), None);
     engine.mirror_flowviz_settled_push(site, grain(1));
@@ -53,8 +52,7 @@ fn seed_overlapping_truthful_carriers(engine: &mut OsloSandboxEngine, count: usi
 
 #[test]
 fn unit_truthful_constructor_extends_015c_without_physics_delta() {
-    let perceptual =
-        OsloSandboxEngine::new_front_unit_perceptual_flowviz_vessel(20, 10, TEST_SEED);
+    let perceptual = OsloSandboxEngine::new_front_unit_perceptual_flowviz_vessel(20, 10, TEST_SEED);
     let truthful = OsloSandboxEngine::new_front_unit_truthful_flowviz_vessel(20, 10, TEST_SEED);
 
     assert!(perceptual.flowviz_unit_perceptual_enabled());
@@ -109,7 +107,15 @@ fn unit_truthful_disables_pbd_relocation_and_keeps_observed_positions_exact() {
     let before = engine
         .flowviz_unit_carriers
         .values()
-        .map(|carrier| (carrier.id, carrier.x, carrier.y, carrier.ideal_x, carrier.ideal_y))
+        .map(|carrier| {
+            (
+                carrier.id,
+                carrier.x,
+                carrier.y,
+                carrier.ideal_x,
+                carrier.ideal_y,
+            )
+        })
         .collect::<Vec<_>>();
 
     assert!(!engine.relax_unit_micro_positions());
@@ -117,7 +123,15 @@ fn unit_truthful_disables_pbd_relocation_and_keeps_observed_positions_exact() {
     let after = engine
         .flowviz_unit_carriers
         .values()
-        .map(|carrier| (carrier.id, carrier.x, carrier.y, carrier.ideal_x, carrier.ideal_y))
+        .map(|carrier| {
+            (
+                carrier.id,
+                carrier.x,
+                carrier.y,
+                carrier.ideal_x,
+                carrier.ideal_y,
+            )
+        })
         .collect::<Vec<_>>();
     assert_eq!(after, before);
 }
@@ -179,9 +193,7 @@ fn unit_truthful_015c_control_remains_spatially_distinct() {
     let placements = perceptual.collect_unit_micro_render_cells();
     let base_y = perceptual.surface.grid_height_dots / 2;
     assert!(
-        placements
-            .iter()
-            .any(|(_, _, _, y)| y.abs_diff(base_y) > 1),
+        placements.iter().any(|(_, _, _, y)| y.abs_diff(base_y) > 1),
         "015C control must retain the wider capacity search for regression separation"
     );
 }
