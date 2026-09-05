@@ -3,10 +3,10 @@ id: NOW-001
 kind: status
 state: active
 created: 2026-08-01
-updated: 2026-09-04
+updated: 2026-09-05
 authority: working
-summary: H4/v5 remains published production authority and SEDIMENT-008 oslo-vessel-front physics remains owner-frozen. SEDIMENT-015A-R2 through 015D are machine-green. The owner accepted 015D performance/rain improvement but rejected its visual chronology: truthful unit carriers can still accumulate and replay different authoritative epochs independently, producing implausible ribbons/arcs despite exact final stack and spatially truthful rasterization. SEDIMENT-015E now owns coherent temporal replay via a global per-physics-quantum presentation barrier; all grains in one quantum remain concurrent, but no later Oslo quantum may execute until that observed batch is visually caught up.
-next: Natively validate SEDIMENT-015E. Prove the coherent constructor is physics-identical to 015D, queued/active batch debt blocks later physics, caught-up rolling carriers release the barrier, no second authoritative epoch accumulates during visual debt, mass remains exact during interpolation, frozen-front/exact-stack parity remains exact, and all 015D/015C/015B/015A/legacy/full gates stay green before another owner rainbow-collapse gate.
+summary: H4/v5 remains published production authority and SEDIMENT-008 oslo-vessel-front physics remains owner-frozen. SEDIMENT-015A-R2 through 015E are semantically machine-green. The owner found 015E chronology materially improved but still rejected detached rails/ribbons in transit. Source inspection shows rolling segment Y is reconstructed from aggregate column/rolling state instead of captured from the same RollingGrain before and after its authoritative hop. SEDIMENT-015F now owns direct rolling geometry while preserving 015E coherent replay and 015D truthful real-time raster.
+next: Natively validate SEDIMENT-015F. Prove initial and continuing rolling segments use the exact Y assigned to the same RollingGrain at the physical event, recorded geometry is immutable after later column changes, 015E coherent chronology and all earlier unit/conservative gates stay green, frozen-front/exact-stack parity remains exact, and raster/scaling performance does not regress before another owner rainbow-collapse gate.
 ---
 
 # NOW — Strata

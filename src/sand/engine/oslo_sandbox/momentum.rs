@@ -216,10 +216,14 @@ impl OsloSandboxEngine {
         visual_y: usize,
         motion_id: Option<flowviz_unit::FlowVizMotionId>,
     ) {
+        let unit_observed_y = self
+            .flowviz_unit_direct_geometry
+            .then(|| self.unit_observed_rolling_target_y(site));
         let flat_coast_remaining = self.flat_coast_budget(site);
         self.rolling_grains.push_back(RollingGrain {
             site,
             visual_y,
+            unit_observed_y,
             category_id,
             direction,
             flat_coast_remaining,
@@ -238,10 +242,14 @@ impl OsloSandboxEngine {
         visual_y: usize,
         motion_id: Option<flowviz_unit::FlowVizMotionId>,
     ) {
+        let unit_observed_y = self
+            .flowviz_unit_direct_geometry
+            .then(|| self.unit_observed_rolling_target_y(site));
         let flat_coast_remaining = self.flat_coast_budget(site);
         self.rolling_grains.push_back(RollingGrain {
             site,
             visual_y,
+            unit_observed_y,
             category_id,
             direction,
             flat_coast_remaining,
@@ -377,7 +385,22 @@ impl OsloSandboxEngine {
         let source_y = self.top_grain_y(source).unwrap_or(rolling.visual_y);
         if self.flowviz_unit {
             if let Some(id) = rolling.motion_id {
-                self.append_unit_rolling_segment(id, source, next_site);
+                if self.flowviz_unit_direct_geometry {
+                    let observed_source_y = rolling
+                        .unit_observed_y
+                        .unwrap_or(rolling.visual_y as f32);
+                    let observed_target_y = self.unit_observed_rolling_target_y(next_site);
+                    self.append_unit_rolling_segment_with_geometry(
+                        id,
+                        source,
+                        next_site,
+                        observed_source_y,
+                        observed_target_y,
+                    );
+                    rolling.unit_observed_y = Some(observed_target_y);
+                } else {
+                    self.append_unit_rolling_segment(id, source, next_site);
+                }
             } else {
                 self.flowviz_unit_misses = self.flowviz_unit_misses.saturating_add(1);
             }

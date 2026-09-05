@@ -310,6 +310,23 @@ impl OsloSandboxEngine {
         self.append_unit_segment_with_geometry(id, source, destination, None, None);
     }
 
+    pub(super) fn append_unit_rolling_segment_with_geometry(
+        &mut self,
+        id: FlowVizMotionId,
+        source: usize,
+        destination: usize,
+        observed_source_y: f32,
+        observed_target_y: f32,
+    ) {
+        self.append_unit_segment_with_geometry(
+            id,
+            source,
+            Some(destination),
+            Some(observed_source_y),
+            Some(observed_target_y),
+        );
+    }
+
     pub(super) fn append_unit_rolling_segment(
         &mut self,
         id: FlowVizMotionId,

@@ -15,6 +15,8 @@ mod flowviz_unit_micro_tests;
 mod flowviz_unit_perceptual;
 #[cfg(test)]
 mod flowviz_unit_perceptual_tests;
+#[cfg(test)]
+mod flowviz_unit_direct_tests;
 mod flowviz_unit_render;
 #[cfg(test)]
 mod flowviz_unit_truthful_tests;
@@ -105,6 +107,7 @@ pub(crate) struct FallingDrive {
 pub(super) struct RollingGrain {
     site: usize,
     visual_y: usize,
+    unit_observed_y: Option<f32>,
     category_id: CategoryId,
     direction: ToppleDirection,
     flat_coast_remaining: u8,
@@ -173,6 +176,7 @@ pub(crate) struct OsloSandboxEngine {
     flowviz_unit_perceptual: bool,
     flowviz_unit_truthful: bool,
     flowviz_unit_coherent: bool,
+    flowviz_unit_direct_geometry: bool,
     columns: Vec<Vec<CategoryId>>,
     // Presentation-only y overrides aligned one-for-one with `columns`.
     // A settled grain can already participate in authoritative physics while
@@ -354,6 +358,17 @@ impl OsloSandboxEngine {
         sandbox
     }
 
+    pub(crate) fn new_front_unit_direct_geometry_flowviz_vessel(
+        width: u16,
+        height: u16,
+        seed: u64,
+    ) -> Self {
+        let mut sandbox = Self::new_front_unit_coherent_flowviz_vessel(width, height, seed);
+        sandbox.flowviz_unit_direct_geometry = true;
+        sandbox.sync_surface();
+        sandbox
+    }
+
     pub(crate) fn new_fluid_vessel(width: u16, height: u16, seed: u64) -> Self {
         Self::new_with_flow(
             width,
@@ -414,6 +429,7 @@ impl OsloSandboxEngine {
             flowviz_unit_perceptual: false,
             flowviz_unit_truthful: false,
             flowviz_unit_coherent: false,
+            flowviz_unit_direct_geometry: false,
             columns: vec![Vec::new(); lattice_size],
             column_visual_y: vec![Vec::new(); lattice_size],
             flowviz_edge_flux: vec![0; lattice_size],
@@ -780,6 +796,13 @@ impl OsloSandboxEngine {
                 rolling.visual_y = rolling
                     .visual_y
                     .clamp(new_visible_vertical.0, new_visible_vertical.1 - 1);
+            }
+        }
+        if self.flowviz_unit_direct_geometry && perceptual_vertical_shift != 0.0 {
+            for rolling in &mut self.rolling_grains {
+                if let Some(observed_y) = &mut rolling.unit_observed_y {
+                    *observed_y += perceptual_vertical_shift;
+                }
             }
         }
         if self.flowviz_enabled {
