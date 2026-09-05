@@ -10,6 +10,44 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use super::{App, PaletteCommand, RuntimeMutation, ui_helpers};
 
+#[cfg(debug_assertions)]
+const TESTING_FILL_CATEGORY_SPECS: [(&str, usize); 6] = [
+    ("Fixture Green", 0),
+    ("Fixture Yellow", 2),
+    ("Fixture Red", 6),
+    ("Fixture Purple", 7),
+    ("Fixture Blue", 9),
+    ("Fixture Cyan", 11),
+];
+
+#[cfg(debug_assertions)]
+fn ensure_testing_fill_categories_in_tracker(
+    tracker: &mut crate::domain::TimeTracker,
+) -> Result<(Vec<CategoryId>, bool), String> {
+    let mut created = false;
+    let mut ids = Vec::with_capacity(TESTING_FILL_CATEGORY_SPECS.len());
+    for (name, color_index) in TESTING_FILL_CATEGORY_SPECS {
+        if let Some(category) = tracker
+            .categories_ordered()
+            .into_iter()
+            .find(|category| category.name.eq_ignore_ascii_case(name))
+        {
+            ids.push(category.id);
+            continue;
+        }
+        let id = tracker
+            .add_category(
+                name.to_string(),
+                "testingcheats fill fixture layer".to_string(),
+                Some(color_index),
+            )
+            .ok_or_else(|| format!("failed to create testing fixture category {name}"))?;
+        ids.push(id);
+        created = true;
+    }
+    Ok((ids, created))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ReportEditKeyIntent {
     Append(char),
@@ -152,6 +190,23 @@ fn resolve_historical_activity_edit_key(
 }
 
 impl App {
+    #[cfg(debug_assertions)]
+    fn ensure_testing_fill_categories(&mut self) -> Result<Vec<CategoryId>, String> {
+        let (ids, created) =
+            ensure_testing_fill_categories_in_tracker(&mut self.time_tracker)?;
+
+        if created {
+            self.persist_categories();
+            if self.has_persistence_recovery() {
+                return Err(
+                    "testingcheats fill created fixture categories but category persistence entered recovery"
+                        .to_string(),
+                );
+            }
+        }
+        Ok(ids)
+    }
+
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> bool {
         if key.kind == KeyEventKind::Release {
             return false;
@@ -451,7 +506,7 @@ impl App {
             }
             #[cfg(debug_assertions)]
             CommandIntent::TestingCheatsHelp => Ok(
-                "testingcheats: model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · fill · clear · status · reset"
+                "testingcheats: model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · fill (ensures six Fixture categories) · clear · status · reset"
                     .to_string(),
             ),
             #[cfg(debug_assertions)]
@@ -524,13 +579,7 @@ impl App {
             #[cfg(debug_assertions)]
             CommandIntent::TestingCheatsFill => {
                 self.ensure_testing_cheats_preview()?;
-                let category_ids = self
-                    .time_tracker
-                    .categories_ordered()
-                    .iter()
-                    .map(|category| category.id)
-                    .filter(|category_id| *category_id != DRIFT_CATEGORY_ID)
-                    .collect::<Vec<_>>();
+                let category_ids = self.ensure_testing_fill_categories()?;
                 let testing = self.testing_cheats.as_mut().expect("testing preview exists");
                 let model = testing.engine.model_name();
                 let grains = testing.engine.fill_rainbow_80(&category_ids)?;
@@ -541,7 +590,7 @@ impl App {
                 testing.visual_dirty = false;
                 self.render_needed = true;
                 Ok(format!(
-                    "Testing sandbox {model} rainbow-filled to 80% of the visible window ({grains} grains; authoritative sediment unchanged)"
+                    "Testing sandbox {model} rainbow-filled to 80% of the visible window using six idempotent Fixture categories ({grains} grains; testing sediment isolated, category catalog persisted)"
                 ))
             }
             #[cfg(debug_assertions)]
@@ -1701,5 +1750,33 @@ mod report_edit_tests {
             .unwrap()
             .expect("status should resolve as a direct command");
         assert_eq!(resolved, crate::command::CommandIntent::Status);
+    }
+}
+
+#[cfg(test)]
+mod testing_fill_category_tests {
+    use super::{TESTING_FILL_CATEGORY_SPECS, ensure_testing_fill_categories_in_tracker};
+    use crate::{constants::COLORS, domain::TimeTracker};
+
+    #[test]
+    fn testing_fill_categories_are_exact_and_idempotent() {
+        let mut tracker = TimeTracker::new();
+        let (first_ids, created) =
+            ensure_testing_fill_categories_in_tracker(&mut tracker).unwrap();
+        assert!(created);
+        assert_eq!(first_ids.len(), TESTING_FILL_CATEGORY_SPECS.len());
+
+        for ((name, color_index), id) in TESTING_FILL_CATEGORY_SPECS.into_iter().zip(&first_ids) {
+            let category = tracker.category_by_id(*id).unwrap();
+            assert_eq!(category.name, name);
+            assert_eq!(category.color, COLORS[color_index]);
+        }
+
+        let count_after_first = tracker.categories_ordered().len();
+        let (second_ids, created_again) =
+            ensure_testing_fill_categories_in_tracker(&mut tracker).unwrap();
+        assert!(!created_again);
+        assert_eq!(second_ids, first_ids);
+        assert_eq!(tracker.categories_ordered().len(), count_after_first);
     }
 }

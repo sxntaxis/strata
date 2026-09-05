@@ -19,6 +19,8 @@ mod flowviz_unit_perceptual_tests;
 mod flowviz_unit_direct_tests;
 #[cfg(test)]
 mod flowviz_unit_support_tests;
+#[cfg(test)]
+mod flowviz_unit_provenance_tests;
 mod flowviz_unit_render;
 #[cfg(test)]
 mod flowviz_unit_truthful_tests;
