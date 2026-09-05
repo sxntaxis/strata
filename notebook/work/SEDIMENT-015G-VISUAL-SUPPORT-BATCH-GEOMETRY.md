@@ -134,3 +134,6 @@ Only presentation lane assignment is delayed until the authoritative quantum bou
 Only after machine green:
 
 > Do the large diagonal voids/hollow rails disappear when rolling carriers are packed contiguously above the delayed visual bed using only the final rolling occupancy of each coherent physical quantum?
+## R1 native-gate correction
+
+The first native run stopped at `unit_visual_support_final_batch_lanes_are_contiguous_above_visible_bed` before exercising 015G semantics. The synthetic fixture attempted to recruit `source_a -> destination` across two lattice sites, so `record_flowviz_mobile_entry_with_custody` correctly returned `None` under the existing adjacent-edge contract. R1 changes only the fixture: the two sources are now the immediate left and right neighbours of one destination, with matching Right/Left directions. Runtime source is unchanged. The contiguous-lane expectation remains exactly `base, base - 1, ...`.

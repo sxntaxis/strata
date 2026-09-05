@@ -148,16 +148,21 @@ fn unit_visual_support_lane_uses_visible_shadow_not_hidden_physical_settlement()
 fn unit_visual_support_final_batch_lanes_are_contiguous_above_visible_bed() {
     let mut engine =
         OsloSandboxEngine::new_front_unit_visual_support_flowviz_vessel(20, 10, TEST_SEED);
-    let source_a = engine.columns.len() / 2 - 1;
-    let source_b = source_a + 1;
-    let destination = source_b + 1;
+    let destination = engine.columns.len() / 2;
+    let source_a = destination - 1;
+    let source_b = destination + 1;
+    assert_eq!(source_a.abs_diff(destination), 1);
+    assert_eq!(source_b.abs_diff(destination), 1);
     set_column(&mut engine, source_a, vec![grain(31)]);
     set_column(&mut engine, source_b, vec![grain(32)]);
     set_column(&mut engine, destination, vec![grain(41), grain(42)]);
     engine.reset_unit_flowviz_from_physics();
 
     let mut ids = Vec::new();
-    for source in [source_a, source_b] {
+    for (source, direction) in [
+        (source_a, ToppleDirection::Right),
+        (source_b, ToppleDirection::Left),
+    ] {
         let (category_id, source_y, custody) =
             engine.pop_settled_grain_with_custody(source).unwrap();
         let id = engine
@@ -172,7 +177,7 @@ fn unit_visual_support_final_batch_lanes_are_contiguous_above_visible_bed() {
         engine.seed_rolling_grain_at_y_with_motion(
             destination,
             category_id,
-            ToppleDirection::Right,
+            direction,
             source_y,
             Some(id),
         );
