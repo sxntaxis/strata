@@ -243,10 +243,12 @@ fn unit_perceptual_resize_preserves_bottom_relative_observed_geometry() {
         .unwrap();
     let _ = engine.advance_flowviz_tracers();
     let before_height = engine.surface.grid_height_dots as f32;
+    let before_top = engine.visible_vertical_bounds().0 as f32;
     let before = engine.flowviz_unit_carriers.get(&id).unwrap().active.unwrap();
 
     engine.resize(20, 14);
     let expanded_height = engine.surface.grid_height_dots as f32;
+    let expanded_top = engine.visible_vertical_bounds().0 as f32;
     let shift = expanded_height - before_height;
     let expanded = engine.flowviz_unit_carriers.get(&id).unwrap().active.unwrap();
     assert_eq!(expanded.start_y, before.start_y + shift);
@@ -260,12 +262,64 @@ fn unit_perceptual_resize_preserves_bottom_relative_observed_geometry() {
         before.segment.observed_target_y.map(|value| value + shift)
     );
 
+    // The logical canvas is grow-only. Bottom-relative geometry therefore
+    // preserves canonical depth when the canvas expands, while viewport-local
+    // coordinates change only with the visible top.
+    assert_eq!(
+        expanded_height - 1.0 - expanded.start_y,
+        before_height - 1.0 - before.start_y
+    );
+    assert_eq!(
+        expanded_height - 1.0 - expanded.target_y,
+        before_height - 1.0 - before.target_y
+    );
+    assert_eq!(expanded.start_y - expanded_top, expanded.start_y);
+
     engine.resize(20, 10);
+    let restored_height = engine.surface.grid_height_dots as f32;
+    let restored_top = engine.visible_vertical_bounds().0 as f32;
     let restored = engine.flowviz_unit_carriers.get(&id).unwrap().active.unwrap();
-    assert_eq!(restored.start_y, before.start_y);
-    assert_eq!(restored.target_y, before.target_y);
-    assert_eq!(restored.segment.observed_source_y, before.segment.observed_source_y);
-    assert_eq!(restored.segment.observed_target_y, before.segment.observed_target_y);
+
+    // Shrinking the terminal does not shrink the canonical canvas, so the raw
+    // canonical y values must remain at the expanded positions. What returns
+    // to the original location is the coordinate inside the bottom-anchored
+    // viewport.
+    assert_eq!(restored_height, expanded_height);
+    assert_eq!(restored.start_y, expanded.start_y);
+    assert_eq!(restored.target_y, expanded.target_y);
+    assert_eq!(
+        restored.segment.observed_source_y,
+        expanded.segment.observed_source_y
+    );
+    assert_eq!(
+        restored.segment.observed_target_y,
+        expanded.segment.observed_target_y
+    );
+    assert_eq!(restored.start_y - restored_top, before.start_y - before_top);
+    assert_eq!(restored.target_y - restored_top, before.target_y - before_top);
+    assert_eq!(
+        restored.segment.observed_source_y.map(|value| value - restored_top),
+        before.segment.observed_source_y.map(|value| value - before_top)
+    );
+    assert_eq!(
+        restored.segment.observed_target_y.map(|value| value - restored_top),
+        before.segment.observed_target_y.map(|value| value - before_top)
+    );
+
+    // Re-expanding merely exposes the existing canonical canvas again; it must
+    // not apply the vertical growth shift a second time.
+    engine.resize(20, 14);
+    let reexpanded = engine.flowviz_unit_carriers.get(&id).unwrap().active.unwrap();
+    assert_eq!(reexpanded.start_y, expanded.start_y);
+    assert_eq!(reexpanded.target_y, expanded.target_y);
+    assert_eq!(
+        reexpanded.segment.observed_source_y,
+        expanded.segment.observed_source_y
+    );
+    assert_eq!(
+        reexpanded.segment.observed_target_y,
+        expanded.segment.observed_target_y
+    );
 }
 
 #[test]

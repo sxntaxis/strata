@@ -201,3 +201,25 @@ Acceptance questions:
 - Does arriving visible mass now plausibly explain the sediment that appears?
 
 Do not tune Oslo slope, front thresholds, rain focus, or avalanche frequency from this gate.
+
+## R1 native resize-gate correction
+
+The first native 015C validation passed semantic gates 4.1 through 4.5 and then failed the resize test because the test conflated the grow-only canonical canvas with the terminal viewport.
+
+`SandEngine::resize` expands the logical canvas when the viewport grows but deliberately does not shrink that canonical canvas when the terminal later narrows. The visible vertical window remains bottom anchored inside the retained canonical extent. Therefore perceptual unit geometry must obey both of these invariants:
+
+```text
+canonical growth:
+    canonical y += canonical-height delta
+    depth from canonical bottom stays constant
+
+viewport shrink after prior growth:
+    canonical y stays unchanged
+    visible_top increases
+    viewport-local y = canonical y - visible_top
+    returns to its earlier narrow-view location
+```
+
+A later re-expansion into the already-existing canonical extent must not apply the growth shift again.
+
+R1 changes only the resize regression to test those actual coordinate spaces. Runtime presentation, physics, routing, custody, scheduler, raster, and observed-geometry semantics are unchanged from the authored 015C candidate.
