@@ -580,6 +580,10 @@ impl TestingSandEngine {
         matches!(self, Self::Oslo(engine) if engine.flowviz_unit_perceptual_enabled())
     }
 
+    fn unit_truthful_flowviz_enabled(&self) -> bool {
+        matches!(self, Self::Oslo(engine) if engine.flowviz_unit_truthful_enabled())
+    }
+
     fn unit_presentation_substeps(&self) -> usize {
         match self {
             Self::Oslo(engine) => engine.flowviz_unit_presentation_substeps(),
@@ -598,6 +602,27 @@ impl TestingSandEngine {
                 engine.update();
                 true
             }
+        }
+    }
+
+    fn advance_testing_truthful_flow_frame(&mut self) -> bool {
+        match self {
+            Self::Oslo(engine) => engine.advance_testing_truthful_flow_frame(),
+            Self::H4(engine) => {
+                engine.update();
+                true
+            }
+            Self::Classic(engine) => {
+                engine.update();
+                true
+            }
+        }
+    }
+
+    fn advance_testing_truthful_visual_frame(&mut self) -> bool {
+        match self {
+            Self::Oslo(engine) => engine.advance_testing_truthful_visual_frame(),
+            _ => false,
         }
     }
 
@@ -859,12 +884,14 @@ impl TestingCheatsState {
                 .flow_wall_accumulator
                 .saturating_add(flow_delta)
                 .min(Duration::from_millis(visual_frame_ms.saturating_mul(64)));
-            if self.engine.unit_perceptual_flowviz_enabled() {
-                // 015C admits no new testingcheats rain during an active
-                // avalanche. Existing ingress is frozen in the sky until
-                // quiescence instead of forming a white waiting crust.
+            if self.engine.unit_perceptual_flowviz_enabled()
+                && !self.engine.unit_truthful_flowviz_enabled()
+            {
+                // 015C control behavior: ingress was intentionally frozen.
                 self.flow_spawn_wall_accumulator = Duration::ZERO;
             } else {
+                // 015D restores live baseline rain while avalanche presentation
+                // is active. This clock is wall-time only and never accelerated.
                 self.flow_spawn_wall_accumulator = self
                     .flow_spawn_wall_accumulator
                     .saturating_add(wall_delta)
@@ -2478,7 +2505,7 @@ impl App {
                 ),
             ))),
             "oslo-vessel-front-grains" => Ok(TestingSandEngine::Oslo(Box::new(
-                OsloSandboxEngine::new_front_unit_perceptual_flowviz_vessel(
+                OsloSandboxEngine::new_front_unit_truthful_flowviz_vessel(
                     self.sand_engine.cell_width,
                     self.sand_engine.cell_height,
                     self.sand_engine.snapshot_state().rng_state,
@@ -2589,6 +2616,7 @@ impl App {
         let grain_visual_rate = physics_rate.saturating_mul(2);
         let tick_rate = Duration::from_millis(TIME_SETTINGS.tick_ms);
         let perceptual = testing.engine.unit_perceptual_flowviz_enabled();
+        let truthful = testing.engine.unit_truthful_flowviz_enabled();
         let frame_budget = if perceptual {
             TESTING_CHEATS_PERCEPTUAL_FRAME_BUDGET
         } else {
@@ -2607,7 +2635,10 @@ impl App {
         // independent of 64x/128x. Deposition is still guarded by the engine's
         // quiescence contract, so these grains can coexist visibly in flight
         // without driving the static pile through the active avalanche.
-        if special_phase && !perceptual && testing.flow_spawn_wall_accumulator >= tick_rate {
+        if special_phase
+            && (!perceptual || truthful)
+            && testing.flow_spawn_wall_accumulator >= tick_rate
+        {
             testing.flow_spawn_wall_accumulator = testing
                 .flow_spawn_wall_accumulator
                 .saturating_sub(tick_rate);
@@ -2628,7 +2659,11 @@ impl App {
                     testing.flow_wall_accumulator = testing
                         .flow_wall_accumulator
                         .saturating_sub(grain_visual_rate);
-                    changed |= testing.engine.advance_testing_perceptual_flow_frame();
+                    changed |= if truthful {
+                        testing.engine.advance_testing_truthful_flow_frame()
+                    } else {
+                        testing.engine.advance_testing_perceptual_flow_frame()
+                    };
                     let substeps = testing.engine.unit_presentation_substeps();
                     for _ in 1..substeps {
                         if Instant::now() >= deadline {
@@ -2669,11 +2704,21 @@ impl App {
                         .flow_wall_accumulator
                         .saturating_sub(grain_visual_rate);
                     let substeps = testing.engine.unit_presentation_substeps();
-                    for _ in 0..substeps {
-                        if Instant::now() >= deadline {
-                            break;
+                    if truthful && Instant::now() < deadline {
+                        changed |= testing.engine.advance_testing_truthful_visual_frame();
+                        for _ in 1..substeps {
+                            if Instant::now() >= deadline {
+                                break;
+                            }
+                            changed |= testing.engine.advance_testing_perceptual_visual_frame();
                         }
-                        changed |= testing.engine.advance_testing_perceptual_visual_frame();
+                    } else {
+                        for _ in 0..substeps {
+                            if Instant::now() >= deadline {
+                                break;
+                            }
+                            changed |= testing.engine.advance_testing_perceptual_visual_frame();
+                        }
                     }
                 } else {
                     testing.flow_wall_accumulator = Duration::ZERO;
@@ -2701,11 +2746,21 @@ impl App {
                         .flow_wall_accumulator
                         .saturating_sub(grain_visual_rate);
                     let substeps = testing.engine.unit_presentation_substeps();
-                    for _ in 0..substeps {
-                        if Instant::now() >= deadline {
-                            break;
+                    if truthful && Instant::now() < deadline {
+                        changed |= testing.engine.advance_testing_truthful_visual_frame();
+                        for _ in 1..substeps {
+                            if Instant::now() >= deadline {
+                                break;
+                            }
+                            changed |= testing.engine.advance_testing_perceptual_visual_frame();
                         }
-                        changed |= testing.engine.advance_testing_perceptual_visual_frame();
+                    } else {
+                        for _ in 0..substeps {
+                            if Instant::now() >= deadline {
+                                break;
+                            }
+                            changed |= testing.engine.advance_testing_perceptual_visual_frame();
+                        }
                     }
                 }
             } else if testing.flow_wall_accumulator >= grain_visual_rate {
@@ -3826,6 +3881,20 @@ mod testing_cheats_clock_tests {
         assert_eq!(testing.queued_simulated, debt_before);
         assert_eq!(testing.flow_wall_accumulator, Duration::from_millis(4_096));
         assert_eq!(testing.flow_spawn_wall_accumulator, Duration::ZERO);
+    }
+
+    #[test]
+    fn truthful_flow_keeps_baseline_rain_clock_while_spending_accelerated_visual_debt() {
+        let mut engine = OsloSandboxEngine::new_front_unit_truthful_flowviz_vessel(20, 10, 7);
+        engine.test_seed_visible_flow();
+        let mut testing = state(TestingSandEngine::Oslo(Box::new(engine)), 64);
+        let debt_before = testing.queued_simulated;
+
+        testing.accumulate_wall_time(Duration::from_secs(1));
+
+        assert_eq!(testing.queued_simulated, debt_before);
+        assert_eq!(testing.flow_wall_accumulator, Duration::from_millis(4_096));
+        assert_eq!(testing.flow_spawn_wall_accumulator, Duration::from_secs(1));
     }
 
     #[test]

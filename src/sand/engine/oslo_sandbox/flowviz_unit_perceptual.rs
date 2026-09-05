@@ -22,6 +22,10 @@ impl OsloSandboxEngine {
         self.flowviz_unit_perceptual
     }
 
+    pub(crate) fn flowviz_unit_truthful_enabled(&self) -> bool {
+        self.flowviz_unit_truthful
+    }
+
     pub(crate) fn flowviz_unit_presentation_backlog(&self) -> usize {
         if !self.flowviz_unit_perceptual {
             return 0;
@@ -62,6 +66,38 @@ impl OsloSandboxEngine {
         if self.topple_one_active_site() {
             return true;
         }
+        changed
+    }
+
+
+    /// SEDIMENT-015D testing frame. Rain remains visually alive while the
+    /// avalanche is active, but commit is still impossible until authoritative
+    /// flow is quiescent. This spends presentation CPU without allowing ingress
+    /// to drive or mutate the active pile.
+    pub(crate) fn advance_testing_truthful_flow_frame(&mut self) -> bool {
+        debug_assert!(self.flowviz_unit_truthful);
+        self.frame_count = if self.frame_count.is_multiple_of(2) {
+            self.frame_count.wrapping_add(2)
+        } else {
+            self.frame_count.wrapping_add(1)
+        };
+        let mut changed = self.advance_falling_drives();
+        changed |= self.advance_fluidization_field();
+        changed |= self.advance_rolling_grains();
+        changed |= self.advance_rolling_visual_motion();
+        if self.topple_one_active_site() {
+            return true;
+        }
+        changed
+    }
+
+    /// 015D presentation-only cadence after physical quiescence. Existing rain
+    /// keeps falling at the ordinary grain frame rate, while commit remains the
+    /// responsibility of a later authoritative quiescent frame.
+    pub(crate) fn advance_testing_truthful_visual_frame(&mut self) -> bool {
+        debug_assert!(self.flowviz_unit_truthful);
+        let mut changed = self.advance_falling_drives();
+        changed |= self.advance_rolling_visual_motion();
         changed
     }
 

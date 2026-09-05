@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-04
 authority: working
-summary: H4/v5 remains published production authority and SEDIMENT-008 oslo-vessel-front physics remains owner-frozen. SEDIMENT-015A-R2 and SEDIMENT-015B are machine-green, but the owner rejected 015B visually: waiting white ingress formed a line, dense active mass still felt under-represented, color progression was reconstructed strangely in y, and the fixed 64 ms testing clock left CPU idle while playback slowed. SEDIMENT-015C now owns perceptual conservation: event-time observed y geometry, full local raster-capacity search, offscreen geometry without top-row clamping, ingress isolation during active testing flow, and backlog-aware accelerated presentation while unit mass/routing/custody stay unchanged.
-next: Natively validate SEDIMENT-015C. Run constructor/geometry/lane/raster/ingress/frozen-parity gates first, then the 015B and 015A suites, legacy conservative/Oslo gates, testing-clock regression, and explicit ignored 5k/10k/20k/40k scaling probe. Only after full repository green return to the owner rainbow-collapse human gate.
+summary: H4/v5 remains published production authority and SEDIMENT-008 oslo-vessel-front physics remains owner-frozen. SEDIMENT-015A-R2, 015B, and 015C-R1 are machine-green, but the owner rejected 015C visually: the full-height uniqueness raster effectively froze the interactive collapse, remote raster relocation made red/yellow material appear at implausible heights, and 015C's ingress isolation made rain stop. SEDIMENT-015D now owns truthful real-time presentation: fixed-stencil O(N) rasterization, observed-lane authority without PBD relocation, local occlusion instead of spatial fabrication, and baseline live rain that cannot commit until flow quiesces.
+next: Natively validate SEDIMENT-015D. Prove one-dot spatial truth, edge-bounded x, dense-occlusion accounting, no-op 015D micro relaxation, live-but-noncommitting rain, frozen-front/exact-stack parity, all 015C/015B/015A/legacy regressions, and explicit 5k/10k/20k/40k scaling evidence before another owner rainbow-collapse gate.
 ---
 
 # NOW — Strata

@@ -36,6 +36,12 @@ impl OsloSandboxEngine {
     }
 
     pub(super) fn relax_unit_micro_positions(&mut self) -> bool {
+        if self.flowviz_unit_truthful {
+            // 015D treats observed rolling lanes as the presentation authority.
+            // Do not spend O(N log N) work pushing carriers away from the real
+            // path merely to manufacture unique display positions.
+            return false;
+        }
         if !self.flowviz_unit_micro || self.flowviz_unit_carriers.len() < 2 {
             return false;
         }
@@ -215,9 +221,76 @@ impl OsloSandboxEngine {
         Some((x, x))
     }
 
+    fn collect_unit_truthful_render_cells(
+        &self,
+    ) -> Vec<(FlowVizMotionId, CategoryId, usize, usize)> {
+        const STENCIL: [(isize, isize); 9] = [
+            (0, 0),
+            (0, -1),
+            (0, 1),
+            (-1, 0),
+            (1, 0),
+            (-1, -1),
+            (1, -1),
+            (-1, 1),
+            (1, 1),
+        ];
+
+        let height = self.surface.grid_height_dots;
+        let width = self.surface.grid_width_dots;
+        if width == 0 || height == 0 {
+            return Vec::new();
+        }
+
+        // Flat occupancy and a fixed 3x3 stencil make raster cost O(N). Static
+        // sediment is intentionally not an exclusion zone: a moving grain may
+        // visually pass over the settled surface. If the local stencil is full,
+        // spatial truth wins over uniqueness and the carrier shares its nearest
+        // cell rather than being teleported vertically.
+        let mut occupied = vec![false; width.saturating_mul(height)];
+        let mut placements = Vec::with_capacity(self.flowviz_unit_carriers.len());
+        for carrier in self.flowviz_unit_carriers.values() {
+            let base_x = carrier.x.round() as isize;
+            let base_y = carrier.y.round() as isize;
+            if base_x < 0 || base_x >= width as isize || base_y < 0 || base_y >= height as isize {
+                continue;
+            }
+            let Some((min_x, max_x)) = Self::unit_micro_raster_x_bounds(carrier, width) else {
+                continue;
+            };
+
+            let mut chosen = None;
+            for (dx, dy) in STENCIL {
+                let x = base_x + dx;
+                let y = base_y + dy;
+                if x < min_x as isize
+                    || x > max_x as isize
+                    || y < 0
+                    || y >= height as isize
+                {
+                    continue;
+                }
+                let x = x as usize;
+                let y = y as usize;
+                let index = y.saturating_mul(width).saturating_add(x);
+                if !occupied[index] {
+                    occupied[index] = true;
+                    chosen = Some((x, y));
+                    break;
+                }
+            }
+            let (x, y) = chosen.unwrap_or((base_x as usize, base_y as usize));
+            placements.push((carrier.id, carrier.category_id, x, y));
+        }
+        placements
+    }
+
     pub(super) fn collect_unit_micro_render_cells(
         &self,
     ) -> Vec<(FlowVizMotionId, CategoryId, usize, usize)> {
+        if self.flowviz_unit_truthful {
+            return self.collect_unit_truthful_render_cells();
+        }
         let height = self.surface.grid_height_dots;
         let width = self.surface.grid_width_dots;
         if width == 0 || height == 0 {
