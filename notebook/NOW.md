@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-04
 authority: working
-summary: H4/v5 remains published production authority and SEDIMENT-008 oslo-vessel-front physics remains owner-frozen. SEDIMENT-014R3 is machine-green but owner-rejected for aggregate parcel fidelity. SEDIMENT-015A-R2 is machine-green on the certified R3 base with one-unit carriers, observed-edge-only routing, exact re-entry custody, exact stack order, and frozen-front parity. SEDIMENT-015B now adds presentation-only local separation, exact pending-depth approach, and bounded unique raster placement before the deferred human rainbow-collapse gate.
-next: Natively validate SEDIMENT-015B from certified 015A-R2 HEAD 0e791a8d10de838cd3b085a944ba4a973bc704b2. Run the 015B physics-parity/exact-stack gate, local-separation corridor gate, dense raster/category-visibility gate, and micro non-authority gate first; then re-run all 015A unit, legacy conservative, Oslo, repository, and help gates. Only if machine-green return to the owner human rainbow-collapse visual gate.
+summary: H4/v5 remains published production authority and SEDIMENT-008 oslo-vessel-front physics remains owner-frozen. SEDIMENT-015A-R2 and SEDIMENT-015B are machine-green, but the owner rejected 015B visually: waiting white ingress formed a line, dense active mass still felt under-represented, color progression was reconstructed strangely in y, and the fixed 64 ms testing clock left CPU idle while playback slowed. SEDIMENT-015C now owns perceptual conservation: event-time observed y geometry, full local raster-capacity search, offscreen geometry without top-row clamping, ingress isolation during active testing flow, and backlog-aware accelerated presentation while unit mass/routing/custody stay unchanged.
+next: Natively validate SEDIMENT-015C. Run constructor/geometry/lane/raster/ingress/frozen-parity gates first, then the 015B and 015A suites, legacy conservative/Oslo gates, testing-clock regression, and explicit ignored 5k/10k/20k/40k scaling probe. Only after full repository green return to the owner rainbow-collapse human gate.
 ---
 
 # NOW — Strata

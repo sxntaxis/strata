@@ -17,6 +17,10 @@ pub(super) struct UnitSegment {
     pub(super) sequence: u64,
     pub(super) source: usize,
     pub(super) destination: Option<usize>,
+    // SEDIMENT-015C records presentation geometry only after physics has
+    // observed the unit event. Legacy 015A/015B controls leave these unset.
+    pub(super) observed_source_y: Option<f32>,
+    pub(super) observed_target_y: Option<f32>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -152,7 +156,17 @@ impl OsloSandboxEngine {
         existing: Option<FlowVizMotionId>,
     ) -> Option<FlowVizMotionId> {
         if self.flowviz_unit {
-            self.begin_unit_motion(source, Some(destination), category_id, source_y, existing)
+            let observed_target_y = self
+                .flowviz_unit_perceptual
+                .then(|| self.unit_observed_rolling_target_y(destination));
+            self.begin_unit_motion_with_geometry(
+                source,
+                Some(destination),
+                category_id,
+                source_y,
+                observed_target_y,
+                existing,
+            )
         } else {
             self.record_flowviz_mobile_entry(source, destination, category_id, source_y);
             None
@@ -165,6 +179,32 @@ impl OsloSandboxEngine {
         destination: Option<usize>,
         category_id: CategoryId,
         source_y: usize,
+        existing: Option<FlowVizMotionId>,
+    ) -> Option<FlowVizMotionId> {
+        let observed_target_y = if self.flowviz_unit_perceptual {
+            destination
+                .map(|site| self.unit_observed_settled_target_y(site))
+                .or_else(|| Some(self.unit_observed_egress_target_y(source_y)))
+        } else {
+            None
+        };
+        self.begin_unit_motion_with_geometry(
+            source,
+            destination,
+            category_id,
+            source_y,
+            observed_target_y,
+            existing,
+        )
+    }
+
+    fn begin_unit_motion_with_geometry(
+        &mut self,
+        source: usize,
+        destination: Option<usize>,
+        category_id: CategoryId,
+        source_y: usize,
+        observed_target_y: Option<f32>,
         existing: Option<FlowVizMotionId>,
     ) -> Option<FlowVizMotionId> {
         if !self.flowviz_unit {
@@ -218,7 +258,13 @@ impl OsloSandboxEngine {
             self.flowviz_unit_peak = self.flowviz_unit_peak.max(self.flowviz_unit_carriers.len());
             id
         };
-        self.append_unit_segment(id, source, destination);
+        self.append_unit_segment_with_geometry(
+            id,
+            source,
+            destination,
+            self.flowviz_unit_perceptual.then_some(source_y as f32),
+            observed_target_y,
+        );
         Some(id)
     }
 
@@ -261,6 +307,45 @@ impl OsloSandboxEngine {
         source: usize,
         destination: Option<usize>,
     ) {
+        self.append_unit_segment_with_geometry(id, source, destination, None, None);
+    }
+
+    pub(super) fn append_unit_rolling_segment(
+        &mut self,
+        id: FlowVizMotionId,
+        source: usize,
+        destination: usize,
+    ) {
+        if !self.flowviz_unit_perceptual {
+            self.append_unit_segment(id, source, Some(destination));
+            return;
+        }
+        let observed_source_y = self.flowviz_unit_carriers.get(&id).map(|carrier| {
+            carrier
+                .queued
+                .back()
+                .and_then(|segment| segment.observed_target_y)
+                .or_else(|| carrier.active.map(|active| active.target_y))
+                .unwrap_or(carrier.ideal_y)
+        });
+        let observed_target_y = Some(self.unit_observed_rolling_target_y(destination));
+        self.append_unit_segment_with_geometry(
+            id,
+            source,
+            Some(destination),
+            observed_source_y,
+            observed_target_y,
+        );
+    }
+
+    fn append_unit_segment_with_geometry(
+        &mut self,
+        id: FlowVizMotionId,
+        source: usize,
+        destination: Option<usize>,
+        observed_source_y: Option<f32>,
+        observed_target_y: Option<f32>,
+    ) {
         if destination.is_some_and(|site| source.abs_diff(site) != 1) {
             self.flowviz_unit_misses = self.flowviz_unit_misses.saturating_add(1);
             return;
@@ -279,6 +364,8 @@ impl OsloSandboxEngine {
             sequence,
             source,
             destination,
+            observed_source_y,
+            observed_target_y,
         });
         carrier.arrived = false;
         self.flowviz_unit_segments = self.flowviz_unit_segments.saturating_add(1);

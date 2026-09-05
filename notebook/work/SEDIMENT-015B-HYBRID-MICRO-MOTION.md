@@ -1,11 +1,11 @@
 ---
 id: SEDIMENT-015B
 kind: work
-state: active
+state: superseded
 created: 2026-09-04
 updated: 2026-09-04
 authority: working
-summary: Add presentation-only local separation and exact pending-depth approach to the machine-green SEDIMENT-015A unit-carrier model so simultaneously transported CategoryId units remain individually legible without changing observed routes, custody, mass, or frozen Oslo/front physics.
+summary: Machine-green presentation-only local separation and exact pending-depth approach over SEDIMENT-015A. Owner human review found perceptual-conservation defects in waiting ingress, dense raster visibility, reconstructed vertical geometry, and fixed-cadence playback; SEDIMENT-015C supersedes the visual gate while retaining the 015B separation foundation.
 ---
 
 # SEDIMENT-015B — Hybrid active-grain micro-motion
@@ -183,3 +183,10 @@ Do not tune Oslo slope/front/rain behavior from this gate.
 - reducing micro iterations under demonstrated load.
 
 Those changes require benchmark evidence rather than assumption.
+
+
+## Native and human closure
+
+Native validation passed compile, all ordered 015B semantic gates, 9/9 legacy conservative-flowviz tests, fmt, strict Clippy, the full 342-test suite with one ignored test, and help smoke. Final diff remained limited to approved Oslo presentation scope with no production physics, persistence, or routing changes.
+
+The owner human rainbow-collapse gate did **not** accept the result. Evidence showed a horizontal white waiting-ingress line, active transport that still felt visually under-conserved, strange color/y progression, and slower wall-clock playback despite available CPU. The accepted interpretation is `FAIL_PERCEPTUAL_CONSERVATION`, not a failure of 015A unit mass/custody. SEDIMENT-015C owns the repair.

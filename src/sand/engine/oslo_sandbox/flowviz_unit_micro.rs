@@ -40,6 +40,7 @@ impl OsloSandboxEngine {
             return false;
         }
         let grid_height = self.surface.grid_height_dots;
+        let perceptual = self.flowviz_unit_perceptual;
         let mut changed = false;
 
         for _ in 0..UNIT_MICRO_ITERATIONS {
@@ -158,7 +159,7 @@ impl OsloSandboxEngine {
                     y = sample.ideal_y + tether_y * scale;
                 }
                 x = x.clamp(sample.min_x, sample.max_x);
-                if grid_height > 0 {
+                if grid_height > 0 && !perceptual {
                     y = y.clamp(0.0, grid_height.saturating_sub(1) as f32);
                 }
                 changed |= (x - carrier.x).abs() > UNIT_MICRO_EPSILON
@@ -240,12 +241,23 @@ impl OsloSandboxEngine {
                 continue;
             };
             let base_y = carrier.y.round() as isize;
+            let raster_radius = if self.flowviz_unit_perceptual {
+                height as isize
+            } else {
+                UNIT_MICRO_RASTER_RADIUS
+            };
+            let mut offsets = Vec::with_capacity((raster_radius as usize).saturating_mul(2) + 1);
+            offsets.push(0isize);
+            for distance in 1..=raster_radius {
+                offsets.push(-distance);
+                offsets.push(distance);
+            }
             let mut chosen = None;
 
             for allow_static_overlap in [false, true] {
                 let mut best: Option<(f32, usize, usize)> = None;
                 for x in min_x..=max_x {
-                    for offset in -UNIT_MICRO_RASTER_RADIUS..=UNIT_MICRO_RASTER_RADIUS {
+                    for offset in offsets.iter().copied() {
                         let y = base_y + offset;
                         if y < 0 || y >= height as isize {
                             continue;

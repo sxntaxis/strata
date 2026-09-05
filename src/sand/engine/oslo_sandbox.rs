@@ -10,9 +10,12 @@ mod flowviz_conservative;
 mod flowviz_conservative_render;
 mod flowviz_unit;
 mod flowviz_unit_micro;
+mod flowviz_unit_perceptual;
 mod flowviz_unit_render;
 #[cfg(test)]
 mod flowviz_unit_micro_tests;
+#[cfg(test)]
+mod flowviz_unit_perceptual_tests;
 
 const OSLO_THRESHOLD_LOW: u8 = 1;
 const OSLO_THRESHOLD_HIGH: u8 = 2;
@@ -163,6 +166,7 @@ pub(crate) struct OsloSandboxEngine {
     flowviz_conservative: bool,
     flowviz_unit: bool,
     flowviz_unit_micro: bool,
+    flowviz_unit_perceptual: bool,
     columns: Vec<Vec<CategoryId>>,
     // Presentation-only y overrides aligned one-for-one with `columns`.
     // A settled grain can already participate in authoritative physics while
@@ -308,6 +312,19 @@ impl OsloSandboxEngine {
         sandbox
     }
 
+    pub(crate) fn new_front_unit_perceptual_flowviz_vessel(
+        width: u16,
+        height: u16,
+        seed: u64,
+    ) -> Self {
+        let mut sandbox = Self::new_front_vessel(width, height, seed);
+        sandbox.enable_unit_flowviz();
+        sandbox.flowviz_unit_micro = true;
+        sandbox.flowviz_unit_perceptual = true;
+        sandbox.sync_surface();
+        sandbox
+    }
+
     pub(crate) fn new_fluid_vessel(width: u16, height: u16, seed: u64) -> Self {
         Self::new_with_flow(
             width,
@@ -365,6 +382,7 @@ impl OsloSandboxEngine {
             flowviz_conservative: false,
             flowviz_unit: false,
             flowviz_unit_micro: false,
+            flowviz_unit_perceptual: false,
             columns: vec![Vec::new(); lattice_size],
             column_visual_y: vec![Vec::new(); lattice_size],
             flowviz_edge_flux: vec![0; lattice_size],
@@ -540,7 +558,9 @@ impl OsloSandboxEngine {
         let old_height = self.surface.grid_height_dots;
         self.surface.resize(width, height);
         let new_width = self.surface.grid_width_dots;
-        let vertical_added = self.surface.grid_height_dots.saturating_sub(old_height);
+        let new_height = self.surface.grid_height_dots;
+        let vertical_added = new_height.saturating_sub(old_height);
+        let perceptual_vertical_shift = new_height as f32 - old_height as f32;
         let mut left_added = 0usize;
 
         if new_width > old_width {
@@ -763,60 +783,91 @@ impl OsloSandboxEngine {
                 }
             }
             if self.flowviz_unit {
-                for carrier in self.flowviz_unit_carriers.values_mut() {
-                    let mut y = carrier.y.max(0.0).floor() as usize;
-                    y = y.saturating_add(vertical_added);
-                    carrier.y = if new_visible_height == 0 {
-                        0.0
-                    } else if new_visible_height < old_visible_height {
-                        Self::project_site_between_bounds(
-                            y,
-                            shifted_old_vertical,
-                            new_visible_vertical,
-                        ) as f32
-                    } else {
-                        y.clamp(new_visible_vertical.0, new_visible_vertical.1 - 1) as f32
-                    };
-                    let mut ideal_y = carrier.ideal_y.max(0.0).floor() as usize;
-                    ideal_y = ideal_y.saturating_add(vertical_added);
-                    carrier.ideal_y = if new_visible_height == 0 {
-                        0.0
-                    } else if new_visible_height < old_visible_height {
-                        Self::project_site_between_bounds(
-                            ideal_y,
-                            shifted_old_vertical,
-                            new_visible_vertical,
-                        ) as f32
-                    } else {
-                        ideal_y.clamp(new_visible_vertical.0, new_visible_vertical.1 - 1) as f32
-                    };
-                    if let Some(active) = &mut carrier.active {
-                        let mut start_y = active.start_y.max(0.0).floor() as usize;
-                        start_y = start_y.saturating_add(vertical_added);
-                        active.start_y = if new_visible_height == 0 {
+                if self.flowviz_unit_perceptual {
+                    // 015C y geometry is recorded relative to the bottom-anchored
+                    // physical stack. Resize therefore applies one exact signed
+                    // bottom shift and preserves offscreen coordinates instead of
+                    // clamping them onto the visible top/bottom rows.
+                    for carrier in self.flowviz_unit_carriers.values_mut() {
+                        carrier.y += perceptual_vertical_shift;
+                        carrier.ideal_y += perceptual_vertical_shift;
+                        if let Some(active) = &mut carrier.active {
+                            active.start_y += perceptual_vertical_shift;
+                            active.target_y += perceptual_vertical_shift;
+                            if let Some(source_y) = &mut active.segment.observed_source_y {
+                                *source_y += perceptual_vertical_shift;
+                            }
+                            if let Some(target_y) = &mut active.segment.observed_target_y {
+                                *target_y += perceptual_vertical_shift;
+                            }
+                        }
+                        for segment in &mut carrier.queued {
+                            if let Some(source_y) = &mut segment.observed_source_y {
+                                *source_y += perceptual_vertical_shift;
+                            }
+                            if let Some(target_y) = &mut segment.observed_target_y {
+                                *target_y += perceptual_vertical_shift;
+                            }
+                        }
+                    }
+                } else {
+                    for carrier in self.flowviz_unit_carriers.values_mut() {
+                        let mut y = carrier.y.max(0.0).floor() as usize;
+                        y = y.saturating_add(vertical_added);
+                        carrier.y = if new_visible_height == 0 {
                             0.0
                         } else if new_visible_height < old_visible_height {
                             Self::project_site_between_bounds(
-                                start_y,
+                                y,
                                 shifted_old_vertical,
                                 new_visible_vertical,
                             ) as f32
                         } else {
-                            start_y.clamp(new_visible_vertical.0, new_visible_vertical.1 - 1) as f32
+                            y.clamp(new_visible_vertical.0, new_visible_vertical.1 - 1) as f32
                         };
-                        let mut target_y = active.target_y.max(0.0).floor() as usize;
-                        target_y = target_y.saturating_add(vertical_added);
-                        active.target_y = if new_visible_height == 0 {
+                        let mut ideal_y = carrier.ideal_y.max(0.0).floor() as usize;
+                        ideal_y = ideal_y.saturating_add(vertical_added);
+                        carrier.ideal_y = if new_visible_height == 0 {
                             0.0
                         } else if new_visible_height < old_visible_height {
                             Self::project_site_between_bounds(
-                                target_y,
+                                ideal_y,
                                 shifted_old_vertical,
                                 new_visible_vertical,
                             ) as f32
                         } else {
-                            target_y.clamp(new_visible_vertical.0, new_visible_vertical.1 - 1) as f32
+                            ideal_y.clamp(new_visible_vertical.0, new_visible_vertical.1 - 1) as f32
                         };
+                        if let Some(active) = &mut carrier.active {
+                            let mut start_y = active.start_y.max(0.0).floor() as usize;
+                            start_y = start_y.saturating_add(vertical_added);
+                            active.start_y = if new_visible_height == 0 {
+                                0.0
+                            } else if new_visible_height < old_visible_height {
+                                Self::project_site_between_bounds(
+                                    start_y,
+                                    shifted_old_vertical,
+                                    new_visible_vertical,
+                                ) as f32
+                            } else {
+                                start_y.clamp(new_visible_vertical.0, new_visible_vertical.1 - 1)
+                                    as f32
+                            };
+                            let mut target_y = active.target_y.max(0.0).floor() as usize;
+                            target_y = target_y.saturating_add(vertical_added);
+                            active.target_y = if new_visible_height == 0 {
+                                0.0
+                            } else if new_visible_height < old_visible_height {
+                                Self::project_site_between_bounds(
+                                    target_y,
+                                    shifted_old_vertical,
+                                    new_visible_vertical,
+                                ) as f32
+                            } else {
+                                target_y.clamp(new_visible_vertical.0, new_visible_vertical.1 - 1)
+                                    as f32
+                            };
+                        }
                     }
                 }
             }

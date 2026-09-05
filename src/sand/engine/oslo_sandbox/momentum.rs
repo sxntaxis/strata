@@ -377,7 +377,7 @@ impl OsloSandboxEngine {
         let source_y = self.top_grain_y(source).unwrap_or(rolling.visual_y);
         if self.flowviz_unit {
             if let Some(id) = rolling.motion_id {
-                self.append_unit_segment(id, source, Some(next_site));
+                self.append_unit_rolling_segment(id, source, next_site);
             } else {
                 self.flowviz_unit_misses = self.flowviz_unit_misses.saturating_add(1);
             }

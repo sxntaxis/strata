@@ -48,6 +48,8 @@ use terminal_lifecycle::{ManagedTerminal, TerminalSession};
 
 #[cfg(debug_assertions)]
 const TESTING_CHEATS_FRAME_BUDGET: Duration = Duration::from_millis(4);
+#[cfg(debug_assertions)]
+const TESTING_CHEATS_PERCEPTUAL_FRAME_BUDGET: Duration = Duration::from_millis(12);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum UiMode {
@@ -574,6 +576,38 @@ impl TestingSandEngine {
         matches!(self, Self::Oslo(engine) if engine.rolling_visual_motion_active())
     }
 
+    fn unit_perceptual_flowviz_enabled(&self) -> bool {
+        matches!(self, Self::Oslo(engine) if engine.flowviz_unit_perceptual_enabled())
+    }
+
+    fn unit_presentation_substeps(&self) -> usize {
+        match self {
+            Self::Oslo(engine) => engine.flowviz_unit_presentation_substeps(),
+            _ => 1,
+        }
+    }
+
+    fn advance_testing_perceptual_flow_frame(&mut self) -> bool {
+        match self {
+            Self::Oslo(engine) => engine.advance_testing_perceptual_flow_frame(),
+            Self::H4(engine) => {
+                engine.update();
+                true
+            }
+            Self::Classic(engine) => {
+                engine.update();
+                true
+            }
+        }
+    }
+
+    fn advance_testing_perceptual_visual_frame(&mut self) -> bool {
+        match self {
+            Self::Oslo(engine) => engine.advance_testing_perceptual_visual_frame(),
+            _ => false,
+        }
+    }
+
     fn advance_testing_flow_frame(&mut self) -> bool {
         match self {
             Self::Oslo(engine) => engine.advance_testing_flow_frame(),
@@ -809,19 +843,35 @@ impl TestingCheatsState {
             || self.engine.rolling_visual_motion_active()
         {
             let visual_frame_ms = TIME_SETTINGS.physics_ms.saturating_mul(2);
+            let flow_clock_multiplier = if self.engine.unit_perceptual_flowviz_enabled() {
+                match self.speed_multiplier {
+                    1 => 1,
+                    2..=4 => 2,
+                    5..=16 => 4,
+                    17..=64 => 8,
+                    _ => 12,
+                }
+            } else {
+                1
+            };
+            let flow_delta = wall_delta.saturating_mul(flow_clock_multiplier);
             self.flow_wall_accumulator = self
                 .flow_wall_accumulator
-                .saturating_add(wall_delta)
-                .min(Duration::from_millis(visual_frame_ms.saturating_mul(8)));
-            // Keep ordinary 1x rain visibly alive during a wall-clock avalanche,
-            // but never turn 64x/128x into hundreds of new drive grains while
-            // the avalanche is playing. This is a separate live-rain clock.
-            self.flow_spawn_wall_accumulator = self
-                .flow_spawn_wall_accumulator
-                .saturating_add(wall_delta)
-                .min(Duration::from_millis(
-                    TIME_SETTINGS.tick_ms.saturating_mul(2),
-                ));
+                .saturating_add(flow_delta)
+                .min(Duration::from_millis(visual_frame_ms.saturating_mul(64)));
+            if self.engine.unit_perceptual_flowviz_enabled() {
+                // 015C admits no new testingcheats rain during an active
+                // avalanche. Existing ingress is frozen in the sky until
+                // quiescence instead of forming a white waiting crust.
+                self.flow_spawn_wall_accumulator = Duration::ZERO;
+            } else {
+                self.flow_spawn_wall_accumulator = self
+                    .flow_spawn_wall_accumulator
+                    .saturating_add(wall_delta)
+                    .min(Duration::from_millis(
+                        TIME_SETTINGS.tick_ms.saturating_mul(2),
+                    ));
+            }
         } else {
             let accelerated = wall_delta.saturating_mul(self.speed_multiplier);
             self.queued_simulated = self.queued_simulated.saturating_add(accelerated);
@@ -2428,7 +2478,7 @@ impl App {
                 ),
             ))),
             "oslo-vessel-front-grains" => Ok(TestingSandEngine::Oslo(Box::new(
-                OsloSandboxEngine::new_front_unit_micro_flowviz_vessel(
+                OsloSandboxEngine::new_front_unit_perceptual_flowviz_vessel(
                     self.sand_engine.cell_width,
                     self.sand_engine.cell_height,
                     self.sand_engine.snapshot_state().rng_state,
@@ -2533,12 +2583,18 @@ impl App {
 
         let physics_rate = Duration::from_millis(TIME_SETTINGS.physics_ms);
         // Oslo's historical sandbox advances visible grains on every second
-        // 32 ms internal frame. Use that effective 64 ms cadence directly for
-        // wall-clock avalanche playback instead of globally serializing each
-        // grain's vertical interpolation.
+        // 32 ms internal frame. 015C keeps that physical quantum but can spend
+        // multiple quanta and presentation substeps inside a bounded wall-clock
+        // budget when accelerated testing has debt to consume.
         let grain_visual_rate = physics_rate.saturating_mul(2);
         let tick_rate = Duration::from_millis(TIME_SETTINGS.tick_ms);
-        let deadline = Instant::now() + TESTING_CHEATS_FRAME_BUDGET;
+        let perceptual = testing.engine.unit_perceptual_flowviz_enabled();
+        let frame_budget = if perceptual {
+            TESTING_CHEATS_PERCEPTUAL_FRAME_BUDGET
+        } else {
+            TESTING_CHEATS_FRAME_BUDGET
+        };
+        let deadline = Instant::now() + frame_budget;
         let category_id = self.time_tracker.active_category_id();
         let mut changed = false;
 
@@ -2551,7 +2607,10 @@ impl App {
         // independent of 64x/128x. Deposition is still guarded by the engine's
         // quiescence contract, so these grains can coexist visibly in flight
         // without driving the static pile through the active avalanche.
-        if special_phase && testing.flow_spawn_wall_accumulator >= tick_rate {
+        if special_phase
+            && !perceptual
+            && testing.flow_spawn_wall_accumulator >= tick_rate
+        {
             testing.flow_spawn_wall_accumulator = testing
                 .flow_spawn_wall_accumulator
                 .saturating_sub(tick_rate);
@@ -2564,8 +2623,25 @@ impl App {
         // concurrently; presentation interpolation is part of the same frame
         // and never blocks physics globally.
         if testing.engine.visible_flow_active() {
-            if testing.flow_wall_accumulator >= grain_visual_rate {
-                // Discard excess wall delay rather than replaying it as a burst.
+            if perceptual {
+                while testing.flow_wall_accumulator >= grain_visual_rate
+                    && Instant::now() < deadline
+                    && testing.engine.visible_flow_active()
+                {
+                    testing.flow_wall_accumulator = testing
+                        .flow_wall_accumulator
+                        .saturating_sub(grain_visual_rate);
+                    changed |= testing.engine.advance_testing_perceptual_flow_frame();
+                    let substeps = testing.engine.unit_presentation_substeps();
+                    for _ in 1..substeps {
+                        if Instant::now() >= deadline {
+                            break;
+                        }
+                        changed |= testing.engine.advance_testing_perceptual_visual_frame();
+                    }
+                }
+            } else if testing.flow_wall_accumulator >= grain_visual_rate {
+                // Legacy presentation keeps its historical single-frame clock.
                 testing.flow_wall_accumulator = Duration::ZERO;
                 changed |= testing.engine.advance_testing_flow_frame();
             }
@@ -2591,8 +2667,21 @@ impl App {
             } else if testing.engine.rolling_visual_motion_active()
                 && testing.flow_wall_accumulator >= grain_visual_rate
             {
-                testing.flow_wall_accumulator = Duration::ZERO;
-                changed |= testing.engine.advance_testing_visual_frame();
+                if perceptual {
+                    testing.flow_wall_accumulator = testing
+                        .flow_wall_accumulator
+                        .saturating_sub(grain_visual_rate);
+                    let substeps = testing.engine.unit_presentation_substeps();
+                    for _ in 0..substeps {
+                        if Instant::now() >= deadline {
+                            break;
+                        }
+                        changed |= testing.engine.advance_testing_perceptual_visual_frame();
+                    }
+                } else {
+                    testing.flow_wall_accumulator = Duration::ZERO;
+                    changed |= testing.engine.advance_testing_visual_frame();
+                }
             }
             if changed {
                 testing.visual_dirty = true;
@@ -2606,7 +2695,23 @@ impl App {
         // Finish all such presentation tracks in parallel at the same grain
         // cadence; do not serialize the entire solver behind one dot.
         if testing.engine.rolling_visual_motion_active() {
-            if testing.flow_wall_accumulator >= grain_visual_rate {
+            if perceptual {
+                while testing.flow_wall_accumulator >= grain_visual_rate
+                    && Instant::now() < deadline
+                    && testing.engine.rolling_visual_motion_active()
+                {
+                    testing.flow_wall_accumulator = testing
+                        .flow_wall_accumulator
+                        .saturating_sub(grain_visual_rate);
+                    let substeps = testing.engine.unit_presentation_substeps();
+                    for _ in 0..substeps {
+                        if Instant::now() >= deadline {
+                            break;
+                        }
+                        changed |= testing.engine.advance_testing_perceptual_visual_frame();
+                    }
+                }
+            } else if testing.flow_wall_accumulator >= grain_visual_rate {
                 testing.flow_wall_accumulator = Duration::ZERO;
                 changed |= testing.engine.advance_testing_visual_frame();
             }
@@ -3710,6 +3815,21 @@ mod testing_cheats_clock_tests {
         assert_eq!(testing.queued_simulated, debt_before);
         assert!(testing.flow_wall_accumulator > Duration::ZERO);
         assert_eq!(testing.flow_spawn_wall_accumulator, Duration::from_secs(1));
+    }
+
+    #[test]
+    fn perceptual_flow_spends_acceleration_on_presentation_without_spawning_waiting_rain() {
+        let mut engine =
+            OsloSandboxEngine::new_front_unit_perceptual_flowviz_vessel(20, 10, 7);
+        engine.test_seed_visible_flow();
+        let mut testing = state(TestingSandEngine::Oslo(Box::new(engine)), 64);
+        let debt_before = testing.queued_simulated;
+
+        testing.accumulate_wall_time(Duration::from_secs(1));
+
+        assert_eq!(testing.queued_simulated, debt_before);
+        assert_eq!(testing.flow_wall_accumulator, Duration::from_millis(4_096));
+        assert_eq!(testing.flow_spawn_wall_accumulator, Duration::ZERO);
     }
 
     #[test]

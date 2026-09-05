@@ -40,6 +40,7 @@ impl OsloSandboxEngine {
         visible_end: usize,
         heights: &[usize],
         settled_targets: &BTreeMap<FlowVizMotionId, (usize, f32)>,
+        perceptual: bool,
     ) -> (f32, f32) {
         let target_x = segment.destination.map_or_else(
             || {
@@ -51,21 +52,33 @@ impl OsloSandboxEngine {
             },
             |site| site as f32,
         );
-        let target_y = segment.destination.map_or_else(
-            || (carrier.ideal_y + 1.0).min(grid_height.saturating_sub(1) as f32),
-            |site| {
-                if carrier.physical == UnitPhysicalState::Settled(site)
-                    && carrier.queued.is_empty()
-                    && let Some((target_site, target_y)) = settled_targets.get(&carrier.id)
-                    && *target_site == site
-                {
-                    *target_y
-                } else {
-                    let height = heights.get(site).copied().unwrap_or(0);
-                    Self::unit_target_y(grid_height, height)
-                }
-            },
-        );
+        let target_y = if perceptual {
+            segment.observed_target_y.unwrap_or_else(|| {
+                segment.destination.map_or_else(
+                    || (carrier.ideal_y + 1.0).min(grid_height.saturating_sub(1) as f32),
+                    |site| {
+                        let height = heights.get(site).copied().unwrap_or(0);
+                        Self::unit_target_y(grid_height, height)
+                    },
+                )
+            })
+        } else {
+            segment.destination.map_or_else(
+                || (carrier.ideal_y + 1.0).min(grid_height.saturating_sub(1) as f32),
+                |site| {
+                    if carrier.physical == UnitPhysicalState::Settled(site)
+                        && carrier.queued.is_empty()
+                        && let Some((target_site, target_y)) = settled_targets.get(&carrier.id)
+                        && *target_site == site
+                    {
+                        *target_y
+                    } else {
+                        let height = heights.get(site).copied().unwrap_or(0);
+                        Self::unit_target_y(grid_height, height)
+                    }
+                },
+            )
+        };
         (target_x, target_y)
     }
 
@@ -104,6 +117,7 @@ impl OsloSandboxEngine {
             .collect::<Vec<_>>();
         let settled_targets = self.unit_settled_targets(grid_height);
         let micro = self.flowviz_unit_micro;
+        let perceptual = self.flowviz_unit_perceptual;
         let mut changed = false;
         let mut discharged_done = Vec::new();
         let mut missing_settled_targets = 0usize;
@@ -124,11 +138,18 @@ impl OsloSandboxEngine {
                     visible_end,
                     &heights,
                     &settled_targets,
+                    perceptual,
                 );
                 carrier.active = Some(UnitActiveSegment {
                     segment,
                     start_x: if micro { carrier.ideal_x } else { carrier.x },
-                    start_y: if micro { carrier.ideal_y } else { carrier.y },
+                    start_y: if perceptual {
+                        segment.observed_source_y.unwrap_or(carrier.ideal_y)
+                    } else if micro {
+                        carrier.ideal_y
+                    } else {
+                        carrier.y
+                    },
                     target_x,
                     target_y,
                     progress: 0.0,
