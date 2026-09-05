@@ -244,3 +244,29 @@ Unchanged and byte/diff-audited where applicable:
 - persistence/schema;
 - scheduler authority except existing generic visual-flow backpressure behavior;
 - SEDIMENT-014 parcel model behavior in its own debug model.
+
+## R1 native finding and R2 gate correction
+
+The first certified-base native run reached the unit ordinary-drive gate after compilation and the initial focused custody tests had passed, then stopped at:
+
+```text
+unit_flowviz_preserves_frozen_front_physics_and_exact_stack_on_ordinary_drive
+unit visual transport failed to drain
+```
+
+Static reconstruction against the exact failing candidate shows that this was not evidence that a physically settled carrier could not reconcile. The test reused `direct_drive_and_relax`, a helper that drains only ordinary active-site topples. `oslo-vessel-front` can legitimately create an authoritative `RollingGrain` on a severe failure. Once that occurs, the helper returns while explicit physical flow is still active, but the test then advances only the visual clock and waits for all unit carriers to disappear.
+
+That expectation is invalid for the SEDIMENT-015 contract. A carrier whose authoritative state is still `Rolling` must **not** invent a settlement or egress merely because its currently observed visual segments have finished replaying. Presentation must wait for the next physical fact.
+
+SEDIMENT-015A-R2 therefore changes no runtime source. It repairs the gate so each deterministic drive first reaches complete front-model physical quiescence in both the frozen control and the unit-flowviz sibling by advancing rolling grains plus active-site topples. Exact authoritative parity is checked at that boundary. Only then is presentation drained and exact stack equality required.
+
+A dedicated anti-fabrication regression also freezes the complementary rule:
+
+```text
+physical RollingGrain still exists
++ its only observed visual edge has completed
+=> carrier remains Rolling and alive
+=> visual clock may not synthesize settlement/discharge
+```
+
+This is a strengthening of the acceptance test, not a relaxation: R1 could compare only the direct-topple prefix before explicit front flow finished; R2 compares the fully quiescent authoritative front state on every drive, then separately proves exact visual drain.

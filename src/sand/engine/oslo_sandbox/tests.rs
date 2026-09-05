@@ -29,6 +29,24 @@ fn direct_drive_and_relax(engine: &mut OsloSandboxEngine, site: usize) -> usize 
     moves
 }
 
+fn direct_front_drive_and_quiesce(engine: &mut OsloSandboxEngine, site: usize) {
+    engine.push_settled_grain_at_visual_y(site, grain(), None);
+    engine.mirror_flowviz_settled_push(site, grain());
+    engine.total_generated = engine.total_generated.saturating_add(1);
+    engine.enqueue_neighborhood(site);
+
+    let mut guard = 0usize;
+    loop {
+        guard = guard.saturating_add(1);
+        assert!(guard < 250_000, "front direct drive failed to quiesce");
+        let mut changed = engine.advance_rolling_grains();
+        changed |= engine.topple_one_active_site();
+        if !changed && engine.active_sites.is_empty() && !engine.explicit_flow_active() {
+            break;
+        }
+    }
+}
+
 fn category_counts<I>(categories: I) -> std::collections::HashMap<CategoryId, usize>
 where
     I: IntoIterator<Item = CategoryId>,
@@ -1485,9 +1503,29 @@ fn unit_flowviz_preserves_frozen_front_physics_and_exact_stack_on_ordinary_drive
 
     for drive in 0..2_000usize {
         let site = (drive.wrapping_mul(37).wrapping_add(11)) % width;
-        let frozen_moves = direct_drive_and_relax(&mut frozen, site);
-        let grain_moves = direct_drive_and_relax(&mut grains, site);
-        assert_eq!(grain_moves, frozen_moves);
+        direct_front_drive_and_quiesce(&mut frozen, site);
+        direct_front_drive_and_quiesce(&mut grains, site);
+
+        // This gate is intentionally stronger than the earlier direct-topple
+        // helper: the frozen front and unit presentation model must first reach
+        // the same *authoritative physical quiescence*, including any rolling
+        // grains spawned by a severe local failure, before presentation alone
+        // is asked to drain its already-observed history.
+        assert!(!frozen.explicit_flow_active());
+        assert!(!grains.explicit_flow_active());
+        assert_eq!(grains.columns, frozen.columns);
+        assert_eq!(grains.critical_slopes, frozen.critical_slopes);
+        assert_eq!(grains.threshold_rng_state, frozen.threshold_rng_state);
+        assert_eq!(grains.relax_rng_state, frozen.relax_rng_state);
+        assert_eq!(grains.discharged_count(), frozen.discharged_count());
+        assert_eq!(grains.front_erosions(), frozen.front_erosions());
+        assert_eq!(grains.front_support_recruits(), frozen.front_support_recruits());
+        assert_eq!(grains.avalanche_moves, frozen.avalanche_moves);
+        assert!(grains.flowviz_unit_mass_matches_physics());
+        assert_eq!(
+            unit_visual_category_counts(&grains),
+            unit_authoritative_category_counts(&grains)
+        );
 
         let mut visual_guard = 0usize;
         while grains.rolling_visual_motion_active() {
@@ -1501,16 +1539,57 @@ fn unit_flowviz_preserves_frozen_front_physics_and_exact_stack_on_ordinary_drive
             );
         }
         assert_eq!(grains.flowviz_shadow_columns, grains.columns);
+        assert!(grains
+            .flowviz_unit_custody
+            .iter()
+            .flatten()
+            .all(Option::is_none));
+        assert_eq!(grains.flowviz_unit_misses(), 0);
+    }
+}
+
+#[test]
+fn unit_flowviz_visual_clock_does_not_invent_rolling_completion() {
+    let mut engine = OsloSandboxEngine::new_front_unit_flowviz_vessel(20, 10, TEST_SEED);
+    let source = engine.lattice_size() / 2;
+    let destination = source + 1;
+    set_column_height(&mut engine, source, 4);
+    set_column_height(&mut engine, destination, 1);
+    engine.reset_unit_flowviz_from_physics();
+
+    let (category_id, visual_y, custody) = engine.pop_settled_grain_with_custody(source).unwrap();
+    let id = engine
+        .begin_unit_motion(source, Some(destination), category_id, visual_y, custody)
+        .unwrap();
+    engine.seed_rolling_grain_at_y_with_motion(
+        destination,
+        category_id,
+        ToppleDirection::Right,
+        visual_y,
+        Some(id),
+    );
+
+    for _ in 0..32 {
+        let _ = engine.advance_flowviz_tracers();
     }
 
-    assert_eq!(grains.columns, frozen.columns);
-    assert_eq!(grains.critical_slopes, frozen.critical_slopes);
-    assert_eq!(grains.threshold_rng_state, frozen.threshold_rng_state);
-    assert_eq!(grains.relax_rng_state, frozen.relax_rng_state);
-    assert_eq!(grains.discharged_count(), frozen.discharged_count());
-    assert_eq!(grains.front_erosions(), frozen.front_erosions());
-    assert_eq!(grains.front_support_recruits(), frozen.front_support_recruits());
-    assert_eq!(grains.flowviz_unit_misses(), 0);
+    // Presentation may replay the observed source->destination edge, but it may
+    // not infer a settlement/egress event that authoritative physics has not
+    // performed. The live carrier therefore remains paired with the live
+    // RollingGrain until a physical update supplies the next fact.
+    let carrier = engine.flowviz_unit_carriers.get(&id).unwrap();
+    assert_eq!(carrier.physical, flowviz_unit::UnitPhysicalState::Rolling);
+    assert!(carrier.active.is_none());
+    assert!(carrier.queued.is_empty());
+    assert_eq!(engine.rolling_grains.len(), 1);
+    assert_eq!(engine.flowviz_unit_carrier_count(), 1);
+    assert!(engine.rolling_visual_motion_active());
+    assert!(engine.flowviz_unit_mass_matches_physics());
+    assert_eq!(
+        unit_visual_category_counts(&engine),
+        unit_authoritative_category_counts(&engine)
+    );
+    assert_eq!(engine.flowviz_unit_misses(), 0);
 }
 
 #[test]
