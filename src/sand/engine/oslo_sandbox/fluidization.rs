@@ -175,7 +175,8 @@ impl OsloSandboxEngine {
             .collect::<Vec<_>>();
 
         for (site, direction, destination) in release_sites {
-            let Some((category_id, visual_y, custody)) = self.pop_settled_grain_with_custody(site) else {
+            let Some((category_id, visual_y, custody)) = self.pop_settled_grain_with_custody(site)
+            else {
                 continue;
             };
             let motion_id = self.record_flowviz_mobile_entry_with_custody(

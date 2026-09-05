@@ -1,5 +1,5 @@
+use super::flowviz_unit::{UNIT_SEGMENT_STEP, UnitActiveSegment, UnitPhysicalState};
 use super::*;
-use super::flowviz_unit::{UnitActiveSegment, UnitPhysicalState, UNIT_SEGMENT_STEP};
 
 impl OsloSandboxEngine {
     fn unit_target_y(grid_height: usize, shadow_height: usize) -> f32 {
@@ -22,19 +22,19 @@ impl OsloSandboxEngine {
         let mut discharged_done = Vec::new();
 
         for carrier in self.flowviz_unit_carriers.values_mut() {
-            if carrier.active.is_none() {
-                if let Some(segment) = carrier.queued.pop_front() {
-                    debug_assert!(
-                        segment.sequence > 0 && segment.sequence < observed_sequence_limit,
-                        "unit carrier can replay only an already-observed physical segment"
-                    );
-                    carrier.active = Some(UnitActiveSegment {
-                        segment,
-                        start_x: carrier.x,
-                        start_y: carrier.y,
-                        progress: 0.0,
-                    });
-                }
+            if carrier.active.is_none()
+                && let Some(segment) = carrier.queued.pop_front()
+            {
+                debug_assert!(
+                    segment.sequence > 0 && segment.sequence < observed_sequence_limit,
+                    "unit carrier can replay only an already-observed physical segment"
+                );
+                carrier.active = Some(UnitActiveSegment {
+                    segment,
+                    start_x: carrier.x,
+                    start_y: carrier.y,
+                    progress: 0.0,
+                });
             }
 
             if let Some(active) = &mut carrier.active {
@@ -95,7 +95,11 @@ impl OsloSandboxEngine {
                 if depth >= self.columns[site].len() {
                     break;
                 }
-                let Some(id) = self.flowviz_unit_custody[site].get(depth).copied().flatten() else {
+                let Some(id) = self.flowviz_unit_custody[site]
+                    .get(depth)
+                    .copied()
+                    .flatten()
+                else {
                     self.flowviz_unit_misses = self.flowviz_unit_misses.saturating_add(1);
                     break;
                 };
@@ -171,10 +175,11 @@ impl OsloSandboxEngine {
 
     #[cfg(test)]
     pub(super) fn flowviz_unit_mass_matches_physics(&self) -> bool {
-        self.flowviz_shadow_columns.iter().map(Vec::len).sum::<usize>()
+        self.flowviz_shadow_columns
+            .iter()
+            .map(Vec::len)
+            .sum::<usize>()
             + self.flowviz_unit_carriers.len()
-            == self.settled_count()
-                + self.rolling_grains.len()
-                + self.flowviz_unit_egress_pending()
+            == self.settled_count() + self.rolling_grains.len() + self.flowviz_unit_egress_pending()
     }
 }

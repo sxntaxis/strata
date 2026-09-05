@@ -169,7 +169,8 @@ pub(crate) struct OsloSandboxEngine {
     flowviz_edge_flux: Vec<i16>,
     flowviz_tracers: VecDeque<flowviz::FlowVizTracer>,
     flowviz_parcels: VecDeque<flowviz_conservative::FlowVizParcel>,
-    flowviz_unit_carriers: BTreeMap<flowviz_unit::FlowVizMotionId, flowviz_unit::FlowVizUnitCarrier>,
+    flowviz_unit_carriers:
+        BTreeMap<flowviz_unit::FlowVizMotionId, flowviz_unit::FlowVizUnitCarrier>,
     flowviz_unit_custody: Vec<Vec<Option<flowviz_unit::FlowVizMotionId>>>,
     flowviz_unit_next_id: u64,
     flowviz_unit_next_sequence: u64,
@@ -630,21 +631,29 @@ impl OsloSandboxEngine {
                         if let Some(active) = &mut carrier.active {
                             active.start_x = carrier.x;
                             active.segment.source = Self::project_site_between_bounds(
-                                active.segment.source, shifted_old_visible, new_visible,
+                                active.segment.source,
+                                shifted_old_visible,
+                                new_visible,
                             );
                             active.segment.destination = active.segment.destination.map(|site| {
                                 Self::project_site_between_bounds(
-                                    site, shifted_old_visible, new_visible,
+                                    site,
+                                    shifted_old_visible,
+                                    new_visible,
                                 )
                             });
                         }
                         for segment in &mut carrier.queued {
                             segment.source = Self::project_site_between_bounds(
-                                segment.source, shifted_old_visible, new_visible,
+                                segment.source,
+                                shifted_old_visible,
+                                new_visible,
                             );
                             segment.destination = segment.destination.map(|site| {
                                 Self::project_site_between_bounds(
-                                    site, shifted_old_visible, new_visible,
+                                    site,
+                                    shifted_old_visible,
+                                    new_visible,
                                 )
                             });
                         }
@@ -735,7 +744,9 @@ impl OsloSandboxEngine {
                         0.0
                     } else if new_visible_height < old_visible_height {
                         Self::project_site_between_bounds(
-                            y, shifted_old_vertical, new_visible_vertical,
+                            y,
+                            shifted_old_vertical,
+                            new_visible_vertical,
                         ) as f32
                     } else {
                         y.clamp(new_visible_vertical.0, new_visible_vertical.1 - 1) as f32
@@ -747,12 +758,12 @@ impl OsloSandboxEngine {
                             0.0
                         } else if new_visible_height < old_visible_height {
                             Self::project_site_between_bounds(
-                                start_y, shifted_old_vertical, new_visible_vertical,
+                                start_y,
+                                shifted_old_vertical,
+                                new_visible_vertical,
                             ) as f32
                         } else {
-                            start_y
-                                .clamp(new_visible_vertical.0, new_visible_vertical.1 - 1)
-                                as f32
+                            start_y.clamp(new_visible_vertical.0, new_visible_vertical.1 - 1) as f32
                         };
                     }
                 }

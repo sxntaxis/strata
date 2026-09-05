@@ -79,6 +79,7 @@ impl OsloSandboxEngine {
     /// elevation. `column_visual_y` is presentation-only and aligned with the
     /// settled CategoryId stack; physics continues to mutate `columns` at the
     /// same event as before SEDIMENT-010.
+    #[cfg(test)]
     pub(super) fn pop_settled_grain(&mut self, site: usize) -> Option<(CategoryId, usize)> {
         let (category_id, visual_y, _) = self.pop_settled_grain_with_custody(site)?;
         Some((category_id, visual_y))
@@ -100,7 +101,10 @@ impl OsloSandboxEngine {
                 .flatten()
                 .unwrap_or(physical_y)
         };
-        let custody = self.flowviz_unit.then(|| self.pop_unit_custody(site)).flatten();
+        let custody = self
+            .flowviz_unit
+            .then(|| self.pop_unit_custody(site))
+            .flatten();
         let category_id = self.columns.get_mut(site)?.pop()?;
         Some((category_id, visual_y, custody))
     }
@@ -182,6 +186,7 @@ impl OsloSandboxEngine {
     }
 
     #[cfg(test)]
+    #[cfg(test)]
     pub(super) fn seed_rolling_grain(
         &mut self,
         site: usize,
@@ -192,6 +197,7 @@ impl OsloSandboxEngine {
         self.seed_rolling_grain_at_y(site, category_id, direction, visual_y);
     }
 
+    #[cfg(test)]
     pub(super) fn seed_rolling_grain_at_y(
         &mut self,
         site: usize,
@@ -222,18 +228,6 @@ impl OsloSandboxEngine {
         self.momentum_seeds = self.momentum_seeds.saturating_add(1);
         self.momentum_event_seeds = self.momentum_event_seeds.saturating_add(1);
         self.record_rolling_peak();
-    }
-
-    pub(super) fn push_recruited_rolling_grain_at_y(
-        &mut self,
-        site: usize,
-        category_id: CategoryId,
-        direction: ToppleDirection,
-        visual_y: usize,
-    ) {
-        self.push_recruited_rolling_grain_at_y_with_motion(
-            site, category_id, direction, visual_y, None,
-        );
     }
 
     pub(super) fn push_recruited_rolling_grain_at_y_with_motion(

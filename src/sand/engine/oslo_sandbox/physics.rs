@@ -221,13 +221,8 @@ impl OsloSandboxEngine {
                 );
                 self.seed_fluidization_failure(site, destination);
             } else if self.flowviz_unit {
-                let motion_id = self.begin_unit_motion(
-                    site,
-                    Some(destination),
-                    category_id,
-                    visual_y,
-                    custody,
-                );
+                let motion_id =
+                    self.begin_unit_motion(site, Some(destination), category_id, visual_y, custody);
                 self.push_settled_grain_at_visual_y_with_custody(
                     destination,
                     category_id,
@@ -243,13 +238,8 @@ impl OsloSandboxEngine {
             }
         } else {
             if self.flowviz_unit {
-                if let Some(id) = self.begin_unit_motion(
-                    site,
-                    None,
-                    category_id,
-                    visual_y,
-                    custody,
-                ) {
+                if let Some(id) = self.begin_unit_motion(site, None, category_id, visual_y, custody)
+                {
                     self.mark_unit_discharged(id);
                 }
             } else {
@@ -367,11 +357,8 @@ impl OsloSandboxEngine {
             .pop_front()
             .expect("front falling Oslo drive exists");
         if self.flowviz_unit {
-            let custody = self.adopt_unit_visible_settlement(
-                falling.x,
-                falling.category_id,
-                falling.y,
-            );
+            let custody =
+                self.adopt_unit_visible_settlement(falling.x, falling.category_id, falling.y);
             self.push_settled_grain_at_visual_y_with_custody(
                 falling.x,
                 falling.category_id,

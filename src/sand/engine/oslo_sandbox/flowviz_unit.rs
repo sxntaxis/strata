@@ -114,7 +114,8 @@ impl OsloSandboxEngine {
             if let Some(active) = &mut carrier.active {
                 active.start_x += shift;
                 active.segment.source += left_added;
-                active.segment.destination = active.segment.destination.map(|site| site + left_added);
+                active.segment.destination =
+                    active.segment.destination.map(|site| site + left_added);
             }
             for segment in &mut carrier.queued {
                 segment.source += left_added;
@@ -145,13 +146,7 @@ impl OsloSandboxEngine {
         existing: Option<FlowVizMotionId>,
     ) -> Option<FlowVizMotionId> {
         if self.flowviz_unit {
-            self.begin_unit_motion(
-                source,
-                Some(destination),
-                category_id,
-                source_y,
-                existing,
-            )
+            self.begin_unit_motion(source, Some(destination), category_id, source_y, existing)
         } else {
             self.record_flowviz_mobile_entry(source, destination, category_id, source_y);
             None
