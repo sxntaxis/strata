@@ -26,6 +26,30 @@ impl OsloSandboxEngine {
         self.flowviz_unit_truthful
     }
 
+    pub(crate) fn flowviz_unit_coherent_enabled(&self) -> bool {
+        self.flowviz_unit_coherent
+    }
+
+    /// SEDIMENT-015E presentation barrier. A rolling carrier that has already
+    /// replayed every observed segment is caught up even though its physical
+    /// grain remains mobile. New authoritative Oslo work is blocked only while
+    /// an observed segment, settlement arrival, or egress animation is still
+    /// pending.
+    pub(crate) fn flowviz_unit_coherent_batch_pending(&self) -> bool {
+        if !self.flowviz_unit_coherent {
+            return false;
+        }
+        self.flowviz_unit_carriers.values().any(|carrier| {
+            carrier.active.is_some()
+                || !carrier.queued.is_empty()
+                || match carrier.physical {
+                    flowviz_unit::UnitPhysicalState::Rolling => false,
+                    flowviz_unit::UnitPhysicalState::Settled(_)
+                    | flowviz_unit::UnitPhysicalState::Discharged => !carrier.arrived,
+                }
+        })
+    }
+
     pub(crate) fn flowviz_unit_presentation_backlog(&self) -> usize {
         if !self.flowviz_unit_perceptual {
             return 0;
@@ -33,15 +57,32 @@ impl OsloSandboxEngine {
         self.flowviz_unit_carriers
             .values()
             .map(|carrier| {
+                let arrival_debt = if self.flowviz_unit_coherent {
+                    matches!(
+                        carrier.physical,
+                        flowviz_unit::UnitPhysicalState::Settled(_)
+                            | flowviz_unit::UnitPhysicalState::Discharged
+                    ) && !carrier.arrived
+                } else {
+                    !carrier.arrived
+                };
                 carrier.queued.len()
                     + carrier.active.is_some() as usize
-                    + (!carrier.arrived) as usize
+                    + arrival_debt as usize
             })
             .sum()
     }
 
     pub(crate) fn flowviz_unit_presentation_substeps(&self) -> usize {
-        match self.flowviz_unit_presentation_backlog() {
+        let backlog = self.flowviz_unit_presentation_backlog();
+        if self.flowviz_unit_coherent {
+            return match backlog {
+                0 => 1,
+                1..=8_192 => 6,
+                _ => 8,
+            };
+        }
+        match backlog {
             0 => 1,
             1..=2_048 => 2,
             2_049..=8_192 => 3,
@@ -87,6 +128,34 @@ impl OsloSandboxEngine {
         if self.topple_one_active_site() {
             return true;
         }
+        changed
+    }
+
+    /// SEDIMENT-015E lockstep presentation frame. Oslo may emit at most one
+    /// lattice hop per rolling grain in an authoritative rolling update. Once
+    /// such a batch has produced visual debt, subsequent wall-clock frames
+    /// spend their budget only on that already-observed presentation until it
+    /// catches up. This prevents a carrier from accumulating hops from multiple
+    /// physical epochs while the settled shadow has already advanced further.
+    pub(crate) fn advance_testing_coherent_flow_frame(&mut self) -> bool {
+        debug_assert!(self.flowviz_unit_coherent);
+        if self.flowviz_unit_coherent_batch_pending() {
+            return self.advance_testing_truthful_visual_frame();
+        }
+
+        self.frame_count = if self.frame_count.is_multiple_of(2) {
+            self.frame_count.wrapping_add(2)
+        } else {
+            self.frame_count.wrapping_add(1)
+        };
+        let mut changed = self.advance_falling_drives();
+        changed |= self.advance_fluidization_field();
+        changed |= self.advance_rolling_grains();
+        changed |= self.topple_one_active_site();
+        // Presentation advances only after the complete authoritative quantum.
+        // The next authoritative quantum is forbidden until this newly observed
+        // batch is visually caught up.
+        changed |= self.advance_rolling_visual_motion();
         changed
     }
 

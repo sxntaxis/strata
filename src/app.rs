@@ -584,6 +584,10 @@ impl TestingSandEngine {
         matches!(self, Self::Oslo(engine) if engine.flowviz_unit_truthful_enabled())
     }
 
+    fn unit_coherent_flowviz_enabled(&self) -> bool {
+        matches!(self, Self::Oslo(engine) if engine.flowviz_unit_coherent_enabled())
+    }
+
     fn unit_presentation_substeps(&self) -> usize {
         match self {
             Self::Oslo(engine) => engine.flowviz_unit_presentation_substeps(),
@@ -608,6 +612,20 @@ impl TestingSandEngine {
     fn advance_testing_truthful_flow_frame(&mut self) -> bool {
         match self {
             Self::Oslo(engine) => engine.advance_testing_truthful_flow_frame(),
+            Self::H4(engine) => {
+                engine.update();
+                true
+            }
+            Self::Classic(engine) => {
+                engine.update();
+                true
+            }
+        }
+    }
+
+    fn advance_testing_coherent_flow_frame(&mut self) -> bool {
+        match self {
+            Self::Oslo(engine) => engine.advance_testing_coherent_flow_frame(),
             Self::H4(engine) => {
                 engine.update();
                 true
@@ -2505,7 +2523,7 @@ impl App {
                 ),
             ))),
             "oslo-vessel-front-grains" => Ok(TestingSandEngine::Oslo(Box::new(
-                OsloSandboxEngine::new_front_unit_truthful_flowviz_vessel(
+                OsloSandboxEngine::new_front_unit_coherent_flowviz_vessel(
                     self.sand_engine.cell_width,
                     self.sand_engine.cell_height,
                     self.sand_engine.snapshot_state().rng_state,
@@ -2617,6 +2635,7 @@ impl App {
         let tick_rate = Duration::from_millis(TIME_SETTINGS.tick_ms);
         let perceptual = testing.engine.unit_perceptual_flowviz_enabled();
         let truthful = testing.engine.unit_truthful_flowviz_enabled();
+        let coherent = testing.engine.unit_coherent_flowviz_enabled();
         let frame_budget = if perceptual {
             TESTING_CHEATS_PERCEPTUAL_FRAME_BUDGET
         } else {
@@ -2646,12 +2665,33 @@ impl App {
             changed = true;
         }
 
-        // Visible moving avalanche mass advances one complete effective Oslo
-        // frame at a stable wall-clock grain cadence. Every rolling grain moves
-        // concurrently; presentation interpolation is part of the same frame
-        // and never blocks physics globally.
+        // Visible moving avalanche mass advances one effective Oslo quantum at
+        // a stable wall-clock grain cadence. Legacy profiles can pipeline visual
+        // debt; SEDIMENT-015E instead inserts a global *batch* barrier so every
+        // grain in one quantum remains concurrent but the next quantum cannot be
+        // consumed before this one has had a render pass.
         if testing.engine.visible_flow_active() {
-            if perceptual {
+            if coherent {
+                // 015E deliberately permits only one coherent authoritative/visual
+                // batch per app render pass. Even if 64x has accumulated several
+                // physics quanta of wall-clock debt, the next physical quantum
+                // cannot be consumed invisibly in the same render pass after the
+                // previous batch catches up. The UI gets a chance to present each
+                // coherent stage before Oslo advances again.
+                if testing.flow_wall_accumulator >= grain_visual_rate {
+                    testing.flow_wall_accumulator = testing
+                        .flow_wall_accumulator
+                        .saturating_sub(grain_visual_rate);
+                    changed |= testing.engine.advance_testing_coherent_flow_frame();
+                    let substeps = testing.engine.unit_presentation_substeps();
+                    for _ in 1..substeps {
+                        if Instant::now() >= deadline {
+                            break;
+                        }
+                        changed |= testing.engine.advance_testing_perceptual_visual_frame();
+                    }
+                }
+            } else if perceptual {
                 while testing.flow_wall_accumulator >= grain_visual_rate
                     && Instant::now() < deadline
                     && testing.engine.visible_flow_active()
@@ -2737,7 +2777,23 @@ impl App {
         // Finish all such presentation tracks in parallel at the same grain
         // cadence; do not serialize the entire solver behind one dot.
         if testing.engine.rolling_visual_motion_active() {
-            if perceptual {
+            if coherent {
+                if testing.flow_wall_accumulator >= grain_visual_rate {
+                    testing.flow_wall_accumulator = testing
+                        .flow_wall_accumulator
+                        .saturating_sub(grain_visual_rate);
+                    let substeps = testing.engine.unit_presentation_substeps();
+                    if Instant::now() < deadline {
+                        changed |= testing.engine.advance_testing_truthful_visual_frame();
+                        for _ in 1..substeps {
+                            if Instant::now() >= deadline {
+                                break;
+                            }
+                            changed |= testing.engine.advance_testing_perceptual_visual_frame();
+                        }
+                    }
+                }
+            } else if perceptual {
                 while testing.flow_wall_accumulator >= grain_visual_rate
                     && Instant::now() < deadline
                     && testing.engine.rolling_visual_motion_active()
