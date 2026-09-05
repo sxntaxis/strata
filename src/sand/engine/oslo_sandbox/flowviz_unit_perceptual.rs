@@ -30,10 +30,12 @@ impl OsloSandboxEngine {
         self.flowviz_unit_coherent
     }
 
+    #[cfg(test)]
     pub(crate) fn flowviz_unit_direct_geometry_enabled(&self) -> bool {
         self.flowviz_unit_direct_geometry
     }
 
+    #[cfg(test)]
     pub(crate) fn flowviz_unit_visual_support_enabled(&self) -> bool {
         self.flowviz_unit_visual_support
     }
@@ -74,9 +76,7 @@ impl OsloSandboxEngine {
                 } else {
                     !carrier.arrived
                 };
-                carrier.queued.len()
-                    + carrier.active.is_some() as usize
-                    + arrival_debt as usize
+                carrier.queued.len() + carrier.active.is_some() as usize + arrival_debt as usize
             })
             .sum()
     }

@@ -54,8 +54,7 @@ fn unit_direct_initial_recruit_segment_matches_assigned_rolling_lane() {
     );
     engine.reset_unit_flowviz_from_physics();
 
-    let (category_id, source_y, custody) =
-        engine.pop_settled_grain_with_custody(source).unwrap();
+    let (category_id, source_y, custody) = engine.pop_settled_grain_with_custody(source).unwrap();
     let id = engine
         .record_flowviz_mobile_entry_with_custody(
             source,
@@ -155,8 +154,7 @@ fn unit_direct_offscreen_lane_remains_bottom_relative_and_unclamped() {
     );
     engine.reset_unit_flowviz_from_physics();
 
-    let (category_id, source_y, custody) =
-        engine.pop_settled_grain_with_custody(source).unwrap();
+    let (category_id, source_y, custody) = engine.pop_settled_grain_with_custody(source).unwrap();
     let id = engine
         .record_flowviz_mobile_entry_with_custody(
             source,
@@ -205,16 +203,9 @@ fn unit_direct_second_hop_uses_direct_y_before_and_after_physics_move() {
     set_column(&mut engine, destination, Vec::new());
     engine.reset_unit_flowviz_from_physics();
 
-    let (category_id, source_y, custody) =
-        engine.pop_settled_grain_with_custody(source).unwrap();
+    let (category_id, source_y, custody) = engine.pop_settled_grain_with_custody(source).unwrap();
     let id = engine
-        .record_flowviz_mobile_entry_with_custody(
-            source,
-            middle,
-            category_id,
-            source_y,
-            custody,
-        )
+        .record_flowviz_mobile_entry_with_custody(source, middle, category_id, source_y, custody)
         .unwrap();
     engine.seed_rolling_grain_at_y_with_motion(
         middle,
@@ -265,8 +256,7 @@ fn unit_direct_resize_shifts_rolling_and_segment_geometry_once_with_canvas_growt
     set_column(&mut engine, destination, vec![grain(66), grain(67)]);
     engine.reset_unit_flowviz_from_physics();
 
-    let (category_id, source_y, custody) =
-        engine.pop_settled_grain_with_custody(source).unwrap();
+    let (category_id, source_y, custody) = engine.pop_settled_grain_with_custody(source).unwrap();
     let id = engine
         .record_flowviz_mobile_entry_with_custody(
             source,
@@ -285,7 +275,12 @@ fn unit_direct_resize_shifts_rolling_and_segment_geometry_once_with_canvas_growt
     );
 
     let before_height = engine.surface.grid_height_dots as f32;
-    let before_rolling_y = engine.rolling_grains.back().unwrap().unit_observed_y.unwrap();
+    let before_rolling_y = engine
+        .rolling_grains
+        .back()
+        .unwrap()
+        .unit_observed_y
+        .unwrap();
     let before_segment_y = engine
         .flowviz_unit_carriers
         .get(&id)
@@ -300,7 +295,12 @@ fn unit_direct_resize_shifts_rolling_and_segment_geometry_once_with_canvas_growt
     engine.resize(20, 14);
     let expanded_height = engine.surface.grid_height_dots as f32;
     let shift = expanded_height - before_height;
-    let expanded_rolling_y = engine.rolling_grains.back().unwrap().unit_observed_y.unwrap();
+    let expanded_rolling_y = engine
+        .rolling_grains
+        .back()
+        .unwrap()
+        .unit_observed_y
+        .unwrap();
     let expanded_segment_y = engine
         .flowviz_unit_carriers
         .get(&id)
@@ -314,7 +314,12 @@ fn unit_direct_resize_shifts_rolling_and_segment_geometry_once_with_canvas_growt
     assert_eq!(expanded_segment_y, before_segment_y + shift);
 
     engine.resize(20, 10);
-    let restored_rolling_y = engine.rolling_grains.back().unwrap().unit_observed_y.unwrap();
+    let restored_rolling_y = engine
+        .rolling_grains
+        .back()
+        .unwrap()
+        .unit_observed_y
+        .unwrap();
     let restored_segment_y = engine
         .flowviz_unit_carriers
         .get(&id)
@@ -357,16 +362,9 @@ fn unit_direct_recorded_hop_geometry_does_not_follow_later_column_mutation() {
     set_column(&mut engine, destination, Vec::new());
     engine.reset_unit_flowviz_from_physics();
 
-    let (category_id, source_y, custody) =
-        engine.pop_settled_grain_with_custody(source).unwrap();
+    let (category_id, source_y, custody) = engine.pop_settled_grain_with_custody(source).unwrap();
     let id = engine
-        .record_flowviz_mobile_entry_with_custody(
-            source,
-            middle,
-            category_id,
-            source_y,
-            custody,
-        )
+        .record_flowviz_mobile_entry_with_custody(source, middle, category_id, source_y, custody)
         .unwrap();
     engine.seed_rolling_grain_at_y_with_motion(
         middle,
@@ -426,7 +424,10 @@ fn direct_geometry_drive_and_drain(engine: &mut OsloSandboxEngine, site: usize) 
     let mut guard = 0usize;
     loop {
         guard = guard.saturating_add(1);
-        assert!(guard < 500_000, "015F direct-geometry drive failed to drain");
+        assert!(
+            guard < 500_000,
+            "015F direct-geometry drive failed to drain"
+        );
         let changed = if engine.visible_flow_active() {
             engine.advance_testing_coherent_flow_frame()
         } else if engine.rolling_visual_motion_active() {

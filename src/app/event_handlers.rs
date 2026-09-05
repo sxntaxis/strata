@@ -192,8 +192,7 @@ fn resolve_historical_activity_edit_key(
 impl App {
     #[cfg(debug_assertions)]
     fn ensure_testing_fill_categories(&mut self) -> Result<Vec<CategoryId>, String> {
-        let (ids, created) =
-            ensure_testing_fill_categories_in_tracker(&mut self.time_tracker)?;
+        let (ids, created) = ensure_testing_fill_categories_in_tracker(&mut self.time_tracker)?;
 
         if created {
             self.persist_categories();
@@ -1761,8 +1760,7 @@ mod testing_fill_category_tests {
     #[test]
     fn testing_fill_categories_are_exact_and_idempotent() {
         let mut tracker = TimeTracker::new();
-        let (first_ids, created) =
-            ensure_testing_fill_categories_in_tracker(&mut tracker).unwrap();
+        let (first_ids, created) = ensure_testing_fill_categories_in_tracker(&mut tracker).unwrap();
         assert!(created);
         assert_eq!(first_ids.len(), TESTING_FILL_CATEGORY_SPECS.len());
 

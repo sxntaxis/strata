@@ -9,6 +9,10 @@ mod flowviz;
 mod flowviz_conservative;
 mod flowviz_conservative_render;
 mod flowviz_unit;
+#[cfg(test)]
+mod flowviz_unit_coherent_tests;
+#[cfg(test)]
+mod flowviz_unit_direct_tests;
 mod flowviz_unit_micro;
 #[cfg(test)]
 mod flowviz_unit_micro_tests;
@@ -16,16 +20,12 @@ mod flowviz_unit_perceptual;
 #[cfg(test)]
 mod flowviz_unit_perceptual_tests;
 #[cfg(test)]
-mod flowviz_unit_direct_tests;
-#[cfg(test)]
-mod flowviz_unit_support_tests;
-#[cfg(test)]
 mod flowviz_unit_provenance_tests;
 mod flowviz_unit_render;
 #[cfg(test)]
-mod flowviz_unit_truthful_tests;
+mod flowviz_unit_support_tests;
 #[cfg(test)]
-mod flowviz_unit_coherent_tests;
+mod flowviz_unit_truthful_tests;
 
 const OSLO_THRESHOLD_LOW: u8 = 1;
 const OSLO_THRESHOLD_HIGH: u8 = 2;
@@ -107,7 +107,7 @@ pub(crate) struct FallingDrive {
     category_id: CategoryId,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct RollingGrain {
     site: usize,
     visual_y: usize,

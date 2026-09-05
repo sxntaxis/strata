@@ -169,13 +169,7 @@ fn unit_visual_support_rainbow_provenance_diagnostic() {
             });
             eprintln!(
                 "RAINBOW_BATCH batch={} green_hops={} yellow_hops={} red_hops={} purple_hops={} blue_hops={} cyan_hops={}",
-                physical_batches,
-                deltas[0],
-                deltas[1],
-                deltas[2],
-                deltas[3],
-                deltas[4],
-                deltas[5]
+                physical_batches, deltas[0], deltas[1], deltas[2], deltas[3], deltas[4], deltas[5]
             );
         }
 
@@ -263,9 +257,7 @@ fn unit_visual_support_rainbow_provenance_diagnostic() {
         .columns
         .iter()
         .flat_map(|column| column.iter().enumerate())
-        .filter(|(depth, category_id)| {
-            *depth < green_band_height && **category_id == categories[5]
-        })
+        .filter(|(depth, category_id)| *depth < green_band_height && **category_id == categories[5])
         .count();
     let mut cyan_low_traces = traces
         .iter()

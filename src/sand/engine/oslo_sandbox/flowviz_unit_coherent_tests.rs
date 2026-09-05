@@ -24,8 +24,7 @@ fn seed_one_observed_rolling_hop(
     set_column(engine, destination + 1, Vec::new());
     engine.reset_unit_flowviz_from_physics();
 
-    let (category_id, visual_y, custody) =
-        engine.pop_settled_grain_with_custody(source).unwrap();
+    let (category_id, visual_y, custody) = engine.pop_settled_grain_with_custody(source).unwrap();
     let id = engine
         .record_flowviz_mobile_entry_with_custody(
             source,
@@ -74,7 +73,10 @@ fn unit_coherent_barrier_spends_visual_debt_before_next_physics_hop() {
     assert!(engine.advance_testing_coherent_flow_frame());
 
     assert_eq!(engine.avalanche_moves, moves_before);
-    assert_eq!(engine.rolling_grains.front().unwrap().site, rolling_site_before);
+    assert_eq!(
+        engine.rolling_grains.front().unwrap().site,
+        rolling_site_before
+    );
     assert_eq!(engine.columns, columns_before);
     assert_eq!(rolling_site_before, destination);
     assert!(engine.flowviz_unit_carriers.contains_key(&id));
@@ -254,7 +256,10 @@ fn unit_coherent_native_one_hop_batch_probe() {
         let mut steps = 0usize;
         while engine.flowviz_unit_coherent_batch_pending() {
             steps = steps.saturating_add(1);
-            assert!(steps <= 6, "015E one-hop batch exceeded six presentation steps");
+            assert!(
+                steps <= 6,
+                "015E one-hop batch exceeded six presentation steps"
+            );
             let _ = engine.advance_flowviz_tracers();
         }
         let elapsed = started.elapsed();

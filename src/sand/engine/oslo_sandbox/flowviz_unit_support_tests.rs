@@ -96,8 +96,7 @@ fn unit_visual_support_lane_uses_visible_shadow_not_hidden_physical_settlement()
     // the delayed visible support after the reset.
     engine.flowviz_shadow_columns[destination] = vec![grain(21)];
 
-    let (category_id, source_y, custody) =
-        engine.pop_settled_grain_with_custody(source).unwrap();
+    let (category_id, source_y, custody) = engine.pop_settled_grain_with_custody(source).unwrap();
     let id = engine
         .record_flowviz_mobile_entry_with_custody(
             source,
@@ -215,8 +214,7 @@ fn unit_visual_support_playback_uses_finalized_target_after_shadow_changes() {
     set_column(&mut engine, destination, vec![grain(61)]);
     engine.reset_unit_flowviz_from_physics();
 
-    let (category_id, source_y, custody) =
-        engine.pop_settled_grain_with_custody(source).unwrap();
+    let (category_id, source_y, custody) = engine.pop_settled_grain_with_custody(source).unwrap();
     let id = engine
         .record_flowviz_mobile_entry_with_custody(
             source,
@@ -245,12 +243,7 @@ fn unit_visual_support_playback_uses_finalized_target_after_shadow_changes() {
         .unwrap();
 
     // A later visible-bed mutation must not bend the already-observed segment.
-    engine.flowviz_shadow_columns[destination].extend([
-        grain(71),
-        grain(72),
-        grain(73),
-        grain(74),
-    ]);
+    engine.flowviz_shadow_columns[destination].extend([grain(71), grain(72), grain(73), grain(74)]);
     assert!(engine.advance_unit_flowviz());
     let carrier = engine.flowviz_unit_carriers.get(&id).unwrap();
     let active = carrier.active.unwrap();

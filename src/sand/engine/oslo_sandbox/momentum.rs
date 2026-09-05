@@ -392,9 +392,8 @@ impl OsloSandboxEngine {
         if self.flowviz_unit {
             if let Some(id) = rolling.motion_id {
                 if self.flowviz_unit_visual_support {
-                    let observed_source_y = rolling
-                        .unit_observed_y
-                        .unwrap_or(rolling.visual_y as f32);
+                    let observed_source_y =
+                        rolling.unit_observed_y.unwrap_or(rolling.visual_y as f32);
                     self.append_unit_rolling_segment_pending_target(
                         id,
                         source,
@@ -402,9 +401,8 @@ impl OsloSandboxEngine {
                         observed_source_y,
                     );
                 } else if self.flowviz_unit_direct_geometry {
-                    let observed_source_y = rolling
-                        .unit_observed_y
-                        .unwrap_or(rolling.visual_y as f32);
+                    let observed_source_y =
+                        rolling.unit_observed_y.unwrap_or(rolling.visual_y as f32);
                     let observed_target_y = self.unit_observed_rolling_target_y(next_site);
                     self.append_unit_rolling_segment_with_geometry(
                         id,
