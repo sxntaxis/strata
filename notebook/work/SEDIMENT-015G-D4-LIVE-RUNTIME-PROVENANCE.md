@@ -1,7 +1,7 @@
 ---
 id: SEDIMENT-015G-D4
 kind: work
-state: candidate
+state: complete
 created: 2026-09-05
 updated: 2026-09-05
 authority: working
@@ -89,3 +89,18 @@ Native validation must prove:
 - all SEDIMENT-015G-R2/D1 foundation gates and the full repository checks remain green.
 
 No synthetic `RAINBOW_TRIGGER` assertion and no human visual acceptance gate belong to D4.
+## Certified live finding
+
+D4 was natively green at return head `80194362e08085980eebec0e3c6b3c9ad81c87d8` and the owner captured one real rainbow collapse. The live trace established:
+
+```text
+green:  movement_entries=3    hops=64
+yellow: movement_entries=585  hops=20437
+red:    movement_entries=1283 hops=52150
+purple: movement_entries=2083 hops=88736
+blue:   movement_entries=3322 hops=180104
+cyan:   movement_entries=4317 hops=248180 max_hops=148 max_abs_dx=148
+cyan final below original green-band height: 1401 units
+```
+
+The green-core immobility and strong upper-layer mobility are therefore authoritative SEDIMENT-008/015G behavior in that run. The sampled cyan-low paths were strictly adjacent physical edges. The remaining owner-visible defect is not unsupported cyan relocation but perceptual time-compression of large vertical one-edge drops at the wall flank.

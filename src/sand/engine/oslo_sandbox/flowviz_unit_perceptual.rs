@@ -40,6 +40,11 @@ impl OsloSandboxEngine {
         self.flowviz_unit_visual_support
     }
 
+    #[cfg(test)]
+    pub(crate) fn flowviz_unit_distance_aware_enabled(&self) -> bool {
+        self.flowviz_unit_distance_aware
+    }
+
     /// SEDIMENT-015E presentation barrier. A rolling carrier that has already
     /// replayed every observed segment is caught up even though its physical
     /// grain remains mobile. New authoritative Oslo work is blocked only while

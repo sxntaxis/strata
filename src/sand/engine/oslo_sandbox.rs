@@ -9,10 +9,13 @@ mod flowviz;
 mod flowviz_conservative;
 mod flowviz_conservative_render;
 mod flowviz_unit;
+mod flowviz_unit_distance;
 #[cfg(test)]
 mod flowviz_unit_coherent_tests;
 #[cfg(test)]
 mod flowviz_unit_direct_tests;
+#[cfg(test)]
+mod flowviz_unit_distance_tests;
 #[cfg(debug_assertions)]
 mod flowviz_unit_live_trace;
 mod flowviz_unit_micro;
@@ -184,6 +187,7 @@ pub(crate) struct OsloSandboxEngine {
     flowviz_unit_coherent: bool,
     flowviz_unit_direct_geometry: bool,
     flowviz_unit_visual_support: bool,
+    flowviz_unit_distance_aware: bool,
     columns: Vec<Vec<CategoryId>>,
     // Presentation-only y overrides aligned one-for-one with `columns`.
     // A settled grain can already participate in authoritative physics while
@@ -389,6 +393,17 @@ impl OsloSandboxEngine {
         sandbox
     }
 
+    pub(crate) fn new_front_unit_distance_aware_flowviz_vessel(
+        width: u16,
+        height: u16,
+        seed: u64,
+    ) -> Self {
+        let mut sandbox = Self::new_front_unit_visual_support_flowviz_vessel(width, height, seed);
+        sandbox.flowviz_unit_distance_aware = true;
+        sandbox.sync_surface();
+        sandbox
+    }
+
     pub(crate) fn new_fluid_vessel(width: u16, height: u16, seed: u64) -> Self {
         Self::new_with_flow(
             width,
@@ -451,6 +466,7 @@ impl OsloSandboxEngine {
             flowviz_unit_coherent: false,
             flowviz_unit_direct_geometry: false,
             flowviz_unit_visual_support: false,
+            flowviz_unit_distance_aware: false,
             columns: vec![Vec::new(); lattice_size],
             column_visual_y: vec![Vec::new(); lattice_size],
             flowviz_edge_flux: vec![0; lattice_size],

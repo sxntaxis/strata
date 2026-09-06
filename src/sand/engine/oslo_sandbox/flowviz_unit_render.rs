@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::flowviz_unit::{
-    FlowVizMotionId, UNIT_SEGMENT_STEP, UnitActiveSegment, UnitPhysicalState,
+    FlowVizMotionId, UnitActiveSegment, UnitPhysicalState,
 };
 use super::*;
 
@@ -114,6 +114,7 @@ impl OsloSandboxEngine {
         let micro = self.flowviz_unit_micro;
         let perceptual = self.flowviz_unit_perceptual;
         let visual_support = self.flowviz_unit_visual_support;
+        let distance_aware = self.flowviz_unit_distance_aware;
         let mut changed = false;
         let mut discharged_done = Vec::new();
         let mut missing_settled_targets = 0usize;
@@ -157,7 +158,12 @@ impl OsloSandboxEngine {
             }
 
             if let Some(active) = &mut carrier.active {
-                active.progress = (active.progress + UNIT_SEGMENT_STEP).min(1.0);
+                let progress_step = flowviz_unit_distance::unit_segment_progress_step(
+                    active.start_y,
+                    active.target_y,
+                    distance_aware,
+                );
+                active.progress = (active.progress + progress_step).min(1.0);
                 let (target_x, target_y) = if micro {
                     (active.target_x, active.target_y)
                 } else {
@@ -181,8 +187,14 @@ impl OsloSandboxEngine {
                     (target_x, target_y)
                 };
                 let t = active.progress;
+                let vertical_t = flowviz_unit_distance::unit_segment_vertical_fraction(
+                    t,
+                    active.start_y,
+                    target_y,
+                    distance_aware,
+                );
                 carrier.ideal_x = active.start_x + (target_x - active.start_x) * t;
-                carrier.ideal_y = active.start_y + (target_y - active.start_y) * t;
+                carrier.ideal_y = active.start_y + (target_y - active.start_y) * vertical_t;
                 if micro && !visual_support {
                     carrier.x += (carrier.ideal_x - carrier.x) * UNIT_MICRO_TRACK_BLEND;
                     carrier.y += (carrier.ideal_y - carrier.y) * UNIT_MICRO_TRACK_BLEND;

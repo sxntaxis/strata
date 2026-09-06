@@ -2530,7 +2530,7 @@ impl App {
                 ),
             ))),
             "oslo-vessel-front-grains" => Ok(TestingSandEngine::Oslo(Box::new(
-                OsloSandboxEngine::new_front_unit_visual_support_flowviz_vessel(
+                OsloSandboxEngine::new_front_unit_distance_aware_flowviz_vessel(
                     self.sand_engine.cell_width,
                     self.sand_engine.cell_height,
                     self.sand_engine.snapshot_state().rng_state,

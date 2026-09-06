@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-05
 authority: working
-summary: H4/v5 remains published production authority and SEDIMENT-008 oslo-vessel-front physics remains owner-frozen. The owner-preferred visual candidate remains SEDIMENT-015G-R2 and SEDIMENT-016 remains rejected. D1 added persisted Fixture categories without runtime semantic change. D2/D3 synthetic trigger diagnostics still produced zero fixture-layer hops despite the owner reproducing collapse interactively, so D4 stops guessing the trigger and adds debug-only live provenance to the exact human sandbox.
-next: Natively validate SEDIMENT-015G-D4, then reproduce the owner rainbow collapse once and run `testingcheats provenance`. Interpret the exact live dimensions/RNG plus green/cyan adjacent-edge evidence before making any further visual or physics change.
+summary: H4/v5 remains published production authority and SEDIMENT-008 oslo-vessel-front physics remains owner-frozen. The owner-preferred visual baseline remains SEDIMENT-015G-R2 and SEDIMENT-016 remains rejected. D4 live provenance proved the strong upper-layer mobility bias is real physics: green moved only 3 episodes/64 hops while cyan moved 4317 episodes/248180 adjacent hops, including 1401 final cyan units below the original green-band height. The remaining bounded defect is perceptual compression of very large vertical one-edge drops.
+next: Natively validate SEDIMENT-015H distance-aware drop playback on the D4 return base. Preserve 015G-R2 targets and all frozen physics; lengthen only large downward observed segments with a bounded gravity-shaped interpolation, then re-run the rainbow human gate without requiring 64x.
 ---
 
 # NOW — Strata

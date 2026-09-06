@@ -528,7 +528,7 @@ impl App {
                         "frozen oslo-vessel-front physics + conservative visual shadow surface and weighted local-flow parcels"
                     }
                     "oslo-vessel-front-grains" => {
-                        "frozen oslo-vessel-front physics + one visual carrier per active CategoryId unit and causal observed-edge replay"
+                        "frozen oslo-vessel-front physics + one visual carrier per active CategoryId unit, causal observed-edge replay, and distance-aware long-drop playback"
                     }
                     "oslo-vessel-fluid" => {
                         "oslo-vessel-front + explicit partial-fluidization order field with start/stop hysteresis"
