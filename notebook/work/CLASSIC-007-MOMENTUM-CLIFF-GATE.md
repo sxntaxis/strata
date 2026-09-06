@@ -1,7 +1,7 @@
 ---
 id: CLASSIC-007
 kind: work
-state: candidate
+state: completed
 created: 2026-09-06
 updated: 2026-09-06
 authority: working
@@ -88,3 +88,9 @@ For `momentum`, inspect two phases:
 2. **mature slope** — avalanches should retain the entertaining coherent continuation that motivated keeping momentum.
 
 Do not promote `momentum` to the default in this pass. Promotion, if desired, is a separate owner decision after this human gate.
+
+## Closure
+
+CLASSIC-007 passed native validation with 415 unit + 23 integration tests and no mechanical fallout. The owner then human-compared `anchored` and the refined `momentum` using `testingcheats fillhalf`. The cliff gate was a visible improvement: the severe early-fill lateral-spawn reading was reduced while mature-slope one-hop continuation remained attractive.
+
+The owner did not promote `momentum` to the default yet. The remaining refinement question is narrower: CLASSIC-007's absolute drop-depth band still creates a somewhat artificial eligibility window. CLASSIC-008 therefore explores three alternative bonus-hop gates while preserving CLASSIC-007 `momentum` as the control.

@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-06
 authority: working
-summary: CLASSIC-006 is machine-green and owner-smoked: anchored is the default Classic experiment and `testingcheats fillhalf` works as intended. CLASSIC-007 is the active candidate, changing only momentum bonus-hop eligibility with a bounded local cliff gate so deep early-fill walls fall back to the ordinary Classic diagonal while mature-slope one-hop continuation is preserved.
-next: Natively validate CLASSIC-007, then human-compare anchored versus refined momentum with `testingcheats fillhalf`, checking that early-fill lateral-looking hops disappear without weakening mature-slope avalanche continuation.
+summary: CLASSIC-007 is machine-green and owner-confirmed improved. CLASSIC-008 is the active candidate, preserving anchored as default and CLASSIC-007 momentum as control while adding repose-relative, tangent-continuity, and soft repose-relative momentum gates for direct `fillhalf` comparison.
+next: Natively validate CLASSIC-008, then human-compare anchored, momentum, momentum-repose, momentum-tangent, and momentum-soft with a fresh `testingcheats fillhalf` after each selection, judging early cliff artifacts separately from mature-slope avalanche continuation.
 ---
 
 # NOW — Strata

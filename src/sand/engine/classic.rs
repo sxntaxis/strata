@@ -42,6 +42,9 @@ enum ClassicExperimentProfile {
     MemorySlope,
     Anchored,
     Momentum,
+    MomentumRepose,
+    MomentumTangent,
+    MomentumSoft,
 }
 
 impl ClassicExperimentProfile {
@@ -53,6 +56,9 @@ impl ClassicExperimentProfile {
             Self::MemorySlope => "memory-slope",
             Self::Anchored => "anchored",
             Self::Momentum => "momentum",
+            Self::MomentumRepose => "momentum-repose",
+            Self::MomentumTangent => "momentum-tangent",
+            Self::MomentumSoft => "momentum-soft",
         }
     }
 
@@ -64,6 +70,9 @@ impl ClassicExperimentProfile {
             "memory-slope" => Some(Self::MemorySlope),
             "anchored" => Some(Self::Anchored),
             "momentum" => Some(Self::Momentum),
+            "momentum-repose" => Some(Self::MomentumRepose),
+            "momentum-tangent" => Some(Self::MomentumTangent),
+            "momentum-soft" => Some(Self::MomentumSoft),
             _ => None,
         }
     }
@@ -71,23 +80,45 @@ impl ClassicExperimentProfile {
     fn uses_memory(self) -> bool {
         matches!(
             self,
-            Self::Memory | Self::MemorySlope | Self::Anchored | Self::Momentum
+            Self::Memory
+                | Self::MemorySlope
+                | Self::Anchored
+                | Self::Momentum
+                | Self::MomentumRepose
+                | Self::MomentumTangent
+                | Self::MomentumSoft
         )
     }
 
     fn uses_slope_bias(self) -> bool {
         matches!(
             self,
-            Self::Slope | Self::MemorySlope | Self::Anchored | Self::Momentum
+            Self::Slope
+                | Self::MemorySlope
+                | Self::Anchored
+                | Self::Momentum
+                | Self::MomentumRepose
+                | Self::MomentumTangent
+                | Self::MomentumSoft
         )
     }
 
     fn uses_anchors(self) -> bool {
-        matches!(self, Self::Anchored | Self::Momentum)
+        matches!(
+            self,
+            Self::Anchored
+                | Self::Momentum
+                | Self::MomentumRepose
+                | Self::MomentumTangent
+                | Self::MomentumSoft
+        )
     }
 
     fn uses_momentum(self) -> bool {
-        self == Self::Momentum
+        matches!(
+            self,
+            Self::Momentum | Self::MomentumRepose | Self::MomentumTangent | Self::MomentumSoft
+        )
     }
 }
 
@@ -329,7 +360,7 @@ impl ClassicSandboxEngine {
     pub(crate) fn set_experiment_profile_name(&mut self, profile: &str) -> Result<(), String> {
         let Some(profile) = ClassicExperimentProfile::parse(profile) else {
             return Err(
-                "classic experiment profile must be rugged, memory, slope, memory-slope, anchored, or momentum"
+                "classic experiment profile must be rugged, memory, slope, memory-slope, anchored, momentum, momentum-repose, momentum-tangent, or momentum-soft"
                     .to_string(),
             );
         };
@@ -699,22 +730,72 @@ impl ClassicSandboxEngine {
         if y + 1 >= bounds.y_end || !self.classic_diagonal_is_available(bounds, x, next_x, y) {
             return;
         }
-        // Keep momentum on slope-like relief rather than cliff faces. The
-        // accepted one-hop behavior looks natural once the receiving surface is
-        // only a few dots below the moving grain, but on very deep early-fill
-        // walls the same lateral hop reads like spawning. This bounded local
-        // depth gate suppresses only that cliff case; it adds no angle solver,
-        // lookahead, velocity, or additional hop.
         let drop_depth = self.diagonal_drop_depth(bounds, next_x, y);
-        if !(CLASSIC_MOMENTUM_MIN_DROP_DEPTH..=CLASSIC_MOMENTUM_MAX_DROP_DEPTH)
-            .contains(&drop_depth)
-        {
+        if !self.momentum_bonus_is_eligible(bounds, x, next_x, y, step, drop_depth) {
             return;
         }
         self.surface.grid[y][x] = None;
         self.surface.grid[y + 1][next_x] = Some(category_id);
         self.diagonal_moves = self.diagonal_moves.saturating_add(1);
         self.refresh_local_repose(next_x);
+    }
+
+    fn momentum_bonus_is_eligible(
+        &mut self,
+        bounds: ViewportBounds,
+        source_x: usize,
+        target_x: usize,
+        source_y: usize,
+        step: isize,
+        drop_depth: usize,
+    ) -> bool {
+        match self.experiment_profile {
+            ClassicExperimentProfile::Momentum => {
+                // CLASSIC-007 control: a fixed local slope band removes the
+                // deep early-fill cliff artifact while preserving the accepted
+                // mature one-hop continuation.
+                (CLASSIC_MOMENTUM_MIN_DROP_DEPTH..=CLASSIC_MOMENTUM_MAX_DROP_DEPTH)
+                    .contains(&drop_depth)
+            }
+            ClassicExperimentProfile::MomentumRepose => {
+                // A: reuse Classic's own local stability threshold. Momentum is
+                // eligible only on relief at, or one dot beyond, the source
+                // column's local repose instead of using a globally fixed band.
+                let repose = usize::from(self.local_repose[source_x]);
+                (repose..=repose.saturating_add(1)).contains(&drop_depth)
+            }
+            ClassicExperimentProfile::MomentumTangent => {
+                // B: require the receiving surface and one forward sample to
+                // form a bounded, locally continuous diagonal. This is only a
+                // one-column lookahead gate; it never creates another hop.
+                if drop_depth == 0 || drop_depth > CLASSIC_MOMENTUM_MAX_DROP_DEPTH {
+                    return false;
+                }
+                let Some(forward_x) = target_x.checked_add_signed(step) else {
+                    return false;
+                };
+                if forward_x < bounds.x_start || forward_x >= bounds.x_end {
+                    return false;
+                }
+                let forward_drop =
+                    self.diagonal_drop_depth(bounds, forward_x, source_y.saturating_add(1));
+                forward_drop > 0
+                    && forward_drop <= CLASSIC_MOMENTUM_MAX_DROP_DEPTH
+                    && drop_depth.abs_diff(forward_drop) <= 1
+            }
+            ClassicExperimentProfile::MomentumSoft => {
+                // C: turn the repose-relative upper edge into a soft transition.
+                // Exact local repose always continues, one extra dot continues
+                // 60% of the time, and anything steeper is treated as a cliff.
+                let repose = usize::from(self.local_repose[source_x]);
+                match drop_depth.checked_sub(repose) {
+                    Some(0) => true,
+                    Some(1) => self.next_physics_random_u64() % 5 < 3,
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
     }
 
     fn local_repose_allows_diagonal(

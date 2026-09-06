@@ -371,6 +371,9 @@ fn classic_experiment_selection_is_nonretroactive_and_uses_rugged_texture_base()
         "memory-slope",
         "anchored",
         "momentum",
+        "momentum-repose",
+        "momentum-tangent",
+        "momentum-soft",
     ] {
         engine.set_experiment_profile_name(profile).unwrap();
         assert_eq!(engine.experiment_profile_name(), profile);
@@ -542,6 +545,106 @@ fn momentum_profile_suppresses_bonus_hop_on_cliff_like_relief() {
     assert_eq!(bonus_targets, 0, "cliff-like relief must suppress momentum");
     assert_eq!(engine.diagonal_moves, 1);
     assert_eq!(engine.surface.physical_grain_count(), 2);
+}
+
+#[test]
+fn momentum_repose_profile_tracks_the_local_repose_band() {
+    let mut engine = ClassicSandboxEngine::new(18, 14, 119, ClassicRainMode::Uniform);
+    engine
+        .set_experiment_profile_name("momentum-repose")
+        .unwrap();
+    let bounds = engine.surface.viewport_bounds().expect("visible basin");
+    let x = bounds.x_start + (bounds.x_end - bounds.x_start) / 2;
+    let target_x = x + 1;
+    let y = bounds.y_start + 2;
+
+    engine.local_repose[x] = CLASSIC_REPOSE_LOW;
+    assert!(engine.momentum_bonus_is_eligible(bounds, x, target_x, y, 1, 1));
+    assert!(engine.momentum_bonus_is_eligible(bounds, x, target_x, y, 1, 2));
+    assert!(!engine.momentum_bonus_is_eligible(bounds, x, target_x, y, 1, 3));
+
+    engine.local_repose[x] = CLASSIC_REPOSE_HIGH;
+    assert!(!engine.momentum_bonus_is_eligible(bounds, x, target_x, y, 1, 2));
+    assert!(engine.momentum_bonus_is_eligible(bounds, x, target_x, y, 1, 3));
+    assert!(engine.momentum_bonus_is_eligible(bounds, x, target_x, y, 1, 4));
+    assert!(!engine.momentum_bonus_is_eligible(bounds, x, target_x, y, 1, 5));
+}
+
+#[test]
+fn momentum_tangent_profile_requires_bounded_forward_surface_continuity() {
+    let mut engine = ClassicSandboxEngine::new(18, 16, 121, ClassicRainMode::Uniform);
+    engine
+        .set_experiment_profile_name("momentum-tangent")
+        .unwrap();
+    let bounds = engine.surface.viewport_bounds().expect("visible basin");
+    let x = bounds.x_start + (bounds.x_end - bounds.x_start) / 2;
+    let target_x = x + 1;
+    let forward_x = x + 2;
+    let y = bounds.y_start + 2;
+    let category = CategoryId(1);
+
+    // A coherent diagonal keeps the prospective drop roughly constant after
+    // advancing one row and one column: 1 now, 1 at the forward sample.
+    engine.surface.grid[y + 2][target_x] = Some(category);
+    engine.surface.grid[y + 3][forward_x] = Some(category);
+    assert!(engine.momentum_bonus_is_eligible(bounds, x, target_x, y, 1, 1));
+
+    // A sharp kink breaks local tangent continuity even though the first
+    // receiving column alone is still close enough to the grain.
+    engine.surface.grid[y + 3][forward_x] = None;
+    engine.surface.grid[y + 5][forward_x] = Some(category);
+    assert!(!engine.momentum_bonus_is_eligible(bounds, x, target_x, y, 1, 1));
+
+    // Deep open walls remain ineligible even if distant surfaces happen to be
+    // mutually parallel; tangent mode must not restore lateral-looking cliffs.
+    engine.surface.grid[y + 2][target_x] = None;
+    engine.surface.grid[y + 5][forward_x] = None;
+    assert!(!engine.momentum_bonus_is_eligible(bounds, x, target_x, y, 1, 8));
+}
+
+#[test]
+fn momentum_soft_profile_has_exact_repose_certain_one_extra_dot_soft_and_cliff_off() {
+    let mut engine = ClassicSandboxEngine::new(18, 14, 123, ClassicRainMode::Uniform);
+    engine.set_experiment_profile_name("momentum-soft").unwrap();
+    let bounds = engine.surface.viewport_bounds().expect("visible basin");
+    let x = bounds.x_start + (bounds.x_end - bounds.x_start) / 2;
+    let target_x = x + 1;
+    let y = bounds.y_start + 2;
+
+    engine.local_repose[x] = CLASSIC_REPOSE_MID;
+    assert!(engine.momentum_bonus_is_eligible(bounds, x, target_x, y, 1, 2));
+    assert!(!engine.momentum_bonus_is_eligible(bounds, x, target_x, y, 1, 4));
+
+    let mut accepted = 0usize;
+    let samples = 100usize;
+    for _ in 0..samples {
+        if engine.momentum_bonus_is_eligible(bounds, x, target_x, y, 1, 3) {
+            accepted += 1;
+        }
+    }
+    assert!(
+        (40..=80).contains(&accepted),
+        "60% soft edge was not observable: accepted={accepted}/{samples}"
+    );
+}
+
+#[test]
+fn classic_008_momentum_profiles_remain_mass_conserving_and_observable() {
+    for profile in [
+        "momentum",
+        "momentum-repose",
+        "momentum-tangent",
+        "momentum-soft",
+    ] {
+        let metrics = experiment_metrics(profile);
+        eprintln!(
+            "CLASSIC_008_METRICS profile={profile} roughness={} apex={} width={} diagonal_moves={}",
+            metrics.0, metrics.1, metrics.2, metrics.3
+        );
+        assert!(metrics.1 > 0, "profile={profile}");
+        assert!(metrics.2 > 0, "profile={profile}");
+        assert!(metrics.3 > 0, "profile={profile}");
+    }
 }
 
 fn experiment_metrics(profile: &str) -> (usize, usize, usize, usize) {
