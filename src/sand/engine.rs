@@ -29,7 +29,7 @@ use crate::{
 };
 
 mod color_blend;
-pub(crate) use color_blend::BrailleColorBlend;
+pub(crate) use color_blend::{BrailleColorBackground, BrailleColorBlend};
 use color_blend::blend_braille_color;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -894,6 +894,19 @@ impl SandEngine {
         categories: &[Category],
         color_blend: BrailleColorBlend,
     ) -> Vec<Line<'static>> {
+        self.render_with_color_blend_and_background(
+            categories,
+            color_blend,
+            BrailleColorBackground::Neutral,
+        )
+    }
+
+    pub(crate) fn render_with_color_blend_and_background(
+        &self,
+        categories: &[Category],
+        color_blend: BrailleColorBlend,
+        color_background: BrailleColorBackground,
+    ) -> Vec<Line<'static>> {
         let cell_w = self.cell_width as usize;
         let cell_h = self.cell_height as usize;
         let viewport_width_dots = cell_w.saturating_mul(SAND_ENGINE.dot_width);
@@ -954,7 +967,12 @@ impl SandEngine {
                     }
                 }
 
-                let color = blend_braille_color(&counts, &category_colors, color_blend);
+                let color = blend_braille_color(
+                    &counts,
+                    &category_colors,
+                    color_blend,
+                    color_background,
+                );
                 let ch = char::from_u32(SAND_ENGINE.braille_base + dots as u32).unwrap_or(' ');
                 spans.push(Span::raw(ch.to_string()).fg(color));
             }
@@ -1357,7 +1375,7 @@ mod tests {
 
     use ratatui::style::Color;
 
-    use super::BrailleColorBlend;
+    use super::{BrailleColorBackground, BrailleColorBlend};
     #[cfg(debug_assertions)]
     use super::centered_half_open_interval;
 
@@ -1603,6 +1621,20 @@ mod tests {
             .expect("rendered foreground color")
     }
 
+    fn first_render_color_with_background(
+        engine: &SandEngine,
+        categories: &[Category],
+        blend: BrailleColorBlend,
+        background: BrailleColorBackground,
+    ) -> Color {
+        engine
+            .render_with_color_blend_and_background(categories, blend, background)[0]
+            .spans[0]
+            .style
+            .fg
+            .expect("rendered foreground color")
+    }
+
     #[test]
     fn ordinary_render_is_exact_rgb_control() {
         let mut engine = SandEngine::new(1, 1);
@@ -1636,6 +1668,10 @@ mod tests {
         for profile in [
             BrailleColorBlend::Rgb,
             BrailleColorBlend::RgbAdditive,
+            BrailleColorBlend::RgbLuma,
+            BrailleColorBlend::RgbLumaSafe,
+            BrailleColorBlend::RgbMid,
+            BrailleColorBlend::RgbContrast,
             BrailleColorBlend::Linear,
             BrailleColorBlend::Oklab,
             BrailleColorBlend::Dominant,
@@ -1780,6 +1816,7 @@ mod tests {
                 &counts,
                 &colors,
                 BrailleColorBlend::RgbAdditive,
+                BrailleColorBackground::Neutral,
             ),
             Color::Rgb(255, 255, 255)
         );
@@ -1819,11 +1856,13 @@ mod tests {
                 &counts,
                 &colors,
                 BrailleColorBlend::RgbAdditive,
+                BrailleColorBackground::Neutral,
             ),
             super::color_blend::blend_braille_color(
                 &counts,
                 &colors,
                 BrailleColorBlend::Rgb,
+                BrailleColorBackground::Neutral,
             )
         );
     }
@@ -1840,6 +1879,7 @@ mod tests {
                 &counts,
                 &colors,
                 BrailleColorBlend::RgbAdditive,
+                BrailleColorBackground::Neutral,
             ),
             Color::Rgb(225, 45, 45)
         );
@@ -1851,9 +1891,178 @@ mod tests {
                 &counts,
                 &colors,
                 BrailleColorBlend::RgbAdditive,
+                BrailleColorBackground::Neutral,
             ),
             Color::Rgb(213, 185, 185)
         );
+    }
+
+    #[test]
+    fn luma_neutral_profiles_keep_exact_complement_cancellation_away_from_black_and_white() {
+        let mut engine = SandEngine::new(1, 1);
+        engine.clear();
+        let red = CategoryId::new(1);
+        let cyan = CategoryId::new(2);
+        for y in 0..engine.grid.len() {
+            for x in 0..engine.grid[y].len() {
+                engine.grid[y][x] = Some(if y < 2 { red } else { cyan });
+            }
+        }
+        let categories = [
+            test_category(1, Color::Rgb(255, 0, 0)),
+            test_category(2, Color::Rgb(0, 255, 255)),
+        ];
+
+        let luma = first_render_color(&engine, &categories, BrailleColorBlend::RgbLuma);
+        let safe = first_render_color(&engine, &categories, BrailleColorBlend::RgbLumaSafe);
+        let mid = first_render_color(&engine, &categories, BrailleColorBlend::RgbMid);
+
+        assert_eq!(luma, Color::Rgb(179, 179, 179));
+        assert_eq!(safe, Color::Rgb(164, 164, 164));
+        assert_eq!(mid, Color::Rgb(119, 119, 119));
+        for color in [luma, safe, mid] {
+            let Color::Rgb(r, g, b) = color else {
+                panic!("expected RGB neutral");
+            };
+            assert_eq!(r, g);
+            assert_eq!(g, b);
+            assert!(r > 40, "neutral must stay away from black: {r}");
+            assert!(r < 215, "neutral must stay away from white: {r}");
+        }
+    }
+
+    #[test]
+    fn rgb_contrast_background_policy_moves_only_the_cancelled_neutral_target() {
+        let mut engine = SandEngine::new(1, 1);
+        engine.clear();
+        let red = CategoryId::new(1);
+        let cyan = CategoryId::new(2);
+        for y in 0..engine.grid.len() {
+            for x in 0..engine.grid[y].len() {
+                engine.grid[y][x] = Some(if y < 2 { red } else { cyan });
+            }
+        }
+        let categories = [
+            test_category(1, Color::Rgb(255, 0, 0)),
+            test_category(2, Color::Rgb(0, 255, 255)),
+        ];
+
+        let dark = first_render_color_with_background(
+            &engine,
+            &categories,
+            BrailleColorBlend::RgbContrast,
+            BrailleColorBackground::Dark,
+        );
+        let neutral = first_render_color_with_background(
+            &engine,
+            &categories,
+            BrailleColorBlend::RgbContrast,
+            BrailleColorBackground::Neutral,
+        );
+        let light = first_render_color_with_background(
+            &engine,
+            &categories,
+            BrailleColorBlend::RgbContrast,
+            BrailleColorBackground::Light,
+        );
+
+        let gray = |color| match color {
+            Color::Rgb(r, g, b) => {
+                assert_eq!(r, g);
+                assert_eq!(g, b);
+                r
+            }
+            _ => panic!("expected RGB neutral"),
+        };
+        let dark_gray = gray(dark);
+        let neutral_gray = gray(neutral);
+        let light_gray = gray(light);
+        assert_eq!(dark_gray, 164);
+        assert_eq!(neutral_gray, 119);
+        assert_eq!(light_gray, 99);
+        assert!(dark_gray > neutral_gray);
+        assert!(neutral_gray > light_gray);
+        assert!(dark_gray < 215);
+        assert!(light_gray > 40);
+
+        // Non-canceling mixtures remain exact legacy RGB regardless of the
+        // background preview policy.
+        let yellow = CategoryId::new(3);
+        for y in 0..engine.grid.len() {
+            for x in 0..engine.grid[y].len() {
+                engine.grid[y][x] = Some(if y < 2 { red } else { yellow });
+            }
+        }
+        let categories = [
+            test_category(1, Color::Rgb(255, 0, 0)),
+            test_category(3, Color::Rgb(255, 255, 0)),
+        ];
+        let legacy = first_render_color(&engine, &categories, BrailleColorBlend::Rgb);
+        for background in [
+            BrailleColorBackground::Neutral,
+            BrailleColorBackground::Dark,
+            BrailleColorBackground::Light,
+        ] {
+            assert_eq!(
+                first_render_color_with_background(
+                    &engine,
+                    &categories,
+                    BrailleColorBlend::RgbContrast,
+                    background,
+                ),
+                legacy
+            );
+        }
+    }
+
+    #[test]
+    fn background_policy_is_ignored_by_all_profiles_except_rgb_contrast() {
+        let mut engine = SandEngine::new(1, 1);
+        engine.clear();
+        let red = CategoryId::new(1);
+        let cyan = CategoryId::new(2);
+        for y in 0..engine.grid.len() {
+            for x in 0..engine.grid[y].len() {
+                engine.grid[y][x] = Some(if y < 2 { red } else { cyan });
+            }
+        }
+        let categories = [
+            test_category(1, Color::Rgb(255, 0, 0)),
+            test_category(2, Color::Rgb(0, 255, 255)),
+        ];
+
+        for profile in [
+            BrailleColorBlend::Rgb,
+            BrailleColorBlend::RgbAdditive,
+            BrailleColorBlend::RgbLuma,
+            BrailleColorBlend::RgbLumaSafe,
+            BrailleColorBlend::RgbMid,
+            BrailleColorBlend::Linear,
+            BrailleColorBlend::Oklab,
+            BrailleColorBlend::Dominant,
+            BrailleColorBlend::DominantSoft,
+        ] {
+            let neutral = first_render_color_with_background(
+                &engine,
+                &categories,
+                profile,
+                BrailleColorBackground::Neutral,
+            );
+            for background in [BrailleColorBackground::Dark, BrailleColorBackground::Light] {
+                assert_eq!(
+                    first_render_color_with_background(
+                        &engine,
+                        &categories,
+                        profile,
+                        background,
+                    ),
+                    neutral,
+                    "profile={} background={}",
+                    profile.name(),
+                    background.name()
+                );
+            }
+        }
     }
 
     #[test]

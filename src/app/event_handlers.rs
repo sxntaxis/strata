@@ -505,7 +505,7 @@ impl App {
             }
             #[cfg(debug_assertions)]
             CommandIntent::TestingCheatsHelp => Ok(
-                "testingcheats: default sandbox classic · model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> · classic texture [baseline|textured|rugged|terraced] · classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft|momentum-contact|momentum-repose-contact|momentum-surface|momentum-grounded-contact] · classic colorblend [rgb|rgb-additive|linear|oklab|dominant|dominant-soft] · classic stratigraphy · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · fill (classic/hybrid/Oslo; ensures six Fixture categories) · fillhalf (same fill, centered half-width) · clear · status · provenance · reset"
+                "testingcheats: default sandbox classic · model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> · classic texture [baseline|textured|rugged|terraced] · classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft|momentum-contact|momentum-repose-contact|momentum-surface|momentum-grounded-contact] · classic colorblend [rgb|rgb-additive|rgb-luma|rgb-luma-safe|rgb-mid|rgb-contrast|linear|oklab|dominant|dominant-soft] · classic colorbackground [neutral|dark|light] · classic stratigraphy · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · fill (classic/hybrid/Oslo; ensures six Fixture categories) · fillhalf (same fill, centered half-width) · clear · status · provenance · reset"
                     .to_string(),
             ),
             #[cfg(debug_assertions)]
@@ -625,7 +625,25 @@ impl App {
                 } else {
                     let profile = testing.engine.classic_color_blend_profile()?;
                     Ok(format!(
-                        "Testing sandbox {model} Braille color blend: {profile} (rgb is the pre-VISUAL-001 control)"
+                        "Testing sandbox {model} Braille color blend: {profile} (rgb-additive is the owner-selected CLASSIC-014 baseline; rgb is the legacy control)"
+                    ))
+                }
+            }
+            #[cfg(debug_assertions)]
+            CommandIntent::TestingCheatsClassicColorBackground { policy } => {
+                self.ensure_testing_cheats_preview()?;
+                let testing = self.testing_cheats.as_mut().expect("testing preview exists");
+                let model = testing.engine.model_name();
+                if let Some(policy) = policy {
+                    testing.engine.set_classic_color_background_policy(&policy)?;
+                    self.render_needed = true;
+                    Ok(format!(
+                        "Testing sandbox {model} Braille background policy: {policy} (render-only preview; rgb-contrast only; no terminal query or persistence)"
+                    ))
+                } else {
+                    let policy = testing.engine.classic_color_background_policy()?;
+                    Ok(format!(
+                        "Testing sandbox {model} Braille background policy: {policy} (neutral is theme-independent; dark/light preview rgb-contrast)"
                     ))
                 }
             }

@@ -169,6 +169,12 @@ impl ClassicSandboxEngine {
         writeln!(report, "colorblend={}", self.color_blend_profile_name()).expect("String write");
         writeln!(
             report,
+            "colorbackground={}",
+            self.color_background_policy_name()
+        )
+        .expect("String write");
+        writeln!(
+            report,
             "initial_fill_span=x[{}, {}) y[{}, {}) initial_grains={}",
             fill.x_start, fill.x_end, fill.y_start, fill.y_end, fill.initial_total
         )

@@ -61,6 +61,10 @@ pub(crate) enum CommandIntent {
         profile: Option<String>,
     },
     #[cfg(debug_assertions)]
+    TestingCheatsClassicColorBackground {
+        policy: Option<String>,
+    },
+    #[cfg(debug_assertions)]
     TestingCheatsClassicStratigraphy,
     #[cfg(debug_assertions)]
     TestingCheatsStatus,
@@ -95,6 +99,7 @@ impl CommandIntent {
                         | Self::TestingCheatsClassicTexture { .. }
                         | Self::TestingCheatsClassicExperiment { .. }
                         | Self::TestingCheatsClassicColorBlend { .. }
+                        | Self::TestingCheatsClassicColorBackground { .. }
                         | Self::TestingCheatsClassicStratigraphy
                         | Self::TestingCheatsStatus
                         | Self::TestingCheatsProvenance
@@ -151,7 +156,7 @@ pub(crate) fn parse(input: &str) -> Result<CommandIntent, String> {
 #[cfg(debug_assertions)]
 fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
     let Some((subcommand, rest)) = args.split_first() else {
-        return Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft|momentum-contact|momentum-repose-contact|momentum-surface|momentum-grounded-contact] | classic colorblend [rgb|rgb-additive|linear|oklab|dominant|dominant-soft] | classic stratigraphy | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | fillhalf | clear | status | provenance | reset".to_string());
+        return Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft|momentum-contact|momentum-repose-contact|momentum-surface|momentum-grounded-contact] | classic colorblend [rgb|rgb-additive|rgb-luma|rgb-luma-safe|rgb-mid|rgb-contrast|linear|oklab|dominant|dominant-soft] | classic colorbackground [neutral|dark|light] | classic stratigraphy | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | fillhalf | clear | status | provenance | reset".to_string());
     };
 
     match subcommand.to_ascii_lowercase().as_str() {
@@ -262,22 +267,55 @@ fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
             }
             if blend.len() != 1 {
                 return Err(
-                    "Usage: testingcheats classic colorblend [rgb|rgb-additive|linear|oklab|dominant|dominant-soft]"
+                    "Usage: testingcheats classic colorblend [rgb|rgb-additive|rgb-luma|rgb-luma-safe|rgb-mid|rgb-contrast|linear|oklab|dominant|dominant-soft]"
                         .to_string(),
                 );
             }
             let profile = blend[0].to_ascii_lowercase();
             if !matches!(
                 profile.as_str(),
-                "rgb" | "rgb-additive" | "linear" | "oklab" | "dominant" | "dominant-soft"
+                "rgb"
+                    | "rgb-additive"
+                    | "rgb-luma"
+                    | "rgb-luma-safe"
+                    | "rgb-mid"
+                    | "rgb-contrast"
+                    | "linear"
+                    | "oklab"
+                    | "dominant"
+                    | "dominant-soft"
             ) {
                 return Err(
-                    "classic colorblend profile must be rgb, rgb-additive, linear, oklab, dominant, or dominant-soft"
+                    "classic colorblend profile must be rgb, rgb-additive, rgb-luma, rgb-luma-safe, rgb-mid, rgb-contrast, linear, oklab, dominant, or dominant-soft"
                         .to_string(),
                 );
             }
             Ok(CommandIntent::TestingCheatsClassicColorBlend {
                 profile: Some(profile),
+            })
+        }
+        "classic"
+            if rest
+                .first()
+                .is_some_and(|token| token.eq_ignore_ascii_case("colorbackground")) =>
+        {
+            let policy = &rest[1..];
+            if policy.is_empty() {
+                return Ok(CommandIntent::TestingCheatsClassicColorBackground { policy: None });
+            }
+            if policy.len() != 1 {
+                return Err(
+                    "Usage: testingcheats classic colorbackground [neutral|dark|light]".to_string(),
+                );
+            }
+            let policy = policy[0].to_ascii_lowercase();
+            if !matches!(policy.as_str(), "neutral" | "dark" | "light") {
+                return Err(
+                    "classic colorbackground policy must be neutral, dark, or light".to_string(),
+                );
+            }
+            Ok(CommandIntent::TestingCheatsClassicColorBackground {
+                policy: Some(policy),
             })
         }
         "classic" if rest.len() == 1 && rest[0].eq_ignore_ascii_case("stratigraphy") => {
@@ -289,7 +327,7 @@ fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
         "status" if rest.is_empty() => Ok(CommandIntent::TestingCheatsStatus),
         "provenance" if rest.is_empty() => Ok(CommandIntent::TestingCheatsProvenance),
         "reset" if rest.is_empty() => Ok(CommandIntent::TestingCheatsReset),
-        _ => Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft|momentum-contact|momentum-repose-contact|momentum-surface|momentum-grounded-contact] | classic colorblend [rgb|rgb-additive|linear|oklab|dominant|dominant-soft] | classic stratigraphy | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | fillhalf | clear | status | provenance | reset".to_string()),
+        _ => Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft|momentum-contact|momentum-repose-contact|momentum-surface|momentum-grounded-contact] | classic colorblend [rgb|rgb-additive|rgb-luma|rgb-luma-safe|rgb-mid|rgb-contrast|linear|oklab|dominant|dominant-soft] | classic colorbackground [neutral|dark|light] | classic stratigraphy | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | fillhalf | clear | status | provenance | reset".to_string()),
     }
 }
 
@@ -810,6 +848,10 @@ mod tests {
         for profile in [
             "rgb",
             "rgb-additive",
+            "rgb-luma",
+            "rgb-luma-safe",
+            "rgb-mid",
+            "rgb-contrast",
             "linear",
             "oklab",
             "dominant",
@@ -823,6 +865,19 @@ mod tests {
             );
         }
         assert!(parse("testingcheats classic colorblend neon").is_err());
+        assert_eq!(
+            parse("testingcheats classic colorbackground").unwrap(),
+            CommandIntent::TestingCheatsClassicColorBackground { policy: None }
+        );
+        for policy in ["neutral", "dark", "light"] {
+            assert_eq!(
+                parse(&format!("testingcheats classic colorbackground {policy}")).unwrap(),
+                CommandIntent::TestingCheatsClassicColorBackground {
+                    policy: Some(policy.to_string())
+                }
+            );
+        }
+        assert!(parse("testingcheats classic colorbackground auto").is_err());
         assert_eq!(
             parse("testingcheats classic stratigraphy").unwrap(),
             CommandIntent::TestingCheatsClassicStratigraphy

@@ -762,6 +762,26 @@ impl TestingSandEngine {
         }
     }
 
+    fn classic_color_background_policy(&self) -> Result<&'static str, String> {
+        match self {
+            Self::Classic(engine) => Ok(engine.color_background_policy_name()),
+            _ => Err(
+                "testingcheats classic colorbackground is available only for classic/hybrid"
+                    .to_string(),
+            ),
+        }
+    }
+
+    fn set_classic_color_background_policy(&mut self, policy: &str) -> Result<(), String> {
+        match self {
+            Self::Classic(engine) => engine.set_color_background_policy_name(policy),
+            _ => Err(
+                "testingcheats classic colorbackground is available only for classic/hybrid"
+                    .to_string(),
+            ),
+        }
+    }
+
     fn classic_stratigraphy_report(&self, categories: &[Category]) -> Result<String, String> {
         match self {
             Self::Classic(engine) => engine.rainbow_stratigraphy_report(categories),
@@ -825,7 +845,7 @@ impl TestingSandEngine {
                 let (canonical_w, canonical_h) = engine.canonical_dimensions();
                 let (vertical, diagonal) = engine.movement_counts();
                 format!(
-                    "{} sandbox · physical={} · pending={} · canonical={}x{} · vertical_moves={} · diagonal_moves={} · texture={} · experiment={} · colorblend={} · closed VW walls · no discharge",
+                    "{} sandbox · physical={} · pending={} · canonical={}x{} · vertical_moves={} · diagonal_moves={} · texture={} · experiment={} · colorblend={} · colorbackground={} · closed VW walls · no discharge",
                     engine.model_name(),
                     engine.physical_grain_count(),
                     engine.pending_count(),
@@ -835,7 +855,8 @@ impl TestingSandEngine {
                     diagonal,
                     engine.texture_profile_name(),
                     engine.experiment_profile_name(),
-                    engine.color_blend_profile_name()
+                    engine.color_blend_profile_name(),
+                    engine.color_background_policy_name()
                 )
             }
             Self::Oslo(engine) => {

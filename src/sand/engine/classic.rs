@@ -4,7 +4,10 @@ use ratatui::prelude::Line;
 
 use crate::domain::{Category, CategoryId};
 
-use super::{BrailleColorBlend, SandEngine, ViewportBounds, centered_half_open_interval};
+use super::{
+    BrailleColorBackground, BrailleColorBlend, SandEngine, ViewportBounds,
+    centered_half_open_interval,
+};
 
 mod grounded_index;
 mod stratigraphy;
@@ -238,6 +241,7 @@ pub(crate) struct ClassicSandboxEngine {
     texture_profile: ClassicTextureProfile,
     experiment_profile: ClassicExperimentProfile,
     color_blend_profile: BrailleColorBlend,
+    color_background_policy: BrailleColorBackground,
     last_rainbow_fill: Option<ClassicRainbowFillDescriptor>,
     rain_focus_x: Option<usize>,
     rain_focus_target_x: Option<usize>,
@@ -279,7 +283,8 @@ impl ClassicSandboxEngine {
             repose_memory_remaining,
             texture_profile: ClassicTextureProfile::Rugged,
             experiment_profile: ClassicExperimentProfile::MomentumGroundedContact,
-            color_blend_profile: BrailleColorBlend::Rgb,
+            color_blend_profile: BrailleColorBlend::RgbAdditive,
+            color_background_policy: BrailleColorBackground::Neutral,
             last_rainbow_fill: None,
             rain_focus_x: None,
             rain_focus_target_x: None,
@@ -368,8 +373,11 @@ impl ClassicSandboxEngine {
     }
 
     pub(crate) fn render(&self, categories: &[Category]) -> Vec<Line<'static>> {
-        self.surface
-            .render_with_color_blend(categories, self.color_blend_profile)
+        self.surface.render_with_color_blend_and_background(
+            categories,
+            self.color_blend_profile,
+            self.color_background_policy,
+        )
     }
 
     pub(crate) fn color_blend_profile_name(&self) -> &'static str {
@@ -379,11 +387,25 @@ impl ClassicSandboxEngine {
     pub(crate) fn set_color_blend_profile_name(&mut self, profile: &str) -> Result<(), String> {
         let Some(profile) = BrailleColorBlend::parse(profile) else {
             return Err(
-                "classic colorblend profile must be rgb, rgb-additive, linear, oklab, dominant, or dominant-soft"
+                "classic colorblend profile must be rgb, rgb-additive, rgb-luma, rgb-luma-safe, rgb-mid, rgb-contrast, linear, oklab, dominant, or dominant-soft"
                     .to_string(),
             );
         };
         self.color_blend_profile = profile;
+        Ok(())
+    }
+
+    pub(crate) fn color_background_policy_name(&self) -> &'static str {
+        self.color_background_policy.name()
+    }
+
+    pub(crate) fn set_color_background_policy_name(&mut self, policy: &str) -> Result<(), String> {
+        let Some(policy) = BrailleColorBackground::parse(policy) else {
+            return Err(
+                "classic colorbackground policy must be neutral, dark, or light".to_string(),
+            );
+        };
+        self.color_background_policy = policy;
         Ok(())
     }
 
@@ -1344,6 +1366,8 @@ mod tests {
     #[test]
     fn colorblend_selection_is_render_only_and_nonretroactive() {
         let mut engine = ClassicSandboxEngine::new(12, 10, 701, ClassicRainMode::Uniform);
+        assert_eq!(engine.color_blend_profile_name(), "rgb-additive");
+        assert_eq!(engine.color_background_policy_name(), "neutral");
         let ids = [
             CategoryId(1),
             CategoryId(2),
@@ -1365,6 +1389,10 @@ mod tests {
         for profile in [
             "rgb",
             "rgb-additive",
+            "rgb-luma",
+            "rgb-luma-safe",
+            "rgb-mid",
+            "rgb-contrast",
             "linear",
             "oklab",
             "dominant",
@@ -1382,6 +1410,24 @@ mod tests {
             assert_eq!(engine.movement_counts(), moves, "profile={profile}");
         }
         assert!(engine.set_color_blend_profile_name("neon").is_err());
+
+        for policy in ["neutral", "dark", "light"] {
+            engine
+                .set_color_background_policy_name(policy)
+                .expect("valid background policy");
+            assert_eq!(engine.color_background_policy_name(), policy);
+            assert_eq!(engine.surface.grid, grid, "background={policy}");
+            assert_eq!(engine.physics_rng_state, physics_rng, "background={policy}");
+            assert_eq!(engine.repose_rng_state, repose_rng, "background={policy}");
+            assert_eq!(engine.local_repose, local_repose, "background={policy}");
+            assert_eq!(
+                engine.repose_memory_remaining,
+                memory,
+                "background={policy}"
+            );
+            assert_eq!(engine.movement_counts(), moves, "background={policy}");
+        }
+        assert!(engine.set_color_background_policy_name("auto").is_err());
     }
 
     #[test]

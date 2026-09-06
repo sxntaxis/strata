@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-06
 authority: working
-summary: CLASSIC-013 is machine-green. Human review keeps `rgb` as the preferred Braille color control and leaves stratigraphic redistribution physics unchanged for now. CLASSIC-014 is the current bounded edge: add one render-only `rgb-additive` comparison that lifts strong chromatic cancellation toward white while preserving `rgb`, momentum-grounded-contact physics, and the CLASSIC-012 performance baseline exactly.
-next: Natively validate CLASSIC-014 as a zero-physics renderer-only pass, then compare `rgb` versus `rgb-additive` on the same live fillhalf grid, especially complementary Red/Cyan and Yellow/Blue boundaries. Do not resume physics or performance changes until the owner closes this color gate.
+summary: CLASSIC-013 is machine-green; stratigraphic redistribution remains accepted unchanged. Human review promotes CLASSIC-014 `rgb-additive` as the preferred Classic/Hybrid Braille color baseline. CLASSIC-015 is the current bounded edge: compare source-lightness, safe-neutral, fixed-mid, and background-aware cancellation targets without changing physics, mass, RNG, or the CLASSIC-012 performance baseline.
+next: Natively validate CLASSIC-015, then compare `rgb-additive`, `rgb-luma`, `rgb-luma-safe`, `rgb-mid`, and `rgb-contrast` on one unchanged fillhalf state. For `rgb-contrast`, preview `neutral`, `dark`, and `light`; do not add terminal auto-detection or persistent settings until the owner selects the color semantic.
 ---
 
 # NOW — Strata

@@ -6,12 +6,15 @@ use crate::domain::{CategoryId, DRIFT_CATEGORY_ID};
 
 /// Debug-selectable reduction from the up-to-eight independently colored sand
 /// dots inside one terminal Braille cell to the single foreground color that
-/// the terminal can actually display. Production `SandEngine::render` remains
-/// exactly on `Rgb`, the pre-VISUAL-001 behavior.
+/// the terminal can actually display.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BrailleColorBlend {
     Rgb,
     RgbAdditive,
+    RgbLuma,
+    RgbLumaSafe,
+    RgbMid,
+    RgbContrast,
     Linear,
     Oklab,
     Dominant,
@@ -23,6 +26,10 @@ impl BrailleColorBlend {
         match self {
             Self::Rgb => "rgb",
             Self::RgbAdditive => "rgb-additive",
+            Self::RgbLuma => "rgb-luma",
+            Self::RgbLumaSafe => "rgb-luma-safe",
+            Self::RgbMid => "rgb-mid",
+            Self::RgbContrast => "rgb-contrast",
             Self::Linear => "linear",
             Self::Oklab => "oklab",
             Self::Dominant => "dominant",
@@ -34,10 +41,44 @@ impl BrailleColorBlend {
         match name.trim().to_ascii_lowercase().as_str() {
             "rgb" => Some(Self::Rgb),
             "rgb-additive" => Some(Self::RgbAdditive),
+            "rgb-luma" => Some(Self::RgbLuma),
+            "rgb-luma-safe" => Some(Self::RgbLumaSafe),
+            "rgb-mid" => Some(Self::RgbMid),
+            "rgb-contrast" => Some(Self::RgbContrast),
             "linear" => Some(Self::Linear),
             "oklab" => Some(Self::Oklab),
             "dominant" => Some(Self::Dominant),
             "dominant-soft" => Some(Self::DominantSoft),
+            _ => None,
+        }
+    }
+}
+
+/// Render-only preview policy for the terminal background. It is deliberately
+/// separate from color-mixing semantics so the owner can compare the same
+/// `rgb-contrast` rule against dark/light terminal assumptions. No terminal I/O
+/// or persistence is introduced by this review pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BrailleColorBackground {
+    Neutral,
+    Dark,
+    Light,
+}
+
+impl BrailleColorBackground {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Neutral => "neutral",
+            Self::Dark => "dark",
+            Self::Light => "light",
+        }
+    }
+
+    pub(crate) fn parse(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "neutral" => Some(Self::Neutral),
+            "dark" => Some(Self::Dark),
+            "light" => Some(Self::Light),
             _ => None,
         }
     }
@@ -109,9 +150,6 @@ fn legacy_rgb_mean(
     category_colors: &HashMap<CategoryId, Color>,
     total_colored_dots: usize,
 ) -> (u8, u8, u8) {
-    // Preserve the exact pre-VISUAL-001 arithmetic control, including f32
-    // weighting and truncation. `rgb-additive` deliberately starts from this
-    // exact result and changes it only when chromatic cancellation is present.
     let mut blended_r = 0f32;
     let mut blended_g = 0f32;
     let mut blended_b = 0f32;
@@ -131,17 +169,12 @@ fn encoded_rgb_chroma(r: u8, g: u8, b: u8) -> f64 {
     f64::from(maximum - minimum) / 255.0
 }
 
-fn rgb_additive_cancellation_blend(
+fn cancellation_amount(
     counts: &HashMap<CategoryId, usize>,
     category_colors: &HashMap<CategoryId, Color>,
     total_colored_dots: usize,
-) -> Color {
-    let (base_r, base_g, base_b) = legacy_rgb_mean(counts, category_colors, total_colored_dots);
-
-    // Detect chroma that disappeared because differently-hued source colors
-    // canceled in the encoded-RGB mean. Neutral source colors do not trigger
-    // the lift: if the inputs had no chroma to begin with, the legacy result is
-    // retained exactly.
+    base: (u8, u8, u8),
+) -> f64 {
     let mut source_chroma = 0.0f64;
     for (category_id, count) in counts {
         let (r, g, b) = category_rgb(*category_id, category_colors);
@@ -149,36 +182,99 @@ fn rgb_additive_cancellation_blend(
         source_chroma += encoded_rgb_chroma(r, g, b) * weight;
     }
     if source_chroma <= f64::EPSILON {
-        return Color::Rgb(base_r, base_g, base_b);
+        return 0.0;
     }
+    let mixed_chroma = encoded_rgb_chroma(base.0, base.1, base.2);
+    (1.0 - mixed_chroma / source_chroma).clamp(0.0, 1.0)
+}
 
-    let mixed_chroma = encoded_rgb_chroma(base_r, base_g, base_b);
-    let cancellation = (1.0 - mixed_chroma / source_chroma).clamp(0.0, 1.0);
-    if cancellation <= f64::EPSILON {
-        return Color::Rgb(base_r, base_g, base_b);
-    }
+fn weighted_source_oklab_lightness(
+    counts: &HashMap<CategoryId, usize>,
+    category_colors: &HashMap<CategoryId, Color>,
+    total_colored_dots: usize,
+) -> f64 {
+    counts
+        .iter()
+        .map(|(category_id, count)| {
+            let (r, g, b) = category_rgb(*category_id, category_colors);
+            let (l, _, _) = linear_rgb_to_oklab(
+                srgb_channel_to_linear(r),
+                srgb_channel_to_linear(g),
+                srgb_channel_to_linear(b),
+            );
+            l * (*count as f64 / total_colored_dots as f64)
+        })
+        .sum::<f64>()
+        .clamp(0.0, 1.0)
+}
 
-    // A squared response keeps ordinary/unequal RGB mixtures close to the
-    // owner-preferred legacy look, while strong complementary cancellation
-    // rises continuously toward white instead of dull gray.
-    let lift = cancellation * cancellation;
-    let lift_channel = |channel: u8| {
-        (f64::from(channel) + (255.0 - f64::from(channel)) * lift)
+fn neutral_rgb_at_oklab_lightness(lightness: f64) -> (u8, u8, u8) {
+    let (r, g, b) = oklab_to_linear_rgb(lightness.clamp(0.0, 1.0), 0.0, 0.0);
+    (
+        linear_channel_to_srgb(r),
+        linear_channel_to_srgb(g),
+        linear_channel_to_srgb(b),
+    )
+}
+
+fn blend_rgb_toward(base: (u8, u8, u8), target: (u8, u8, u8), amount: f64) -> Color {
+    let blend = |from: u8, to: u8| {
+        (f64::from(from) + (f64::from(to) - f64::from(from)) * amount)
             .round()
             .clamp(0.0, 255.0) as u8
     };
-
     Color::Rgb(
-        lift_channel(base_r),
-        lift_channel(base_g),
-        lift_channel(base_b),
+        blend(base.0, target.0),
+        blend(base.1, target.1),
+        blend(base.2, target.2),
     )
+}
+
+fn cancellation_neutral_blend(
+    counts: &HashMap<CategoryId, usize>,
+    category_colors: &HashMap<CategoryId, Color>,
+    total_colored_dots: usize,
+    target_lightness: impl FnOnce(f64) -> f64,
+) -> Color {
+    let base = legacy_rgb_mean(counts, category_colors, total_colored_dots);
+    let cancellation = cancellation_amount(counts, category_colors, total_colored_dots, base);
+    if cancellation <= f64::EPSILON {
+        return Color::Rgb(base.0, base.1, base.2);
+    }
+    let source_l = weighted_source_oklab_lightness(counts, category_colors, total_colored_dots);
+    let target = neutral_rgb_at_oklab_lightness(target_lightness(source_l));
+    blend_rgb_toward(base, target, cancellation * cancellation)
+}
+
+fn rgb_additive_cancellation_blend(
+    counts: &HashMap<CategoryId, usize>,
+    category_colors: &HashMap<CategoryId, Color>,
+    total_colored_dots: usize,
+) -> Color {
+    let base = legacy_rgb_mean(counts, category_colors, total_colored_dots);
+    let cancellation = cancellation_amount(counts, category_colors, total_colored_dots, base);
+    if cancellation <= f64::EPSILON {
+        return Color::Rgb(base.0, base.1, base.2);
+    }
+    blend_rgb_toward(base, (255, 255, 255), cancellation * cancellation)
+}
+
+fn rgb_contrast_target(source_l: f64, background: BrailleColorBackground) -> f64 {
+    const SAFE_LOW: f64 = 0.42;
+    const SAFE_HIGH: f64 = 0.72;
+    let safe = source_l.clamp(SAFE_LOW, SAFE_HIGH);
+    match background {
+        BrailleColorBackground::Neutral => 0.57,
+        BrailleColorBackground::Dark => safe.max(0.64),
+        BrailleColorBackground::Light => safe.min(0.50),
+    }
 }
 
 pub(super) fn blend_braille_color(
     counts: &HashMap<CategoryId, usize>,
     category_colors: &HashMap<CategoryId, Color>,
     profile: BrailleColorBlend,
+    background: BrailleColorBackground,
 ) -> Color {
     let total_colored_dots: usize = counts.values().sum();
     if total_colored_dots == 0 {
@@ -198,6 +294,30 @@ pub(super) fn blend_braille_color(
         BrailleColorBlend::RgbAdditive => {
             rgb_additive_cancellation_blend(counts, category_colors, total_colored_dots)
         }
+        BrailleColorBlend::RgbLuma => cancellation_neutral_blend(
+            counts,
+            category_colors,
+            total_colored_dots,
+            |source_l| source_l,
+        ),
+        BrailleColorBlend::RgbLumaSafe => cancellation_neutral_blend(
+            counts,
+            category_colors,
+            total_colored_dots,
+            |source_l| source_l.clamp(0.42, 0.72),
+        ),
+        BrailleColorBlend::RgbMid => cancellation_neutral_blend(
+            counts,
+            category_colors,
+            total_colored_dots,
+            |_| 0.57,
+        ),
+        BrailleColorBlend::RgbContrast => cancellation_neutral_blend(
+            counts,
+            category_colors,
+            total_colored_dots,
+            |source_l| rgb_contrast_target(source_l, background),
+        ),
         BrailleColorBlend::Linear => {
             let mut r = 0f64;
             let mut g = 0f64;
@@ -258,9 +378,6 @@ pub(super) fn blend_braille_color(
             Color::Rgb(r, g, b)
         }
         BrailleColorBlend::DominantSoft => {
-            // Smooth majority emphasis without a hand-tuned fixed blend ratio:
-            // squaring each category's dot count preserves exact ties while
-            // progressively suppressing minority influence as one material wins.
             let total_weight = counts
                 .values()
                 .map(|count| count.saturating_mul(*count))
@@ -330,7 +447,7 @@ mod tests {
                         counts.insert(ids[2], third);
                     }
                     assert_eq!(
-                        blend_braille_color(&counts, &colors, BrailleColorBlend::Rgb),
+                        blend_braille_color(&counts, &colors, BrailleColorBlend::Rgb, BrailleColorBackground::Neutral),
                         legacy_rgb_reference(&counts, &colors),
                         "counts=({first},{second},{third})"
                     );
