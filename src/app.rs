@@ -522,6 +522,9 @@ struct SimulationState {
 }
 
 #[cfg(debug_assertions)]
+const TESTING_CHEATS_DEFAULT_MODEL: &str = "classic";
+
+#[cfg(debug_assertions)]
 enum TestingSandEngine {
     H4(SandEngine),
     Classic(ClassicSandboxEngine),
@@ -681,8 +684,12 @@ impl TestingSandEngine {
 
     fn fill_rainbow_80(&mut self, category_ids: &[CategoryId]) -> Result<usize, String> {
         match self {
+            Self::Classic(engine) => engine.debug_fill_rainbow_80(category_ids),
             Self::Oslo(engine) => engine.debug_fill_rainbow_80(category_ids),
-            _ => Err("testingcheats fill is available only for Oslo sandbox models".to_string()),
+            Self::H4(_) => Err(
+                "testingcheats fill is available for classic/hybrid and Oslo sandbox models"
+                    .to_string(),
+            ),
         }
     }
 
@@ -2558,7 +2565,7 @@ impl App {
         if self.is_catching_up() {
             return Err("testingcheats is unavailable while catch-up is active".to_string());
         }
-        let engine = self.build_testing_model("h4")?;
+        let engine = self.build_testing_model(TESTING_CHEATS_DEFAULT_MODEL)?;
         self.testing_cheats = Some(TestingCheatsState {
             engine,
             spawn_accumulator: self.simulation.spawn_accumulator,
@@ -3889,8 +3896,11 @@ mod day_end_snapshot_tests {
 
 #[cfg(all(test, debug_assertions))]
 mod testing_cheats_clock_tests {
-    use super::{TestingCheatsState, TestingSandEngine};
-    use crate::sand::OsloSandboxEngine;
+    use super::{TESTING_CHEATS_DEFAULT_MODEL, TestingCheatsState, TestingSandEngine};
+    use crate::{
+        domain::CategoryId,
+        sand::{ClassicRainMode, ClassicSandboxEngine, OsloSandboxEngine},
+    };
     use std::time::Duration;
 
     fn state(engine: TestingSandEngine, speed_multiplier: u32) -> TestingCheatsState {
@@ -3904,6 +3914,27 @@ mod testing_cheats_clock_tests {
             flow_spawn_wall_accumulator: Duration::ZERO,
             visual_dirty: false,
         }
+    }
+
+    #[test]
+    fn testing_cheats_default_sandbox_is_classic() {
+        assert_eq!(TESTING_CHEATS_DEFAULT_MODEL, "classic");
+    }
+
+    #[test]
+    fn testing_cheats_classic_wrapper_accepts_rainbow_fill() {
+        let mut engine = TestingSandEngine::Classic(ClassicSandboxEngine::new(
+            8,
+            6,
+            17,
+            ClassicRainMode::Uniform,
+        ));
+        let grains = engine
+            .fill_rainbow_80(&[CategoryId(1), CategoryId(2), CategoryId(3)])
+            .expect("classic testing fill");
+
+        assert!(grains > 0);
+        assert_eq!(engine.grain_count(), grains);
     }
 
     #[test]

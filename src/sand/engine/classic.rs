@@ -156,6 +156,42 @@ impl ClassicSandboxEngine {
         (self.vertical_moves, self.diagonal_moves)
     }
 
+    pub(crate) fn debug_fill_rainbow_80(
+        &mut self,
+        category_ids: &[CategoryId],
+    ) -> Result<usize, String> {
+        if category_ids.is_empty() {
+            return Err("testingcheats fill requires at least one configured layer".to_string());
+        }
+
+        self.clear();
+        let Some(bounds) = self.surface.viewport_bounds() else {
+            return Ok(0);
+        };
+        let visible_height = bounds.y_end.saturating_sub(bounds.y_start);
+        let fill_height = visible_height.saturating_mul(4) / 5;
+        if fill_height == 0 || bounds.x_start >= bounds.x_end {
+            return Ok(0);
+        }
+
+        for x in bounds.x_start..bounds.x_end {
+            for depth in 0..fill_height {
+                let layer = depth.saturating_mul(category_ids.len()) / fill_height;
+                let category_id = category_ids[layer.min(category_ids.len() - 1)];
+                let y = bounds.y_end - 1 - depth;
+                self.surface.grid[y][x] = Some(category_id);
+            }
+        }
+
+        self.pending_drive.clear();
+        self.frame_count = 0;
+        self.total_generated = self.surface.physical_grain_count();
+        self.vertical_moves = 0;
+        self.diagonal_moves = 0;
+        self.sync_surface_metadata();
+        Ok(self.total_generated)
+    }
+
     fn flush_pending_drive(&mut self) {
         if self.pending_drive.is_empty() {
             return;
@@ -431,6 +467,66 @@ mod tests {
 
     fn mass(engine: &ClassicSandboxEngine) -> usize {
         engine.physical_grain_count() + engine.pending_count()
+    }
+
+    #[test]
+    fn classic_fill_rainbow_80_builds_exact_bottom_anchored_layers() {
+        let mut engine = ClassicSandboxEngine::new(10, 10, 7, ClassicRainMode::Uniform);
+        let categories = [
+            CategoryId(1),
+            CategoryId(2),
+            CategoryId(3),
+            CategoryId(4),
+            CategoryId(5),
+            CategoryId(6),
+        ];
+
+        let grains = engine
+            .debug_fill_rainbow_80(&categories)
+            .expect("classic fixture fill");
+        let bounds = engine.surface.viewport_bounds().expect("visible bounds");
+        let visible_height = bounds.y_end - bounds.y_start;
+        let fill_height = visible_height * 4 / 5;
+        let visible_width = bounds.x_end - bounds.x_start;
+
+        assert_eq!(grains, visible_width * fill_height);
+        assert_eq!(engine.grain_count(), grains);
+        assert_eq!(engine.physical_grain_count(), grains);
+        assert_eq!(engine.pending_count(), 0);
+        assert_eq!(engine.movement_counts(), (0, 0));
+
+        for x in bounds.x_start..bounds.x_end {
+            for y in bounds.y_start..bounds.y_end - fill_height {
+                assert_eq!(engine.surface.grid[y][x], None);
+            }
+            for depth in 0..fill_height {
+                let layer = depth * categories.len() / fill_height;
+                let expected = categories[layer.min(categories.len() - 1)];
+                let y = bounds.y_end - 1 - depth;
+                assert_eq!(engine.surface.grid[y][x], Some(expected));
+            }
+        }
+    }
+
+    #[test]
+    fn classic_fill_rainbow_80_is_repeatable_and_rejects_empty_layers() {
+        let mut engine = ClassicSandboxEngine::new(8, 6, 11, ClassicRainMode::Uniform);
+        let categories = [CategoryId(11), CategoryId(12)];
+
+        let first = engine
+            .debug_fill_rainbow_80(&categories)
+            .expect("first classic fixture fill");
+        for _ in 0..8 {
+            engine.update();
+        }
+        let second = engine
+            .debug_fill_rainbow_80(&categories)
+            .expect("second classic fixture fill");
+
+        assert_eq!(second, first);
+        assert_eq!(engine.grain_count(), first);
+        assert_eq!(engine.movement_counts(), (0, 0));
+        assert!(engine.debug_fill_rainbow_80(&[]).is_err());
     }
 
     #[test]

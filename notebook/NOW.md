@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-05
 authority: working
-summary: H4/v5 remains published production authority and SEDIMENT-008 oslo-vessel-front physics remains owner-frozen. The owner-preferred visual baseline remains SEDIMENT-015G-R2 and SEDIMENT-016 remains rejected. D4 live provenance proved the strong upper-layer mobility bias is real physics: green moved only 3 episodes/64 hops while cyan moved 4317 episodes/248180 adjacent hops, including 1401 final cyan units below the original green-band height. The remaining bounded defect is perceptual compression of very large vertical one-edge drops.
-next: Natively validate SEDIMENT-015H distance-aware drop playback on the D4 return base. Preserve 015G-R2 targets and all frozen physics; lengthen only large downward observed segments with a bounded gravity-shaped interpolation, then re-run the rainbow human gate without requiring 64x.
+summary: The owner has ended the Oslo/SEDIMENT visual-model iteration and selected Classic as the next simple sandbox baseline. CLASSIC-001 keeps accepted production SandEngine authority unchanged, makes Classic the default testingcheats sandbox, and makes testingcheats fill create/reuse the six persisted Fixture categories and build the 80% rainbow fixture directly in Classic.
+next: Natively validate CLASSIC-001. If machine-green, owner-dogfood the certified Classic sandbox with testingcheats fill and decide separately whether Classic merits production promotion.
 ---
 
 # NOW — Strata
