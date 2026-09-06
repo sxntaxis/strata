@@ -814,6 +814,34 @@ fn rainbow_fill_populates_exactly_eighty_percent_of_current_visible_window() {
     assert!(engine.columns[..start].iter().all(Vec::is_empty));
     assert!(engine.columns[end..].iter().all(Vec::is_empty));
 }
+
+#[test]
+fn rainbow_fillhalf_populates_centered_half_of_current_visible_width() {
+    let mut engine = OsloSandboxEngine::new_front_vessel(21, 10, TEST_SEED);
+    let categories = [CategoryId(11), CategoryId(22), CategoryId(33), CategoryId(44)];
+    let (visible_start, visible_end) = engine.visible_lattice_bounds();
+    let visible_width = visible_end - visible_start;
+    let expected_width = (visible_width / 2).max(1);
+    let expected_start = visible_start + (visible_width - expected_width) / 2;
+    let expected_end = expected_start + expected_width;
+    let expected_height = engine.visible_height() * 4 / 5;
+
+    let grains = engine
+        .debug_fill_rainbow_80_centered_half(&categories)
+        .unwrap();
+
+    assert_eq!(grains, expected_width * expected_height);
+    for site in visible_start..visible_end {
+        if (expected_start..expected_end).contains(&site) {
+            assert_eq!(engine.columns[site].len(), expected_height);
+            assert_eq!(engine.columns[site].first().copied(), Some(categories[0]));
+            assert_eq!(engine.columns[site].last().copied(), Some(categories[3]));
+        } else {
+            assert!(engine.columns[site].is_empty());
+        }
+    }
+}
+
 #[test]
 fn severe_front_release_preserves_source_elevation_then_descends_one_dot_per_visual_step() {
     let mut engine = OsloSandboxEngine::new_front_vessel(20, 10, TEST_SEED);

@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, VecDeque};
 use crate::domain::{Category, CategoryId};
 use ratatui::prelude::Line;
 
-use super::{PendingGrainRun, SandEngine};
+use super::{PendingGrainRun, SandEngine, centered_half_open_interval};
 
 mod flowviz;
 mod flowviz_conservative;
@@ -1099,6 +1099,21 @@ impl OsloSandboxEngine {
         &mut self,
         category_ids: &[CategoryId],
     ) -> Result<usize, String> {
+        self.debug_fill_rainbow_80_with_span(category_ids, false)
+    }
+
+    pub(crate) fn debug_fill_rainbow_80_centered_half(
+        &mut self,
+        category_ids: &[CategoryId],
+    ) -> Result<usize, String> {
+        self.debug_fill_rainbow_80_with_span(category_ids, true)
+    }
+
+    fn debug_fill_rainbow_80_with_span(
+        &mut self,
+        category_ids: &[CategoryId],
+        centered_half_width: bool,
+    ) -> Result<usize, String> {
         if category_ids.is_empty() {
             return Err("testingcheats fill requires at least one configured layer".to_string());
         }
@@ -1108,7 +1123,12 @@ impl OsloSandboxEngine {
         if fill_height == 0 || visible_start >= visible_end {
             return Ok(0);
         }
-        for site in visible_start..visible_end {
+        let (fill_start, fill_end) = if centered_half_width {
+            centered_half_open_interval(visible_start, visible_end)
+        } else {
+            (visible_start, visible_end)
+        };
+        for site in fill_start..fill_end {
             let mut filled = Vec::with_capacity(fill_height);
             for depth in 0..fill_height {
                 let layer = depth.saturating_mul(category_ids.len()) / fill_height;
@@ -1121,8 +1141,8 @@ impl OsloSandboxEngine {
         self.reset_conservative_flowviz_from_physics();
         self.reset_unit_flowviz_from_physics();
         #[cfg(debug_assertions)]
-        self.reset_live_rainbow_provenance(category_ids);
-        for site in visible_start..visible_end {
+        self.reset_live_rainbow_provenance(category_ids, fill_start, fill_end);
+        for site in fill_start..fill_end {
             self.enqueue_neighborhood(site);
         }
         self.sync_surface();

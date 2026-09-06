@@ -4,7 +4,7 @@ use ratatui::prelude::Line;
 
 use crate::domain::{Category, CategoryId};
 
-use super::{SandEngine, ViewportBounds};
+use super::{SandEngine, ViewportBounds, centered_half_open_interval};
 
 const CLASSIC_PHYSICS_RNG_XOR: u64 = 0xC6BC_2796_92B5_CC83;
 const CLASSIC_RAIN_RNG_XOR: u64 = 0xD1B5_4A32_D192_ED03;
@@ -183,7 +183,7 @@ impl ClassicSandboxEngine {
             local_repose,
             repose_memory_remaining,
             texture_profile: ClassicTextureProfile::Rugged,
-            experiment_profile: ClassicExperimentProfile::Rugged,
+            experiment_profile: ClassicExperimentProfile::Anchored,
             rain_focus_x: None,
             rain_focus_target_x: None,
             rain_focus_move_counter: 0,
@@ -337,6 +337,21 @@ impl ClassicSandboxEngine {
         &mut self,
         category_ids: &[CategoryId],
     ) -> Result<usize, String> {
+        self.debug_fill_rainbow_80_with_span(category_ids, false)
+    }
+
+    pub(crate) fn debug_fill_rainbow_80_centered_half(
+        &mut self,
+        category_ids: &[CategoryId],
+    ) -> Result<usize, String> {
+        self.debug_fill_rainbow_80_with_span(category_ids, true)
+    }
+
+    fn debug_fill_rainbow_80_with_span(
+        &mut self,
+        category_ids: &[CategoryId],
+        centered_half_width: bool,
+    ) -> Result<usize, String> {
         if category_ids.is_empty() {
             return Err("testingcheats fill requires at least one configured layer".to_string());
         }
@@ -351,7 +366,13 @@ impl ClassicSandboxEngine {
             return Ok(0);
         }
 
-        for x in bounds.x_start..bounds.x_end {
+        let (fill_x_start, fill_x_end) = if centered_half_width {
+            centered_half_open_interval(bounds.x_start, bounds.x_end)
+        } else {
+            (bounds.x_start, bounds.x_end)
+        };
+
+        for x in fill_x_start..fill_x_end {
             for depth in 0..fill_height {
                 let layer = depth.saturating_mul(category_ids.len()) / fill_height;
                 let category_id = category_ids[layer.min(category_ids.len() - 1)];
@@ -921,6 +942,46 @@ mod tests {
         assert_eq!(engine.grain_count(), first);
         assert_eq!(engine.movement_counts(), (0, 0));
         assert!(engine.debug_fill_rainbow_80(&[]).is_err());
+    }
+
+    #[test]
+    fn classic_fillhalf_uses_centered_half_width_with_identical_vertical_layers() {
+        let mut engine = ClassicSandboxEngine::new(11, 10, 13, ClassicRainMode::Uniform);
+        let categories = [CategoryId(1), CategoryId(2), CategoryId(3)];
+        let bounds = engine.surface.viewport_bounds().expect("visible bounds");
+        let visible_width = bounds.x_end - bounds.x_start;
+        let fill_width = (visible_width / 2).max(1);
+        let fill_start = bounds.x_start + (visible_width - fill_width) / 2;
+        let fill_end = fill_start + fill_width;
+        let fill_height = (bounds.y_end - bounds.y_start) * 4 / 5;
+
+        let grains = engine
+            .debug_fill_rainbow_80_centered_half(&categories)
+            .expect("classic centered half fixture fill");
+
+        assert_eq!(grains, fill_width * fill_height);
+        assert_eq!(engine.grain_count(), grains);
+        assert_eq!(engine.pending_count(), 0);
+        assert_eq!(engine.movement_counts(), (0, 0));
+
+        for x in bounds.x_start..bounds.x_end {
+            if !(fill_start..fill_end).contains(&x) {
+                assert!(
+                    engine.surface.grid[bounds.y_start..bounds.y_end]
+                        .iter()
+                        .all(|row| row[x].is_none()),
+                    "outside half-fill span must remain empty at x={x}"
+                );
+                continue;
+            }
+
+            for depth in 0..fill_height {
+                let layer = depth * categories.len() / fill_height;
+                let expected = categories[layer.min(categories.len() - 1)];
+                let y = bounds.y_end - 1 - depth;
+                assert_eq!(engine.surface.grid[y][x], Some(expected));
+            }
+        }
     }
 
     #[test]

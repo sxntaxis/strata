@@ -225,6 +225,7 @@ fn local_repose_three_requires_one_more_unit_of_relief_than_repose_two() {
 #[test]
 fn baseline_profile_preserves_classic_002_exact_repose_mapping() {
     let mut engine = ClassicSandboxEngine::new(30, 10, 71, ClassicRainMode::Uniform);
+    engine.set_experiment_profile_name("rugged").unwrap();
     engine.set_texture_profile_name("baseline").unwrap();
     engine.clear();
     assert_eq!(engine.texture_profile_name(), "baseline");
@@ -246,6 +247,7 @@ fn baseline_profile_preserves_classic_002_exact_repose_mapping() {
 #[test]
 fn texture_profile_selection_is_nonretroactive_and_fill_resamples_cleanly() {
     let mut engine = ClassicSandboxEngine::new(100, 8, 29, ClassicRainMode::Uniform);
+    engine.set_experiment_profile_name("rugged").unwrap();
     assert_eq!(engine.texture_profile_name(), "rugged");
     let before = engine.local_repose.clone();
 
@@ -282,6 +284,8 @@ fn texture_profiles_remain_deterministic_for_a_fixed_seed() {
     for profile in ["baseline", "textured", "rugged", "terraced"] {
         let mut first = ClassicSandboxEngine::new(40, 10, 71, ClassicRainMode::Uniform);
         let mut second = ClassicSandboxEngine::new(40, 10, 71, ClassicRainMode::Uniform);
+        first.set_experiment_profile_name("rugged").unwrap();
+        second.set_experiment_profile_name("rugged").unwrap();
         first.set_texture_profile_name(profile).unwrap();
         second.set_texture_profile_name(profile).unwrap();
         first.clear();
@@ -293,6 +297,7 @@ fn texture_profiles_remain_deterministic_for_a_fixed_seed() {
 
 fn profile_metrics(profile: &str) -> (usize, usize, usize, usize) {
     let mut engine = ClassicSandboxEngine::new(30, 10, 7, ClassicRainMode::Uniform);
+    engine.set_experiment_profile_name("rugged").unwrap();
     engine.set_texture_profile_name(profile).unwrap();
     install_centered_compact_wall(&mut engine, 30, 24);
     let expected_mass = engine.surface.physical_grain_count();
@@ -368,6 +373,13 @@ fn classic_experiment_selection_is_nonretroactive_and_uses_rugged_texture_base()
         );
     }
     assert!(engine.set_experiment_profile_name("custom").is_err());
+}
+
+#[test]
+fn anchored_is_the_owner_selected_default_classic_experiment() {
+    let engine = ClassicSandboxEngine::new(80, 10, 102, ClassicRainMode::Uniform);
+    assert_eq!(engine.texture_profile_name(), "rugged");
+    assert_eq!(engine.experiment_profile_name(), "anchored");
 }
 
 #[test]

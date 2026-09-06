@@ -3,6 +3,18 @@ pub(crate) mod classic;
 #[cfg(debug_assertions)]
 pub(crate) mod oslo_sandbox;
 
+#[cfg(debug_assertions)]
+pub(super) fn centered_half_open_interval(start: usize, end: usize) -> (usize, usize) {
+    if start >= end {
+        return (start, start);
+    }
+    let width = end - start;
+    let half_width = (width / 2).max(1);
+    let offset = (width - half_width) / 2;
+    let fill_start = start + offset;
+    (fill_start, fill_start + half_width)
+}
+
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use ratatui::{
@@ -1362,6 +1374,9 @@ impl SandEngine {
 mod tests {
     use std::collections::HashSet;
 
+    #[cfg(debug_assertions)]
+    use super::centered_half_open_interval;
+
     use crate::{
         domain::CategoryId,
         sand::{
@@ -1383,6 +1398,15 @@ mod tests {
             .map(|run| run.count)
             .sum::<usize>();
         placed + pending
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn centered_half_interval_is_deterministic_for_even_odd_and_single_widths() {
+        assert_eq!(centered_half_open_interval(10, 18), (12, 16));
+        assert_eq!(centered_half_open_interval(10, 17), (12, 15));
+        assert_eq!(centered_half_open_interval(10, 11), (10, 11));
+        assert_eq!(centered_half_open_interval(10, 10), (10, 10));
     }
 
     #[test]

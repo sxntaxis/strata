@@ -505,7 +505,7 @@ impl App {
             }
             #[cfg(debug_assertions)]
             CommandIntent::TestingCheatsHelp => Ok(
-                "testingcheats: default sandbox classic · model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> · classic texture [baseline|textured|rugged|terraced] · classic experiment [rugged|memory|slope|memory-slope|anchored|momentum] · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · fill (classic/hybrid/Oslo; ensures six Fixture categories) · clear · status · provenance · reset"
+                "testingcheats: default sandbox classic · model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> · classic texture [baseline|textured|rugged|terraced] · classic experiment [rugged|memory|slope|memory-slope|anchored|momentum] · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · fill (classic/hybrid/Oslo; ensures six Fixture categories) · fillhalf (same fill, centered half-width) · clear · status · provenance · reset"
                     .to_string(),
             ),
             #[cfg(debug_assertions)]
@@ -584,7 +584,7 @@ impl App {
                     testing.engine.set_classic_texture_profile(&profile)?;
                     self.render_needed = true;
                     Ok(format!(
-                        "Testing sandbox {model} texture profile: {profile} (new repose resamples only; use `testingcheats fill` for a clean comparison)"
+                        "Testing sandbox {model} texture profile: {profile} (new repose resamples only; use `testingcheats fill` or `testingcheats fillhalf` for a clean comparison)"
                     ))
                 } else {
                     let profile = testing.engine.classic_texture_profile()?;
@@ -602,7 +602,7 @@ impl App {
                     testing.engine.set_classic_experiment_profile(&profile)?;
                     self.render_needed = true;
                     Ok(format!(
-                        "Testing sandbox {model} Classic experiment: {profile} (rugged texture base; use `testingcheats fill` for a clean comparison)"
+                        "Testing sandbox {model} Classic experiment: {profile} (rugged texture base; use `testingcheats fill` or `testingcheats fillhalf` for a clean comparison)"
                     ))
                 } else {
                     let profile = testing.engine.classic_experiment_profile()?;
@@ -626,6 +626,23 @@ impl App {
                 self.render_needed = true;
                 Ok(format!(
                     "Testing sandbox {model} rainbow-filled to 80% of the visible window using six idempotent Fixture categories ({grains} grains; testing sediment isolated, category catalog persisted)"
+                ))
+            }
+            #[cfg(debug_assertions)]
+            CommandIntent::TestingCheatsFillHalf => {
+                self.ensure_testing_cheats_preview()?;
+                let category_ids = self.ensure_testing_fill_categories()?;
+                let testing = self.testing_cheats.as_mut().expect("testing preview exists");
+                let model = testing.engine.model_name();
+                let grains = testing.engine.fill_rainbow_80_centered_half(&category_ids)?;
+                testing.spawn_accumulator = std::time::Duration::ZERO;
+                testing.physics_accumulator = std::time::Duration::ZERO;
+                testing.queued_simulated = std::time::Duration::ZERO;
+                testing.flow_wall_accumulator = std::time::Duration::ZERO;
+                testing.visual_dirty = false;
+                self.render_needed = true;
+                Ok(format!(
+                    "Testing sandbox {model} rainbow-filled to 80% visible height across the centered half-width using six idempotent Fixture categories ({grains} grains; testing sediment isolated, category catalog persisted)"
                 ))
             }
             #[cfg(debug_assertions)]

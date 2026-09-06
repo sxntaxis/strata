@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-06
 authority: working
-summary: Rugged is now the owner-selected Classic texture baseline. CLASSIC-005 adds a six-step debug-only complexity ladder—rugged, memory, slope, memory-slope, anchored, momentum—so each bounded local mechanism can be human-compared with the same fill fixture before any added complexity is accepted.
-next: Natively validate CLASSIC-005, then compare `testingcheats classic experiment rugged|memory|slope|memory-slope|anchored|momentum` with a fresh `testingcheats fill` after each and freeze the last profile that preserves the preferred Classic avalanche character.
+summary: CLASSIC-005 passed machine validation and owner visual comparison. Anchored is now the preferred default Classic experiment over the rugged texture base; momentum remains a promising non-default experiment pending one narrow cliff/steep-slope eligibility refinement. CLASSIC-006 also adds `testingcheats fillhalf`, the existing rainbow fixture restricted to the centered half of visible width.
+next: Validate CLASSIC-006, human-smoke `anchored` and `momentum` with `testingcheats fillhalf`, then design a narrow momentum cliff gate that suppresses lateral-looking bonus hops on near-vertical early-fill relief without weakening mature-slope avalanche continuation.
 ---
 
 # NOW — Strata

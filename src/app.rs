@@ -693,6 +693,20 @@ impl TestingSandEngine {
         }
     }
 
+    fn fill_rainbow_80_centered_half(
+        &mut self,
+        category_ids: &[CategoryId],
+    ) -> Result<usize, String> {
+        match self {
+            Self::Classic(engine) => engine.debug_fill_rainbow_80_centered_half(category_ids),
+            Self::Oslo(engine) => engine.debug_fill_rainbow_80_centered_half(category_ids),
+            Self::H4(_) => Err(
+                "testingcheats fillhalf is available for classic/hybrid and Oslo sandbox models"
+                    .to_string(),
+            ),
+        }
+    }
+
     fn classic_texture_profile(&self) -> Result<&'static str, String> {
         match self {
             Self::Classic(engine) => Ok(engine.texture_profile_name()),
@@ -3976,6 +3990,26 @@ mod testing_cheats_clock_tests {
     }
 
     #[test]
+    fn testing_cheats_classic_wrapper_accepts_centered_half_rainbow_fill() {
+        let mut engine = TestingSandEngine::Classic(ClassicSandboxEngine::new(
+            8,
+            6,
+            17,
+            ClassicRainMode::Uniform,
+        ));
+        let full = engine
+            .fill_rainbow_80(&[CategoryId(1), CategoryId(2), CategoryId(3)])
+            .expect("classic testing fill");
+        let half = engine
+            .fill_rainbow_80_centered_half(&[CategoryId(1), CategoryId(2), CategoryId(3)])
+            .expect("classic testing half fill");
+
+        assert!(half > 0);
+        assert!(half < full);
+        assert_eq!(engine.grain_count(), half);
+    }
+
+    #[test]
     fn testing_cheats_classic_wrapper_selects_texture_profiles_without_switching_models() {
         let mut engine = TestingSandEngine::Classic(ClassicSandboxEngine::new(
             8,
@@ -3984,7 +4018,7 @@ mod testing_cheats_clock_tests {
             ClassicRainMode::Uniform,
         ));
 
-        assert_eq!(engine.classic_texture_profile().unwrap(), "baseline");
+        assert_eq!(engine.classic_texture_profile().unwrap(), "rugged");
         engine.set_classic_texture_profile("rugged").unwrap();
         assert_eq!(engine.classic_texture_profile().unwrap(), "rugged");
         assert_eq!(engine.model_name(), "classic");

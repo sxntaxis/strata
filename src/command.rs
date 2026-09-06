@@ -47,6 +47,8 @@ pub(crate) enum CommandIntent {
     #[cfg(debug_assertions)]
     TestingCheatsFill,
     #[cfg(debug_assertions)]
+    TestingCheatsFillHalf,
+    #[cfg(debug_assertions)]
     TestingCheatsClassicTexture {
         profile: Option<String>,
     },
@@ -83,6 +85,7 @@ impl CommandIntent {
                         | Self::TestingCheatsModel { .. }
                         | Self::TestingCheatsClear
                         | Self::TestingCheatsFill
+                        | Self::TestingCheatsFillHalf
                         | Self::TestingCheatsClassicTexture { .. }
                         | Self::TestingCheatsClassicExperiment { .. }
                         | Self::TestingCheatsStatus
@@ -140,7 +143,7 @@ pub(crate) fn parse(input: &str) -> Result<CommandIntent, String> {
 #[cfg(debug_assertions)]
 fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
     let Some((subcommand, rest)) = args.split_first() else {
-        return Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | classic experiment [rugged|memory|slope|memory-slope|anchored|momentum] | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | clear | status | provenance | reset".to_string());
+        return Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | classic experiment [rugged|memory|slope|memory-slope|anchored|momentum] | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | fillhalf | clear | status | provenance | reset".to_string());
     };
 
     match subcommand.to_ascii_lowercase().as_str() {
@@ -233,11 +236,12 @@ fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
             })
         }
         "fill" if rest.is_empty() => Ok(CommandIntent::TestingCheatsFill),
+        "fillhalf" if rest.is_empty() => Ok(CommandIntent::TestingCheatsFillHalf),
         "clear" if rest.is_empty() => Ok(CommandIntent::TestingCheatsClear),
         "status" if rest.is_empty() => Ok(CommandIntent::TestingCheatsStatus),
         "provenance" if rest.is_empty() => Ok(CommandIntent::TestingCheatsProvenance),
         "reset" if rest.is_empty() => Ok(CommandIntent::TestingCheatsReset),
-        _ => Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | classic experiment [rugged|memory|slope|memory-slope|anchored|momentum] | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | clear | status | provenance | reset".to_string()),
+        _ => Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | classic experiment [rugged|memory|slope|memory-slope|anchored|momentum] | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | fillhalf | clear | status | provenance | reset".to_string()),
     }
 }
 
@@ -742,6 +746,10 @@ mod tests {
         assert_eq!(
             parse("testingcheats fill").unwrap(),
             CommandIntent::TestingCheatsFill
+        );
+        assert_eq!(
+            parse("testingcheats fillhalf").unwrap(),
+            CommandIntent::TestingCheatsFillHalf
         );
         assert_eq!(
             parse("testingcheats clear").unwrap(),

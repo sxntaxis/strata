@@ -43,8 +43,12 @@ pub(super) struct LiveRainbowProvenance {
 }
 
 impl OsloSandboxEngine {
-    pub(super) fn reset_live_rainbow_provenance(&mut self, categories: &[CategoryId]) {
-        let (visible_start, visible_end) = self.visible_lattice_bounds();
+    pub(super) fn reset_live_rainbow_provenance(
+        &mut self,
+        categories: &[CategoryId],
+        initial_fill_start: usize,
+        initial_fill_end: usize,
+    ) {
         let mut initial_counts = HashMap::new();
         for category_id in self.columns.iter().flatten().copied() {
             if categories.contains(&category_id) {
@@ -68,8 +72,8 @@ impl OsloSandboxEngine {
             enabled: self.flowviz_unit && !categories.is_empty(),
             categories: categories.to_vec(),
             initial_counts,
-            initial_visible_start: visible_start,
-            initial_visible_end: visible_end,
+            initial_visible_start: initial_fill_start,
+            initial_visible_end: initial_fill_end,
             initial_green_band_height,
             start_cell_width: self.surface.cell_width,
             start_cell_height: self.surface.cell_height,
