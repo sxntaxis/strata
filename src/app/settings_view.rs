@@ -88,7 +88,9 @@ impl App {
                 let error_line = Line::from(vec![
                     Span::styled(
                         "config error: ",
-                        Style::default().fg(self.theme_error()).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(self.theme_error())
+                            .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(err.to_string(), Style::default().fg(self.theme_status())),
                 ]);
@@ -385,7 +387,10 @@ impl App {
                                     .add_modifier(Modifier::BOLD),
                             ))
                         } else {
-                            Line::from(Span::styled(label, Style::default().fg(self.theme_foreground())))
+                            Line::from(Span::styled(
+                                label,
+                                Style::default().fg(self.theme_foreground()),
+                            ))
                         }
                     })
                     .collect();

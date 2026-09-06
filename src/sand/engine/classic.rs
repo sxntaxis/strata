@@ -1421,8 +1421,7 @@ mod tests {
             assert_eq!(engine.repose_rng_state, repose_rng, "background={policy}");
             assert_eq!(engine.local_repose, local_repose, "background={policy}");
             assert_eq!(
-                engine.repose_memory_remaining,
-                memory,
+                engine.repose_memory_remaining, memory,
                 "background={policy}"
             );
             assert_eq!(engine.movement_counts(), moves, "background={policy}");

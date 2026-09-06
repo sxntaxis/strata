@@ -12,8 +12,8 @@ mod color;
 mod theme;
 
 pub(crate) use color::nearest_legacy_color_index;
-pub(crate) use theme::{ThemeAppearance, ThemeDescriptor, UiColorRef};
 use theme::Theme;
+pub(crate) use theme::{ThemeAppearance, ThemeDescriptor, UiColorRef};
 
 const APPEARANCE_SCHEMA_VERSION: u8 = 1;
 const COLOR_ANCHOR_TAG: i64 = 1_i64 << 62;

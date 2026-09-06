@@ -29,8 +29,8 @@ use crate::{
 };
 
 mod color_blend;
-pub(crate) use color_blend::{BrailleColorBackground, BrailleColorBlend};
 use color_blend::blend_braille_color;
+pub(crate) use color_blend::{BrailleColorBackground, BrailleColorBlend};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SandStateGrain {
@@ -967,12 +967,8 @@ impl SandEngine {
                     }
                 }
 
-                let color = blend_braille_color(
-                    &counts,
-                    &category_colors,
-                    color_blend,
-                    color_background,
-                );
+                let color =
+                    blend_braille_color(&counts, &category_colors, color_blend, color_background);
                 let ch = char::from_u32(SAND_ENGINE.braille_base + dots as u32).unwrap_or(' ');
                 spans.push(Span::raw(ch.to_string()).fg(color));
             }
@@ -1375,9 +1371,9 @@ mod tests {
 
     use ratatui::style::Color;
 
-    use super::{BrailleColorBackground, BrailleColorBlend};
     #[cfg(debug_assertions)]
     use super::centered_half_open_interval;
+    use super::{BrailleColorBackground, BrailleColorBlend};
 
     use crate::{
         domain::{Category, CategoryId},
@@ -1627,9 +1623,7 @@ mod tests {
         blend: BrailleColorBlend,
         background: BrailleColorBackground,
     ) -> Color {
-        engine
-            .render_with_color_blend_and_background(categories, blend, background)[0]
-            .spans[0]
+        engine.render_with_color_blend_and_background(categories, blend, background)[0].spans[0]
             .style
             .fg
             .expect("rendered foreground color")
@@ -1779,7 +1773,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn rgb_additive_lifts_exact_complementary_cancellation_to_white() {
         let mut engine = SandEngine::new(1, 1);
@@ -1799,8 +1792,14 @@ mod tests {
         let rgb_lines = engine.render_with_color_blend(&categories, BrailleColorBlend::Rgb);
         let additive_lines =
             engine.render_with_color_blend(&categories, BrailleColorBlend::RgbAdditive);
-        assert_eq!(rgb_lines[0].spans[0].content, additive_lines[0].spans[0].content);
-        assert_eq!(rgb_lines[0].spans[0].style.fg, Some(Color::Rgb(127, 127, 127)));
+        assert_eq!(
+            rgb_lines[0].spans[0].content,
+            additive_lines[0].spans[0].content
+        );
+        assert_eq!(
+            rgb_lines[0].spans[0].style.fg,
+            Some(Color::Rgb(127, 127, 127))
+        );
         assert_eq!(
             additive_lines[0].spans[0].style.fg,
             Some(Color::Rgb(255, 255, 255))
@@ -1869,7 +1868,8 @@ mod tests {
 
     #[test]
     fn rgb_additive_unequal_complements_lift_continuously_without_dominant_flip() {
-        let mut counts = HashMap::from([(CategoryId::new(1), 7usize), (CategoryId::new(2), 1usize)]);
+        let mut counts =
+            HashMap::from([(CategoryId::new(1), 7usize), (CategoryId::new(2), 1usize)]);
         let colors = HashMap::from([
             (CategoryId::new(1), Color::Rgb(255, 0, 0)),
             (CategoryId::new(2), Color::Rgb(0, 255, 255)),
@@ -2050,12 +2050,7 @@ mod tests {
             );
             for background in [BrailleColorBackground::Dark, BrailleColorBackground::Light] {
                 assert_eq!(
-                    first_render_color_with_background(
-                        &engine,
-                        &categories,
-                        profile,
-                        background,
-                    ),
+                    first_render_color_with_background(&engine, &categories, profile, background,),
                     neutral,
                     "profile={} background={}",
                     profile.name(),
@@ -2352,7 +2347,7 @@ mod tests {
 
 #[cfg(test)]
 mod organic_formation_tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashSet;
 
     use crate::{
         domain::CategoryId,
@@ -3011,7 +3006,7 @@ mod organic_formation_tests {
 
 #[cfg(test)]
 mod conservation_tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashSet;
 
     use crate::{domain::CategoryId, sand::SandEngine};
 
@@ -3098,7 +3093,7 @@ mod conservation_tests {
 
     #[cfg(test)]
     mod compressed_mass_tests {
-        use std::collections::{HashMap, HashSet};
+        use std::collections::HashSet;
 
         use crate::domain::CategoryId;
         use crate::sand::{PendingGrainRun, SandEngine, SandState, SandStateGrain};

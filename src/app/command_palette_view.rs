@@ -67,7 +67,10 @@ impl App {
                     "> ",
                     Style::default().fg(accent).add_modifier(Modifier::BOLD),
                 ),
-                Span::styled("Type a command...", Style::default().fg(self.theme_status())),
+                Span::styled(
+                    "Type a command...",
+                    Style::default().fg(self.theme_status()),
+                ),
             ])
         } else {
             Line::from(vec![
@@ -364,7 +367,10 @@ impl App {
         } else {
             Line::from(vec![
                 Span::styled(title, Style::default().fg(self.theme_foreground())),
-                Span::styled(" ".repeat(title_pad), Style::default().fg(self.theme_foreground())),
+                Span::styled(
+                    " ".repeat(title_pad),
+                    Style::default().fg(self.theme_foreground()),
+                ),
                 Span::styled(spacer, Style::default().fg(self.theme_foreground())),
                 Span::styled(hint, Style::default().fg(self.theme_status())),
             ])

@@ -7,8 +7,8 @@ use std::{
 use ratatui::style::Color;
 use serde::Deserialize;
 
-use super::{BUILTIN_THEME_ID, BUILTIN_THEME_SOURCE};
 use super::color::{ThemeSwatch, nearest_swatch, nearest_swatch_index};
+use super::{BUILTIN_THEME_ID, BUILTIN_THEME_SOURCE};
 
 const THEME_SCHEMA_VERSION: u8 = 1;
 
@@ -204,7 +204,10 @@ pub(super) fn load_themes_from(directory: &Path) -> Result<Vec<Theme>, String> {
     if directory.exists() {
         let mut entries = fs::read_dir(directory)
             .map_err(|error| {
-                format!("Cannot read theme directory {}: {error}", directory.display())
+                format!(
+                    "Cannot read theme directory {}: {error}",
+                    directory.display()
+                )
             })?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| {

@@ -6,7 +6,6 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, List, ListItem, ListState},
 };
 
-
 use super::{App, view_style};
 
 impl App {
@@ -56,7 +55,9 @@ impl App {
             })
             .chain(std::iter::once({
                 let is_selected = self.is_on_insert_space();
-                let cycling_color = self.appearance.sand_color_at(self.new_category_color_cursor);
+                let cycling_color = self
+                    .appearance
+                    .sand_color_at(self.new_category_color_cursor);
 
                 if is_selected {
                     ListItem::new(Line::from(vec![

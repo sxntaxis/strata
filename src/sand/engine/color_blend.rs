@@ -291,30 +291,24 @@ pub(super) fn blend_braille_color(
         BrailleColorBlend::RgbAdditive => {
             rgb_additive_cancellation_blend(counts, category_colors, total_colored_dots)
         }
-        BrailleColorBlend::RgbLuma => cancellation_neutral_blend(
-            counts,
-            category_colors,
-            total_colored_dots,
-            |source_l| source_l,
-        ),
-        BrailleColorBlend::RgbLumaSafe => cancellation_neutral_blend(
-            counts,
-            category_colors,
-            total_colored_dots,
-            |source_l| source_l.clamp(0.42, 0.72),
-        ),
-        BrailleColorBlend::RgbMid => cancellation_neutral_blend(
-            counts,
-            category_colors,
-            total_colored_dots,
-            |_| 0.57,
-        ),
-        BrailleColorBlend::RgbContrast => cancellation_neutral_blend(
-            counts,
-            category_colors,
-            total_colored_dots,
-            |source_l| rgb_contrast_target(source_l, background),
-        ),
+        BrailleColorBlend::RgbLuma => {
+            cancellation_neutral_blend(counts, category_colors, total_colored_dots, |source_l| {
+                source_l
+            })
+        }
+        BrailleColorBlend::RgbLumaSafe => {
+            cancellation_neutral_blend(counts, category_colors, total_colored_dots, |source_l| {
+                source_l.clamp(0.42, 0.72)
+            })
+        }
+        BrailleColorBlend::RgbMid => {
+            cancellation_neutral_blend(counts, category_colors, total_colored_dots, |_| 0.57)
+        }
+        BrailleColorBlend::RgbContrast => {
+            cancellation_neutral_blend(counts, category_colors, total_colored_dots, |source_l| {
+                rgb_contrast_target(source_l, background)
+            })
+        }
         BrailleColorBlend::Linear => {
             let mut r = 0f64;
             let mut g = 0f64;
@@ -444,7 +438,12 @@ mod tests {
                         counts.insert(ids[2], third);
                     }
                     assert_eq!(
-                        blend_braille_color(&counts, &colors, BrailleColorBlend::Rgb, BrailleColorBackground::Neutral),
+                        blend_braille_color(
+                            &counts,
+                            &colors,
+                            BrailleColorBlend::Rgb,
+                            BrailleColorBackground::Neutral
+                        ),
                         legacy_rgb_reference(&counts, &colors),
                         "counts=({first},{second},{third})"
                     );

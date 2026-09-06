@@ -1440,7 +1440,11 @@ impl App {
         }
     }
 
-    pub(super) fn resolved_category_color(&self, category_id: CategoryId, anchor: ratatui::style::Color) -> ratatui::style::Color {
+    pub(super) fn resolved_category_color(
+        &self,
+        category_id: CategoryId,
+        anchor: ratatui::style::Color,
+    ) -> ratatui::style::Color {
         if is_drift_category_id(category_id) {
             self.appearance.idle_color()
         } else {

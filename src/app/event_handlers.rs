@@ -1,6 +1,5 @@
 use crate::{
     command::{self, CommandIntent},
-    constants::COLORS,
     domain::{Category, CategoryId, DRIFT_CATEGORY_ID, ReportPeriod, is_drift_category_id},
     keybindings::{Action, InputContext},
     sqlite,
@@ -1214,7 +1213,8 @@ impl App {
     }
 
     fn handle_settings_theme_dropdown(&mut self, key: KeyEvent) {
-        let Some(super::SettingsOverlay::SelectTheme { mut selected }) = self.settings_overlay.take()
+        let Some(super::SettingsOverlay::SelectTheme { mut selected }) =
+            self.settings_overlay.take()
         else {
             return;
         };
@@ -1230,7 +1230,11 @@ impl App {
                 return;
             }
             KeyCode::Up | KeyCode::Left => {
-                selected = if selected == 0 { themes.len() - 1 } else { selected - 1 };
+                selected = if selected == 0 {
+                    themes.len() - 1
+                } else {
+                    selected - 1
+                };
             }
             KeyCode::Down | KeyCode::Right => {
                 selected = (selected + 1) % themes.len();
@@ -1969,7 +1973,9 @@ mod testing_fill_category_tests {
         assert!(created);
         assert_eq!(first_ids.len(), TESTING_FILL_CATEGORY_SPECS.len());
 
-        for ((name, new_category_color_cursor), id) in TESTING_FILL_CATEGORY_SPECS.into_iter().zip(&first_ids) {
+        for ((name, new_category_color_cursor), id) in
+            TESTING_FILL_CATEGORY_SPECS.into_iter().zip(&first_ids)
+        {
             let category = tracker.category_by_id(*id).unwrap();
             assert_eq!(category.name, name);
             assert_eq!(category.color, COLORS[new_category_color_cursor]);

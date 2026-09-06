@@ -413,7 +413,8 @@ impl App {
             self.time_tracker.add_category_with_color(
                 requested_name.to_string(),
                 String::new(),
-                self.appearance.sand_color_at(self.new_category_color_cursor),
+                self.appearance
+                    .sand_color_at(self.new_category_color_cursor),
             )
         };
 
@@ -499,7 +500,8 @@ impl App {
 
     pub(super) fn get_selected_color(&self) -> Color {
         if self.is_on_insert_space() {
-            self.appearance.sand_color_at(self.new_category_color_cursor)
+            self.appearance
+                .sand_color_at(self.new_category_color_cursor)
         } else if let Some(category) = self.time_tracker.category_by_index(self.selected_index) {
             self.resolved_category_color(category.id, category.color)
         } else {

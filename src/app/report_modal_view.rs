@@ -174,7 +174,10 @@ impl App {
                     .historical_activity_target_name()
                     .unwrap_or_else(|| "unavailable".to_string());
                 let mut spans = vec![
-                    Span::styled("log past · layer ", Style::default().fg(self.theme_status())),
+                    Span::styled(
+                        "log past · layer ",
+                        Style::default().fg(self.theme_status()),
+                    ),
                     Span::styled(
                         target,
                         if edit.active_field == super::HistoricalActivityField::Layer {
@@ -275,8 +278,11 @@ impl App {
                 )
             };
             Some(
-                Line::from(Span::styled(label, Style::default().fg(self.theme_status())))
-                    .alignment(Alignment::Right),
+                Line::from(Span::styled(
+                    label,
+                    Style::default().fg(self.theme_status()),
+                ))
+                .alignment(Alignment::Right),
             )
         } else {
             self.keymap

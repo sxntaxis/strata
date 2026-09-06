@@ -10,13 +10,9 @@ pub(super) fn report_period_label_span(
     status: Color,
 ) -> Span<'static> {
     let style = if active {
-        Style::default()
-            .fg(foreground)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(foreground).add_modifier(Modifier::BOLD)
     } else {
-        Style::default()
-            .fg(status)
-            .add_modifier(Modifier::DIM)
+        Style::default().fg(status).add_modifier(Modifier::DIM)
     };
 
     Span::styled(label.to_string(), style)

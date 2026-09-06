@@ -194,9 +194,7 @@ fn frame_block(
             Line::from(vec![
                 Span::styled(
                     category_name,
-                    Style::default()
-                        .fg(foreground)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(foreground).add_modifier(Modifier::BOLD),
                 ),
                 if description.is_empty() {
                     Span::raw("")
@@ -213,11 +211,8 @@ fn frame_block(
         );
     }
     block = block.title(
-        Line::from(Span::styled(
-            session_timer,
-            Style::default().fg(foreground),
-        ))
-        .alignment(Alignment::Center),
+        Line::from(Span::styled(session_timer, Style::default().fg(foreground)))
+            .alignment(Alignment::Center),
     );
     if let Some(effective_time) = effective_time {
         block = block.title(

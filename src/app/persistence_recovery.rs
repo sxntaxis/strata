@@ -10,7 +10,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
 };
@@ -605,7 +605,9 @@ impl App {
         let mut lines = vec![
             Line::from(Span::styled(
                 "AUTHORITATIVE PERSISTENCE FAILED",
-                Style::default().fg(self.theme_error()).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(self.theme_error())
+                    .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
             Line::from(vec![
@@ -641,7 +643,9 @@ impl App {
         if recovery.exit_without_saving_armed {
             lines.push(Line::from(Span::styled(
                 "[X] press again to exit without a recovery export",
-                Style::default().fg(self.theme_error()).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(self.theme_error())
+                    .add_modifier(Modifier::BOLD),
             )));
         } else {
             lines.push(Line::from("[X] arm exit without saving"));
@@ -820,6 +824,7 @@ struct EmergencyActiveSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::style::Color;
 
     fn recovery_category(id: u64, name: &str, description: &str) -> crate::domain::Category {
         crate::domain::Category {

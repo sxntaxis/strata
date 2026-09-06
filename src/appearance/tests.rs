@@ -3,9 +3,9 @@ use std::path::PathBuf;
 
 use ratatui::style::Color;
 
-use super::*;
 use super::color::{ThemeSwatch, nearest_swatch};
 use super::theme::{Theme, UiColorRef, load_themes_from};
+use super::*;
 
 const SAMPLE: &str = r##"
 schema = 1
@@ -52,7 +52,7 @@ c = "#0000ff"
 #[test]
 fn hue_wheel_is_derived_not_declaration_order() {
     let theme = Theme::parse("odd", SAMPLE).unwrap();
-    let mut swatches = vec![
+    let mut swatches = [
         ThemeSwatch::new("bruise".into(), Color::Rgb(160, 64, 208)).unwrap(),
         ThemeSwatch::new("ocean".into(), Color::Rgb(32, 144, 255)).unwrap(),
         ThemeSwatch::new("volcano".into(), Color::Rgb(255, 48, 0)).unwrap(),
@@ -69,7 +69,10 @@ fn hue_wheel_is_derived_not_declaration_order() {
         .collect::<Vec<_>>();
     assert_ne!(derived, declaration);
     for pair in swatches.windows(2) {
-        assert_ne!(ThemeSwatch::hue_order(&pair[0], &pair[1]), Ordering::Greater);
+        assert_ne!(
+            ThemeSwatch::hue_order(&pair[0], &pair[1]),
+            Ordering::Greater
+        );
     }
     assert_eq!(theme.sand_color_count(), 4);
 }
@@ -205,9 +208,8 @@ idle = "default"
 #[test]
 fn default_is_a_ui_sentinel_not_a_palette_key_case_insensitively() {
     for key in ["default", "Default", "DEFAULT"] {
-        let invalid = format!(
-            "schema = 1\n[theme]\nname = \"Bad\"\n[palette]\n{key} = \"#ffffff\"\n"
-        );
+        let invalid =
+            format!("schema = 1\n[theme]\nname = \"Bad\"\n[palette]\n{key} = \"#ffffff\"\n");
         assert!(Theme::parse("bad", &invalid).is_err());
     }
 }
@@ -251,8 +253,7 @@ fn theme_selection_persists_without_mutating_category_anchor() {
     std::fs::write(themes.join("odd.toml"), SAMPLE).unwrap();
     let config_path = root.join("appearance.toml");
 
-    let mut loaded =
-        AppearanceState::load_from_paths(false, config_path.clone(), &themes).unwrap();
+    let mut loaded = AppearanceState::load_from_paths(false, config_path.clone(), &themes).unwrap();
     let anchor = Color::Rgb(255, 0, 0);
     assert_eq!(loaded.active_theme_id(), BUILTIN_THEME_ID);
     loaded.select_theme("odd").unwrap();

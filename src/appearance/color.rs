@@ -56,10 +56,7 @@ impl ThemeSwatch {
     }
 }
 
-pub(super) fn nearest_swatch<'a>(
-    wheel: &'a [ThemeSwatch],
-    anchor: Color,
-) -> Option<&'a ThemeSwatch> {
+pub(super) fn nearest_swatch(wheel: &[ThemeSwatch], anchor: Color) -> Option<&ThemeSwatch> {
     nearest_swatch_index(wheel, anchor).and_then(|index| wheel.get(index))
 }
 
