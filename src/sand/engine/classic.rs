@@ -11,9 +11,10 @@ const CLASSIC_RAIN_RNG_XOR: u64 = 0xD1B5_4A32_D192_ED03;
 const CLASSIC_REPOSE_RNG_XOR: u64 = 0xA5A5_5A5A_D3C1_B7E9;
 const CLASSIC_REPOSE_LOW: u8 = 1;
 const CLASSIC_REPOSE_HIGH: u8 = 2;
-// Weak heterogeneity only: one column in twenty temporarily tolerates one
-// additional unit of local relief before a diagonal release.
-const CLASSIC_HIGH_REPOSE_ONE_IN: usize = 20;
+// Weak heterogeneity default: five percent of columns temporarily tolerate one
+// additional unit of local relief before a diagonal release. Debug tooling may
+// tune this percentage without changing production or persisted authority.
+const CLASSIC_HIGH_REPOSE_PERCENT_DEFAULT: u8 = 5;
 const GOLDEN_RATIO: f64 = 1.618_033_988_749_895;
 const RAIN_FOCUS_BIAS_ONE_IN: usize = 10;
 // At one ingress per second, a full focus traverse takes about twelve hours.
@@ -53,6 +54,7 @@ pub(crate) struct ClassicSandboxEngine {
     initial_repose_rng_state: u64,
     repose_rng_state: u64,
     local_repose: Vec<u8>,
+    high_repose_percent: u8,
     rain_focus_x: Option<usize>,
     rain_focus_target_x: Option<usize>,
     rain_focus_move_counter: usize,
@@ -89,6 +91,7 @@ impl ClassicSandboxEngine {
             initial_repose_rng_state: repose_rng_state,
             repose_rng_state,
             local_repose,
+            high_repose_percent: CLASSIC_HIGH_REPOSE_PERCENT_DEFAULT,
             rain_focus_x: None,
             rain_focus_target_x: None,
             rain_focus_move_counter: 0,
@@ -192,6 +195,29 @@ impl ClassicSandboxEngine {
 
     pub(crate) fn movement_counts(&self) -> (usize, usize) {
         (self.vertical_moves, self.diagonal_moves)
+    }
+
+    pub(crate) fn high_repose_percent(&self) -> u8 {
+        self.high_repose_percent
+    }
+
+    pub(crate) fn set_high_repose_percent(&mut self, percent: u8) -> Result<(), String> {
+        if percent > 100 {
+            return Err("classic repose percentage must be between 0 and 100".to_string());
+        }
+        // Deliberately do not resample existing columns. This makes the cheat
+        // non-destructive to a live fixture; `testingcheats fill`/clear starts a
+        // clean comparison using the newly selected percentage.
+        self.high_repose_percent = percent;
+        Ok(())
+    }
+
+    pub(crate) fn reset_high_repose_percent(&mut self) {
+        self.high_repose_percent = CLASSIC_HIGH_REPOSE_PERCENT_DEFAULT;
+    }
+
+    pub(crate) fn default_high_repose_percent() -> u8 {
+        CLASSIC_HIGH_REPOSE_PERCENT_DEFAULT
     }
 
     pub(crate) fn debug_fill_rainbow_80(
@@ -494,7 +520,16 @@ impl ClassicSandboxEngine {
             return CLASSIC_REPOSE_LOW;
         }
 
-        if self.next_repose_random_u64() as usize % CLASSIC_HIGH_REPOSE_ONE_IN == 0 {
+        let random = self.next_repose_random_u64();
+        let high = match self.high_repose_percent {
+            // Preserve CLASSIC-002's exact 1-in-20 default mapping so merely
+            // adding the tuning cheat does not perturb the accepted 5% baseline.
+            CLASSIC_HIGH_REPOSE_PERCENT_DEFAULT => random as usize % 20 == 0,
+            0 => false,
+            100 => true,
+            percent => random % 100 < u64::from(percent),
+        };
+        if high {
             CLASSIC_REPOSE_HIGH
         } else {
             CLASSIC_REPOSE_LOW

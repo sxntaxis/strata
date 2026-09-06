@@ -47,6 +47,12 @@ pub(crate) enum CommandIntent {
     #[cfg(debug_assertions)]
     TestingCheatsFill,
     #[cfg(debug_assertions)]
+    TestingCheatsClassicRepose {
+        percent: Option<u8>,
+    },
+    #[cfg(debug_assertions)]
+    TestingCheatsClassicReposeDefault,
+    #[cfg(debug_assertions)]
     TestingCheatsStatus,
     #[cfg(debug_assertions)]
     TestingCheatsProvenance,
@@ -75,6 +81,8 @@ impl CommandIntent {
                         | Self::TestingCheatsModel { .. }
                         | Self::TestingCheatsClear
                         | Self::TestingCheatsFill
+                        | Self::TestingCheatsClassicRepose { .. }
+                        | Self::TestingCheatsClassicReposeDefault
                         | Self::TestingCheatsStatus
                         | Self::TestingCheatsProvenance
                         | Self::TestingCheatsReset
@@ -130,7 +138,7 @@ pub(crate) fn parse(input: &str) -> Result<CommandIntent, String> {
 #[cfg(debug_assertions)]
 fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
     let Some((subcommand, rest)) = args.split_first() else {
-        return Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | clear | status | provenance | reset".to_string());
+        return Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic repose [0..100|default] | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | clear | status | provenance | reset".to_string());
     };
 
     match subcommand.to_ascii_lowercase().as_str() {
@@ -179,12 +187,30 @@ fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
             }
             Ok(CommandIntent::TestingCheatsModel { model })
         }
+        "classic" if rest.len() == 1 && rest[0].eq_ignore_ascii_case("repose") => {
+            Ok(CommandIntent::TestingCheatsClassicRepose { percent: None })
+        }
+        "classic" if rest.len() == 2 && rest[0].eq_ignore_ascii_case("repose") => {
+            if rest[1].eq_ignore_ascii_case("default") {
+                Ok(CommandIntent::TestingCheatsClassicReposeDefault)
+            } else {
+                let percent = rest[1].parse::<u8>().map_err(|_| {
+                    "Usage: testingcheats classic repose [0..100|default]".to_string()
+                })?;
+                if percent > 100 {
+                    return Err("classic repose percentage must be between 0 and 100".to_string());
+                }
+                Ok(CommandIntent::TestingCheatsClassicRepose {
+                    percent: Some(percent),
+                })
+            }
+        }
         "fill" if rest.is_empty() => Ok(CommandIntent::TestingCheatsFill),
         "clear" if rest.is_empty() => Ok(CommandIntent::TestingCheatsClear),
         "status" if rest.is_empty() => Ok(CommandIntent::TestingCheatsStatus),
         "provenance" if rest.is_empty() => Ok(CommandIntent::TestingCheatsProvenance),
         "reset" if rest.is_empty() => Ok(CommandIntent::TestingCheatsReset),
-        _ => Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | clear | status | provenance | reset".to_string()),
+        _ => Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic repose [0..100|default] | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | clear | status | provenance | reset".to_string()),
     }
 }
 
@@ -643,6 +669,20 @@ mod tests {
                 model: "oslo-vessel-fluid".into()
             }
         );
+        assert_eq!(
+            parse("testingcheats classic repose").unwrap(),
+            CommandIntent::TestingCheatsClassicRepose { percent: None }
+        );
+        assert_eq!(
+            parse("testingcheats classic repose 20").unwrap(),
+            CommandIntent::TestingCheatsClassicRepose { percent: Some(20) }
+        );
+        assert_eq!(
+            parse("testingcheats classic repose default").unwrap(),
+            CommandIntent::TestingCheatsClassicReposeDefault
+        );
+        assert!(parse("testingcheats classic repose 101").is_err());
+        assert!(parse("testingcheats classic repose nope").is_err());
         assert_eq!(
             parse("testingcheats fill").unwrap(),
             CommandIntent::TestingCheatsFill

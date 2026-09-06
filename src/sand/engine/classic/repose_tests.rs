@@ -192,3 +192,60 @@ fn classic_and_hybrid_still_share_the_same_repose_and_gravity_law() {
     assert_eq!(classic.physics_rng_state, hybrid.physics_rng_state);
     assert_eq!(classic.repose_rng_state, hybrid.repose_rng_state);
 }
+
+#[test]
+fn repose_percentage_tuning_is_nonretroactive_and_fill_uses_the_new_value() {
+    let mut engine = ClassicSandboxEngine::new(20, 8, 29, ClassicRainMode::Uniform);
+    assert_eq!(
+        engine.high_repose_percent(),
+        ClassicSandboxEngine::default_high_repose_percent()
+    );
+
+    let before = engine.local_repose.clone();
+    engine
+        .set_high_repose_percent(100)
+        .expect("100 percent repose tuning");
+    assert_eq!(engine.local_repose, before, "tuning must not rewrite live columns");
+    let categories = [CategoryId(1), CategoryId(2)];
+    engine
+        .debug_fill_rainbow_80(&categories)
+        .expect("fill after 100 percent repose tuning");
+    assert!(
+        engine
+            .local_repose
+            .iter()
+            .all(|repose| *repose == CLASSIC_REPOSE_HIGH)
+    );
+
+    engine
+        .set_high_repose_percent(0)
+        .expect("zero percent repose tuning");
+    engine
+        .debug_fill_rainbow_80(&categories)
+        .expect("fill after zero percent repose tuning");
+    assert!(
+        engine
+            .local_repose
+            .iter()
+            .all(|repose| *repose == CLASSIC_REPOSE_LOW)
+    );
+
+    engine.reset_high_repose_percent();
+    assert_eq!(
+        engine.high_repose_percent(),
+        ClassicSandboxEngine::default_high_repose_percent()
+    );
+    assert!(engine.set_high_repose_percent(101).is_err());
+}
+
+#[test]
+fn tuned_repose_percentage_remains_deterministic_for_a_fixed_seed() {
+    let mut first = ClassicSandboxEngine::new(30, 10, 71, ClassicRainMode::Uniform);
+    let mut second = ClassicSandboxEngine::new(30, 10, 71, ClassicRainMode::Uniform);
+    first.set_high_repose_percent(20).unwrap();
+    second.set_high_repose_percent(20).unwrap();
+    first.clear();
+    second.clear();
+    assert_eq!(first.local_repose, second.local_repose);
+    assert_eq!(first.repose_rng_state, second.repose_rng_state);
+}

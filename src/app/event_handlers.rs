@@ -505,7 +505,7 @@ impl App {
             }
             #[cfg(debug_assertions)]
             CommandIntent::TestingCheatsHelp => Ok(
-                "testingcheats: default sandbox classic · model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · fill (classic/hybrid/Oslo; ensures six Fixture categories) · clear · status · provenance · reset"
+                "testingcheats: default sandbox classic · model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> · classic repose [0..100|default] · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · fill (classic/hybrid/Oslo; ensures six Fixture categories) · clear · status · provenance · reset"
                     .to_string(),
             ),
             #[cfg(debug_assertions)]
@@ -573,6 +573,36 @@ impl App {
                     command::format_hms(duration_seconds as usize),
                     grains,
                     command::format_hms(queued.as_secs() as usize)
+                ))
+            }
+            #[cfg(debug_assertions)]
+            CommandIntent::TestingCheatsClassicRepose { percent } => {
+                self.ensure_testing_cheats_preview()?;
+                let testing = self.testing_cheats.as_mut().expect("testing preview exists");
+                let model = testing.engine.model_name();
+                if let Some(percent) = percent {
+                    testing.engine.set_classic_repose_percent(percent)?;
+                    self.render_needed = true;
+                    Ok(format!(
+                        "Testing sandbox {model} high-repose probability: {percent}% (new repose resamples only; use `testingcheats fill` for a clean comparison)"
+                    ))
+                } else {
+                    let percent = testing.engine.classic_repose_percent()?;
+                    let default_percent = testing.engine.classic_repose_default_percent()?;
+                    Ok(format!(
+                        "Testing sandbox {model} high-repose probability: {percent}% (CLASSIC-002 default is {default_percent}%)"
+                    ))
+                }
+            }
+            #[cfg(debug_assertions)]
+            CommandIntent::TestingCheatsClassicReposeDefault => {
+                self.ensure_testing_cheats_preview()?;
+                let testing = self.testing_cheats.as_mut().expect("testing preview exists");
+                let model = testing.engine.model_name();
+                let percent = testing.engine.reset_classic_repose_percent()?;
+                self.render_needed = true;
+                Ok(format!(
+                    "Testing sandbox {model} high-repose probability reset to {percent}% (new repose resamples only; use `testingcheats fill` for a clean comparison)"
                 ))
             }
             #[cfg(debug_assertions)]

@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-05
 authority: working
-summary: CLASSIC-001 recovered the owner's preferred simple avalanche behavior; CLASSIC-002 is the bounded candidate that adds only weak deterministic local repose heterogeneity (95% repose 1 / 5% repose 2) to break the overly linear final slope while preserving direct authoritative Classic rendering, rainbow fill, and production SandEngine isolation.
-next: Natively validate CLASSIC-002. If machine-green, owner-dogfood the same testingcheats fill collapse and judge whether surface roughness improves without materially changing Classic macro avalanche/runout behavior.
+summary: CLASSIC-002 recovered a strong simple avalanche with a mildly rougher 5% high-repose surface; CLASSIC-003 adds only a debug-only `testingcheats classic repose [0..100|default]` tuning control so the owner can compare stronger texture levels without changing the accepted 5% default, Classic rendering, or production authority.
+next: Natively validate CLASSIC-003, then compare 10%, 20%, and 30% with a fresh `testingcheats fill` after each setting and choose the smallest visually sufficient texture level.
 ---
 
 # NOW — Strata
