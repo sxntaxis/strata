@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-06
 authority: working
-summary: CLASSIC-007 is machine-green and owner-confirmed improved. CLASSIC-008 is the active candidate, preserving anchored as default and CLASSIC-007 momentum as control while adding repose-relative, tangent-continuity, and soft repose-relative momentum gates for direct `fillhalf` comparison.
-next: Natively validate CLASSIC-008, then human-compare anchored, momentum, momentum-repose, momentum-tangent, and momentum-soft with a fresh `testingcheats fillhalf` after each selection, judging early cliff artifacts separately from mature-slope avalanche continuation.
+summary: CLASSIC-008 is machine-green but its momentum gate variants remain visually hard to distinguish and do not fully solve the owner-observed widening/multiple falling lanes. CLASSIC-009 is the active candidate: preserve anchored and all prior controls, then test whether bonus momentum should require the direct blocker to be a grounded supported pile column rather than another airborne grain.
+next: Natively validate CLASSIC-009, then human-compare anchored, momentum, momentum-repose, momentum-contact, and momentum-repose-contact with a fresh `testingcheats fillhalf` after each selection, judging falling-column lane widening separately from mature-slope avalanche continuation.
 ---
 
 # NOW — Strata

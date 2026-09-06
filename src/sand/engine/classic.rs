@@ -45,6 +45,8 @@ enum ClassicExperimentProfile {
     MomentumRepose,
     MomentumTangent,
     MomentumSoft,
+    MomentumContact,
+    MomentumReposeContact,
 }
 
 impl ClassicExperimentProfile {
@@ -59,6 +61,8 @@ impl ClassicExperimentProfile {
             Self::MomentumRepose => "momentum-repose",
             Self::MomentumTangent => "momentum-tangent",
             Self::MomentumSoft => "momentum-soft",
+            Self::MomentumContact => "momentum-contact",
+            Self::MomentumReposeContact => "momentum-repose-contact",
         }
     }
 
@@ -73,6 +77,8 @@ impl ClassicExperimentProfile {
             "momentum-repose" => Some(Self::MomentumRepose),
             "momentum-tangent" => Some(Self::MomentumTangent),
             "momentum-soft" => Some(Self::MomentumSoft),
+            "momentum-contact" => Some(Self::MomentumContact),
+            "momentum-repose-contact" => Some(Self::MomentumReposeContact),
             _ => None,
         }
     }
@@ -87,6 +93,8 @@ impl ClassicExperimentProfile {
                 | Self::MomentumRepose
                 | Self::MomentumTangent
                 | Self::MomentumSoft
+                | Self::MomentumContact
+                | Self::MomentumReposeContact
         )
     }
 
@@ -100,6 +108,8 @@ impl ClassicExperimentProfile {
                 | Self::MomentumRepose
                 | Self::MomentumTangent
                 | Self::MomentumSoft
+                | Self::MomentumContact
+                | Self::MomentumReposeContact
         )
     }
 
@@ -111,14 +121,25 @@ impl ClassicExperimentProfile {
                 | Self::MomentumRepose
                 | Self::MomentumTangent
                 | Self::MomentumSoft
+                | Self::MomentumContact
+                | Self::MomentumReposeContact
         )
     }
 
     fn uses_momentum(self) -> bool {
         matches!(
             self,
-            Self::Momentum | Self::MomentumRepose | Self::MomentumTangent | Self::MomentumSoft
+            Self::Momentum
+                | Self::MomentumRepose
+                | Self::MomentumTangent
+                | Self::MomentumSoft
+                | Self::MomentumContact
+                | Self::MomentumReposeContact
         )
+    }
+
+    fn momentum_requires_grounded_blocker(self) -> bool {
+        matches!(self, Self::MomentumContact | Self::MomentumReposeContact)
     }
 }
 
@@ -360,7 +381,7 @@ impl ClassicSandboxEngine {
     pub(crate) fn set_experiment_profile_name(&mut self, profile: &str) -> Result<(), String> {
         let Some(profile) = ClassicExperimentProfile::parse(profile) else {
             return Err(
-                "classic experiment profile must be rugged, memory, slope, memory-slope, anchored, momentum, momentum-repose, momentum-tangent, or momentum-soft"
+                "classic experiment profile must be rugged, memory, slope, memory-slope, anchored, momentum, momentum-repose, momentum-tangent, momentum-soft, momentum-contact, or momentum-repose-contact"
                     .to_string(),
             );
         };
@@ -637,16 +658,51 @@ impl ClassicSandboxEngine {
             return;
         }
 
+        // Contact-gated momentum distinguishes a grain arriving at the actual
+        // supported pile from one merely catching another grain in flight.
+        // Ordinary Classic diagonal behavior remains unchanged either way.
+        let momentum_blocker_grounded = if self
+            .experiment_profile
+            .momentum_requires_grounded_blocker()
+        {
+            self.direct_blocker_is_grounded(bounds, x, y + 1)
+        } else {
+            true
+        };
+
         self.surface.grid[y][x] = None;
         self.surface.grid[y + 1][target_x] = Some(category_id);
         self.diagonal_moves = self.diagonal_moves.saturating_add(1);
 
         if self.experiment_profile.uses_momentum() {
-            self.try_one_bonus_diagonal(bounds, target_x, y + 1, step, category_id);
+            self.try_one_bonus_diagonal(
+                bounds,
+                target_x,
+                y + 1,
+                step,
+                category_id,
+                momentum_blocker_grounded,
+            );
         }
 
         self.refresh_local_repose(x);
         self.refresh_local_repose(target_x);
+    }
+
+    fn direct_blocker_is_grounded(
+        &self,
+        bounds: ViewportBounds,
+        x: usize,
+        blocker_y: usize,
+    ) -> bool {
+        if blocker_y >= bounds.y_end || self.surface.grid[blocker_y][x].is_none() {
+            return false;
+        }
+        // Classic terrain settles into bottom-connected vertical columns. A
+        // blocker with any air gap beneath it is still airborne for the narrow
+        // purpose of deciding whether momentum may add a second diagonal hop.
+        // This does not change whether the ordinary Classic diagonal happens.
+        (blocker_y..bounds.y_end).all(|row| self.surface.grid[row][x].is_some())
     }
 
     fn choose_diagonal_step(&mut self, bounds: ViewportBounds, x: usize, y: usize) -> isize {
@@ -723,7 +779,11 @@ impl ClassicSandboxEngine {
         y: usize,
         step: isize,
         category_id: CategoryId,
+        blocker_grounded: bool,
     ) {
+        if !blocker_grounded {
+            return;
+        }
         let Some(next_x) = x.checked_add_signed(step) else {
             return;
         };
@@ -750,14 +810,15 @@ impl ClassicSandboxEngine {
         drop_depth: usize,
     ) -> bool {
         match self.experiment_profile {
-            ClassicExperimentProfile::Momentum => {
+            ClassicExperimentProfile::Momentum | ClassicExperimentProfile::MomentumContact => {
                 // CLASSIC-007 control: a fixed local slope band removes the
                 // deep early-fill cliff artifact while preserving the accepted
                 // mature one-hop continuation.
                 (CLASSIC_MOMENTUM_MIN_DROP_DEPTH..=CLASSIC_MOMENTUM_MAX_DROP_DEPTH)
                     .contains(&drop_depth)
             }
-            ClassicExperimentProfile::MomentumRepose => {
+            ClassicExperimentProfile::MomentumRepose
+            | ClassicExperimentProfile::MomentumReposeContact => {
                 // A: reuse Classic's own local stability threshold. Momentum is
                 // eligible only on relief at, or one dot beyond, the source
                 // column's local repose instead of using a globally fixed band.

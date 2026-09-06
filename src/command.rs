@@ -143,7 +143,7 @@ pub(crate) fn parse(input: &str) -> Result<CommandIntent, String> {
 #[cfg(debug_assertions)]
 fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
     let Some((subcommand, rest)) = args.split_first() else {
-        return Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft] | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | fillhalf | clear | status | provenance | reset".to_string());
+        return Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft|momentum-contact|momentum-repose-contact] | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | fillhalf | clear | status | provenance | reset".to_string());
     };
 
     match subcommand.to_ascii_lowercase().as_str() {
@@ -217,7 +217,7 @@ fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
             }
             if experiment.len() != 1 {
                 return Err(
-                    "Usage: testingcheats classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft]"
+                    "Usage: testingcheats classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft|momentum-contact|momentum-repose-contact]"
                         .to_string(),
                 );
             }
@@ -233,9 +233,11 @@ fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
                     | "momentum-repose"
                     | "momentum-tangent"
                     | "momentum-soft"
+                    | "momentum-contact"
+                    | "momentum-repose-contact"
             ) {
                 return Err(
-                    "classic experiment profile must be rugged, memory, slope, memory-slope, anchored, momentum, momentum-repose, momentum-tangent, or momentum-soft"
+                    "classic experiment profile must be rugged, memory, slope, memory-slope, anchored, momentum, momentum-repose, momentum-tangent, momentum-soft, momentum-contact, or momentum-repose-contact"
                         .to_string(),
                 );
             }
@@ -249,7 +251,7 @@ fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
         "status" if rest.is_empty() => Ok(CommandIntent::TestingCheatsStatus),
         "provenance" if rest.is_empty() => Ok(CommandIntent::TestingCheatsProvenance),
         "reset" if rest.is_empty() => Ok(CommandIntent::TestingCheatsReset),
-        _ => Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft] | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | fillhalf | clear | status | provenance | reset".to_string()),
+        _ => Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft|momentum-contact|momentum-repose-contact] | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | fillhalf | clear | status | provenance | reset".to_string()),
     }
 }
 
@@ -750,6 +752,8 @@ mod tests {
             "momentum-repose",
             "momentum-tangent",
             "momentum-soft",
+            "momentum-contact",
+            "momentum-repose-contact",
         ] {
             assert_eq!(
                 parse(&format!("testingcheats classic experiment {profile}")).unwrap(),

@@ -374,6 +374,8 @@ fn classic_experiment_selection_is_nonretroactive_and_uses_rugged_texture_base()
         "momentum-repose",
         "momentum-tangent",
         "momentum-soft",
+        "momentum-contact",
+        "momentum-repose-contact",
     ] {
         engine.set_experiment_profile_name(profile).unwrap();
         assert_eq!(engine.experiment_profile_name(), profile);
@@ -626,6 +628,158 @@ fn momentum_soft_profile_has_exact_repose_certain_one_extra_dot_soft_and_cliff_o
         (40..=80).contains(&accepted),
         "60% soft edge was not observable: accepted={accepted}/{samples}"
     );
+}
+
+#[test]
+fn momentum_control_can_amplify_an_airborne_blocker_into_a_bonus_lane() {
+    let mut engine = ClassicSandboxEngine::new(18, 14, 129, ClassicRainMode::Uniform);
+    engine.set_experiment_profile_name("momentum").unwrap();
+    engine.local_repose.fill(CLASSIC_REPOSE_LOW);
+    let bounds = engine.surface.viewport_bounds().expect("visible basin");
+    let x = bounds.x_start + (bounds.x_end - bounds.x_start) / 2;
+    let y = bounds.y_start + 2;
+    let category = CategoryId(1);
+
+    engine.surface.grid[y][x] = Some(category);
+    engine.surface.grid[y + 1][x] = Some(category);
+    engine.surface.grid[y + 4][x - 2] = Some(category);
+    engine.surface.grid[y + 4][x + 2] = Some(category);
+    assert!(!engine.direct_blocker_is_grounded(bounds, x, y + 1));
+
+    engine.move_grain_once(bounds, x, y);
+    let bonus_targets = [(x - 2, y + 2), (x + 2, y + 2)]
+        .into_iter()
+        .filter(|(px, py)| engine.surface.grid[*py][*px] == Some(category))
+        .count();
+    assert_eq!(
+        bonus_targets, 1,
+        "CLASSIC-007 control should expose the airborne-collision amplification under test"
+    );
+    assert_eq!(engine.diagonal_moves, 2);
+}
+
+#[test]
+fn momentum_contact_suppresses_only_the_bonus_after_an_airborne_blocker() {
+    let mut engine = ClassicSandboxEngine::new(18, 14, 129, ClassicRainMode::Uniform);
+    engine
+        .set_experiment_profile_name("momentum-contact")
+        .unwrap();
+    engine.local_repose.fill(CLASSIC_REPOSE_LOW);
+    let bounds = engine.surface.viewport_bounds().expect("visible basin");
+    let x = bounds.x_start + (bounds.x_end - bounds.x_start) / 2;
+    let y = bounds.y_start + 2;
+    let category = CategoryId(1);
+
+    // The direct blocker has air beneath it, so it is another falling grain,
+    // not the supported pile. The ordinary Classic diagonal remains legal and
+    // the receiving columns are deliberately in the fixed momentum depth band.
+    engine.surface.grid[y][x] = Some(category);
+    engine.surface.grid[y + 1][x] = Some(category);
+    engine.surface.grid[y + 4][x - 2] = Some(category);
+    engine.surface.grid[y + 4][x + 2] = Some(category);
+    let expected_mass = engine.surface.physical_grain_count();
+
+    assert!(!engine.direct_blocker_is_grounded(bounds, x, y + 1));
+    engine.move_grain_once(bounds, x, y);
+
+    let ordinary_targets = [(x - 1, y + 1), (x + 1, y + 1)]
+        .into_iter()
+        .filter(|(px, py)| engine.surface.grid[*py][*px] == Some(category))
+        .count();
+    let bonus_targets = [(x - 2, y + 2), (x + 2, y + 2)]
+        .into_iter()
+        .filter(|(px, py)| engine.surface.grid[*py][*px] == Some(category))
+        .count();
+
+    assert_eq!(ordinary_targets, 1, "ordinary Classic diagonal must remain");
+    assert_eq!(bonus_targets, 0, "airborne blockers must not seed a momentum lane");
+    assert_eq!(engine.diagonal_moves, 1);
+    assert_eq!(engine.surface.physical_grain_count(), expected_mass);
+}
+
+#[test]
+fn momentum_contact_keeps_the_bonus_when_the_blocker_is_supported_pile() {
+    let mut engine = ClassicSandboxEngine::new(18, 18, 131, ClassicRainMode::Uniform);
+    engine
+        .set_experiment_profile_name("momentum-contact")
+        .unwrap();
+    engine.local_repose.fill(CLASSIC_REPOSE_LOW);
+    let bounds = engine.surface.viewport_bounds().expect("visible basin");
+    let x = bounds.x_start + (bounds.x_end - bounds.x_start) / 2;
+    let floor = bounds.y_end - 1;
+    let y = floor - 5;
+    let category = CategoryId(1);
+
+    engine.surface.grid[y][x] = Some(category);
+    for row in y + 1..=floor {
+        engine.surface.grid[row][x] = Some(category);
+    }
+    // Both possible bonus receiving columns have drop depth exactly two and
+    // are themselves ordinary bottom-connected pile columns.
+    for target_x in [x - 2, x + 2] {
+        for row in y + 4..=floor {
+            engine.surface.grid[row][target_x] = Some(category);
+        }
+    }
+    let expected_mass = engine.surface.physical_grain_count();
+
+    assert!(engine.direct_blocker_is_grounded(bounds, x, y + 1));
+    engine.move_grain_once(bounds, x, y);
+
+    let bonus_targets = [(x - 2, y + 2), (x + 2, y + 2)]
+        .into_iter()
+        .filter(|(px, py)| engine.surface.grid[*py][*px] == Some(category))
+        .count();
+    assert_eq!(bonus_targets, 1, "supported surface contact must retain momentum");
+    assert_eq!(engine.diagonal_moves, 2);
+    assert_eq!(engine.surface.physical_grain_count(), expected_mass);
+}
+
+#[test]
+fn momentum_repose_contact_keeps_repose_gate_but_rejects_airborne_collision() {
+    let mut engine = ClassicSandboxEngine::new(18, 14, 133, ClassicRainMode::Uniform);
+    engine
+        .set_experiment_profile_name("momentum-repose-contact")
+        .unwrap();
+    engine.local_repose.fill(CLASSIC_REPOSE_LOW);
+    let bounds = engine.surface.viewport_bounds().expect("visible basin");
+    let x = bounds.x_start + (bounds.x_end - bounds.x_start) / 2;
+    let target_x = x + 1;
+    let y = bounds.y_start + 2;
+    let category = CategoryId(1);
+
+    // The profile retains A's exact repose-relative gate.
+    assert!(engine.momentum_bonus_is_eligible(bounds, x, target_x, y, 1, 1));
+    assert!(engine.momentum_bonus_is_eligible(bounds, x, target_x, y, 1, 2));
+    assert!(!engine.momentum_bonus_is_eligible(bounds, x, target_x, y, 1, 3));
+
+    // But an airborne direct blocker suppresses the bonus even when the
+    // receiving relief itself would pass that repose-relative gate.
+    engine.surface.grid[y][x] = Some(category);
+    engine.surface.grid[y + 1][x] = Some(category);
+    engine.surface.grid[y + 4][x - 2] = Some(category);
+    engine.surface.grid[y + 4][x + 2] = Some(category);
+    engine.move_grain_once(bounds, x, y);
+    let bonus_targets = [(x - 2, y + 2), (x + 2, y + 2)]
+        .into_iter()
+        .filter(|(px, py)| engine.surface.grid[*py][*px] == Some(category))
+        .count();
+    assert_eq!(bonus_targets, 0);
+    assert_eq!(engine.diagonal_moves, 1);
+}
+
+#[test]
+fn classic_009_contact_profiles_remain_mass_conserving_and_observable() {
+    for profile in ["momentum-contact", "momentum-repose-contact"] {
+        let metrics = experiment_metrics(profile);
+        eprintln!(
+            "CLASSIC_009_METRICS profile={profile} roughness={} apex={} width={} diagonal_moves={}",
+            metrics.0, metrics.1, metrics.2, metrics.3
+        );
+        assert!(metrics.1 > 0, "profile={profile}");
+        assert!(metrics.2 > 0, "profile={profile}");
+        assert!(metrics.3 > 0, "profile={profile}");
+    }
 }
 
 #[test]
