@@ -505,7 +505,7 @@ impl App {
             }
             #[cfg(debug_assertions)]
             CommandIntent::TestingCheatsHelp => Ok(
-                "testingcheats: default sandbox classic · model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> · classic texture [baseline|textured|rugged|terraced] · classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft|momentum-contact|momentum-repose-contact|momentum-surface|momentum-grounded-contact] · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · fill (classic/hybrid/Oslo; ensures six Fixture categories) · fillhalf (same fill, centered half-width) · clear · status · provenance · reset"
+                "testingcheats: default sandbox classic · model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> · classic texture [baseline|textured|rugged|terraced] · classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft|momentum-contact|momentum-repose-contact|momentum-surface|momentum-grounded-contact] · classic colorblend [rgb|linear|oklab|dominant|dominant-soft] · classic stratigraphy · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · fill (classic/hybrid/Oslo; ensures six Fixture categories) · fillhalf (same fill, centered half-width) · clear · status · provenance · reset"
                     .to_string(),
             ),
             #[cfg(debug_assertions)]
@@ -610,6 +610,65 @@ impl App {
                         "Testing sandbox {model} Classic experiment: {profile}"
                     ))
                 }
+            }
+            #[cfg(debug_assertions)]
+            CommandIntent::TestingCheatsClassicColorBlend { profile } => {
+                self.ensure_testing_cheats_preview()?;
+                let testing = self.testing_cheats.as_mut().expect("testing preview exists");
+                let model = testing.engine.model_name();
+                if let Some(profile) = profile {
+                    testing.engine.set_classic_color_blend_profile(&profile)?;
+                    self.render_needed = true;
+                    Ok(format!(
+                        "Testing sandbox {model} Braille color blend: {profile} (render-only; physics/grid/categories unchanged)"
+                    ))
+                } else {
+                    let profile = testing.engine.classic_color_blend_profile()?;
+                    Ok(format!(
+                        "Testing sandbox {model} Braille color blend: {profile} (rgb is the pre-VISUAL-001 control)"
+                    ))
+                }
+            }
+            #[cfg(debug_assertions)]
+            CommandIntent::TestingCheatsClassicStratigraphy => {
+                let Some(testing) = self.testing_cheats.as_ref() else {
+                    return Err(
+                        "testingcheats classic stratigraphy requires an active classic/hybrid testing sandbox after testingcheats fill or fillhalf"
+                            .to_string(),
+                    );
+                };
+                let categories = self.time_tracker.categories_ordered();
+                let report = testing.engine.classic_stratigraphy_report(&categories)?;
+                let cache_root = std::env::var_os("XDG_CACHE_HOME")
+                    .map(std::path::PathBuf::from)
+                    .or_else(|| {
+                        std::env::var_os("HOME")
+                            .map(std::path::PathBuf::from)
+                            .map(|home| home.join(".cache"))
+                    })
+                    .ok_or_else(|| {
+                        "testingcheats classic stratigraphy could not resolve a cache directory"
+                            .to_string()
+                    })?;
+                let path = cache_root.join("strata").join("classic-stratigraphy.txt");
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent).map_err(|error| {
+                        format!(
+                            "testingcheats classic stratigraphy could not create {}: {error}",
+                            parent.display()
+                        )
+                    })?;
+                }
+                std::fs::write(&path, report.as_bytes()).map_err(|error| {
+                    format!(
+                        "testingcheats classic stratigraphy could not write {}: {error}",
+                        path.display()
+                    )
+                })?;
+                Ok(format!(
+                    "Classic stratigraphy report written to {} (read-only distribution diagnostic; physics and testing sediment unchanged)",
+                    path.display()
+                ))
             }
             #[cfg(debug_assertions)]
             CommandIntent::TestingCheatsFill => {

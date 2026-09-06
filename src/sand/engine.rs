@@ -25,8 +25,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     constants::SAND_ENGINE,
-    domain::{Category, CategoryId, DRIFT_CATEGORY_ID},
+    domain::{Category, CategoryId},
 };
+
+mod color_blend;
+pub(crate) use color_blend::BrailleColorBlend;
+use color_blend::blend_braille_color;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SandStateGrain {
@@ -882,6 +886,14 @@ impl SandEngine {
     }
 
     pub fn render(&self, categories: &[Category]) -> Vec<Line<'static>> {
+        self.render_with_color_blend(categories, BrailleColorBlend::Rgb)
+    }
+
+    pub(crate) fn render_with_color_blend(
+        &self,
+        categories: &[Category],
+        color_blend: BrailleColorBlend,
+    ) -> Vec<Line<'static>> {
         let cell_w = self.cell_width as usize;
         let cell_h = self.cell_height as usize;
         let viewport_width_dots = cell_w.saturating_mul(SAND_ENGINE.dot_width);
@@ -900,7 +912,6 @@ impl SandEngine {
             .iter()
             .map(|category| (category.id, category.color))
             .collect();
-        let none_id = DRIFT_CATEGORY_ID;
 
         for cy in 0..cell_h {
             let mut spans: Vec<Span<'static>> = Vec::with_capacity(cell_w);
@@ -943,37 +954,7 @@ impl SandEngine {
                     }
                 }
 
-                let total_colored_dots: usize = counts.values().sum();
-                let color = if total_colored_dots > 0 {
-                    let mut blended_r = 0f32;
-                    let mut blended_g = 0f32;
-                    let mut blended_b = 0f32;
-
-                    for (category_id, count) in &counts {
-                        let (r, g, b) = if *category_id == none_id {
-                            (255u8, 255u8, 255u8)
-                        } else {
-                            match category_colors
-                                .get(category_id)
-                                .copied()
-                                .unwrap_or(Color::White)
-                            {
-                                Color::Rgb(r, g, b) => (r, g, b),
-                                _ => (255, 255, 255),
-                            }
-                        };
-
-                        let weight = *count as f32 / total_colored_dots as f32;
-                        blended_r += r as f32 * weight;
-                        blended_g += g as f32 * weight;
-                        blended_b += b as f32 * weight;
-                    }
-
-                    Color::Rgb(blended_r as u8, blended_g as u8, blended_b as u8)
-                } else {
-                    Color::White
-                };
-
+                let color = blend_braille_color(&counts, &category_colors, color_blend);
                 let ch = char::from_u32(SAND_ENGINE.braille_base + dots as u32).unwrap_or(' ');
                 spans.push(Span::raw(ch.to_string()).fg(color));
             }
@@ -1374,11 +1355,14 @@ impl SandEngine {
 mod tests {
     use std::collections::HashSet;
 
+    use ratatui::style::Color;
+
     #[cfg(debug_assertions)]
     use super::centered_half_open_interval;
+    use super::BrailleColorBlend;
 
     use crate::{
-        domain::CategoryId,
+        domain::{Category, CategoryId},
         sand::{
             PendingGrainRun, SandEngine, SandState, SandStateGrain, recolor_state_category_mass,
         },
@@ -1595,6 +1579,157 @@ mod tests {
         assert_eq!(
             engine.grid[y_offset + old_height - 1][x_offset + old_width - 1],
             Some(CategoryId::new(2))
+        );
+    }
+
+    fn test_category(id: u64, color: Color) -> Category {
+        Category {
+            id: CategoryId::new(id),
+            name: format!("category-{id}"),
+            color,
+            description: String::new(),
+            balance_effect: 0,
+        }
+    }
+
+    fn first_render_color(
+        engine: &SandEngine,
+        categories: &[Category],
+        blend: BrailleColorBlend,
+    ) -> Color {
+        engine.render_with_color_blend(categories, blend)[0].spans[0]
+            .style
+            .fg
+            .expect("rendered foreground color")
+    }
+
+    #[test]
+    fn ordinary_render_is_exact_rgb_control() {
+        let mut engine = SandEngine::new(1, 1);
+        engine.clear();
+        let first = CategoryId::new(1);
+        let second = CategoryId::new(2);
+        for row in &mut engine.grid {
+            row.fill(Some(first));
+        }
+        engine.grid[0][0] = Some(second);
+        let categories = [
+            test_category(1, Color::Rgb(220, 40, 20)),
+            test_category(2, Color::Rgb(20, 80, 240)),
+        ];
+
+        assert_eq!(
+            engine.render(&categories),
+            engine.render_with_color_blend(&categories, BrailleColorBlend::Rgb)
+        );
+    }
+
+    #[test]
+    fn braille_color_blend_profiles_preserve_single_material_cells_exactly() {
+        let mut engine = SandEngine::new(1, 1);
+        engine.clear();
+        for row in &mut engine.grid {
+            row.fill(Some(CategoryId::new(1)));
+        }
+        let categories = [test_category(1, Color::Rgb(20, 100, 220))];
+
+        for profile in [
+            BrailleColorBlend::Rgb,
+            BrailleColorBlend::Linear,
+            BrailleColorBlend::Oklab,
+            BrailleColorBlend::Dominant,
+            BrailleColorBlend::DominantSoft,
+        ] {
+            assert_eq!(
+                first_render_color(&engine, &categories, profile),
+                Color::Rgb(20, 100, 220),
+                "profile={}",
+                profile.name()
+            );
+        }
+    }
+
+    #[test]
+    fn dominant_and_dominant_soft_reduce_minority_color_without_changing_dot_geometry() {
+        let mut engine = SandEngine::new(1, 1);
+        engine.clear();
+        let red = CategoryId::new(1);
+        let blue = CategoryId::new(2);
+        for row in &mut engine.grid {
+            row.fill(Some(red));
+        }
+        engine.grid[0][0] = Some(blue);
+        let categories = [
+            test_category(1, Color::Rgb(255, 0, 0)),
+            test_category(2, Color::Rgb(0, 0, 255)),
+        ];
+
+        let rgb_lines = engine.render_with_color_blend(&categories, BrailleColorBlend::Rgb);
+        let soft_lines =
+            engine.render_with_color_blend(&categories, BrailleColorBlend::DominantSoft);
+        let dominant_lines =
+            engine.render_with_color_blend(&categories, BrailleColorBlend::Dominant);
+
+        assert_eq!(rgb_lines[0].spans[0].content, soft_lines[0].spans[0].content);
+        assert_eq!(rgb_lines[0].spans[0].content, dominant_lines[0].spans[0].content);
+        assert_eq!(rgb_lines[0].spans[0].style.fg, Some(Color::Rgb(223, 0, 31)));
+        assert_eq!(soft_lines[0].spans[0].style.fg, Some(Color::Rgb(249, 0, 5)));
+        assert_eq!(dominant_lines[0].spans[0].style.fg, Some(Color::Rgb(255, 0, 0)));
+    }
+
+    #[test]
+    fn dominant_ties_choose_lower_category_id_deterministically() {
+        let mut engine = SandEngine::new(1, 1);
+        engine.clear();
+        let high_id = CategoryId::new(10);
+        let low_id = CategoryId::new(5);
+        for y in 0..engine.grid.len() {
+            for x in 0..engine.grid[y].len() {
+                engine.grid[y][x] = Some(if y < 2 { high_id } else { low_id });
+            }
+        }
+        let categories = [
+            test_category(10, Color::Rgb(240, 40, 20)),
+            test_category(5, Color::Rgb(20, 180, 220)),
+        ];
+
+        assert_eq!(
+            first_render_color(&engine, &categories, BrailleColorBlend::Dominant),
+            Color::Rgb(20, 180, 220)
+        );
+        assert_eq!(
+            first_render_color(&engine, &categories, BrailleColorBlend::DominantSoft),
+            first_render_color(&engine, &categories, BrailleColorBlend::Rgb)
+        );
+    }
+
+    #[test]
+    fn linear_light_profile_is_distinct_from_legacy_srgb_mean() {
+        let mut engine = SandEngine::new(1, 1);
+        engine.clear();
+        let black = CategoryId::new(1);
+        let white = CategoryId::new(2);
+        for y in 0..engine.grid.len() {
+            for x in 0..engine.grid[y].len() {
+                engine.grid[y][x] = Some(if y < 2 { black } else { white });
+            }
+        }
+        let categories = [
+            test_category(1, Color::Rgb(0, 0, 0)),
+            test_category(2, Color::Rgb(255, 255, 255)),
+        ];
+
+        assert_eq!(
+            first_render_color(&engine, &categories, BrailleColorBlend::Rgb),
+            Color::Rgb(127, 127, 127)
+        );
+        assert_eq!(
+            first_render_color(&engine, &categories, BrailleColorBlend::Linear),
+            Color::Rgb(188, 188, 188)
+        );
+        assert_ne!(
+            first_render_color(&engine, &categories, BrailleColorBlend::Oklab),
+            Color::Rgb(127, 127, 127)
         );
     }
 

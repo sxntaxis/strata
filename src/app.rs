@@ -743,6 +743,34 @@ impl TestingSandEngine {
         }
     }
 
+    fn classic_color_blend_profile(&self) -> Result<&'static str, String> {
+        match self {
+            Self::Classic(engine) => Ok(engine.color_blend_profile_name()),
+            _ => Err(
+                "testingcheats classic colorblend is available only for classic/hybrid".to_string(),
+            ),
+        }
+    }
+
+    fn set_classic_color_blend_profile(&mut self, profile: &str) -> Result<(), String> {
+        match self {
+            Self::Classic(engine) => engine.set_color_blend_profile_name(profile),
+            _ => Err(
+                "testingcheats classic colorblend is available only for classic/hybrid".to_string(),
+            ),
+        }
+    }
+
+    fn classic_stratigraphy_report(&self, categories: &[Category]) -> Result<String, String> {
+        match self {
+            Self::Classic(engine) => engine.rainbow_stratigraphy_report(categories),
+            _ => Err(
+                "testingcheats classic stratigraphy is available only for classic/hybrid after testingcheats fill or fillhalf"
+                    .to_string(),
+            ),
+        }
+    }
+
     fn sync_for_render(&mut self) {
         if let Self::Oslo(engine) = self {
             engine.sync_for_render();
@@ -796,7 +824,7 @@ impl TestingSandEngine {
                 let (canonical_w, canonical_h) = engine.canonical_dimensions();
                 let (vertical, diagonal) = engine.movement_counts();
                 format!(
-                    "{} sandbox · physical={} · pending={} · canonical={}x{} · vertical_moves={} · diagonal_moves={} · texture={} · experiment={} · closed VW walls · no discharge",
+                    "{} sandbox · physical={} · pending={} · canonical={}x{} · vertical_moves={} · diagonal_moves={} · texture={} · experiment={} · colorblend={} · closed VW walls · no discharge",
                     engine.model_name(),
                     engine.physical_grain_count(),
                     engine.pending_count(),
@@ -805,7 +833,8 @@ impl TestingSandEngine {
                     vertical,
                     diagonal,
                     engine.texture_profile_name(),
-                    engine.experiment_profile_name()
+                    engine.experiment_profile_name(),
+                    engine.color_blend_profile_name()
                 )
             }
             Self::Oslo(engine) => {

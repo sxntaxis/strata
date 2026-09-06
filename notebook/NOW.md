@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-06
 authority: working
-summary: CLASSIC-011 is machine-green and human-accepted: momentum-grounded-contact is now the owner-selected Classic baseline because vertical free fall stays in-lane until genuine pile contact while mature-slope repose momentum remains entertaining. The remaining defect is implementation cost: repeated bottom-connectivity scans can saturate one CPU thread during dense fillhalf relaxation and visibly slow cadence. CLASSIC-012 is the active candidate: promote momentum-grounded-contact as the default and replace repeated floor scans with an exact sweep-local grounded-column index, with cached-vs-uncached state/RNG equivalence as a hard gate.
-next: Natively validate CLASSIC-012, require exact cached-versus-reference equality across dense multi-seed gravity passes plus full repository gates, report native CPU/frame-time improvement on fillhalf, then human-smoke the default for identical physics with restored visual cadence.
+summary: CLASSIC-012 is machine-green and human-confirmed live: momentum-grounded-contact is the owner-selected Classic default and its exact grounded-column cache preserves physics while delivering a 5.08x median native dense-wall speedup. Further performance work is paused while CLASSIC-013 reviews two remaining visual questions without changing physics: fill/fillhalf category redistribution/stratigraphic mixing and the single-foreground-color reduction used for multi-category Braille cells.
+next: Natively validate CLASSIC-013 as a zero-physics review pass: prove the stratigraphy report is read-only and fill-relative, preserve all CLASSIC-012/011 exactness gates, prove rgb is the exact legacy renderer control, then compare rgb/linear/oklab/dominant/dominant-soft on the same live fillhalf grid before deciding whether physical color redistribution needs any intervention.
 ---
 
 # NOW — Strata

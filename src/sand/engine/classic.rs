@@ -4,10 +4,12 @@ use ratatui::prelude::Line;
 
 use crate::domain::{Category, CategoryId};
 
-use super::{SandEngine, ViewportBounds, centered_half_open_interval};
+use super::{BrailleColorBlend, SandEngine, ViewportBounds, centered_half_open_interval};
 
 mod grounded_index;
+mod stratigraphy;
 use grounded_index::GroundedColumnIndex;
+use stratigraphy::ClassicRainbowFillDescriptor;
 
 const CLASSIC_PHYSICS_RNG_XOR: u64 = 0xC6BC_2796_92B5_CC83;
 const CLASSIC_RAIN_RNG_XOR: u64 = 0xD1B5_4A32_D192_ED03;
@@ -235,6 +237,8 @@ pub(crate) struct ClassicSandboxEngine {
     repose_memory_remaining: Vec<u8>,
     texture_profile: ClassicTextureProfile,
     experiment_profile: ClassicExperimentProfile,
+    color_blend_profile: BrailleColorBlend,
+    last_rainbow_fill: Option<ClassicRainbowFillDescriptor>,
     rain_focus_x: Option<usize>,
     rain_focus_target_x: Option<usize>,
     rain_focus_move_counter: usize,
@@ -275,6 +279,8 @@ impl ClassicSandboxEngine {
             repose_memory_remaining,
             texture_profile: ClassicTextureProfile::Rugged,
             experiment_profile: ClassicExperimentProfile::MomentumGroundedContact,
+            color_blend_profile: BrailleColorBlend::Rgb,
+            last_rainbow_fill: None,
             rain_focus_x: None,
             rain_focus_target_x: None,
             rain_focus_move_counter: 0,
@@ -316,6 +322,7 @@ impl ClassicSandboxEngine {
         let old_repose = self.local_repose.clone();
         let old_memory = self.repose_memory_remaining.clone();
         self.surface.resize(width, height);
+        self.last_rainbow_fill = None;
         let new_width = self.surface.grid_width_dots;
         let horizontal_offset = new_width.saturating_sub(old_width) / 2;
         if new_width > old_width {
@@ -347,6 +354,7 @@ impl ClassicSandboxEngine {
 
     pub(crate) fn clear(&mut self) {
         self.surface.clear();
+        self.last_rainbow_fill = None;
         self.pending_drive.clear();
         self.rain_focus_x = None;
         self.rain_focus_target_x = None;
@@ -360,7 +368,23 @@ impl ClassicSandboxEngine {
     }
 
     pub(crate) fn render(&self, categories: &[Category]) -> Vec<Line<'static>> {
-        self.surface.render(categories)
+        self.surface
+            .render_with_color_blend(categories, self.color_blend_profile)
+    }
+
+    pub(crate) fn color_blend_profile_name(&self) -> &'static str {
+        self.color_blend_profile.name()
+    }
+
+    pub(crate) fn set_color_blend_profile_name(&mut self, profile: &str) -> Result<(), String> {
+        let Some(profile) = BrailleColorBlend::parse(profile) else {
+            return Err(
+                "classic colorblend profile must be rgb, linear, oklab, dominant, or dominant-soft"
+                    .to_string(),
+            );
+        };
+        self.color_blend_profile = profile;
+        Ok(())
     }
 
     pub(crate) fn dimensions(&self) -> (u16, u16) {
@@ -472,6 +496,14 @@ impl ClassicSandboxEngine {
             }
         }
 
+        self.last_rainbow_fill = Some(ClassicRainbowFillDescriptor::from_fill(
+            category_ids,
+            fill_x_start,
+            fill_x_end,
+            bounds.y_end,
+            fill_height,
+        ));
+
         self.pending_drive.clear();
         self.frame_count = 0;
         self.total_generated = self.surface.physical_grain_count();
@@ -480,6 +512,7 @@ impl ClassicSandboxEngine {
         self.sync_surface_metadata();
         Ok(self.total_generated)
     }
+
 
     fn flush_pending_drive(&mut self) {
         if self.pending_drive.is_empty() {
@@ -1170,10 +1203,26 @@ impl ClassicSandboxEngine {
 
 #[cfg(test)]
 mod tests {
+    use ratatui::style::Color;
+
     use super::*;
 
     fn mass(engine: &ClassicSandboxEngine) -> usize {
         engine.physical_grain_count() + engine.pending_count()
+    }
+
+    fn fixture_categories(ids: &[CategoryId]) -> Vec<Category> {
+        ids.iter()
+            .copied()
+            .enumerate()
+            .map(|(index, id)| Category {
+                id,
+                name: format!("Fixture {index}"),
+                color: Color::Rgb((30 + index * 25) as u8, (60 + index * 20) as u8, (90 + index * 15) as u8),
+                description: String::new(),
+                balance_effect: 0,
+            })
+            .collect()
     }
 
     #[test]
@@ -1287,6 +1336,142 @@ mod tests {
             }
         }
         assert_eq!(mass(&engine), engine.grain_count());
+    }
+
+    #[test]
+    fn colorblend_selection_is_render_only_and_nonretroactive() {
+        let mut engine = ClassicSandboxEngine::new(12, 10, 701, ClassicRainMode::Uniform);
+        let ids = [
+            CategoryId(1),
+            CategoryId(2),
+            CategoryId(3),
+            CategoryId(4),
+            CategoryId(5),
+            CategoryId(6),
+        ];
+        engine
+            .debug_fill_rainbow_80_centered_half(&ids)
+            .expect("fillhalf");
+        let grid = engine.surface.grid.clone();
+        let physics_rng = engine.physics_rng_state;
+        let repose_rng = engine.repose_rng_state;
+        let local_repose = engine.local_repose.clone();
+        let memory = engine.repose_memory_remaining.clone();
+        let moves = engine.movement_counts();
+
+        for profile in ["rgb", "linear", "oklab", "dominant", "dominant-soft"] {
+            engine
+                .set_color_blend_profile_name(profile)
+                .expect("valid blend");
+            assert_eq!(engine.color_blend_profile_name(), profile);
+            assert_eq!(engine.surface.grid, grid, "profile={profile}");
+            assert_eq!(engine.physics_rng_state, physics_rng, "profile={profile}");
+            assert_eq!(engine.repose_rng_state, repose_rng, "profile={profile}");
+            assert_eq!(engine.local_repose, local_repose, "profile={profile}");
+            assert_eq!(engine.repose_memory_remaining, memory, "profile={profile}");
+            assert_eq!(engine.movement_counts(), moves, "profile={profile}");
+        }
+        assert!(engine.set_color_blend_profile_name("neon").is_err());
+    }
+
+    #[test]
+    fn stratigraphy_report_describes_fill_distribution_without_mutating_physics() {
+        let mut engine = ClassicSandboxEngine::new(12, 10, 702, ClassicRainMode::Uniform);
+        let ids = [
+            CategoryId(1),
+            CategoryId(2),
+            CategoryId(3),
+            CategoryId(4),
+            CategoryId(5),
+            CategoryId(6),
+        ];
+        let categories = fixture_categories(&ids);
+        engine
+            .debug_fill_rainbow_80_centered_half(&ids)
+            .expect("fillhalf");
+        let grid_before = engine.surface.grid.clone();
+        let rng_before = (engine.physics_rng_state, engine.repose_rng_state);
+        let repose_before = engine.local_repose.clone();
+        let memory_before = engine.repose_memory_remaining.clone();
+        let moves_before = engine.movement_counts();
+
+        let report = engine
+            .rainbow_stratigraphy_report(&categories)
+            .expect("stratigraphy report");
+        assert!(report.contains("CLASSIC_STRATIGRAPHY_REPORT"));
+        assert!(report.contains("stratigraphic_rank_drops=0"));
+        assert!(report.contains("outside_fill_span=0"));
+        assert_eq!(engine.surface.grid, grid_before);
+        assert_eq!((engine.physics_rng_state, engine.repose_rng_state), rng_before);
+        assert_eq!(engine.local_repose, repose_before);
+        assert_eq!(engine.repose_memory_remaining, memory_before);
+        assert_eq!(engine.movement_counts(), moves_before);
+    }
+
+    #[test]
+    fn stratigraphy_report_surfaces_cross_band_and_lateral_outliers() {
+        let mut engine = ClassicSandboxEngine::new(12, 10, 703, ClassicRainMode::Uniform);
+        let ids = [
+            CategoryId(1),
+            CategoryId(2),
+            CategoryId(3),
+            CategoryId(4),
+            CategoryId(5),
+            CategoryId(6),
+        ];
+        let categories = fixture_categories(&ids);
+        engine
+            .debug_fill_rainbow_80_centered_half(&ids)
+            .expect("fillhalf");
+        let fill = engine
+            .last_rainbow_fill
+            .clone()
+            .expect("fill descriptor");
+        assert!(fill.x_start > 0);
+        let top_category = *ids.last().expect("top category");
+        let source = engine
+            .surface
+            .grid
+            .iter()
+            .enumerate()
+            .find_map(|(y, row)| {
+                row.iter()
+                    .position(|cell| *cell == Some(top_category))
+                    .map(|x| (x, y))
+            })
+            .expect("top category grain");
+        engine.surface.grid[source.1][source.0] = None;
+        engine.surface.grid[fill.y_end - 1][fill.x_start - 1] = Some(top_category);
+
+        let report = engine
+            .rainbow_stratigraphy_report(&categories)
+            .expect("stratigraphy report");
+        let line = report
+            .lines()
+            .find(|line| line.contains("id=6 initial_band="))
+            .expect("top category report line");
+        assert!(line.contains("below=1"), "{line}");
+        assert!(line.contains("outside_fill_span=1"), "{line}");
+        assert!(report.contains("category=\"Fixture 5\" id=6"));
+    }
+
+    #[test]
+    fn resize_or_clear_invalidates_fill_relative_stratigraphy_reference() {
+        let ids = [CategoryId(1), CategoryId(2)];
+        let categories = fixture_categories(&ids);
+        let mut resized = ClassicSandboxEngine::new(12, 10, 704, ClassicRainMode::Uniform);
+        resized
+            .debug_fill_rainbow_80_centered_half(&ids)
+            .expect("fillhalf");
+        resized.resize(13, 10);
+        assert!(resized.rainbow_stratigraphy_report(&categories).is_err());
+
+        let mut cleared = ClassicSandboxEngine::new(12, 10, 705, ClassicRainMode::Uniform);
+        cleared
+            .debug_fill_rainbow_80_centered_half(&ids)
+            .expect("fillhalf");
+        cleared.clear();
+        assert!(cleared.rainbow_stratigraphy_report(&categories).is_err());
     }
 
     #[test]
