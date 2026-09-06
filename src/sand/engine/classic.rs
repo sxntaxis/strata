@@ -661,14 +661,12 @@ impl ClassicSandboxEngine {
         // Contact-gated momentum distinguishes a grain arriving at the actual
         // supported pile from one merely catching another grain in flight.
         // Ordinary Classic diagonal behavior remains unchanged either way.
-        let momentum_blocker_grounded = if self
-            .experiment_profile
-            .momentum_requires_grounded_blocker()
-        {
-            self.direct_blocker_is_grounded(bounds, x, y + 1)
-        } else {
-            true
-        };
+        let momentum_blocker_grounded =
+            if self.experiment_profile.momentum_requires_grounded_blocker() {
+                self.direct_blocker_is_grounded(bounds, x, y + 1)
+            } else {
+                true
+            };
 
         self.surface.grid[y][x] = None;
         self.surface.grid[y + 1][target_x] = Some(category_id);

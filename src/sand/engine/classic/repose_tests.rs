@@ -692,7 +692,10 @@ fn momentum_contact_suppresses_only_the_bonus_after_an_airborne_blocker() {
         .count();
 
     assert_eq!(ordinary_targets, 1, "ordinary Classic diagonal must remain");
-    assert_eq!(bonus_targets, 0, "airborne blockers must not seed a momentum lane");
+    assert_eq!(
+        bonus_targets, 0,
+        "airborne blockers must not seed a momentum lane"
+    );
     assert_eq!(engine.diagonal_moves, 1);
     assert_eq!(engine.surface.physical_grain_count(), expected_mass);
 }
@@ -730,7 +733,10 @@ fn momentum_contact_keeps_the_bonus_when_the_blocker_is_supported_pile() {
         .into_iter()
         .filter(|(px, py)| engine.surface.grid[*py][*px] == Some(category))
         .count();
-    assert_eq!(bonus_targets, 1, "supported surface contact must retain momentum");
+    assert_eq!(
+        bonus_targets, 1,
+        "supported surface contact must retain momentum"
+    );
     assert_eq!(engine.diagonal_moves, 2);
     assert_eq!(engine.surface.physical_grain_count(), expected_mass);
 }
