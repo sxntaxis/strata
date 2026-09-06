@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-06
 authority: working
-summary: CLASSIC-008 is machine-green but its momentum gate variants remain visually hard to distinguish and do not fully solve the owner-observed widening/multiple falling lanes. CLASSIC-009 is the active candidate: preserve anchored and all prior controls, then test whether bonus momentum should require the direct blocker to be a grounded supported pile column rather than another airborne grain.
-next: Natively validate CLASSIC-009, then human-compare anchored, momentum, momentum-repose, momentum-contact, and momentum-repose-contact with a fresh `testingcheats fillhalf` after each selection, judging falling-column lane widening separately from mature-slope avalanche continuation.
+summary: CLASSIC-009 is machine-green and its direct-blocker contact gate visibly improves the multi-lane falling artifact, but human review of momentum-repose-contact still shows occasional bonus destinations following receiving relief that is not bottom-connected. CLASSIC-010 is the active candidate: preserve all prior controls and require the first support below the proposed bonus destination to be grounded pile before momentum may continue.
+next: Natively validate CLASSIC-010, then human-compare momentum-repose-contact against momentum-surface with fresh `testingcheats fillhalf`, judging unsupported-looking lateral points separately from mature-slope avalanche continuation.
 ---
 
 # NOW — Strata

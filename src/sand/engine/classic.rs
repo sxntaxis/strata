@@ -47,6 +47,7 @@ enum ClassicExperimentProfile {
     MomentumSoft,
     MomentumContact,
     MomentumReposeContact,
+    MomentumSurface,
 }
 
 impl ClassicExperimentProfile {
@@ -63,6 +64,7 @@ impl ClassicExperimentProfile {
             Self::MomentumSoft => "momentum-soft",
             Self::MomentumContact => "momentum-contact",
             Self::MomentumReposeContact => "momentum-repose-contact",
+            Self::MomentumSurface => "momentum-surface",
         }
     }
 
@@ -79,6 +81,7 @@ impl ClassicExperimentProfile {
             "momentum-soft" => Some(Self::MomentumSoft),
             "momentum-contact" => Some(Self::MomentumContact),
             "momentum-repose-contact" => Some(Self::MomentumReposeContact),
+            "momentum-surface" => Some(Self::MomentumSurface),
             _ => None,
         }
     }
@@ -95,6 +98,7 @@ impl ClassicExperimentProfile {
                 | Self::MomentumSoft
                 | Self::MomentumContact
                 | Self::MomentumReposeContact
+                | Self::MomentumSurface
         )
     }
 
@@ -110,6 +114,7 @@ impl ClassicExperimentProfile {
                 | Self::MomentumSoft
                 | Self::MomentumContact
                 | Self::MomentumReposeContact
+                | Self::MomentumSurface
         )
     }
 
@@ -123,6 +128,7 @@ impl ClassicExperimentProfile {
                 | Self::MomentumSoft
                 | Self::MomentumContact
                 | Self::MomentumReposeContact
+                | Self::MomentumSurface
         )
     }
 
@@ -135,11 +141,19 @@ impl ClassicExperimentProfile {
                 | Self::MomentumSoft
                 | Self::MomentumContact
                 | Self::MomentumReposeContact
+                | Self::MomentumSurface
         )
     }
 
     fn momentum_requires_grounded_blocker(self) -> bool {
-        matches!(self, Self::MomentumContact | Self::MomentumReposeContact)
+        matches!(
+            self,
+            Self::MomentumContact | Self::MomentumReposeContact | Self::MomentumSurface
+        )
+    }
+
+    fn momentum_requires_grounded_receiving_support(self) -> bool {
+        matches!(self, Self::MomentumSurface)
     }
 }
 
@@ -381,7 +395,7 @@ impl ClassicSandboxEngine {
     pub(crate) fn set_experiment_profile_name(&mut self, profile: &str) -> Result<(), String> {
         let Some(profile) = ClassicExperimentProfile::parse(profile) else {
             return Err(
-                "classic experiment profile must be rugged, memory, slope, memory-slope, anchored, momentum, momentum-repose, momentum-tangent, momentum-soft, momentum-contact, or momentum-repose-contact"
+                "classic experiment profile must be rugged, memory, slope, memory-slope, anchored, momentum, momentum-repose, momentum-tangent, momentum-soft, momentum-contact, momentum-repose-contact, or momentum-surface"
                     .to_string(),
             );
         };
@@ -703,6 +717,23 @@ impl ClassicSandboxEngine {
         (blocker_y..bounds.y_end).all(|row| self.surface.grid[row][x].is_some())
     }
 
+    // CLASSIC-010: the bonus may follow relief only when the first occupied
+    // support below its proposed destination is itself bottom-connected pile.
+    // This is a bonus-only surface gate; ordinary Classic motion is untouched.
+    fn first_support_below_is_grounded(
+        &self,
+        bounds: ViewportBounds,
+        x: usize,
+        destination_y: usize,
+    ) -> bool {
+        let Some(support_y) = (destination_y.saturating_add(1)..bounds.y_end)
+            .find(|row| self.surface.grid[*row][x].is_some())
+        else {
+            return false;
+        };
+        self.direct_blocker_is_grounded(bounds, x, support_y)
+    }
+
     fn choose_diagonal_step(&mut self, bounds: ViewportBounds, x: usize, y: usize) -> isize {
         let random_step = if self.physics_random_bool() {
             1isize
@@ -792,6 +823,16 @@ impl ClassicSandboxEngine {
         if !self.momentum_bonus_is_eligible(bounds, x, next_x, y, step, drop_depth) {
             return;
         }
+        // The owner-observed residual lane artifact can occur after the original
+        // grounded-contact check: a legal bonus may still chase an airborne
+        // receiving support. `momentum-surface` rejects only that second hop.
+        if self
+            .experiment_profile
+            .momentum_requires_grounded_receiving_support()
+            && !self.first_support_below_is_grounded(bounds, next_x, y + 1)
+        {
+            return;
+        }
         self.surface.grid[y][x] = None;
         self.surface.grid[y + 1][next_x] = Some(category_id);
         self.diagonal_moves = self.diagonal_moves.saturating_add(1);
@@ -816,7 +857,8 @@ impl ClassicSandboxEngine {
                     .contains(&drop_depth)
             }
             ClassicExperimentProfile::MomentumRepose
-            | ClassicExperimentProfile::MomentumReposeContact => {
+            | ClassicExperimentProfile::MomentumReposeContact
+            | ClassicExperimentProfile::MomentumSurface => {
                 // A: reuse Classic's own local stability threshold. Momentum is
                 // eligible only on relief at, or one dot beyond, the source
                 // column's local repose instead of using a globally fixed band.
