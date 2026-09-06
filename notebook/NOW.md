@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-05
 authority: working
-summary: The owner has ended the Oslo/SEDIMENT visual-model iteration and selected Classic as the next simple sandbox baseline. CLASSIC-001 keeps accepted production SandEngine authority unchanged, makes Classic the default testingcheats sandbox, and makes testingcheats fill create/reuse the six persisted Fixture categories and build the 80% rainbow fixture directly in Classic.
-next: Natively validate CLASSIC-001. If machine-green, owner-dogfood the certified Classic sandbox with testingcheats fill and decide separately whether Classic merits production promotion.
+summary: CLASSIC-001 recovered the owner's preferred simple avalanche behavior; CLASSIC-002 is the bounded candidate that adds only weak deterministic local repose heterogeneity (95% repose 1 / 5% repose 2) to break the overly linear final slope while preserving direct authoritative Classic rendering, rainbow fill, and production SandEngine isolation.
+next: Natively validate CLASSIC-002. If machine-green, owner-dogfood the same testingcheats fill collapse and judge whether surface roughness improves without materially changing Classic macro avalanche/runout behavior.
 ---
 
 # NOW — Strata

@@ -8,6 +8,12 @@ use super::{SandEngine, ViewportBounds};
 
 const CLASSIC_PHYSICS_RNG_XOR: u64 = 0xC6BC_2796_92B5_CC83;
 const CLASSIC_RAIN_RNG_XOR: u64 = 0xD1B5_4A32_D192_ED03;
+const CLASSIC_REPOSE_RNG_XOR: u64 = 0xA5A5_5A5A_D3C1_B7E9;
+const CLASSIC_REPOSE_LOW: u8 = 1;
+const CLASSIC_REPOSE_HIGH: u8 = 2;
+// Weak heterogeneity only: one column in twenty temporarily tolerates one
+// additional unit of local relief before a diagonal release.
+const CLASSIC_HIGH_REPOSE_ONE_IN: usize = 20;
 const GOLDEN_RATIO: f64 = 1.618_033_988_749_895;
 const RAIN_FOCUS_BIAS_ONE_IN: usize = 10;
 // At one ingress per second, a full focus traverse takes about twelve hours.
@@ -26,7 +32,7 @@ pub(crate) enum ClassicRainMode {
 /// - each grain is a physical cell, not a height-only particle;
 /// - gravity first tries straight down;
 /// - when blocked, the grain chooses one random diagonal and moves only if that
-///   destination is free;
+///   destination is free and the source column's weak local repose allows release;
 /// - the current visible window is the complete active basin, so its side edges
 ///   are real closed walls and grains never cross them;
 /// - the canonical canvas grows monotonically to the largest viewport seen;
@@ -44,6 +50,9 @@ pub(crate) struct ClassicSandboxEngine {
     mode: ClassicRainMode,
     physics_rng_state: u64,
     rain_rng_state: u64,
+    initial_repose_rng_state: u64,
+    repose_rng_state: u64,
+    local_repose: Vec<u8>,
     rain_focus_x: Option<usize>,
     rain_focus_target_x: Option<usize>,
     rain_focus_move_counter: usize,
@@ -52,6 +61,8 @@ pub(crate) struct ClassicSandboxEngine {
     total_generated: usize,
     vertical_moves: usize,
     diagonal_moves: usize,
+    #[cfg(test)]
+    force_uniform_repose: bool,
 }
 
 impl ClassicSandboxEngine {
@@ -64,11 +75,20 @@ impl ClassicSandboxEngine {
         if rain_rng_state == 0 {
             rain_rng_state = CLASSIC_RAIN_RNG_XOR;
         }
-        Self {
-            surface: SandEngine::new(width, height),
+        let mut repose_rng_state = seed ^ CLASSIC_REPOSE_RNG_XOR;
+        if repose_rng_state == 0 {
+            repose_rng_state = CLASSIC_REPOSE_RNG_XOR;
+        }
+        let surface = SandEngine::new(width, height);
+        let local_repose = vec![CLASSIC_REPOSE_LOW; surface.grid_width_dots];
+        let mut engine = Self {
+            surface,
             mode,
             physics_rng_state,
             rain_rng_state,
+            initial_repose_rng_state: repose_rng_state,
+            repose_rng_state,
+            local_repose,
             rain_focus_x: None,
             rain_focus_target_x: None,
             rain_focus_move_counter: 0,
@@ -77,7 +97,11 @@ impl ClassicSandboxEngine {
             total_generated: 0,
             vertical_moves: 0,
             diagonal_moves: 0,
-        }
+            #[cfg(test)]
+            force_uniform_repose: false,
+        };
+        engine.resample_all_local_repose();
+        engine
     }
 
     pub(crate) fn model_name(&self) -> &'static str {
@@ -103,8 +127,20 @@ impl ClassicSandboxEngine {
 
     pub(crate) fn resize(&mut self, width: u16, height: u16) {
         let old_width = self.surface.grid_width_dots;
+        let old_repose = self.local_repose.clone();
         self.surface.resize(width, height);
-        let horizontal_offset = self.surface.grid_width_dots.saturating_sub(old_width) / 2;
+        let new_width = self.surface.grid_width_dots;
+        let horizontal_offset = new_width.saturating_sub(old_width) / 2;
+        if new_width > old_width {
+            let mut expanded_repose = Vec::with_capacity(new_width);
+            for _ in 0..new_width {
+                expanded_repose.push(self.sample_local_repose());
+            }
+            for (x, repose) in old_repose.into_iter().enumerate() {
+                expanded_repose[x + horizontal_offset] = repose;
+            }
+            self.local_repose = expanded_repose;
+        }
         if horizontal_offset > 0 {
             self.rain_focus_x = self
                 .rain_focus_x
@@ -126,6 +162,8 @@ impl ClassicSandboxEngine {
         self.total_generated = 0;
         self.vertical_moves = 0;
         self.diagonal_moves = 0;
+        self.repose_rng_state = self.initial_repose_rng_state;
+        self.resample_all_local_repose();
     }
 
     pub(crate) fn render(&self, categories: &[Category]) -> Vec<Line<'static>> {
@@ -406,9 +444,61 @@ impl ClassicSandboxEngine {
         if self.surface.grid[y + 1][target_x].is_some() {
             return;
         }
+        if !self.local_repose_allows_diagonal(bounds, x, target_x, y) {
+            return;
+        }
         self.surface.grid[y][x] = None;
         self.surface.grid[y + 1][target_x] = Some(category_id);
         self.diagonal_moves = self.diagonal_moves.saturating_add(1);
+        self.refresh_local_repose(x);
+        self.refresh_local_repose(target_x);
+    }
+
+    fn local_repose_allows_diagonal(
+        &self,
+        bounds: ViewportBounds,
+        source_x: usize,
+        target_x: usize,
+        source_y: usize,
+    ) -> bool {
+        if self.local_repose[source_x] <= CLASSIC_REPOSE_LOW {
+            return true;
+        }
+
+        // Classic's original diagonal vacancy test is equivalent to allowing a
+        // compact surface to relax when the local height relief is at least two.
+        // A rare repose=2 column tolerates exactly one extra relief unit, so the
+        // cell one step below the ordinary diagonal target must also be empty.
+        let deeper_y = source_y + 2;
+        deeper_y < bounds.y_end && self.surface.grid[deeper_y][target_x].is_none()
+    }
+
+    fn resample_all_local_repose(&mut self) {
+        for x in 0..self.local_repose.len() {
+            let repose = self.sample_local_repose();
+            self.local_repose[x] = repose;
+        }
+    }
+
+    fn refresh_local_repose(&mut self, x: usize) {
+        if x >= self.local_repose.len() {
+            return;
+        }
+        let repose = self.sample_local_repose();
+        self.local_repose[x] = repose;
+    }
+
+    fn sample_local_repose(&mut self) -> u8 {
+        #[cfg(test)]
+        if self.force_uniform_repose {
+            return CLASSIC_REPOSE_LOW;
+        }
+
+        if self.next_repose_random_u64() as usize % CLASSIC_HIGH_REPOSE_ONE_IN == 0 {
+            CLASSIC_REPOSE_HIGH
+        } else {
+            CLASSIC_REPOSE_LOW
+        }
     }
 
     fn sync_surface_metadata(&mut self) {
@@ -437,6 +527,18 @@ impl ClassicSandboxEngine {
 
     fn physics_random_bool(&mut self) -> bool {
         self.next_physics_random_u64() & 1 == 0
+    }
+
+    fn next_repose_random_u64(&mut self) -> u64 {
+        let mut x = self.repose_rng_state;
+        if x == 0 {
+            x = CLASSIC_REPOSE_RNG_XOR;
+        }
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.repose_rng_state = x;
+        x
     }
 
     fn next_rain_random_u64(&mut self) -> u64 {
@@ -647,3 +749,7 @@ mod tests {
         assert_eq!(uniform.surface.grid, hybrid.surface.grid);
     }
 }
+
+#[cfg(test)]
+#[path = "classic/repose_tests.rs"]
+mod repose_tests;
