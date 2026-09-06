@@ -817,7 +817,9 @@ fn momentum_repose_contact_can_still_bonus_toward_airborne_receiving_support() {
 #[test]
 fn momentum_surface_suppresses_bonus_when_receiving_support_is_airborne() {
     let mut engine = ClassicSandboxEngine::new(18, 18, 137, ClassicRainMode::Uniform);
-    engine.set_experiment_profile_name("momentum-surface").unwrap();
+    engine
+        .set_experiment_profile_name("momentum-surface")
+        .unwrap();
     engine.local_repose.fill(CLASSIC_REPOSE_LOW);
     let bounds = engine.surface.viewport_bounds().expect("visible basin");
     let x = bounds.x_start + (bounds.x_end - bounds.x_start) / 2;
@@ -858,7 +860,9 @@ fn momentum_surface_suppresses_bonus_when_receiving_support_is_airborne() {
 #[test]
 fn momentum_surface_keeps_bonus_when_receiving_support_is_grounded() {
     let mut engine = ClassicSandboxEngine::new(18, 18, 139, ClassicRainMode::Uniform);
-    engine.set_experiment_profile_name("momentum-surface").unwrap();
+    engine
+        .set_experiment_profile_name("momentum-surface")
+        .unwrap();
     engine.local_repose.fill(CLASSIC_REPOSE_LOW);
     let bounds = engine.surface.viewport_bounds().expect("visible basin");
     let x = bounds.x_start + (bounds.x_end - bounds.x_start) / 2;
