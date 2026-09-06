@@ -864,6 +864,13 @@ impl TestingSandEngine {
             }
         }
     }
+
+    fn live_rainbow_provenance_report(&self) -> Result<String, String> {
+        match self {
+            Self::Oslo(engine) => engine.live_rainbow_provenance_report(),
+            _ => Err("testingcheats provenance is available only for oslo-vessel-front-grains after testingcheats fill".to_string()),
+        }
+    }
 }
 
 #[cfg(debug_assertions)]

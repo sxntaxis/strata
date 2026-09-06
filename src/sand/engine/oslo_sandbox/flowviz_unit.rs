@@ -265,6 +265,8 @@ impl OsloSandboxEngine {
             self.flowviz_unit_peak = self.flowviz_unit_peak.max(self.flowviz_unit_carriers.len());
             id
         };
+        #[cfg(debug_assertions)]
+        self.note_live_rainbow_motion_start(id, category_id, source);
         self.append_unit_segment_with_geometry(
             id,
             source,
@@ -451,36 +453,56 @@ impl OsloSandboxEngine {
         }
         let sequence = self.flowviz_unit_next_sequence;
         self.flowviz_unit_next_sequence = self.flowviz_unit_next_sequence.saturating_add(1);
-        let carrier = self
-            .flowviz_unit_carriers
-            .get_mut(&id)
-            .expect("unit carrier existence was checked");
-        carrier.queued.push_back(UnitSegment {
-            sequence,
-            source,
-            destination,
-            observed_source_y,
-            observed_target_y,
-        });
-        carrier.arrived = false;
+        {
+            let carrier = self
+                .flowviz_unit_carriers
+                .get_mut(&id)
+                .expect("unit carrier existence was checked");
+            carrier.queued.push_back(UnitSegment {
+                sequence,
+                source,
+                destination,
+                observed_source_y,
+                observed_target_y,
+            });
+            carrier.arrived = false;
+        }
+        #[cfg(debug_assertions)]
+        self.note_live_rainbow_segment(id, source, destination);
         self.flowviz_unit_segments = self.flowviz_unit_segments.saturating_add(1);
     }
 
     pub(super) fn mark_unit_settled(&mut self, id: FlowVizMotionId, site: usize) {
-        if let Some(carrier) = self.flowviz_unit_carriers.get_mut(&id) {
+        let recorded = if let Some(carrier) = self.flowviz_unit_carriers.get_mut(&id) {
             carrier.physical = UnitPhysicalState::Settled(site);
             carrier.arrived = false;
+            true
         } else {
             self.flowviz_unit_misses = self.flowviz_unit_misses.saturating_add(1);
+            false
+        };
+        #[cfg(debug_assertions)]
+        if recorded {
+            self.note_live_rainbow_settled(id, site);
         }
+        #[cfg(not(debug_assertions))]
+        let _ = recorded;
     }
 
     pub(super) fn mark_unit_discharged(&mut self, id: FlowVizMotionId) {
-        if let Some(carrier) = self.flowviz_unit_carriers.get_mut(&id) {
+        let recorded = if let Some(carrier) = self.flowviz_unit_carriers.get_mut(&id) {
             carrier.physical = UnitPhysicalState::Discharged;
             carrier.arrived = false;
+            true
         } else {
             self.flowviz_unit_misses = self.flowviz_unit_misses.saturating_add(1);
+            false
+        };
+        #[cfg(debug_assertions)]
+        if recorded {
+            self.note_live_rainbow_discharged(id);
         }
+        #[cfg(not(debug_assertions))]
+        let _ = recorded;
     }
 }

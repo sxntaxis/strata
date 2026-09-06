@@ -9,6 +9,8 @@ mod flowviz;
 mod flowviz_conservative;
 mod flowviz_conservative_render;
 mod flowviz_unit;
+#[cfg(debug_assertions)]
+mod flowviz_unit_live_trace;
 #[cfg(test)]
 mod flowviz_unit_coherent_tests;
 #[cfg(test)]
@@ -201,6 +203,8 @@ pub(crate) struct OsloSandboxEngine {
     flowviz_unit_segments: usize,
     flowviz_unit_reveals: usize,
     flowviz_unit_misses: usize,
+    #[cfg(debug_assertions)]
+    flowviz_live_rainbow: flowviz_unit_live_trace::LiveRainbowProvenance,
     flowviz_shadow_columns: Vec<Vec<CategoryId>>,
     flowviz_transport_left: Vec<Vec<(CategoryId, usize)>>,
     flowviz_transport_right: Vec<Vec<(CategoryId, usize)>>,
@@ -460,6 +464,8 @@ impl OsloSandboxEngine {
             flowviz_unit_segments: 0,
             flowviz_unit_reveals: 0,
             flowviz_unit_misses: 0,
+            #[cfg(debug_assertions)]
+            flowviz_live_rainbow: flowviz_unit_live_trace::LiveRainbowProvenance::default(),
             flowviz_shadow_columns: vec![Vec::new(); lattice_size],
             flowviz_transport_left: vec![Vec::new(); lattice_size],
             flowviz_transport_right: vec![Vec::new(); lattice_size],
@@ -1098,6 +1104,8 @@ impl OsloSandboxEngine {
         self.total_generated = self.settled_count();
         self.reset_conservative_flowviz_from_physics();
         self.reset_unit_flowviz_from_physics();
+        #[cfg(debug_assertions)]
+        self.reset_live_rainbow_provenance(category_ids);
         for site in visible_start..visible_end {
             self.enqueue_neighborhood(site);
         }

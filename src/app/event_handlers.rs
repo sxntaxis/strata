@@ -505,7 +505,7 @@ impl App {
             }
             #[cfg(debug_assertions)]
             CommandIntent::TestingCheatsHelp => Ok(
-                "testingcheats: model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · fill (ensures six Fixture categories) · clear · status · reset"
+                "testingcheats: model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · fill (ensures six Fixture categories and resets live provenance) · clear · status · provenance · reset"
                     .to_string(),
             ),
             #[cfg(debug_assertions)]
@@ -622,6 +622,34 @@ impl App {
                 } else {
                     Ok("Testing sandbox inactive; authoritative live sediment is displayed".to_string())
                 }
+            }
+            #[cfg(debug_assertions)]
+            CommandIntent::TestingCheatsProvenance => {
+                let Some(testing) = self.testing_cheats.as_ref() else {
+                    return Err("testingcheats provenance requires an active testing sandbox".to_string());
+                };
+                let report = testing.engine.live_rainbow_provenance_report()?;
+                let cache_root = std::env::var_os("XDG_CACHE_HOME")
+                    .map(std::path::PathBuf::from)
+                    .or_else(|| {
+                        std::env::var_os("HOME")
+                            .map(std::path::PathBuf::from)
+                            .map(|home| home.join(".cache"))
+                    })
+                    .ok_or_else(|| "testingcheats provenance could not resolve a cache directory".to_string())?;
+                let path = cache_root.join("strata").join("rainbow-provenance.txt");
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent).map_err(|error| {
+                        format!("testingcheats provenance could not create {}: {error}", parent.display())
+                    })?;
+                }
+                std::fs::write(&path, report.as_bytes()).map_err(|error| {
+                    format!("testingcheats provenance could not write {}: {error}", path.display())
+                })?;
+                Ok(format!(
+                    "Rainbow provenance written to {} (read-only diagnostic; testing sediment unchanged)",
+                    path.display()
+                ))
             }
             #[cfg(debug_assertions)]
             CommandIntent::TestingCheatsReset => {

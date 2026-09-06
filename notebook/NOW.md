@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-05
 authority: working
-summary: H4/v5 remains published production authority and SEDIMENT-008 oslo-vessel-front physics remains owner-frozen. The owner judged SEDIMENT-015G-R2 (`9f0943b`) the best visual result so far, with only a small apparent initial teleportation and an open question about cyan transport versus the mostly static green basal core. The subsequent SEDIMENT-016 authoritative-active-grain redesign produced a giant fan/ray regression and is rejected. Work is rolled back exactly to 015G-R2. SEDIMENT-015G-D1 adds only diagnostic rainbow provenance evidence and idempotent persisted Fixture categories for `testingcheats fill`; Oslo physics and 015G presentation semantics remain unchanged.
-next: Natively validate SEDIMENT-015G-D1 on the exact 015G-R2 base. Run the fixture-category idempotence gate and the ignored rainbow provenance diagnostic, return the exact RAINBOW_BATCH/TRACE/GREEN_MASS/CYAN_LOW lines, then re-run 015G-R2 control regressions and repository gates. Do not open another visual redesign until the trace answers whether the apparent cyan jump is physical transport or presentation.
+summary: H4/v5 remains published production authority and SEDIMENT-008 oslo-vessel-front physics remains owner-frozen. The owner-preferred visual candidate remains SEDIMENT-015G-R2 and SEDIMENT-016 remains rejected. D1 added persisted Fixture categories without runtime semantic change. D2/D3 synthetic trigger diagnostics still produced zero fixture-layer hops despite the owner reproducing collapse interactively, so D4 stops guessing the trigger and adds debug-only live provenance to the exact human sandbox.
+next: Natively validate SEDIMENT-015G-D4, then reproduce the owner rainbow collapse once and run `testingcheats provenance`. Interpret the exact live dimensions/RNG plus green/cyan adjacent-edge evidence before making any further visual or physics change.
 ---
 
 # NOW — Strata
