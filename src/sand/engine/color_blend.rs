@@ -173,7 +173,7 @@ pub(super) fn blend_braille_color(
             )
         }
         BrailleColorBlend::Dominant => {
-            let mut best_id = None;
+            let mut best_id: Option<CategoryId> = None;
             let mut best_count = 0usize;
             for (category_id, count) in counts {
                 if *count > best_count
@@ -187,7 +187,8 @@ pub(super) fn blend_braille_color(
                     best_count = *count;
                 }
             }
-            let (r, g, b) = category_rgb(best_id.expect("colored category exists"), category_colors);
+            let (r, g, b) =
+                category_rgb(best_id.expect("colored category exists"), category_colors);
             Color::Rgb(r, g, b)
         }
         BrailleColorBlend::DominantSoft => {

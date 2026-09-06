@@ -142,8 +142,8 @@ impl ClassicSandboxEngine {
                     stat.max_outside = stat.max_outside.max(outside);
                 }
 
-                let unsupported = y + 1 < self.surface.grid.len()
-                    && self.surface.grid[y + 1][x].is_none();
+                let unsupported =
+                    y + 1 < self.surface.grid.len() && self.surface.grid[y + 1][x].is_none();
                 if unsupported {
                     stat.unsupported = stat.unsupported.saturating_add(1);
                 }
@@ -160,10 +160,7 @@ impl ClassicSandboxEngine {
 
         let rank_drops = self.stratigraphic_rank_drops(&ranks);
         let (tracked_braille_cells, mixed_braille_cells) = self.braille_mix_counts(&ranks);
-        let current_tracked = stats
-            .values()
-            .map(|stat| stat.current_count)
-            .sum::<usize>();
+        let current_tracked = stats.values().map(|stat| stat.current_count).sum::<usize>();
 
         let mut report = String::new();
         writeln!(report, "CLASSIC_STRATIGRAPHY_REPORT").expect("String write");
@@ -190,7 +187,9 @@ impl ClassicSandboxEngine {
                 .get(&band.category_id)
                 .copied()
                 .unwrap_or("<unknown>");
-            let stat = stats.get(&band.category_id).expect("tracked category stats");
+            let stat = stats
+                .get(&band.category_id)
+                .expect("tracked category stats");
             writeln!(
                 report,
                 "CATEGORY name={name:?} id={} initial_band=y[{}, {}) initial={} current={} above={} max_above={} below={} max_below={} outside_fill_span={} max_outside={} unsupported={}",
@@ -210,7 +209,7 @@ impl ClassicSandboxEngine {
             .expect("String write");
         }
 
-        outliers.sort_unstable_by(|left, right| right.0.cmp(&left.0));
+        outliers.sort_unstable_by_key(|left| std::cmp::Reverse(left.0));
         writeln!(report).expect("String write");
         writeln!(report, "OUTLIERS top={}", outliers.len().min(24)).expect("String write");
         for (_, category_id, x, y, above, below, outside, unsupported) in
@@ -248,10 +247,10 @@ impl ClassicSandboxEngine {
                 let Some(rank) = ranks.get(&category_id).copied() else {
                     continue;
                 };
-                if let Some(previous) = previous_rank {
-                    if rank < previous {
-                        rank_drops = rank_drops.saturating_add(1);
-                    }
+                if let Some(previous) = previous_rank
+                    && rank < previous
+                {
+                    rank_drops = rank_drops.saturating_add(1);
                 }
                 previous_rank = Some(rank);
             }
@@ -276,10 +275,10 @@ impl ClassicSandboxEngine {
                         if yy >= bounds.y_end || xx >= bounds.x_end {
                             continue;
                         }
-                        if let Some(category_id) = self.surface.grid[yy][xx] {
-                            if ranks.contains_key(&category_id) {
-                                present.insert(category_id);
-                            }
+                        if let Some(category_id) = self.surface.grid[yy][xx]
+                            && ranks.contains_key(&category_id)
+                        {
+                            present.insert(category_id);
                         }
                     }
                 }

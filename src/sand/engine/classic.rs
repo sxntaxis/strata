@@ -513,7 +513,6 @@ impl ClassicSandboxEngine {
         Ok(self.total_generated)
     }
 
-
     fn flush_pending_drive(&mut self) {
         if self.pending_drive.is_empty() {
             return;
@@ -1218,7 +1217,11 @@ mod tests {
             .map(|(index, id)| Category {
                 id,
                 name: format!("Fixture {index}"),
-                color: Color::Rgb((30 + index * 25) as u8, (60 + index * 20) as u8, (90 + index * 15) as u8),
+                color: Color::Rgb(
+                    (30 + index * 25) as u8,
+                    (60 + index * 20) as u8,
+                    (90 + index * 15) as u8,
+                ),
                 description: String::new(),
                 balance_effect: 0,
             })
@@ -1402,7 +1405,10 @@ mod tests {
         assert!(report.contains("stratigraphic_rank_drops=0"));
         assert!(report.contains("outside_fill_span=0"));
         assert_eq!(engine.surface.grid, grid_before);
-        assert_eq!((engine.physics_rng_state, engine.repose_rng_state), rng_before);
+        assert_eq!(
+            (engine.physics_rng_state, engine.repose_rng_state),
+            rng_before
+        );
         assert_eq!(engine.local_repose, repose_before);
         assert_eq!(engine.repose_memory_remaining, memory_before);
         assert_eq!(engine.movement_counts(), moves_before);
@@ -1423,10 +1429,7 @@ mod tests {
         engine
             .debug_fill_rainbow_80_centered_half(&ids)
             .expect("fillhalf");
-        let fill = engine
-            .last_rainbow_fill
-            .clone()
-            .expect("fill descriptor");
+        let fill = engine.last_rainbow_fill.clone().expect("fill descriptor");
         assert!(fill.x_start > 0);
         let top_category = *ids.last().expect("top category");
         let source = engine

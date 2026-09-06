@@ -1357,9 +1357,9 @@ mod tests {
 
     use ratatui::style::Color;
 
+    use super::BrailleColorBlend;
     #[cfg(debug_assertions)]
     use super::centered_half_open_interval;
-    use super::BrailleColorBlend;
 
     use crate::{
         domain::{Category, CategoryId},
@@ -1670,11 +1670,20 @@ mod tests {
         let dominant_lines =
             engine.render_with_color_blend(&categories, BrailleColorBlend::Dominant);
 
-        assert_eq!(rgb_lines[0].spans[0].content, soft_lines[0].spans[0].content);
-        assert_eq!(rgb_lines[0].spans[0].content, dominant_lines[0].spans[0].content);
+        assert_eq!(
+            rgb_lines[0].spans[0].content,
+            soft_lines[0].spans[0].content
+        );
+        assert_eq!(
+            rgb_lines[0].spans[0].content,
+            dominant_lines[0].spans[0].content
+        );
         assert_eq!(rgb_lines[0].spans[0].style.fg, Some(Color::Rgb(223, 0, 31)));
         assert_eq!(soft_lines[0].spans[0].style.fg, Some(Color::Rgb(249, 0, 5)));
-        assert_eq!(dominant_lines[0].spans[0].style.fg, Some(Color::Rgb(255, 0, 0)));
+        assert_eq!(
+            dominant_lines[0].spans[0].style.fg,
+            Some(Color::Rgb(255, 0, 0))
+        );
     }
 
     #[test]

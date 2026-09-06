@@ -525,6 +525,7 @@ struct SimulationState {
 const TESTING_CHEATS_DEFAULT_MODEL: &str = "classic";
 
 #[cfg(debug_assertions)]
+#[allow(clippy::large_enum_variant)]
 enum TestingSandEngine {
     H4(SandEngine),
     Classic(ClassicSandboxEngine),
