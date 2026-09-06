@@ -117,10 +117,12 @@ fn heterogeneous_classic_is_deterministic_for_a_fixed_seed() {
 #[test]
 fn weak_local_repose_increases_surface_roughness_without_rewriting_macroform() {
     let mut baseline = ClassicSandboxEngine::new(30, 10, 7, ClassicRainMode::Uniform);
+    baseline.set_experiment_profile_name("rugged").unwrap();
     baseline.force_uniform_repose = true;
     baseline.local_repose.fill(CLASSIC_REPOSE_LOW);
 
     let mut heterogeneous = ClassicSandboxEngine::new(30, 10, 7, ClassicRainMode::Uniform);
+    heterogeneous.set_experiment_profile_name("rugged").unwrap();
     install_centered_compact_wall(&mut baseline, 30, 24);
     install_centered_compact_wall(&mut heterogeneous, 30, 24);
     baseline.force_uniform_repose = true;
@@ -254,7 +256,10 @@ fn texture_profile_selection_is_nonretroactive_and_fill_resamples_cleanly() {
     engine
         .set_texture_profile_name("textured")
         .expect("textured profile");
-    assert_eq!(engine.local_repose, before, "profile selection must not rewrite live columns");
+    assert_eq!(
+        engine.local_repose, before,
+        "profile selection must not rewrite live columns"
+    );
     engine
         .debug_fill_rainbow_80(&[CategoryId(1), CategoryId(2)])
         .expect("textured fill");
@@ -291,7 +296,10 @@ fn texture_profiles_remain_deterministic_for_a_fixed_seed() {
         first.clear();
         second.clear();
         assert_eq!(first.local_repose, second.local_repose, "profile={profile}");
-        assert_eq!(first.repose_rng_state, second.repose_rng_state, "profile={profile}");
+        assert_eq!(
+            first.repose_rng_state, second.repose_rng_state,
+            "profile={profile}"
+        );
     }
 }
 
@@ -466,7 +474,10 @@ fn momentum_profile_allows_at_most_one_bonus_same_direction_diagonal() {
         .into_iter()
         .filter(|(px, py)| engine.surface.grid[*py][*px] == Some(category))
         .count();
-    assert_eq!(occupied, 1, "momentum must add exactly one same-direction bonus hop");
+    assert_eq!(
+        occupied, 1,
+        "momentum must add exactly one same-direction bonus hop"
+    );
     assert_eq!(engine.diagonal_moves, 2);
     assert_eq!(engine.surface.physical_grain_count(), 2);
 }

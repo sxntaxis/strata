@@ -732,7 +732,14 @@ mod tests {
             parse("testingcheats classic experiment").unwrap(),
             CommandIntent::TestingCheatsClassicExperiment { profile: None }
         );
-        for profile in ["rugged", "memory", "slope", "memory-slope", "anchored", "momentum"] {
+        for profile in [
+            "rugged",
+            "memory",
+            "slope",
+            "memory-slope",
+            "anchored",
+            "momentum",
+        ] {
             assert_eq!(
                 parse(&format!("testingcheats classic experiment {profile}")).unwrap(),
                 CommandIntent::TestingCheatsClassicExperiment {

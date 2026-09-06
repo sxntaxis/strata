@@ -67,11 +67,17 @@ impl ClassicExperimentProfile {
     }
 
     fn uses_memory(self) -> bool {
-        matches!(self, Self::Memory | Self::MemorySlope | Self::Anchored | Self::Momentum)
+        matches!(
+            self,
+            Self::Memory | Self::MemorySlope | Self::Anchored | Self::Momentum
+        )
     }
 
     fn uses_slope_bias(self) -> bool {
-        matches!(self, Self::Slope | Self::MemorySlope | Self::Anchored | Self::Momentum)
+        matches!(
+            self,
+            Self::Slope | Self::MemorySlope | Self::Anchored | Self::Momentum
+        )
     }
 
     fn uses_anchors(self) -> bool {
@@ -230,7 +236,7 @@ impl ClassicSandboxEngine {
         if new_width > old_width {
             let mut expanded_repose = Vec::with_capacity(new_width);
             for _ in 0..new_width {
-                expanded_repose.push(self.sample_local_repose());
+                expanded_repose.push(self.sample_base_local_repose());
             }
             for (x, repose) in old_repose.into_iter().enumerate() {
                 expanded_repose[x + horizontal_offset] = repose;
@@ -611,7 +617,11 @@ impl ClassicSandboxEngine {
     }
 
     fn choose_diagonal_step(&mut self, bounds: ViewportBounds, x: usize, y: usize) -> isize {
-        let random_step = if self.physics_random_bool() { 1isize } else { -1isize };
+        let random_step = if self.physics_random_bool() {
+            1isize
+        } else {
+            -1isize
+        };
         if !self.experiment_profile.uses_slope_bias() {
             return random_step;
         }
@@ -633,7 +643,7 @@ impl ClassicSandboxEngine {
 
         // Mild 3:1 preference. The remaining quarter preserves Classic's
         // stochastic character and prevents relief from becoming deterministic.
-        let prefer_steeper = self.next_physics_random_u64() % 4 != 0;
+        let prefer_steeper = !self.next_physics_random_u64().is_multiple_of(4);
         if prefer_steeper {
             if left_drop > right_drop { -1 } else { 1 }
         } else {
@@ -641,7 +651,12 @@ impl ClassicSandboxEngine {
         }
     }
 
-    fn diagonal_drop_depth(&self, bounds: ViewportBounds, target_x: usize, source_y: usize) -> usize {
+    fn diagonal_drop_depth(
+        &self,
+        bounds: ViewportBounds,
+        target_x: usize,
+        source_y: usize,
+    ) -> usize {
         let mut depth = 0usize;
         for y in source_y + 1..bounds.y_end {
             if self.surface.grid[y][target_x].is_some() {
@@ -766,7 +781,11 @@ impl ClassicSandboxEngine {
     }
 
     fn experiment_memory_refreshes(&self) -> u8 {
-        if self.experiment_profile.uses_memory() { 3 } else { 0 }
+        if self.experiment_profile.uses_memory() {
+            3
+        } else {
+            0
+        }
     }
 
     fn texture_patch_continues(&mut self) -> bool {
@@ -793,7 +812,7 @@ impl ClassicSandboxEngine {
             // Preserve CLASSIC-002's exact accepted mapping byte-for-byte in RNG
             // consumption and 1-in-20 threshold selection.
             ClassicTextureProfile::Baseline => {
-                if random % 20 == 0 {
+                if random.is_multiple_of(20) {
                     CLASSIC_REPOSE_MID
                 } else {
                     CLASSIC_REPOSE_LOW
@@ -804,13 +823,11 @@ impl ClassicSandboxEngine {
                 93..=98 => CLASSIC_REPOSE_MID,
                 _ => CLASSIC_REPOSE_HIGH,
             },
-            ClassicTextureProfile::Rugged | ClassicTextureProfile::Terraced => {
-                match random % 100 {
-                    0..=89 => CLASSIC_REPOSE_LOW,
-                    90..=97 => CLASSIC_REPOSE_MID,
-                    _ => CLASSIC_REPOSE_HIGH,
-                }
-            }
+            ClassicTextureProfile::Rugged | ClassicTextureProfile::Terraced => match random % 100 {
+                0..=89 => CLASSIC_REPOSE_LOW,
+                90..=97 => CLASSIC_REPOSE_MID,
+                _ => CLASSIC_REPOSE_HIGH,
+            },
         }
     }
 

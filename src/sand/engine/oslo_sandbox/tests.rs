@@ -818,7 +818,12 @@ fn rainbow_fill_populates_exactly_eighty_percent_of_current_visible_window() {
 #[test]
 fn rainbow_fillhalf_populates_centered_half_of_current_visible_width() {
     let mut engine = OsloSandboxEngine::new_front_vessel(21, 10, TEST_SEED);
-    let categories = [CategoryId(11), CategoryId(22), CategoryId(33), CategoryId(44)];
+    let categories = [
+        CategoryId(11),
+        CategoryId(22),
+        CategoryId(33),
+        CategoryId(44),
+    ];
     let (visible_start, visible_end) = engine.visible_lattice_bounds();
     let visible_width = visible_end - visible_start;
     let expected_width = (visible_width / 2).max(1);
