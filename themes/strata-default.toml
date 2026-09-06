@@ -44,15 +44,3 @@ colors = [
   "sand-sky",
   "sand-cyan",
 ]
-
-[ui]
-background = "default"
-foreground = "white"
-idle = "white"
-status = "gray"
-border = "cyan-ui"
-accent = "blue-ui"
-report = "magenta-ui"
-warning = "yellow-ui"
-error = "red-ui"
-success = "green-ui"

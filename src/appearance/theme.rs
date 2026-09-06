@@ -273,7 +273,7 @@ fn resolve_ui(
         .unwrap_or(UiColorRef::Default);
     let foreground = resolve_ui_ref(id, palette, file.foreground.as_deref())?
         .or_else(|| fallback_ui.map(|ui| ui.foreground))
-        .unwrap_or(UiColorRef::Default);
+        .unwrap_or(UiColorRef::Color(Color::White));
     let idle = resolve_required_ui_color(id, palette, file.idle.as_deref())?
         .or_else(|| fallback_ui.map(|ui| ui.idle))
         .unwrap_or(Color::White);
@@ -288,7 +288,7 @@ fn resolve_ui(
         .unwrap_or(UiColorRef::Color(Color::Blue));
     let report = resolve_ui_ref(id, palette, file.report.as_deref())?
         .or_else(|| fallback_ui.map(|ui| ui.report))
-        .unwrap_or(accent);
+        .unwrap_or(UiColorRef::Color(Color::Magenta));
     let warning = resolve_ui_ref(id, palette, file.warning.as_deref())?
         .or_else(|| fallback_ui.map(|ui| ui.warning))
         .unwrap_or(UiColorRef::Color(Color::Yellow));
@@ -297,7 +297,7 @@ fn resolve_ui(
         .unwrap_or(UiColorRef::Color(Color::Red));
     let success = resolve_ui_ref(id, palette, file.success.as_deref())?
         .or_else(|| fallback_ui.map(|ui| ui.success))
-        .unwrap_or(UiColorRef::Color(Color::Green));
+        .unwrap_or(UiColorRef::Color(Color::Rgb(0, 176, 80)));
     Ok(ThemeUi {
         background,
         foreground,

@@ -28,7 +28,7 @@ updated: 2026-09-06
 - Added profile-local `appearance.toml` theme selection and `config/themes/*.toml` discovery.
 - Added Settings → Appearance → Theme selection.
 - Preserved Layer color cycling, now against the active theme's derived sand wheel.
-- Added theme-aware category/UI rendering paths.
+- Added theme-aware category/UI rendering paths. The built-in theme deliberately inherits Strata's exact pre-theme runtime UI color variants so ANSI colors such as `Color::White` are not silently converted to truecolor `Rgb(255, 255, 255)`.
 - Retained SQLite schema v1. Legacy category color indices decode unchanged; new category colors persist exact RGB anchors through a tagged positive value in the existing compatibility column.
 - Kept CLI schema stable by projecting anchors back to the nearest legacy color index; portable SQLite interchange remains full-fidelity.
 - Promoted Classic default blend to `rgb-luma-safe` without changing physics.
