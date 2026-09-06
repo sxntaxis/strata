@@ -8,8 +8,8 @@ use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    appearance::nearest_legacy_color_index,
     command::CommandIntent,
-    constants::COLORS,
     domain::{
         CategoryId, OperationalDayPolicy, ReportPeriod, ReportWindow, Session, build_period_report,
         build_report_for_window, civil_time_for_utc, day_boundary_config,
@@ -25,7 +25,7 @@ pub struct Invocation {
     #[arg(
         long,
         global = true,
-        help = "Deliberately ignore keymap.json and use built-in defaults"
+        help = "Deliberately ignore profile-local keymap and appearance configuration and use built-in defaults"
     )]
     pub ignore_config: bool,
 
@@ -490,10 +490,7 @@ fn export_data_sqlite(
         .iter()
         .filter(|category| category.id.0 != 0)
         .map(|category| {
-            let color_pos = COLORS
-                .iter()
-                .position(|&color| color == category.color)
-                .unwrap_or(0);
+            let color_pos = nearest_legacy_color_index(category.color);
             CategoryExport {
                 id: category.id.0,
                 name: category.name.clone(),

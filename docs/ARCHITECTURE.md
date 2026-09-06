@@ -1,7 +1,7 @@
 # Strata architecture authority
 
 Status: current implementation map
-Last reviewed: 2026-08-20
+Last reviewed: 2026-09-06
 
 ## System shape
 
@@ -25,6 +25,7 @@ Core responsibilities:
 - `src/temporal.rs` — monotonic/wall-clock reconciliation and exact overlap slicing.
 - `src/sqlite.rs`, `src/sqlite/**` — the one current schema, repository/runtime transactions, interchange, backup/restore/doctor, and fault certification.
 - `src/app.rs`, `src/app/**` — TUI orchestration, explicit interaction modes, recovery, and rendering.
+- `src/appearance.rs`, `src/appearance/**`, `themes/**` — profile-local theme contract, perceptual sand-palette resolution, and UI color roles.
 - `src/sand/**` — canonical sediment, recovery arithmetic, snapshots, and viewport rendering.
 
 ## Persistence and profile authority
@@ -65,6 +66,17 @@ The product remains keyboard-first and keeps the continuous sand view as its cen
 - The category modal is compact in ordinary use; durable metadata has an explicit edit mode.
 - Report history is read-only until explicit edit mode; SQLite persistence succeeds before the in-memory row changes.
 - The configured keymap remains truthful about bound/unbound/disabled actions. Ctrl-C is the mandatory terminal-safety quit path.
+
+## Appearance and themes
+
+- Themes define arbitrary named RGB palettes, optional arbitrary-length sand subsets, and Strata UI-role mappings.
+- `default` means external terminal/environment authority for supported UI roles; it is not a palette swatch.
+- Category color persistence is a theme-independent perceptual anchor, not a theme slot.
+- Layer `Shift+←` / `Shift+→` navigation derives a stable OKLCH hue wheel from the active theme.
+- Theme changes are presentation-only: no sand topology, category/session identity, RNG, or chronology changes.
+- `rgb-luma-safe` is the accepted Classic Braille blend baseline. Terminal auto light/dark detection and contrast adaptation are a subsequent appearance unit.
+
+See `docs/APPEARANCE_AUTHORITY.md`.
 
 ## Live CLI control
 

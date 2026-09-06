@@ -64,26 +64,31 @@ impl App {
             selected_summary_index
                 .and_then(|idx| summary.entries.get(idx))
                 .map(|entry| entry.color)
-                .unwrap_or(Color::White)
+                .unwrap_or(self.theme_foreground())
         };
 
         let interval_title = Line::from(Span::styled(
             interval_label,
-            Style::default().fg(Color::White),
+            Style::default().fg(self.theme_foreground()),
         ))
         .alignment(Alignment::Left);
 
         let center_title = Line::from(Span::styled(
             "Balance",
             Style::default()
-                .fg(Color::White)
+                .fg(self.theme_foreground())
                 .add_modifier(Modifier::BOLD),
         ))
         .alignment(Alignment::Center);
 
         let total_title = Line::from(Span::styled(
             self.format_balance_time(summary.total_balance_seconds),
-            Style::default().fg(view_style::balance_color(summary.total_balance_seconds)),
+            Style::default().fg(view_style::balance_color(
+                summary.total_balance_seconds,
+                self.theme_error(),
+                self.theme_success(),
+                self.theme_status(),
+            )),
         ))
         .alignment(Alignment::Right);
 
@@ -92,25 +97,36 @@ impl App {
             view_style::report_period_label_span(
                 "Day",
                 !custom_range_active && self.report_period == ReportPeriod::Today,
+                self.theme_foreground(),
+                self.theme_status(),
             ),
-            Span::styled("  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("  ", Style::default().fg(self.theme_status())),
             view_style::report_period_label_span(
                 "Week",
                 !custom_range_active && self.report_period == ReportPeriod::Week,
+                self.theme_foreground(),
+                self.theme_status(),
             ),
-            Span::styled("  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("  ", Style::default().fg(self.theme_status())),
             view_style::report_period_label_span(
                 "Month",
                 !custom_range_active && self.report_period == ReportPeriod::Month,
+                self.theme_foreground(),
+                self.theme_status(),
             ),
-            Span::styled("  ", Style::default().fg(Color::DarkGray)),
-            view_style::report_period_label_span("Range", custom_range_active),
+            Span::styled("  ", Style::default().fg(self.theme_status())),
+            view_style::report_period_label_span(
+                "Range",
+                custom_range_active,
+                self.theme_foreground(),
+                self.theme_status(),
+            ),
         ])
         .alignment(Alignment::Center);
         let snapshot_bottom_title = self.should_use_report_snapshot().then(|| {
             Line::from(Span::styled(
                 self.report_snapshot_status_label(),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(self.theme_status()),
             ))
             .alignment(Alignment::Left)
         });
@@ -128,8 +144,8 @@ impl App {
                     preview
                 };
                 let mut spans = vec![
-                    Span::styled("collision · ", Style::default().fg(Color::Yellow)),
-                    Span::styled(preview, Style::default().fg(Color::White)),
+                    Span::styled("collision · ", Style::default().fg(self.theme_warning())),
+                    Span::styled(preview, Style::default().fg(self.theme_foreground())),
                 ];
                 if edit.confirmation.as_ref().is_some_and(|confirmation| {
                     confirmation.conflicts.iter().any(|item| item.active)
@@ -141,24 +157,24 @@ impl App {
                         .unwrap_or_else(|| "current layer".to_string());
                     spans.push(Span::styled(
                         format!(" · current stays {active_name}"),
-                        Style::default().fg(Color::Gray),
+                        Style::default().fg(self.theme_status()),
                     ));
                 }
                 spans.push(Span::styled(
                     " · Enter replace · Esc back",
-                    Style::default().fg(Color::Gray),
+                    Style::default().fg(self.theme_status()),
                 ));
                 Some(Line::from(spans).alignment(Alignment::Right))
             } else {
                 let active_style = Style::default()
-                    .fg(Color::Cyan)
+                    .fg(self.theme_accent())
                     .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
-                let inactive_style = Style::default().fg(Color::White);
+                let inactive_style = Style::default().fg(self.theme_foreground());
                 let target = self
                     .historical_activity_target_name()
                     .unwrap_or_else(|| "unavailable".to_string());
                 let mut spans = vec![
-                    Span::styled("log past · layer ", Style::default().fg(Color::Gray)),
+                    Span::styled("log past · layer ", Style::default().fg(self.theme_status())),
                     Span::styled(
                         target,
                         if edit.active_field == super::HistoricalActivityField::Layer {
@@ -167,7 +183,7 @@ impl App {
                             inactive_style
                         },
                     ),
-                    Span::styled(" · from ", Style::default().fg(Color::Gray)),
+                    Span::styled(" · from ", Style::default().fg(self.theme_status())),
                     Span::styled(
                         edit.from.clone(),
                         if edit.active_field == super::HistoricalActivityField::From {
@@ -176,7 +192,7 @@ impl App {
                             inactive_style
                         },
                     ),
-                    Span::styled(" · to ", Style::default().fg(Color::Gray)),
+                    Span::styled(" · to ", Style::default().fg(self.theme_status())),
                     Span::styled(
                         edit.to.clone(),
                         if edit.active_field == super::HistoricalActivityField::To {
@@ -189,27 +205,27 @@ impl App {
                 if let Some(error) = edit.error.as_ref() {
                     spans.push(Span::styled(
                         format!(" · {error}"),
-                        Style::default().fg(Color::Red),
+                        Style::default().fg(self.theme_error()),
                     ));
                     spans.push(Span::styled(
                         " · Enter retry · Esc cancel",
-                        Style::default().fg(Color::Gray),
+                        Style::default().fg(self.theme_status()),
                     ));
                 } else {
                     spans.push(Span::styled(
                         " · ←/→ layer · Tab next · Enter save · Esc cancel",
-                        Style::default().fg(Color::Gray),
+                        Style::default().fg(self.theme_status()),
                     ));
                 }
                 Some(Line::from(spans).alignment(Alignment::Right))
             }
         } else if let Some(edit) = self.report_range_edit.as_ref() {
             let active_style = Style::default()
-                .fg(Color::Cyan)
+                .fg(self.theme_accent())
                 .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
-            let inactive_style = Style::default().fg(Color::White);
+            let inactive_style = Style::default().fg(self.theme_foreground());
             let mut spans = vec![
-                Span::styled("from ", Style::default().fg(Color::Gray)),
+                Span::styled("from ", Style::default().fg(self.theme_status())),
                 Span::styled(
                     edit.from.clone(),
                     if edit.active_field == super::ReportRangeField::From {
@@ -218,7 +234,7 @@ impl App {
                         inactive_style
                     },
                 ),
-                Span::styled(" · to ", Style::default().fg(Color::Gray)),
+                Span::styled(" · to ", Style::default().fg(self.theme_status())),
                 Span::styled(
                     edit.to.clone(),
                     if edit.active_field == super::ReportRangeField::To {
@@ -231,16 +247,16 @@ impl App {
             if let Some(error) = edit.error.as_ref() {
                 spans.push(Span::styled(
                     format!(" · {error}"),
-                    Style::default().fg(Color::Red),
+                    Style::default().fg(self.theme_error()),
                 ));
                 spans.push(Span::styled(
                     " · Enter retry · Esc cancel",
-                    Style::default().fg(Color::Gray),
+                    Style::default().fg(self.theme_status()),
                 ));
             } else {
                 spans.push(Span::styled(
                     " · Tab next · Enter apply · Esc cancel",
-                    Style::default().fg(Color::Gray),
+                    Style::default().fg(self.theme_status()),
                 ));
             }
             Some(Line::from(spans).alignment(Alignment::Right))
@@ -259,7 +275,7 @@ impl App {
                 )
             };
             Some(
-                Line::from(Span::styled(label, Style::default().fg(Color::Gray)))
+                Line::from(Span::styled(label, Style::default().fg(self.theme_status())))
                     .alignment(Alignment::Right),
             )
         } else {
@@ -269,13 +285,14 @@ impl App {
                 .map(|key| {
                     Line::from(Span::styled(
                         format!("{} Log past", balance_key_hint(key)),
-                        Style::default().fg(Color::Gray),
+                        Style::default().fg(self.theme_status()),
                     ))
                     .alignment(Alignment::Right)
                 })
         };
 
         let mut frame_block = Block::default()
+            .style(Style::default().bg(self.theme_background()))
             .title(interval_title)
             .title(center_title)
             .title(total_title)
@@ -365,16 +382,16 @@ impl App {
         let mid_y = modal_rect.y + (modal_rect.height / 2);
         let left_arrow = Paragraph::new(Line::from(Span::styled(
             "←",
-            Style::default().fg(Color::Gray),
+            Style::default().fg(self.theme_status()),
         )));
         let right_arrow = Paragraph::new(Line::from(Span::styled(
             "→",
             if !self.can_shift_report_interval_newer() {
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(self.theme_status())
                     .add_modifier(Modifier::DIM)
             } else {
-                Style::default().fg(Color::Gray)
+                Style::default().fg(self.theme_status())
             },
         )));
 
@@ -477,17 +494,22 @@ impl App {
                 let metric_cell = format!("{metric_value:>width$}", width = metric_width);
 
                 let metric_color = if is_none_category {
-                    Color::Gray
+                    self.theme_status()
                 } else if row.balance_seconds == 0 {
                     if row.balance_effect < 0 {
-                        Color::Red
+                        self.theme_error()
                     } else if row.balance_effect > 0 {
-                        Color::Green
+                        self.theme_success()
                     } else {
-                        Color::Gray
+                        self.theme_status()
                     }
                 } else {
-                    view_style::balance_color(row.balance_seconds)
+                    view_style::balance_color(
+                        row.balance_seconds,
+                        self.theme_error(),
+                        self.theme_success(),
+                        self.theme_status(),
+                    )
                 };
 
                 if is_selected {
@@ -508,13 +530,13 @@ impl App {
                 } else {
                     let mut spans = Vec::new();
                     if show_date_column {
-                        spans.push(Span::raw(date_cell).fg(Color::Gray));
-                        spans.push(Span::raw(" ").fg(Color::Gray));
+                        spans.push(Span::raw(date_cell).fg(self.theme_status()));
+                        spans.push(Span::raw(" ").fg(self.theme_status()));
                     }
-                    spans.push(Span::raw(tag_cell).fg(Color::White));
-                    spans.push(Span::raw(" ").fg(Color::White));
-                    spans.push(Span::raw(time_cell).fg(Color::Gray));
-                    spans.push(Span::raw(" ").fg(Color::White));
+                    spans.push(Span::raw(tag_cell).fg(self.theme_foreground()));
+                    spans.push(Span::raw(" ").fg(self.theme_foreground()));
+                    spans.push(Span::raw(time_cell).fg(self.theme_status()));
+                    spans.push(Span::raw(" ").fg(self.theme_foreground()));
                     spans.push(Span::raw(metric_cell).fg(metric_color));
 
                     ListItem::new(Line::from(spans))
@@ -528,7 +550,7 @@ impl App {
         let list = if logs.is_empty() {
             List::new(vec![ListItem::new(Line::from(vec![Span::styled(
                 "No logs for this layer in this period.",
-                Style::default().fg(Color::Gray),
+                Style::default().fg(self.theme_status()),
             )]))])
         } else {
             List::new(items)
@@ -576,25 +598,26 @@ impl App {
                     self.format_balance_time(entry.balance_seconds)
                 };
                 let metric_color = if is_none_row {
-                    Color::Gray
+                    self.theme_status()
                 } else if entry.balance_seconds == 0 {
                     if entry.balance_effect < 0 {
-                        Color::Red
+                        self.theme_error()
                     } else if entry.balance_effect > 0 {
-                        Color::Green
+                        self.theme_success()
                     } else {
-                        Color::Gray
+                        self.theme_status()
                     }
                 } else {
-                    view_style::balance_color(entry.balance_seconds)
+                    view_style::balance_color(
+                        entry.balance_seconds,
+                        self.theme_error(),
+                        self.theme_success(),
+                        self.theme_status(),
+                    )
                 };
 
                 if is_selected {
-                    let text_color = if is_none_row {
-                        Color::Black
-                    } else {
-                        view_style::text_color_for_bg(entry.color)
-                    };
+                    let text_color = view_style::text_color_for_bg(entry.color);
                     ListItem::new(Line::from(vec![
                         Span::raw(dot).fg(text_color),
                         Span::raw(name).fg(text_color),
@@ -605,8 +628,8 @@ impl App {
                 } else {
                     ListItem::new(Line::from(vec![
                         Span::raw(dot).fg(entry.color),
-                        Span::raw(name).fg(Color::White),
-                        Span::raw(" ".repeat(pad)).fg(Color::White),
+                        Span::raw(name).fg(self.theme_foreground()),
+                        Span::raw(" ".repeat(pad)).fg(self.theme_foreground()),
                         Span::raw(metric_value).fg(metric_color),
                     ]))
                 }
@@ -619,7 +642,7 @@ impl App {
         let list = if summary.entries.is_empty() {
             List::new(vec![ListItem::new(Line::from(vec![Span::styled(
                 "No tracked sessions for this period.",
-                Style::default().fg(Color::Gray),
+                Style::default().fg(self.theme_status()),
             )]))])
         } else {
             List::new(items)

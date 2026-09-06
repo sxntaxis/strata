@@ -1,0 +1,58 @@
+schema = 1
+
+[theme]
+name = "Strata Default"
+appearance = "dark"
+
+[palette]
+white = "#ffffff"
+black = "#000000"
+gray = "#808080"
+dark-gray = "#555555"
+cyan-ui = "#00ffff"
+blue-ui = "#0000ff"
+yellow-ui = "#ffff00"
+red-ui = "#ff0000"
+green-ui = "#00b050"
+magenta-ui = "#ff00ff"
+
+sand-green = "#00b050"
+sand-lime = "#80ff00"
+sand-yellow = "#ffff00"
+sand-gold = "#ffcc00"
+sand-orange = "#ff9900"
+sand-vermilion = "#ff3300"
+sand-red = "#ff0000"
+sand-violet = "#9900ff"
+sand-indigo = "#6633ff"
+sand-blue = "#0000ff"
+sand-sky = "#0099ff"
+sand-cyan = "#00ffff"
+
+[sand]
+colors = [
+  "sand-green",
+  "sand-lime",
+  "sand-yellow",
+  "sand-gold",
+  "sand-orange",
+  "sand-vermilion",
+  "sand-red",
+  "sand-violet",
+  "sand-indigo",
+  "sand-blue",
+  "sand-sky",
+  "sand-cyan",
+]
+
+[ui]
+background = "default"
+foreground = "white"
+idle = "white"
+status = "gray"
+border = "cyan-ui"
+accent = "blue-ui"
+report = "magenta-ui"
+warning = "yellow-ui"
+error = "red-ui"
+success = "green-ui"

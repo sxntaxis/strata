@@ -283,7 +283,7 @@ impl ClassicSandboxEngine {
             repose_memory_remaining,
             texture_profile: ClassicTextureProfile::Rugged,
             experiment_profile: ClassicExperimentProfile::MomentumGroundedContact,
-            color_blend_profile: BrailleColorBlend::RgbAdditive,
+            color_blend_profile: BrailleColorBlend::RgbLumaSafe,
             color_background_policy: BrailleColorBackground::Neutral,
             last_rainbow_fill: None,
             rain_focus_x: None,
@@ -1366,7 +1366,7 @@ mod tests {
     #[test]
     fn colorblend_selection_is_render_only_and_nonretroactive() {
         let mut engine = ClassicSandboxEngine::new(12, 10, 701, ClassicRainMode::Uniform);
-        assert_eq!(engine.color_blend_profile_name(), "rgb-additive");
+        assert_eq!(engine.color_blend_profile_name(), "rgb-luma-safe");
         assert_eq!(engine.color_background_policy_name(), "neutral");
         let ids = [
             CategoryId(1),

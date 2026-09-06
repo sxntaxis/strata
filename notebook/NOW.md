@@ -5,9 +5,13 @@ state: active
 created: 2026-08-01
 updated: 2026-09-06
 authority: working
-summary: CLASSIC-013 is machine-green; stratigraphic redistribution remains accepted unchanged. Human review promotes CLASSIC-014 `rgb-additive` as the preferred Classic/Hybrid Braille color baseline. CLASSIC-015 is the current bounded edge: compare source-lightness, safe-neutral, fixed-mid, and background-aware cancellation targets without changing physics, mass, RNG, or the CLASSIC-012 performance baseline.
-next: Natively validate CLASSIC-015, then compare `rgb-additive`, `rgb-luma`, `rgb-luma-safe`, `rgb-mid`, and `rgb-contrast` on one unchanged fillhalf state. For `rgb-contrast`, preview `neutral`, `dark`, and `light`; do not add terminal auto-detection or persistent settings until the owner selects the color semantic.
+summary: APPEARANCE-001 is the active authored candidate: manual theme TOML, arbitrary named palettes and sand subsets, OKLCH color cycling, theme-independent category anchors, and rgb-luma-safe as the accepted Classic blend baseline; native validation remains pending.
+next: Natively validate APPEARANCE-001, then owner-smoke a custom theme through Settings and Layers. Keep terminal auto light/dark detection and strict/soft/safe contrast adaptation for the next appearance unit.
 ---
+
+## APPEARANCE-001 authored candidate — 2026-09-06
+
+Manual theme authority is now the active authored candidate: arbitrary named palettes, optional arbitrary-length sand subsets, OKLCH-derived Layer color cycling, profile-local theme selection, theme-independent category RGB anchors, `default` external-color semantics, and `rgb-luma-safe` as Classic blend baseline. Physics remains `momentum-grounded-contact`. Native validation and owner theme smoke are required before publication; terminal auto light/dark and contrast adaptation remain the next appearance unit, not part of this candidate.
 
 # NOW — Strata
 

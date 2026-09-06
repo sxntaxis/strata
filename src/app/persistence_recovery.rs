@@ -605,7 +605,7 @@ impl App {
         let mut lines = vec![
             Line::from(Span::styled(
                 "AUTHORITATIVE PERSISTENCE FAILED",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                Style::default().fg(self.theme_error()).add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
             Line::from(vec![
@@ -632,7 +632,7 @@ impl App {
             Line::from(""),
             Line::from(Span::styled(
                 "Normal controls are disabled. The visible state is not claimed durable.",
-                Style::default().fg(Color::Yellow),
+                Style::default().fg(self.theme_warning()),
             )),
             Line::from(format!("[R] {}", recovery.action.label())),
             Line::from("[E] write emergency recovery JSON and remain open"),
@@ -641,7 +641,7 @@ impl App {
         if recovery.exit_without_saving_armed {
             lines.push(Line::from(Span::styled(
                 "[X] press again to exit without a recovery export",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                Style::default().fg(self.theme_error()).add_modifier(Modifier::BOLD),
             )));
         } else {
             lines.push(Line::from("[X] arm exit without saving"));
@@ -649,22 +649,23 @@ impl App {
         if let Some(path) = &recovery.exported_path {
             lines.push(Line::from(Span::styled(
                 format!("Exported: {}", path.display()),
-                Style::default().fg(Color::Green),
+                Style::default().fg(self.theme_success()),
             )));
         }
         if let Some(error) = &recovery.export_error {
             lines.push(Line::from(Span::styled(
                 format!("Export failed: {error}"),
-                Style::default().fg(Color::Red),
+                Style::default().fg(self.theme_error()),
             )));
         }
 
         let block = Block::default()
+            .style(Style::default().bg(self.theme_background()))
             .title(" Persistence recovery ")
             .title_alignment(Alignment::Center)
             .borders(Borders::ALL)
             .border_type(BorderType::Double)
-            .border_style(Style::default().fg(Color::Red));
+            .border_style(Style::default().fg(self.theme_error()));
         let paragraph = Paragraph::new(lines)
             .block(block)
             .wrap(Wrap { trim: false });

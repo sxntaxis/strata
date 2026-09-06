@@ -25,7 +25,7 @@ impl App {
             self.sand_engine.resize(inner_width, inner_height);
         }
 
-        let categories = self.time_tracker.categories_ordered();
+        let categories = self.categories_for_render();
         #[cfg(debug_assertions)]
         let testing_sand = self.testing_cheats.as_mut().map(|testing| {
             if testing.engine.dimensions() != (inner_width, inner_height) {
@@ -114,9 +114,12 @@ impl App {
             session_timer,
             effective_time_str,
             border_color,
+            self.theme_foreground(),
         );
 
-        let paragraph = Paragraph::new(sand).block(block);
+        let paragraph = Paragraph::new(sand)
+            .block(block)
+            .style(Style::default().bg(self.theme_background()));
         f.render_widget(paragraph, size);
 
         if let Some(progress) = self.catchup_progress_ratio() {
@@ -136,8 +139,8 @@ impl App {
                     .ratio(progress)
                     .label("")
                     .line_set(ratatui::symbols::line::THICK)
-                    .style(Style::default().fg(Color::DarkGray))
-                    .gauge_style(Style::default().fg(border_color).bg(Color::DarkGray));
+                    .style(Style::default().fg(self.theme_status()))
+                    .gauge_style(Style::default().fg(border_color).bg(self.theme_status()));
                 f.render_widget(gauge, Rect::new(gauge_x, gauge_y, gauge_width, 1));
             }
         }
@@ -180,6 +183,7 @@ fn frame_block(
     session_timer: String,
     effective_time: Option<String>,
     border_color: Color,
+    foreground: Color,
 ) -> Block<'static> {
     let mut block = Block::default()
         .borders(Borders::ALL)
@@ -191,7 +195,7 @@ fn frame_block(
                 Span::styled(
                     category_name,
                     Style::default()
-                        .fg(Color::White)
+                        .fg(foreground)
                         .add_modifier(Modifier::BOLD),
                 ),
                 if description.is_empty() {
@@ -200,7 +204,7 @@ fn frame_block(
                     Span::styled(
                         format!(" {}", description),
                         Style::default()
-                            .fg(Color::White)
+                            .fg(foreground)
                             .add_modifier(Modifier::ITALIC),
                     )
                 },
@@ -211,7 +215,7 @@ fn frame_block(
     block = block.title(
         Line::from(Span::styled(
             session_timer,
-            Style::default().fg(Color::White),
+            Style::default().fg(foreground),
         ))
         .alignment(Alignment::Center),
     );
@@ -219,7 +223,7 @@ fn frame_block(
         block = block.title(
             Line::from(Span::styled(
                 effective_time,
-                Style::default().fg(Color::White),
+                Style::default().fg(foreground),
             ))
             .alignment(Alignment::Right),
         );
@@ -283,6 +287,7 @@ mod tests {
             "12:34:56".to_string(),
             None,
             Color::White,
+            Color::White,
         ));
         assert!(idle.contains("12:34:56"));
         assert!(!idle.contains("00:00:00"));
@@ -293,6 +298,7 @@ mod tests {
             "focus".to_string(),
             "00:00:07".to_string(),
             Some("00:00:03".to_string()),
+            Color::White,
             Color::White,
         ));
         assert!(active.contains("Work focus"));
@@ -306,6 +312,7 @@ mod tests {
             "focus".to_string(),
             "00:00:07".to_string(),
             Some("00:00:03".to_string()),
+            Color::White,
             Color::White,
         )
         .render(area, &mut styled);
@@ -323,6 +330,7 @@ mod tests {
             String::new(),
             "00:00:07".to_string(),
             Some("-00:00:03".to_string()),
+            Color::White,
             Color::White,
         ));
         assert!(negative.contains("-00:00:03"));

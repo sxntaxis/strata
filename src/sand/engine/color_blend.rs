@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use ratatui::style::Color;
 
-use crate::domain::{CategoryId, DRIFT_CATEGORY_ID};
+use crate::domain::CategoryId;
 
 /// Debug-selectable reduction from the up-to-eight independently colored sand
 /// dots inside one terminal Braille cell to the single foreground color that
@@ -88,9 +88,6 @@ fn category_rgb(
     category_id: CategoryId,
     category_colors: &HashMap<CategoryId, Color>,
 ) -> (u8, u8, u8) {
-    if category_id == DRIFT_CATEGORY_ID {
-        return (255, 255, 255);
-    }
     match category_colors
         .get(&category_id)
         .copied()

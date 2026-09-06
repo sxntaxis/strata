@@ -83,6 +83,12 @@ impl App {
         let mut categories = self.time_tracker.categories_for_storage();
         categories.extend(self.archived_categories.iter().cloned());
         categories
+            .into_iter()
+            .map(|mut category| {
+                category.color = self.resolved_category_color(category.id, category.color);
+                category
+            })
+            .collect()
     }
 
     pub(super) fn category_color_for_id(&self, category_id: CategoryId) -> Color {
@@ -94,7 +100,8 @@ impl App {
                     .find(|category| category.id == category_id)
                     .map(|category| category.color)
             })
-            .unwrap_or(Color::White)
+            .map(|anchor| self.resolved_category_color(category_id, anchor))
+            .unwrap_or_else(|| self.theme_foreground())
     }
 
     pub(super) fn current_report_window(&self) -> ReportWindow {

@@ -62,6 +62,14 @@ pub fn get_keymap_path() -> PathBuf {
     get_config_dir().join("keymap.json")
 }
 
+pub fn get_appearance_path() -> PathBuf {
+    get_config_dir().join("appearance.toml")
+}
+
+pub fn get_themes_dir() -> PathBuf {
+    get_config_dir().join("themes")
+}
+
 pub fn write_text_file(path: &Path, content: &str) -> Result<(), String> {
     atomic_write(path, content)
 }

@@ -38,28 +38,29 @@ impl App {
         let title = Line::from(Span::styled(
             "settings",
             Style::default()
-                .fg(Color::White)
+                .fg(self.theme_foreground())
                 .add_modifier(Modifier::BOLD),
         ))
         .alignment(Alignment::Center);
 
         let bottom_left = Line::from(Span::styled(
             close_hint,
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(self.theme_status()),
         ))
         .alignment(Alignment::Left);
         let bottom_center = Line::from(Span::styled(
             bottom_description,
-            Style::default().fg(Color::Gray),
+            Style::default().fg(self.theme_status()),
         ))
         .alignment(Alignment::Center);
         let bottom_right = Line::from(Span::styled(
             format!("{movement_hint} · {jump_hint}"),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(self.theme_status()),
         ))
         .alignment(Alignment::Right);
 
         let frame_block = Block::default()
+            .style(Style::default().bg(self.theme_background()))
             .title(title)
             .title_bottom(bottom_left)
             .title_bottom(bottom_center)
@@ -87,9 +88,9 @@ impl App {
                 let error_line = Line::from(vec![
                     Span::styled(
                         "config error: ",
-                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                        Style::default().fg(self.theme_error()).add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(err.to_string(), Style::default().fg(Color::Gray)),
+                    Span::styled(err.to_string(), Style::default().fg(self.theme_status())),
                 ]);
                 f.render_widget(Paragraph::new(vec![error_line]), vertical[0]);
             }
@@ -145,13 +146,13 @@ impl App {
                     Span::styled(
                         pad_column("binding / value", value_col),
                         Style::default()
-                            .fg(Color::Gray)
+                            .fg(self.theme_status())
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
                         "action",
                         Style::default()
-                            .fg(Color::Gray)
+                            .fg(self.theme_status())
                             .add_modifier(Modifier::BOLD),
                     ),
                 ]),
@@ -159,9 +160,30 @@ impl App {
             SettingsRow {
                 selectable: None,
                 line: Line::from(Span::styled(
+                    "Appearance",
+                    Style::default()
+                        .fg(self.theme_accent())
+                        .add_modifier(Modifier::BOLD),
+                )),
+            },
+            self.selectable_row(
+                SettingsSelectable::Theme,
+                selected_item,
+                self.settings_item_color(SettingsSelectable::Theme),
+                pad_column(&self.active_theme_label(), value_col),
+                "Theme".to_string(),
+                action_col,
+            ),
+            SettingsRow {
+                selectable: None,
+                line: Line::from(""),
+            },
+            SettingsRow {
+                selectable: None,
+                line: Line::from(Span::styled(
                     "General",
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(self.theme_border())
                         .add_modifier(Modifier::BOLD),
                 )),
             },
@@ -275,7 +297,7 @@ impl App {
             ])
         } else {
             Line::from(vec![
-                Span::styled(left_text, Style::default().fg(Color::White)),
+                Span::styled(left_text, Style::default().fg(self.theme_foreground())),
                 Span::styled(
                     pad_column(&right_text, right_width),
                     Style::default().fg(accent),
@@ -299,10 +321,11 @@ impl App {
             SettingsOverlay::CaptureKey { action } => {
                 let rect = self.modal_rect_ratio(terminal_size, 1, 2);
                 let block = Block::default()
+                    .style(Style::default().bg(self.theme_background()))
                     .title(Line::from(Span::styled(
                         format!("rebind {}", action.settings_label()),
                         Style::default()
-                            .fg(Color::White)
+                            .fg(self.theme_foreground())
                             .add_modifier(Modifier::BOLD),
                     )))
                     .title_alignment(Alignment::Center)
@@ -316,24 +339,68 @@ impl App {
                 let body = vec![
                     Line::from(Span::styled(
                         "Press the new keybinding.",
-                        Style::default().fg(Color::White),
+                        Style::default().fg(self.theme_foreground()),
                     )),
                     Line::from(Span::styled(
                         "Esc: cancel · Backspace: disable action · Delete: unbind",
-                        Style::default().fg(Color::Gray),
+                        Style::default().fg(self.theme_status()),
                     )),
                 ];
 
                 f.render_widget(ratatui::widgets::Clear, rect);
                 f.render_widget(Paragraph::new(body).block(block), rect);
             }
+            SettingsOverlay::SelectTheme { selected } => {
+                let rect = self.modal_rect_ratio(terminal_size, 1, 2);
+                let block = Block::default()
+                    .style(Style::default().bg(self.theme_background()))
+                    .title(Line::from(Span::styled(
+                        "theme",
+                        Style::default()
+                            .fg(self.theme_foreground())
+                            .add_modifier(Modifier::BOLD),
+                    )))
+                    .title_alignment(Alignment::Center)
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(self.theme_accent()));
+
+                let themes = self.appearance.theme_descriptors();
+                let lines: Vec<Line<'static>> = themes
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, theme)| {
+                        let label = format!(
+                            "{} {} · {}",
+                            if idx == *selected { ">" } else { " " },
+                            theme.name,
+                            Self::theme_appearance_label(theme.appearance)
+                        );
+                        if idx == *selected {
+                            Line::from(Span::styled(
+                                label,
+                                Style::default()
+                                    .fg(view_style::text_color_for_bg(self.theme_accent()))
+                                    .bg(self.theme_accent())
+                                    .add_modifier(Modifier::BOLD),
+                            ))
+                        } else {
+                            Line::from(Span::styled(label, Style::default().fg(self.theme_foreground())))
+                        }
+                    })
+                    .collect();
+
+                f.render_widget(ratatui::widgets::Clear, rect);
+                f.render_widget(Paragraph::new(lines).block(block), rect);
+            }
             SettingsOverlay::SelectWeekStartDay { selected } => {
                 let rect = self.modal_rect_ratio(terminal_size, 1, 3);
                 let block = Block::default()
+                    .style(Style::default().bg(self.theme_background()))
                     .title(Line::from(Span::styled(
                         "week start",
                         Style::default()
-                            .fg(Color::White)
+                            .fg(self.theme_foreground())
                             .add_modifier(Modifier::BOLD),
                     )))
                     .title_alignment(Alignment::Center)
@@ -354,14 +421,16 @@ impl App {
                             Line::from(Span::styled(
                                 format!("> {}", label),
                                 Style::default()
-                                    .fg(Color::Black)
+                                    .fg(view_style::text_color_for_bg(
+                                        self.settings_item_color(SettingsSelectable::WeekStartDay),
+                                    ))
                                     .bg(self.settings_item_color(SettingsSelectable::WeekStartDay))
                                     .add_modifier(Modifier::BOLD),
                             ))
                         } else {
                             Line::from(Span::styled(
                                 format!("  {}", label),
-                                Style::default().fg(Color::White),
+                                Style::default().fg(self.theme_foreground()),
                             ))
                         }
                     })

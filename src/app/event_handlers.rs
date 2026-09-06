@@ -26,7 +26,7 @@ fn ensure_testing_fill_categories_in_tracker(
 ) -> Result<(Vec<CategoryId>, bool), String> {
     let mut created = false;
     let mut ids = Vec::with_capacity(TESTING_FILL_CATEGORY_SPECS.len());
-    for (name, color_index) in TESTING_FILL_CATEGORY_SPECS {
+    for (name, new_category_color_cursor) in TESTING_FILL_CATEGORY_SPECS {
         if let Some(category) = tracker
             .categories_ordered()
             .into_iter()
@@ -39,7 +39,7 @@ fn ensure_testing_fill_categories_in_tracker(
             .add_category(
                 name.to_string(),
                 "testingcheats fill fixture layer".to_string(),
-                Some(color_index),
+                Some(new_category_color_cursor),
             )
             .ok_or_else(|| format!("failed to create testing fixture category {name}"))?;
         ids.push(id);
@@ -1149,6 +1149,9 @@ impl App {
             super::SettingsOverlay::CaptureKey { action } => {
                 self.handle_settings_capture_key_input(action, key);
             }
+            super::SettingsOverlay::SelectTheme { .. } => {
+                self.handle_settings_theme_dropdown(key);
+            }
             super::SettingsOverlay::SelectWeekStartDay { .. } => {
                 self.handle_settings_week_start_dropdown(key);
             }
@@ -1208,6 +1211,52 @@ impl App {
                 }
             }
         }
+    }
+
+    fn handle_settings_theme_dropdown(&mut self, key: KeyEvent) {
+        let Some(super::SettingsOverlay::SelectTheme { mut selected }) = self.settings_overlay.take()
+        else {
+            return;
+        };
+
+        let themes = self.appearance.theme_descriptors();
+        if themes.is_empty() {
+            self.close_settings_overlay();
+            return;
+        }
+        match key.code {
+            KeyCode::Esc => {
+                self.close_settings_overlay();
+                return;
+            }
+            KeyCode::Up | KeyCode::Left => {
+                selected = if selected == 0 { themes.len() - 1 } else { selected - 1 };
+            }
+            KeyCode::Down | KeyCode::Right => {
+                selected = (selected + 1) % themes.len();
+            }
+            KeyCode::Enter => {
+                let id = themes
+                    .get(selected)
+                    .map(|theme| theme.id.clone())
+                    .unwrap_or_else(|| themes[0].id.clone());
+                match self.appearance.select_theme(&id) {
+                    Ok(()) => {
+                        self.close_settings_overlay();
+                        self.render_needed = true;
+                    }
+                    Err(error) => {
+                        self.keymap_error = Some(format!("appearance: {error}"));
+                        self.close_settings_overlay();
+                    }
+                }
+                return;
+            }
+            _ => {}
+        }
+
+        self.settings_overlay = Some(super::SettingsOverlay::SelectTheme { selected });
+        self.render_needed = true;
     }
 
     fn handle_settings_week_start_dropdown(&mut self, key: KeyEvent) {
@@ -1278,14 +1327,17 @@ impl App {
             }
             Action::Left => {
                 if self.is_on_insert_space() {
-                    self.color_index = (self.color_index + COLORS.len() - 1) % COLORS.len();
+                    let count = self.appearance.sand_color_count();
+                    self.new_category_color_cursor =
+                        (self.new_category_color_cursor + count - 1) % count;
                 } else {
                     self.cycle_selected_tag(-1);
                 }
             }
             Action::Right => {
                 if self.is_on_insert_space() {
-                    self.color_index = (self.color_index + 1) % COLORS.len();
+                    let count = self.appearance.sand_color_count();
+                    self.new_category_color_cursor = (self.new_category_color_cursor + 1) % count;
                 } else {
                     self.cycle_selected_tag(1);
                 }
@@ -1318,19 +1370,17 @@ impl App {
                         self.render_needed = true;
                         return true;
                     };
-                    let current_pos = COLORS
-                        .iter()
-                        .position(|&color| color == current_color)
-                        .unwrap_or(0);
-                    let new_pos = (current_pos + COLORS.len() - 1) % COLORS.len();
+                    let new_color = self.appearance.cycle_category_anchor(current_color, -1);
                     if self
                         .time_tracker
-                        .set_category_color_by_index(self.selected_index, COLORS[new_pos])
+                        .set_category_color_by_index(self.selected_index, new_color)
                     {
                         self.persist_categories();
                     }
                 } else if self.is_on_insert_space() {
-                    self.color_index = (self.color_index + COLORS.len() - 1) % COLORS.len();
+                    let count = self.appearance.sand_color_count();
+                    self.new_category_color_cursor =
+                        (self.new_category_color_cursor + count - 1) % count;
                 }
             }
             Action::ShiftRight => {
@@ -1343,19 +1393,16 @@ impl App {
                         self.render_needed = true;
                         return true;
                     };
-                    let current_pos = COLORS
-                        .iter()
-                        .position(|&color| color == current_color)
-                        .unwrap_or(0);
-                    let new_pos = (current_pos + 1) % COLORS.len();
+                    let new_color = self.appearance.cycle_category_anchor(current_color, 1);
                     if self
                         .time_tracker
-                        .set_category_color_by_index(self.selected_index, COLORS[new_pos])
+                        .set_category_color_by_index(self.selected_index, new_color)
                     {
                         self.persist_categories();
                     }
                 } else if self.is_on_insert_space() {
-                    self.color_index = (self.color_index + 1) % COLORS.len();
+                    let count = self.appearance.sand_color_count();
+                    self.new_category_color_cursor = (self.new_category_color_cursor + 1) % count;
                 }
             }
             Action::Confirm => {
@@ -1922,10 +1969,10 @@ mod testing_fill_category_tests {
         assert!(created);
         assert_eq!(first_ids.len(), TESTING_FILL_CATEGORY_SPECS.len());
 
-        for ((name, color_index), id) in TESTING_FILL_CATEGORY_SPECS.into_iter().zip(&first_ids) {
+        for ((name, new_category_color_cursor), id) in TESTING_FILL_CATEGORY_SPECS.into_iter().zip(&first_ids) {
             let category = tracker.category_by_id(*id).unwrap();
             assert_eq!(category.name, name);
-            assert_eq!(category.color, COLORS[color_index]);
+            assert_eq!(category.color, COLORS[new_category_color_cursor]);
         }
 
         let count_after_first = tracker.categories_ordered().len();

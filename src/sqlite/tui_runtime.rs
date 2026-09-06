@@ -9,7 +9,7 @@ use rusqlite::{OptionalExtension, TransactionBehavior, params};
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
-    constants::COLORS,
+    appearance::{decode_color_anchor, encode_color_anchor},
     domain::{
         Category, CategoryId, DRIFT_CATEGORY_CONFIG_NAME, OperationalDayPolicy, Session,
         day_boundary_config, runtime_settings,
@@ -426,10 +426,11 @@ pub(crate) fn sync_categories(
         } else {
             category.name.trim().to_string()
         };
-        let color_index = COLORS
-            .iter()
-            .position(|color| *color == category.color)
-            .unwrap_or(0);
+        let color_index = if id == 0 {
+            0
+        } else {
+            encode_color_anchor(category.color)?
+        };
         transaction
             .execute(
                 "INSERT INTO categories (
@@ -446,7 +447,7 @@ pub(crate) fn sync_categories(
                     id,
                     name,
                     category.description,
-                    i64::try_from(color_index).unwrap_or(0),
+                    color_index,
                     i64::from(category.balance_effect),
                     i64::try_from(sort_order).map_err(|_| "too many categories".to_string())?,
                 ],
@@ -2539,8 +2540,11 @@ fn category_from_row(
     balance_effect: i64,
 ) -> Result<Category, String> {
     let id = u64::try_from(id).map_err(|_| format!("Category ID {id} is invalid"))?;
-    let color_index = usize::try_from(color_index)
-        .map_err(|_| format!("Category color index {color_index} is invalid"))?;
+    let color = if id == 0 {
+        ratatui::style::Color::White
+    } else {
+        decode_color_anchor(color_index)?
+    };
     let balance_effect = i8::try_from(balance_effect)
         .map_err(|_| format!("Category balance {balance_effect} is invalid"))?;
     Ok(Category {
@@ -2550,7 +2554,7 @@ fn category_from_row(
         } else {
             stored_name.to_string()
         },
-        color: COLORS[color_index % COLORS.len()],
+        color,
         description: description.to_string(),
         balance_effect,
     })
@@ -2785,6 +2789,48 @@ mod tests {
             reloaded.active_session.unwrap().description,
             "Session subtitle"
         );
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn category_sync_round_trips_exact_rgb_anchor_without_schema_change() {
+        let path = repository_file("category-color-anchor");
+        let mut repository = SqliteRepository::open(&path).unwrap();
+        repository
+            .create_category(&NewCategoryRecord {
+                name: "Work",
+                description: "",
+                color_index: 0,
+                balance_effect: 1,
+            })
+            .unwrap();
+        drop(repository);
+
+        let mut state = load_state(&path).unwrap();
+        let exact = ratatui::style::Color::Rgb(137, 82, 219);
+        state.loaded_categories.categories[1].color = exact;
+        sync_categories(
+            &path,
+            &state.loaded_categories.categories,
+            CategoryId::new(0),
+            None,
+        )
+        .unwrap();
+
+        let repository = open_cli_repository(&path).unwrap();
+        let stored: i64 = repository
+            .connection
+            .query_row(
+                "SELECT color_index FROM categories WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(decode_color_anchor(stored).unwrap(), exact);
+        drop(repository);
+
+        let reloaded = load_state(&path).unwrap();
+        assert_eq!(reloaded.loaded_categories.categories[1].color, exact);
         std::fs::remove_file(path).ok();
     }
 

@@ -5,7 +5,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
 };
@@ -43,7 +43,7 @@ impl App {
             Line::from(Span::styled(
                 "RECOVERY EVIDENCE",
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(self.theme_warning())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(Span::styled(
@@ -53,7 +53,7 @@ impl App {
                     statement.post_target_class.label()
                 ),
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(self.theme_warning())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
@@ -89,7 +89,7 @@ impl App {
             Line::from(""),
             Line::from(Span::styled(
                 statement.cutoff_policy.clone(),
-                Style::default().fg(Color::Yellow),
+                Style::default().fg(self.theme_warning()),
             )),
             Line::from(
                 "Retry reuses this persisted target. Later live time is not recovered history.",
@@ -101,11 +101,12 @@ impl App {
             )),
         ];
         let block = Block::default()
+            .style(Style::default().bg(self.theme_background()))
             .title(" Checkpoint recovery ")
             .title_alignment(Alignment::Center)
             .borders(Borders::ALL)
             .border_type(BorderType::Double)
-            .border_style(Style::default().fg(Color::Yellow));
+            .border_style(Style::default().fg(self.theme_warning()));
         frame.render_widget(
             Paragraph::new(lines)
                 .block(block)

@@ -4,7 +4,7 @@ Status: implemented and certified
 Program: INTERACTION-001 + INTERACTION-002 convergence
 Current completed unit: INTERACTION-002; PLATEAU-001H H1 presentation hardening certified
 Issues completed: #19, #20, #24
-Last reviewed: 2026-08-27
+Last reviewed: 2026-09-06
 
 ## Purpose
 
@@ -279,3 +279,7 @@ Focused proofs cover explicit view/edit ownership, stable-ID draft persistence, 
 ## Closure
 
 INTERACTION-001 is complete. Future interaction work must preserve these boundaries rather than reintroducing hidden physical-key bypasses, handler fallbacks, ambiguous text ownership, or UI claims that differ from runtime reachability.
+
+## Theme and layer-color interaction
+
+Settings owns global theme selection. The existing Layer modal remains the per-category color surface: `Shift+←` / `Shift+→` cycles the active theme's eligible sand swatches. Themes may expose any non-empty number of sand colors. Strata derives a stable OKLCH hue wheel for navigation; declaration order and numeric slot position are not persistent semantics. A theme change recolors presentation by perceptual anchor matching and does not mutate category identity, history, or physics.

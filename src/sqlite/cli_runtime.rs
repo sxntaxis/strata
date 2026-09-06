@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, path::Path, process};
 use chrono::{DateTime, SecondsFormat, Utc};
 
 use crate::{
-    constants::COLORS,
+    appearance::decode_color_anchor,
     domain::{
         Category, CategoryId, DRIFT_CATEGORY_CONFIG_NAME, OperationalDayPolicy, Session,
         civil_time_for_utc, day_boundary_config, is_drift_name, operational_day_key_for_utc,
@@ -250,8 +250,11 @@ pub(crate) fn read_snapshot(database_path: &Path) -> Result<SqliteCliSnapshot, S
     for record in category_records {
         let id = u64::try_from(record.id)
             .map_err(|_| format!("Category ID {} is outside the supported range", record.id))?;
-        let color_index = usize::try_from(record.color_index)
-            .map_err(|_| format!("Category color {} is invalid", record.color_index))?;
+        let color = if id == 0 {
+            ratatui::style::Color::White
+        } else {
+            decode_color_anchor(record.color_index)?
+        };
         let balance_effect = i8::try_from(record.balance_effect)
             .map_err(|_| format!("Category balance {} is invalid", record.balance_effect))?;
         let name = display_category_name(record.id, &record.name);
@@ -259,7 +262,7 @@ pub(crate) fn read_snapshot(database_path: &Path) -> Result<SqliteCliSnapshot, S
         categories.push(Category {
             id: CategoryId::new(id),
             name,
-            color: COLORS[color_index % COLORS.len()],
+            color,
             description: record.description,
             balance_effect,
         });

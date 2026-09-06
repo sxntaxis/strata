@@ -19,29 +19,30 @@ impl App {
         let entries = self.filtered_command_palette_entries();
         self.clamp_command_palette_selection(entries.len());
 
-        let accent = Color::Cyan;
+        let accent = self.theme_accent();
         let rect = self.command_palette_rect(terminal_size);
 
         let footer = if let Some(feedback) = self.command_palette_feedback.as_ref() {
             Line::from(Span::styled(
                 feedback.clone(),
-                Style::default().fg(Color::LightRed),
+                Style::default().fg(self.theme_error()),
             ))
             .alignment(Alignment::Right)
         } else {
             Line::from(Span::styled(
                 "Enter run · Esc close · ↑↓ move",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(self.theme_status()),
             ))
             .alignment(Alignment::Right)
         };
 
         let frame_block = Block::default()
+            .style(Style::default().bg(self.theme_background()))
             .title(
                 Line::from(Span::styled(
                     "command palette",
                     Style::default()
-                        .fg(Color::White)
+                        .fg(self.theme_foreground())
                         .add_modifier(Modifier::BOLD),
                 ))
                 .alignment(Alignment::Center),
@@ -66,7 +67,7 @@ impl App {
                     "> ",
                     Style::default().fg(accent).add_modifier(Modifier::BOLD),
                 ),
-                Span::styled("Type a command...", Style::default().fg(Color::DarkGray)),
+                Span::styled("Type a command...", Style::default().fg(self.theme_status())),
             ])
         } else {
             Line::from(vec![
@@ -76,7 +77,7 @@ impl App {
                 ),
                 Span::styled(
                     self.command_palette_query.clone(),
-                    Style::default().fg(Color::White),
+                    Style::default().fg(self.theme_foreground()),
                 ),
             ])
         };
@@ -109,7 +110,7 @@ impl App {
         let lines: Vec<Line<'static>> = if entries.is_empty() {
             vec![Line::from(Span::styled(
                 "No commands found.",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(self.theme_status()),
             ))]
         } else {
             entries
@@ -362,10 +363,10 @@ impl App {
             ])
         } else {
             Line::from(vec![
-                Span::styled(title, Style::default().fg(Color::White)),
-                Span::styled(" ".repeat(title_pad), Style::default().fg(Color::White)),
-                Span::styled(spacer, Style::default().fg(Color::White)),
-                Span::styled(hint, Style::default().fg(Color::DarkGray)),
+                Span::styled(title, Style::default().fg(self.theme_foreground())),
+                Span::styled(" ".repeat(title_pad), Style::default().fg(self.theme_foreground())),
+                Span::styled(spacer, Style::default().fg(self.theme_foreground())),
+                Span::styled(hint, Style::default().fg(self.theme_status())),
             ])
         }
     }

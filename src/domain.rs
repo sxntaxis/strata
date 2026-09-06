@@ -415,6 +415,16 @@ impl CategoryStore {
         description: String,
         color_index: Option<usize>,
     ) -> Option<CategoryId> {
+        let color_idx = color_index.unwrap_or(self.order.len() % COLORS.len());
+        self.add_category_with_color(name, description, COLORS[color_idx % COLORS.len()])
+    }
+
+    pub fn add_category_with_color(
+        &mut self,
+        name: String,
+        description: String,
+        color: Color,
+    ) -> Option<CategoryId> {
         let trimmed = name.trim();
         if trimmed.is_empty() {
             return None;
@@ -431,20 +441,17 @@ impl CategoryStore {
 
         let id = CategoryId::new(self.next_id);
         self.next_id += 1;
-
-        let color_idx = color_index.unwrap_or(self.order.len() % COLORS.len());
         self.by_id.insert(
             id,
             Category {
                 id,
                 name: trimmed.to_string(),
-                color: COLORS[color_idx % COLORS.len()],
+                color,
                 description,
                 balance_effect: 1,
             },
         );
         self.order.push(id);
-
         Some(id)
     }
 
@@ -675,6 +682,16 @@ impl TimeTracker {
     ) -> Option<CategoryId> {
         self.category_store
             .add_category(name, description, color_index)
+    }
+
+    pub fn add_category_with_color(
+        &mut self,
+        name: String,
+        description: String,
+        color: Color,
+    ) -> Option<CategoryId> {
+        self.category_store
+            .add_category_with_color(name, description, color)
     }
 
     pub fn restore_category(&mut self, category: Category) -> bool {

@@ -1,7 +1,7 @@
 # Strata accepted decision index
 
 Status: accepted authority
-Last reviewed: 2026-08-27
+Last reviewed: 2026-09-06
 
 Detailed rationale and unresolved implications live in `notebook/decisions/DECISION-REGISTER.md`. This file contains only decisions accepted strongly enough to constrain implementation.
 
@@ -72,6 +72,8 @@ Detailed rationale and unresolved implications live in `notebook/decisions/DECIS
 | STRATA-D062 | Sediment stability uses deterministic metastable repose rather than a memoryless per-frame slide lottery. Bottom-connected supported-column relief owns the coarse static/dynamic stability test; static failure uses relief >3, locally mobilized avalanche regions use relief >1, one diagonal topple occurs per gravity pass, and only symmetry consumes RNG. Local mobilization is persisted canonically so restart can continue an in-progress avalanche exactly. | implemented and certified |
 | STRATA-D063 | Daily-use sediment hardening caps only fully isolated supported spires: a one-column stack with both immediate supported neighbors empty may remain two dots tall, but at height three or more its surface grain yields through the existing local avalanche path. Non-isolated shoulders and hills retain H2 static/dynamic relief 3/1 unchanged; rain, persistence, and SandState v4 are unchanged. | implemented and certified; superseded by STRATA-D064 |
 | STRATA-D064 | Static sediment support is contact-based rather than an absolute spire or global static-relief threshold: once straight-down fall is blocked, a surface grain may settle when it has support below plus at least one occupied lower diagonal or visible wall. Unsupported arrivals become exact-grain `mobilized` state; mobilized grains continue with dynamic relief `>1`, and a diagonal topple may pass mobility only to the newly exposed same-column slip surface when that surface still has a dynamic route. Regional avalanche radii and `active_vertical` proximity are retired. Exact transient mobility is persisted in SandState v5 as sorted canonical grain coordinates; pre-v5 restore preserves topology/mass but discards obsolete regional activity and one-time seeds only unsupported bottom-connected surface grains. | implemented and certified |
+
+| STRATA-D065 | Theme files define arbitrary named RGB palettes, an optional arbitrary-length subset eligible for sand/category colors, and Strata-specific UI mappings. Categories persist theme-independent color anchors rather than palette slots; the Layer modal keeps `Shift+←` / `Shift+→`, with Strata deriving a stable OKLCH hue wheel and resolving anchors perceptually across themes. `default` means external presentation authority, not a palette color. `rgb-luma-safe` is the accepted Classic Braille blend baseline; theme selection is presentation-only and terminal auto-contrast is deferred to a separate appearance unit. | accepted; implementation candidate |
 
 ## Explicitly unresolved
 

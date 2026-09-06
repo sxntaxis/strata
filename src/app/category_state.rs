@@ -1,7 +1,7 @@
 use ratatui::style::Color;
 
 use crate::{
-    constants::{CATEGORY_SETTINGS, COLORS},
+    constants::CATEGORY_SETTINGS,
     domain::{CategoryId, DRIFT_CATEGORY_ID},
     sqlite,
 };
@@ -410,10 +410,10 @@ impl App {
             self.archived_categories.remove(archived_index);
             Some(category_id)
         } else {
-            self.time_tracker.add_category(
+            self.time_tracker.add_category_with_color(
                 requested_name.to_string(),
                 String::new(),
-                Some(self.color_index),
+                self.appearance.sand_color_at(self.new_category_color_cursor),
             )
         };
 
@@ -499,11 +499,11 @@ impl App {
 
     pub(super) fn get_selected_color(&self) -> Color {
         if self.is_on_insert_space() {
-            COLORS[self.color_index]
+            self.appearance.sand_color_at(self.new_category_color_cursor)
         } else if let Some(category) = self.time_tracker.category_by_index(self.selected_index) {
-            category.color
+            self.resolved_category_color(category.id, category.color)
         } else {
-            Color::White
+            self.theme_foreground()
         }
     }
 
@@ -511,8 +511,8 @@ impl App {
         if let Some(idx) = self.time_tracker.active_category_index()
             && let Some(category) = self.time_tracker.category_by_index(idx)
         {
-            return category.color;
+            return self.resolved_category_color(category.id, category.color);
         }
-        Color::White
+        self.theme_foreground()
     }
 }

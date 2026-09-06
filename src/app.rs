@@ -11,6 +11,7 @@ use ratatui::layout::Rect;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    appearance::{AppearanceState, ThemeAppearance, UiColorRef},
     constants::{APP_LAYOUT_SETTINGS, CATCHUP_SETTINGS, RUNTIME_LOOP_SETTINGS, TIME_SETTINGS},
     domain::{
         Category, CategoryId, DRIFT_CATEGORY_DISPLAY_NAME, DRIFT_CATEGORY_ID, FirstDayOfWeek,
@@ -66,6 +67,7 @@ enum SessionClockMode {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SettingsSelectable {
+    Theme,
     WeekStartDay,
     Action(keybindings::Action),
 }
@@ -73,6 +75,7 @@ enum SettingsSelectable {
 #[derive(Clone, Debug)]
 enum SettingsOverlay {
     CaptureKey { action: keybindings::Action },
+    SelectTheme { selected: usize },
     SelectWeekStartDay { selected: usize },
 }
 
@@ -1045,12 +1048,13 @@ impl TestingCheatsState {
 
 struct App {
     time_tracker: TimeTracker,
+    appearance: AppearanceState,
     sand_engine: SandEngine,
     session: SessionState,
     ui_mode: UiMode,
     selected_index: usize,
     new_category_name: String,
-    color_index: usize,
+    new_category_color_cursor: usize,
     modal_description: String,
     modal_active_description_dirty: bool,
     modal_editing_category_metadata: bool,
@@ -1104,6 +1108,7 @@ impl App {
         width: u16,
         height: u16,
         loaded: keybindings::LoadedKeybindings,
+        ignore_config: bool,
     ) -> Result<Self, String> {
         let keymap_path = storage::get_keymap_path();
         let keymap_last_modified = std::fs::metadata(&keymap_path)
@@ -1114,6 +1119,7 @@ impl App {
             runtime_settings,
         } = loaded;
         let keymap_error = None;
+        let appearance = AppearanceState::load(ignore_config)?;
 
         let mut tracker = TimeTracker::new();
         let database_path = sqlite::resolve_runtime_database()?;
@@ -1139,6 +1145,7 @@ impl App {
 
         let mut app = Self {
             time_tracker: tracker,
+            appearance,
             sand_engine: SandEngine::new(width, height),
             session: SessionState {
                 active_session_stable_id: None,
@@ -1147,7 +1154,7 @@ impl App {
             ui_mode: UiMode::Main,
             selected_index: 0,
             new_category_name: String::new(),
-            color_index: 0,
+            new_category_color_cursor: 0,
             modal_description: String::new(),
             modal_active_description_dirty: false,
             modal_editing_category_metadata: false,
@@ -1324,7 +1331,7 @@ impl App {
         self.ui_mode = UiMode::CategoryModal;
         self.selected_index = self.time_tracker.active_category_index().unwrap_or(0);
         self.new_category_name = String::new();
-        self.color_index = 0;
+        self.new_category_color_cursor = 0;
         self.modal_active_description_dirty = false;
         self.sync_modal_description_from_selection();
         self.render_needed = true;
@@ -1433,8 +1440,70 @@ impl App {
         }
     }
 
+    pub(super) fn resolved_category_color(&self, category_id: CategoryId, anchor: ratatui::style::Color) -> ratatui::style::Color {
+        if is_drift_category_id(category_id) {
+            self.appearance.idle_color()
+        } else {
+            self.appearance.resolve_category_color(anchor)
+        }
+    }
+
+    pub(super) fn categories_for_render(&self) -> Vec<Category> {
+        self.time_tracker
+            .categories_ordered()
+            .into_iter()
+            .map(|mut category| {
+                category.color = self.resolved_category_color(category.id, category.color);
+                category
+            })
+            .collect()
+    }
+
+    pub(super) fn resolve_ui_ref(&self, color: UiColorRef) -> ratatui::style::Color {
+        match color {
+            UiColorRef::Default => ratatui::style::Color::Reset,
+            UiColorRef::Color(color) => color,
+        }
+    }
+
+    pub(super) fn theme_background(&self) -> ratatui::style::Color {
+        self.resolve_ui_ref(self.appearance.background_ref())
+    }
+
+    pub(super) fn theme_foreground(&self) -> ratatui::style::Color {
+        self.resolve_ui_ref(self.appearance.foreground_ref())
+    }
+
+    pub(super) fn theme_status(&self) -> ratatui::style::Color {
+        self.resolve_ui_ref(self.appearance.status_ref())
+    }
+
+    pub(super) fn theme_border(&self) -> ratatui::style::Color {
+        self.resolve_ui_ref(self.appearance.border_ref())
+    }
+
+    pub(super) fn theme_accent(&self) -> ratatui::style::Color {
+        self.resolve_ui_ref(self.appearance.accent_ref())
+    }
+
+    pub(super) fn theme_report(&self) -> ratatui::style::Color {
+        self.resolve_ui_ref(self.appearance.report_ref())
+    }
+
+    pub(super) fn theme_warning(&self) -> ratatui::style::Color {
+        self.resolve_ui_ref(self.appearance.warning_ref())
+    }
+
+    pub(super) fn theme_error(&self) -> ratatui::style::Color {
+        self.resolve_ui_ref(self.appearance.error_ref())
+    }
+
+    pub(super) fn theme_success(&self) -> ratatui::style::Color {
+        self.resolve_ui_ref(self.appearance.success_ref())
+    }
+
     fn settings_items(&self) -> Vec<SettingsSelectable> {
-        let mut items = vec![SettingsSelectable::WeekStartDay];
+        let mut items = vec![SettingsSelectable::Theme, SettingsSelectable::WeekStartDay];
         items.extend(
             keybindings::Action::all()
                 .iter()
@@ -1477,6 +1546,10 @@ impl App {
     }
     fn settings_item_description(&self, item: SettingsSelectable) -> String {
         match item {
+            SettingsSelectable::Theme => format!(
+                "Theme palette and UI colors. User themes: {}",
+                storage::get_themes_dir().display()
+            ),
             SettingsSelectable::WeekStartDay => {
                 "First weekday used by the Week range in Balance.".to_string()
             }
@@ -1485,17 +1558,28 @@ impl App {
     }
 
     fn settings_item_color(&self, item: SettingsSelectable) -> ratatui::style::Color {
-        use ratatui::style::Color;
-
         match item {
-            SettingsSelectable::WeekStartDay => Color::Green,
+            SettingsSelectable::Theme => self.theme_accent(),
+            SettingsSelectable::WeekStartDay => self.theme_success(),
             SettingsSelectable::Action(action) => match action.category() {
-                keybindings::ActionCategory::Global => Color::Cyan,
-                keybindings::ActionCategory::Navigation => Color::Yellow,
-                keybindings::ActionCategory::CategoryModal => Color::Green,
-                keybindings::ActionCategory::ReportModal => Color::Magenta,
-                keybindings::ActionCategory::Settings => Color::Blue,
+                keybindings::ActionCategory::Global => self.theme_border(),
+                keybindings::ActionCategory::Navigation => self.theme_warning(),
+                keybindings::ActionCategory::CategoryModal => self.theme_success(),
+                keybindings::ActionCategory::ReportModal => self.theme_report(),
+                keybindings::ActionCategory::Settings => self.theme_accent(),
             },
+        }
+    }
+
+    fn active_theme_label(&self) -> String {
+        self.appearance.active_theme_name().to_string()
+    }
+
+    fn theme_appearance_label(appearance: ThemeAppearance) -> &'static str {
+        match appearance {
+            ThemeAppearance::Dark => "dark",
+            ThemeAppearance::Light => "light",
+            ThemeAppearance::Any => "any",
         }
     }
 
@@ -1602,6 +1686,14 @@ impl App {
 
     fn open_settings_editor_for_selection(&mut self) {
         match self.selected_settings_item() {
+            SettingsSelectable::Theme => {
+                let descriptors = self.appearance.theme_descriptors();
+                let selected = descriptors
+                    .iter()
+                    .position(|theme| theme.id == self.appearance.active_theme_id())
+                    .unwrap_or(0);
+                self.settings_overlay = Some(SettingsOverlay::SelectTheme { selected });
+            }
             SettingsSelectable::Action(action) => {
                 self.settings_overlay = Some(SettingsOverlay::CaptureKey { action });
             }
@@ -3560,9 +3652,12 @@ fn run_application_loop(
     Ok(runtime_error)
 }
 
-pub fn run_ui(loaded: keybindings::LoadedKeybindings) -> Result<(), io::Error> {
+pub fn run_ui(
+    loaded: keybindings::LoadedKeybindings,
+    ignore_config: bool,
+) -> Result<(), io::Error> {
     let (width, height) = crossterm::terminal::size()?;
-    let mut app = App::new(width, height, loaded).map_err(io::Error::other)?;
+    let mut app = App::new(width, height, loaded, ignore_config).map_err(io::Error::other)?;
     let mut terminal_session = TerminalSession::enter()?;
     terminal_lifecycle::maybe_inject_runtime_panic();
 

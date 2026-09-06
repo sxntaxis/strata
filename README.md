@@ -62,7 +62,7 @@ The normal SQLite database is stored at `data/strata.sqlite3` under the selected
 
 ## Configuration authority
 
-Strata loads and validates `~/.config/strata/keymap.json` once before choosing the CLI or TUI and before opening the profile database. Malformed JSON, unknown keys or actions, invalid operational-day settings, and unsupported UTC offsets stop startup with a non-zero error that identifies the file and invalid value.
+Strata loads and validates profile-local configuration before opening the TUI authority. Keybindings live in `keymap.json`; appearance selection lives in `appearance.toml`, with custom themes under `themes/*.toml`. Malformed configuration or an invalid selected theme fails closed with an error identifying the affected configuration. CLI commands do not need to resolve presentation themes.
 
 Strata does not silently replace a broken configuration with defaults. To deliberately ignore the file for one invocation, use the global override:
 
@@ -72,7 +72,7 @@ strata --ignore-config start Work
 strata --ignore-config
 ```
 
-The override uses built-in settings intentionally; normal XDG or complete-profile selection still applies. During a running TUI session, a failed configuration reload keeps the last valid settings and displays the error instead of applying a partial configuration.
+The override uses built-in settings intentionally, including the built-in `default` theme; normal XDG or complete-profile selection still applies. During a running TUI session, a failed keybinding reload keeps the last valid settings and displays the error instead of applying a partial configuration.
 
 
 ## Time authority
@@ -181,6 +181,51 @@ Maintenance operations use explicit locking and refuse stale temporary artifacts
 When an authoritative TUI write fails, Strata freezes normal mutation and displays a non-dismissible recovery surface. Available actions include retry, authoritative reload, emergency custody export, safe export-and-exit, and explicit exit without saving.
 
 The emergency JSON bundle is a custody artifact generated from current application state. It is not the same as the portable CSV bundle and is not a supported import format.
+
+
+## Themes and category colors
+
+Strata ships a built-in `default` theme and loads profile-local theme files from `~/.config/strata/themes/*.toml` (or the selected profile's equivalent config directory). Choose the active theme from **Settings → Appearance → Theme**. The selection is stored in `appearance.toml`.
+
+Themes use arbitrary named RGB swatches. `[sand].colors` is optional and restricts which swatches are offered by the existing Layer color control; if it is omitted, every palette swatch is eligible. There is no fixed palette length and no required red/green/blue naming scheme.
+
+```toml
+schema = 1
+
+[theme]
+name = "Example"
+appearance = "dark"
+
+[palette]
+volcano = "#ff5a36"
+sun = "#f4d35e"
+moss = "#72b879"
+ocean = "#54a7e8"
+bruise = "#ad78d4"
+text = "#e8e8e8"
+surface = "#303030"
+
+[sand]
+colors = ["volcano", "sun", "moss", "ocean", "bruise"]
+
+[ui]
+background = "default"
+foreground = "text"
+idle = "text"
+status = "default"
+border = "ocean"
+accent = "bruise"
+report = "bruise"
+warning = "sun"
+error = "volcano"
+success = "moss"
+```
+
+`default` is not a palette swatch: it tells Strata to leave that supported UI color under external terminal/environment authority. `idle` currently requires an explicit RGB swatch because idle grains participate in Braille color mixing.
+
+The Layer UX remains unchanged: select a layer and use `Shift+←` / `Shift+→` to change its color; the same keys choose a color while forging a new layer. Strata derives a stable perceptual OKLCH hue wheel from the active theme's eligible sand colors, so declaration order and numeric slot positions are not persistent semantics.
+
+Category color choice is stored as a theme-independent RGB anchor. Switching themes resolves that anchor to the nearest eligible swatch rather than assuming two themes have the same palette length or names. Classic uses `rgb-luma-safe` as the default Braille color blend.
 
 ## Settings and keybindings
 

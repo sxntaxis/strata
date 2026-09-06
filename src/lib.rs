@@ -4,6 +4,7 @@ use std::io;
 
 #[allow(clippy::unnecessary_sort_by, clippy::while_let_loop)]
 mod app;
+mod appearance;
 mod cli;
 mod command;
 mod constants;
@@ -59,6 +60,6 @@ pub fn run() -> Result<(), io::Error> {
             cli::run_command(command);
             Ok(())
         }
-        None => app::run_ui(loaded),
+        None => app::run_ui(loaded, invocation.ignore_config),
     }
 }
