@@ -9,11 +9,11 @@ mod flowviz;
 mod flowviz_conservative;
 mod flowviz_conservative_render;
 mod flowviz_unit;
-mod flowviz_unit_distance;
 #[cfg(test)]
 mod flowviz_unit_coherent_tests;
 #[cfg(test)]
 mod flowviz_unit_direct_tests;
+mod flowviz_unit_distance;
 #[cfg(test)]
 mod flowviz_unit_distance_tests;
 #[cfg(debug_assertions)]

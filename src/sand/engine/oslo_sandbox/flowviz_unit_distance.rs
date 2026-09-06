@@ -5,11 +5,7 @@ const LONG_DROP_BASE_FRAMES: f32 = 5.0;
 const LONG_DROP_SQRT_FRAME_SCALE: f32 = 0.9;
 const LONG_DROP_MAX_FRAMES: f32 = 18.0;
 
-pub(super) fn unit_segment_progress_step(
-    start_y: f32,
-    target_y: f32,
-    distance_aware: bool,
-) -> f32 {
+pub(super) fn unit_segment_progress_step(start_y: f32, target_y: f32, distance_aware: bool) -> f32 {
     if !distance_aware {
         return UNIT_SEGMENT_STEP;
     }

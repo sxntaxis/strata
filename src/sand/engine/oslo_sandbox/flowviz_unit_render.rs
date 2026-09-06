@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 
-use super::flowviz_unit::{
-    FlowVizMotionId, UnitActiveSegment, UnitPhysicalState,
-};
+use super::flowviz_unit::{FlowVizMotionId, UnitActiveSegment, UnitPhysicalState};
 use super::*;
 
 const UNIT_MICRO_TRACK_BLEND: f32 = 0.72;

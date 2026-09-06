@@ -38,8 +38,10 @@ fn seed_large_drop(engine: &mut OsloSandboxEngine) -> flowviz_unit::FlowVizMotio
 }
 #[test]
 fn unit_distance_aware_constructor_extends_015g_without_physics_delta() {
-    let support = OsloSandboxEngine::new_front_unit_visual_support_flowviz_vessel(20, 10, TEST_SEED);
-    let distance = OsloSandboxEngine::new_front_unit_distance_aware_flowviz_vessel(20, 10, TEST_SEED);
+    let support =
+        OsloSandboxEngine::new_front_unit_visual_support_flowviz_vessel(20, 10, TEST_SEED);
+    let distance =
+        OsloSandboxEngine::new_front_unit_distance_aware_flowviz_vessel(20, 10, TEST_SEED);
     assert!(support.flowviz_unit_visual_support_enabled());
     assert!(!support.flowviz_unit_distance_aware_enabled());
     assert!(distance.flowviz_unit_visual_support_enabled());
@@ -69,7 +71,8 @@ fn unit_distance_aware_large_drop_is_longer_bounded_and_gravity_shaped() {
     let frames = (1.0 / step).round();
     assert!(step < flowviz_unit::UNIT_SEGMENT_STEP);
     assert!((5.0..=18.0).contains(&frames));
-    let halfway_y = flowviz_unit_distance::unit_segment_vertical_fraction(0.5, start_y, target_y, true);
+    let halfway_y =
+        flowviz_unit_distance::unit_segment_vertical_fraction(0.5, start_y, target_y, true);
     assert!((halfway_y - 0.25).abs() < 0.0001);
     assert_eq!(
         flowviz_unit_distance::unit_segment_vertical_fraction(1.0, start_y, target_y, true),
@@ -134,7 +137,10 @@ fn unit_distance_aware_large_drop_arrives_exactly_at_finalized_target() {
         .is_some_and(|carrier| carrier.active.is_some() || !carrier.queued.is_empty())
     {
         frames += 1;
-        assert!(frames <= 18, "distance-aware long drop exceeded its frame cap");
+        assert!(
+            frames <= 18,
+            "distance-aware long drop exceeded its frame cap"
+        );
         assert!(engine.advance_unit_flowviz());
     }
     let carrier = engine.flowviz_unit_carriers.get(&id).unwrap();
