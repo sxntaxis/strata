@@ -376,6 +376,8 @@ fn classic_experiment_selection_is_nonretroactive_and_uses_rugged_texture_base()
         "momentum-soft",
         "momentum-contact",
         "momentum-repose-contact",
+        "momentum-surface",
+        "momentum-grounded-contact",
     ] {
         engine.set_experiment_profile_name(profile).unwrap();
         assert_eq!(engine.experiment_profile_name(), profile);
@@ -815,6 +817,84 @@ fn momentum_repose_contact_can_still_bonus_toward_airborne_receiving_support() {
 }
 
 #[test]
+fn momentum_grounded_contact_waits_in_lane_when_direct_blocker_is_airborne() {
+    let mut engine = ClassicSandboxEngine::new(18, 14, 141, ClassicRainMode::Uniform);
+    engine
+        .set_experiment_profile_name("momentum-grounded-contact")
+        .unwrap();
+    engine.local_repose.fill(CLASSIC_REPOSE_LOW);
+    let bounds = engine.surface.viewport_bounds().expect("visible basin");
+    let x = bounds.x_start + (bounds.x_end - bounds.x_start) / 2;
+    let y = bounds.y_start + 2;
+    let category = CategoryId(1);
+
+    // The lower grain is still airborne: there is an explicit air gap below it.
+    // CLASSIC-011 must not reinterpret that transient catch-up as surface contact.
+    engine.surface.grid[y][x] = Some(category);
+    engine.surface.grid[y + 1][x] = Some(category);
+    let expected_mass = engine.surface.physical_grain_count();
+    let physics_rng_before = engine.physics_rng_state;
+
+    assert!(!engine.direct_blocker_is_grounded(bounds, x, y + 1));
+    engine.move_grain_once(bounds, x, y);
+
+    assert_eq!(
+        engine.surface.grid[y][x],
+        Some(category),
+        "upper airborne grain must wait in its vertical lane"
+    );
+    assert_eq!(engine.surface.grid[y + 1][x], Some(category));
+    assert_eq!(engine.surface.grid[y + 1][x - 1], None);
+    assert_eq!(engine.surface.grid[y + 1][x + 1], None);
+    assert_eq!(engine.diagonal_moves, 0);
+    assert_eq!(
+        engine.physics_rng_state, physics_rng_before,
+        "a pure airborne wait must not consume a diagonal-direction RNG draw"
+    );
+    assert_eq!(engine.surface.physical_grain_count(), expected_mass);
+}
+
+#[test]
+fn momentum_grounded_contact_preserves_repose_momentum_on_grounded_pile() {
+    let mut engine = ClassicSandboxEngine::new(18, 18, 143, ClassicRainMode::Uniform);
+    engine
+        .set_experiment_profile_name("momentum-grounded-contact")
+        .unwrap();
+    engine.local_repose.fill(CLASSIC_REPOSE_LOW);
+    let bounds = engine.surface.viewport_bounds().expect("visible basin");
+    let x = bounds.x_start + (bounds.x_end - bounds.x_start) / 2;
+    let y = bounds.y_start + 2;
+    let floor = bounds.y_end - 1;
+    let category = CategoryId(1);
+
+    // The direct blocker is genuine bottom-connected pile. Both possible bonus
+    // receiving columns expose repose-relative drop depth one, so the profile
+    // should retain the accepted ordinary diagonal + one bonus continuation.
+    engine.surface.grid[y][x] = Some(category);
+    for row in y + 1..=floor {
+        engine.surface.grid[row][x] = Some(category);
+    }
+    for target_x in [x - 2, x + 2] {
+        engine.surface.grid[y + 3][target_x] = Some(category);
+    }
+    let expected_mass = engine.surface.physical_grain_count();
+
+    assert!(engine.direct_blocker_is_grounded(bounds, x, y + 1));
+    engine.move_grain_once(bounds, x, y);
+
+    let bonus_targets = [(x - 2, y + 2), (x + 2, y + 2)]
+        .into_iter()
+        .filter(|(px, py)| engine.surface.grid[*py][*px] == Some(category))
+        .count();
+    assert_eq!(
+        bonus_targets, 1,
+        "grounded pile contact must retain repose-relative one-hop momentum"
+    );
+    assert_eq!(engine.diagonal_moves, 2);
+    assert_eq!(engine.surface.physical_grain_count(), expected_mass);
+}
+
+#[test]
 fn momentum_surface_suppresses_bonus_when_receiving_support_is_airborne() {
     let mut engine = ClassicSandboxEngine::new(18, 18, 137, ClassicRainMode::Uniform);
     engine
@@ -894,6 +974,18 @@ fn momentum_surface_keeps_bonus_when_receiving_support_is_grounded() {
     );
     assert_eq!(engine.diagonal_moves, 2);
     assert_eq!(engine.surface.physical_grain_count(), expected_mass);
+}
+
+#[test]
+fn classic_011_grounded_contact_remains_mass_conserving_and_observable() {
+    let metrics = experiment_metrics("momentum-grounded-contact");
+    eprintln!(
+        "CLASSIC_011_METRICS profile=momentum-grounded-contact roughness={} apex={} width={} diagonal_moves={}",
+        metrics.0, metrics.1, metrics.2, metrics.3
+    );
+    assert!(metrics.1 > 0);
+    assert!(metrics.2 > 0);
+    assert!(metrics.3 > 0);
 }
 
 #[test]

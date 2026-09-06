@@ -505,7 +505,7 @@ impl App {
             }
             #[cfg(debug_assertions)]
             CommandIntent::TestingCheatsHelp => Ok(
-                "testingcheats: default sandbox classic · model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> · classic texture [baseline|textured|rugged|terraced] · classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft|momentum-contact|momentum-repose-contact|momentum-surface] · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · fill (classic/hybrid/Oslo; ensures six Fixture categories) · fillhalf (same fill, centered half-width) · clear · status · provenance · reset"
+                "testingcheats: default sandbox classic · model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> · classic texture [baseline|textured|rugged|terraced] · classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft|momentum-contact|momentum-repose-contact|momentum-surface|momentum-grounded-contact] · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · fill (classic/hybrid/Oslo; ensures six Fixture categories) · fillhalf (same fill, centered half-width) · clear · status · provenance · reset"
                     .to_string(),
             ),
             #[cfg(debug_assertions)]

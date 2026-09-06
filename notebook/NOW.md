@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-06
 authority: working
-summary: CLASSIC-009 is machine-green and its direct-blocker contact gate visibly improves the multi-lane falling artifact, but human review of momentum-repose-contact still shows occasional bonus destinations following receiving relief that is not bottom-connected. CLASSIC-010 is the active candidate: preserve all prior controls and require the first support below the proposed bonus destination to be grounded pile before momentum may continue.
-next: Natively validate CLASSIC-010, then human-compare momentum-repose-contact against momentum-surface with fresh `testingcheats fillhalf`, judging unsupported-looking lateral points separately from mature-slope avalanche continuation.
+summary: CLASSIC-010 is machine-green, but human review still prefers momentum-repose-contact and identifies the remaining artifact earlier in the Classic law: an airborne grain may treat another airborne direct blocker as surface, take an ordinary diagonal, and accumulate lateral lane drift before genuine pile contact. CLASSIC-011 is the active candidate: preserve every prior profile and add momentum-grounded-contact, which waits in-lane on airborne direct blockers while retaining exact momentum-repose-contact behavior after bottom-connected pile contact.
+next: Natively validate CLASSIC-011, then human-compare momentum-repose-contact against momentum-grounded-contact with fresh `testingcheats fillhalf`, judging falling-wall lane branching separately from mature-slope momentum quality.
 ---
 
 # NOW — Strata

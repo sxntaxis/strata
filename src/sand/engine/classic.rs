@@ -48,6 +48,7 @@ enum ClassicExperimentProfile {
     MomentumContact,
     MomentumReposeContact,
     MomentumSurface,
+    MomentumGroundedContact,
 }
 
 impl ClassicExperimentProfile {
@@ -65,6 +66,7 @@ impl ClassicExperimentProfile {
             Self::MomentumContact => "momentum-contact",
             Self::MomentumReposeContact => "momentum-repose-contact",
             Self::MomentumSurface => "momentum-surface",
+            Self::MomentumGroundedContact => "momentum-grounded-contact",
         }
     }
 
@@ -82,6 +84,7 @@ impl ClassicExperimentProfile {
             "momentum-contact" => Some(Self::MomentumContact),
             "momentum-repose-contact" => Some(Self::MomentumReposeContact),
             "momentum-surface" => Some(Self::MomentumSurface),
+            "momentum-grounded-contact" => Some(Self::MomentumGroundedContact),
             _ => None,
         }
     }
@@ -99,6 +102,7 @@ impl ClassicExperimentProfile {
                 | Self::MomentumContact
                 | Self::MomentumReposeContact
                 | Self::MomentumSurface
+                | Self::MomentumGroundedContact
         )
     }
 
@@ -115,6 +119,7 @@ impl ClassicExperimentProfile {
                 | Self::MomentumContact
                 | Self::MomentumReposeContact
                 | Self::MomentumSurface
+                | Self::MomentumGroundedContact
         )
     }
 
@@ -129,6 +134,7 @@ impl ClassicExperimentProfile {
                 | Self::MomentumContact
                 | Self::MomentumReposeContact
                 | Self::MomentumSurface
+                | Self::MomentumGroundedContact
         )
     }
 
@@ -142,14 +148,22 @@ impl ClassicExperimentProfile {
                 | Self::MomentumContact
                 | Self::MomentumReposeContact
                 | Self::MomentumSurface
+                | Self::MomentumGroundedContact
         )
     }
 
     fn momentum_requires_grounded_blocker(self) -> bool {
         matches!(
             self,
-            Self::MomentumContact | Self::MomentumReposeContact | Self::MomentumSurface
+            Self::MomentumContact
+                | Self::MomentumReposeContact
+                | Self::MomentumSurface
+                | Self::MomentumGroundedContact
         )
+    }
+
+    fn ordinary_diagonal_requires_grounded_blocker(self) -> bool {
+        matches!(self, Self::MomentumGroundedContact)
     }
 
     fn momentum_requires_grounded_receiving_support(self) -> bool {
@@ -395,7 +409,7 @@ impl ClassicSandboxEngine {
     pub(crate) fn set_experiment_profile_name(&mut self, profile: &str) -> Result<(), String> {
         let Some(profile) = ClassicExperimentProfile::parse(profile) else {
             return Err(
-                "classic experiment profile must be rugged, memory, slope, memory-slope, anchored, momentum, momentum-repose, momentum-tangent, momentum-soft, momentum-contact, momentum-repose-contact, or momentum-surface"
+                "classic experiment profile must be rugged, memory, slope, memory-slope, anchored, momentum, momentum-repose, momentum-tangent, momentum-soft, momentum-contact, momentum-repose-contact, momentum-surface, or momentum-grounded-contact"
                     .to_string(),
             );
         };
@@ -661,6 +675,18 @@ impl ClassicSandboxEngine {
             return;
         }
 
+        // CLASSIC-011 diagnostic: for the grounded-contact profile, catching
+        // another grain in free fall is not surface contact. Wait one gravity
+        // sweep instead of converting that transient collision into a lateral
+        // Classic step. Existing profiles preserve their ordinary diagonal law.
+        if self
+            .experiment_profile
+            .ordinary_diagonal_requires_grounded_blocker()
+            && !self.direct_blocker_is_grounded(bounds, x, y + 1)
+        {
+            return;
+        }
+
         // Classic still commits at most one ordinary diagonal choice per grain.
         // Experimental profiles may bias that choice toward the steeper side,
         // but never introduce a second-side retry when the chosen side is blocked.
@@ -858,7 +884,8 @@ impl ClassicSandboxEngine {
             }
             ClassicExperimentProfile::MomentumRepose
             | ClassicExperimentProfile::MomentumReposeContact
-            | ClassicExperimentProfile::MomentumSurface => {
+            | ClassicExperimentProfile::MomentumSurface
+            | ClassicExperimentProfile::MomentumGroundedContact => {
                 // A: reuse Classic's own local stability threshold. Momentum is
                 // eligible only on relief at, or one dot beyond, the source
                 // column's local repose instead of using a globally fixed band.
