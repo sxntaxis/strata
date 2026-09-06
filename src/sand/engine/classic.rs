@@ -379,7 +379,7 @@ impl ClassicSandboxEngine {
     pub(crate) fn set_color_blend_profile_name(&mut self, profile: &str) -> Result<(), String> {
         let Some(profile) = BrailleColorBlend::parse(profile) else {
             return Err(
-                "classic colorblend profile must be rgb, linear, oklab, dominant, or dominant-soft"
+                "classic colorblend profile must be rgb, rgb-additive, linear, oklab, dominant, or dominant-soft"
                     .to_string(),
             );
         };
@@ -1362,7 +1362,14 @@ mod tests {
         let memory = engine.repose_memory_remaining.clone();
         let moves = engine.movement_counts();
 
-        for profile in ["rgb", "linear", "oklab", "dominant", "dominant-soft"] {
+        for profile in [
+            "rgb",
+            "rgb-additive",
+            "linear",
+            "oklab",
+            "dominant",
+            "dominant-soft",
+        ] {
             engine
                 .set_color_blend_profile_name(profile)
                 .expect("valid blend");

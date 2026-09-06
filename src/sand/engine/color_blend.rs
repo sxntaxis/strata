@@ -11,6 +11,7 @@ use crate::domain::{CategoryId, DRIFT_CATEGORY_ID};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BrailleColorBlend {
     Rgb,
+    RgbAdditive,
     Linear,
     Oklab,
     Dominant,
@@ -21,6 +22,7 @@ impl BrailleColorBlend {
     pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Rgb => "rgb",
+            Self::RgbAdditive => "rgb-additive",
             Self::Linear => "linear",
             Self::Oklab => "oklab",
             Self::Dominant => "dominant",
@@ -31,6 +33,7 @@ impl BrailleColorBlend {
     pub(crate) fn parse(name: &str) -> Option<Self> {
         match name.trim().to_ascii_lowercase().as_str() {
             "rgb" => Some(Self::Rgb),
+            "rgb-additive" => Some(Self::RgbAdditive),
             "linear" => Some(Self::Linear),
             "oklab" => Some(Self::Oklab),
             "dominant" => Some(Self::Dominant),
@@ -101,6 +104,77 @@ fn oklab_to_linear_rgb(lab_l: f64, lab_a: f64, lab_b: f64) -> (f64, f64, f64) {
     )
 }
 
+fn legacy_rgb_mean(
+    counts: &HashMap<CategoryId, usize>,
+    category_colors: &HashMap<CategoryId, Color>,
+    total_colored_dots: usize,
+) -> (u8, u8, u8) {
+    // Preserve the exact pre-VISUAL-001 arithmetic control, including f32
+    // weighting and truncation. `rgb-additive` deliberately starts from this
+    // exact result and changes it only when chromatic cancellation is present.
+    let mut blended_r = 0f32;
+    let mut blended_g = 0f32;
+    let mut blended_b = 0f32;
+    for (category_id, count) in counts {
+        let (r, g, b) = category_rgb(*category_id, category_colors);
+        let weight = *count as f32 / total_colored_dots as f32;
+        blended_r += f32::from(r) * weight;
+        blended_g += f32::from(g) * weight;
+        blended_b += f32::from(b) * weight;
+    }
+    (blended_r as u8, blended_g as u8, blended_b as u8)
+}
+
+fn encoded_rgb_chroma(r: u8, g: u8, b: u8) -> f64 {
+    let maximum = r.max(g).max(b);
+    let minimum = r.min(g).min(b);
+    f64::from(maximum - minimum) / 255.0
+}
+
+fn rgb_additive_cancellation_blend(
+    counts: &HashMap<CategoryId, usize>,
+    category_colors: &HashMap<CategoryId, Color>,
+    total_colored_dots: usize,
+) -> Color {
+    let (base_r, base_g, base_b) = legacy_rgb_mean(counts, category_colors, total_colored_dots);
+
+    // Detect chroma that disappeared because differently-hued source colors
+    // canceled in the encoded-RGB mean. Neutral source colors do not trigger
+    // the lift: if the inputs had no chroma to begin with, the legacy result is
+    // retained exactly.
+    let mut source_chroma = 0.0f64;
+    for (category_id, count) in counts {
+        let (r, g, b) = category_rgb(*category_id, category_colors);
+        let weight = *count as f64 / total_colored_dots as f64;
+        source_chroma += encoded_rgb_chroma(r, g, b) * weight;
+    }
+    if source_chroma <= f64::EPSILON {
+        return Color::Rgb(base_r, base_g, base_b);
+    }
+
+    let mixed_chroma = encoded_rgb_chroma(base_r, base_g, base_b);
+    let cancellation = (1.0 - mixed_chroma / source_chroma).clamp(0.0, 1.0);
+    if cancellation <= f64::EPSILON {
+        return Color::Rgb(base_r, base_g, base_b);
+    }
+
+    // A squared response keeps ordinary/unequal RGB mixtures close to the
+    // owner-preferred legacy look, while strong complementary cancellation
+    // rises continuously toward white instead of dull gray.
+    let lift = cancellation * cancellation;
+    let lift_channel = |channel: u8| {
+        (f64::from(channel) + (255.0 - f64::from(channel)) * lift)
+            .round()
+            .clamp(0.0, 255.0) as u8
+    };
+
+    Color::Rgb(
+        lift_channel(base_r),
+        lift_channel(base_g),
+        lift_channel(base_b),
+    )
+}
+
 pub(super) fn blend_braille_color(
     counts: &HashMap<CategoryId, usize>,
     category_colors: &HashMap<CategoryId, Color>,
@@ -118,19 +192,11 @@ pub(super) fn blend_braille_color(
 
     match profile {
         BrailleColorBlend::Rgb => {
-            // Preserve the exact pre-VISUAL-001 arithmetic control, including
-            // f32 weighting and truncation.
-            let mut blended_r = 0f32;
-            let mut blended_g = 0f32;
-            let mut blended_b = 0f32;
-            for (category_id, count) in counts {
-                let (r, g, b) = category_rgb(*category_id, category_colors);
-                let weight = *count as f32 / total_colored_dots as f32;
-                blended_r += f32::from(r) * weight;
-                blended_g += f32::from(g) * weight;
-                blended_b += f32::from(b) * weight;
-            }
-            Color::Rgb(blended_r as u8, blended_g as u8, blended_b as u8)
+            let (r, g, b) = legacy_rgb_mean(counts, category_colors, total_colored_dots);
+            Color::Rgb(r, g, b)
+        }
+        BrailleColorBlend::RgbAdditive => {
+            rgb_additive_cancellation_blend(counts, category_colors, total_colored_dots)
         }
         BrailleColorBlend::Linear => {
             let mut r = 0f64;

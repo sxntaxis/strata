@@ -151,7 +151,7 @@ pub(crate) fn parse(input: &str) -> Result<CommandIntent, String> {
 #[cfg(debug_assertions)]
 fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
     let Some((subcommand, rest)) = args.split_first() else {
-        return Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft|momentum-contact|momentum-repose-contact|momentum-surface|momentum-grounded-contact] | classic colorblend [rgb|linear|oklab|dominant|dominant-soft] | classic stratigraphy | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | fillhalf | clear | status | provenance | reset".to_string());
+        return Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft|momentum-contact|momentum-repose-contact|momentum-surface|momentum-grounded-contact] | classic colorblend [rgb|rgb-additive|linear|oklab|dominant|dominant-soft] | classic stratigraphy | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | fillhalf | clear | status | provenance | reset".to_string());
     };
 
     match subcommand.to_ascii_lowercase().as_str() {
@@ -262,17 +262,17 @@ fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
             }
             if blend.len() != 1 {
                 return Err(
-                    "Usage: testingcheats classic colorblend [rgb|linear|oklab|dominant|dominant-soft]"
+                    "Usage: testingcheats classic colorblend [rgb|rgb-additive|linear|oklab|dominant|dominant-soft]"
                         .to_string(),
                 );
             }
             let profile = blend[0].to_ascii_lowercase();
             if !matches!(
                 profile.as_str(),
-                "rgb" | "linear" | "oklab" | "dominant" | "dominant-soft"
+                "rgb" | "rgb-additive" | "linear" | "oklab" | "dominant" | "dominant-soft"
             ) {
                 return Err(
-                    "classic colorblend profile must be rgb, linear, oklab, dominant, or dominant-soft"
+                    "classic colorblend profile must be rgb, rgb-additive, linear, oklab, dominant, or dominant-soft"
                         .to_string(),
                 );
             }
@@ -289,7 +289,7 @@ fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
         "status" if rest.is_empty() => Ok(CommandIntent::TestingCheatsStatus),
         "provenance" if rest.is_empty() => Ok(CommandIntent::TestingCheatsProvenance),
         "reset" if rest.is_empty() => Ok(CommandIntent::TestingCheatsReset),
-        _ => Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft|momentum-contact|momentum-repose-contact|momentum-surface|momentum-grounded-contact] | classic colorblend [rgb|linear|oklab|dominant|dominant-soft] | classic stratigraphy | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | fillhalf | clear | status | provenance | reset".to_string()),
+        _ => Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft|momentum-contact|momentum-repose-contact|momentum-surface|momentum-grounded-contact] | classic colorblend [rgb|rgb-additive|linear|oklab|dominant|dominant-soft] | classic stratigraphy | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | fillhalf | clear | status | provenance | reset".to_string()),
     }
 }
 
@@ -807,7 +807,14 @@ mod tests {
             parse("testingcheats classic colorblend").unwrap(),
             CommandIntent::TestingCheatsClassicColorBlend { profile: None }
         );
-        for profile in ["rgb", "linear", "oklab", "dominant", "dominant-soft"] {
+        for profile in [
+            "rgb",
+            "rgb-additive",
+            "linear",
+            "oklab",
+            "dominant",
+            "dominant-soft",
+        ] {
             assert_eq!(
                 parse(&format!("testingcheats classic colorblend {profile}")).unwrap(),
                 CommandIntent::TestingCheatsClassicColorBlend {

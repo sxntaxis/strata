@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-06
 authority: working
-summary: CLASSIC-012 is machine-green and human-confirmed live: momentum-grounded-contact is the owner-selected Classic default and its exact grounded-column cache preserves physics while delivering a 5.08x median native dense-wall speedup. Further performance work is paused while CLASSIC-013 reviews two remaining visual questions without changing physics: fill/fillhalf category redistribution/stratigraphic mixing and the single-foreground-color reduction used for multi-category Braille cells.
-next: Natively validate CLASSIC-013 as a zero-physics review pass: prove the stratigraphy report is read-only and fill-relative, preserve all CLASSIC-012/011 exactness gates, prove rgb is the exact legacy renderer control, then compare rgb/linear/oklab/dominant/dominant-soft on the same live fillhalf grid before deciding whether physical color redistribution needs any intervention.
+summary: CLASSIC-013 is machine-green. Human review keeps `rgb` as the preferred Braille color control and leaves stratigraphic redistribution physics unchanged for now. CLASSIC-014 is the current bounded edge: add one render-only `rgb-additive` comparison that lifts strong chromatic cancellation toward white while preserving `rgb`, momentum-grounded-contact physics, and the CLASSIC-012 performance baseline exactly.
+next: Natively validate CLASSIC-014 as a zero-physics renderer-only pass, then compare `rgb` versus `rgb-additive` on the same live fillhalf grid, especially complementary Red/Cyan and Yellow/Blue boundaries. Do not resume physics or performance changes until the owner closes this color gate.
 ---
 
 # NOW — Strata

@@ -1353,7 +1353,7 @@ impl SandEngine {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
 
     use ratatui::style::Color;
 
@@ -1635,6 +1635,7 @@ mod tests {
 
         for profile in [
             BrailleColorBlend::Rgb,
+            BrailleColorBlend::RgbAdditive,
             BrailleColorBlend::Linear,
             BrailleColorBlend::Oklab,
             BrailleColorBlend::Dominant,
@@ -1739,6 +1740,119 @@ mod tests {
         assert_ne!(
             first_render_color(&engine, &categories, BrailleColorBlend::Oklab),
             Color::Rgb(127, 127, 127)
+        );
+    }
+
+
+    #[test]
+    fn rgb_additive_lifts_exact_complementary_cancellation_to_white() {
+        let mut engine = SandEngine::new(1, 1);
+        engine.clear();
+        let red = CategoryId::new(1);
+        let cyan = CategoryId::new(2);
+        for y in 0..engine.grid.len() {
+            for x in 0..engine.grid[y].len() {
+                engine.grid[y][x] = Some(if y < 2 { red } else { cyan });
+            }
+        }
+        let categories = [
+            test_category(1, Color::Rgb(255, 0, 0)),
+            test_category(2, Color::Rgb(0, 255, 255)),
+        ];
+
+        let rgb_lines = engine.render_with_color_blend(&categories, BrailleColorBlend::Rgb);
+        let additive_lines =
+            engine.render_with_color_blend(&categories, BrailleColorBlend::RgbAdditive);
+        assert_eq!(rgb_lines[0].spans[0].content, additive_lines[0].spans[0].content);
+        assert_eq!(rgb_lines[0].spans[0].style.fg, Some(Color::Rgb(127, 127, 127)));
+        assert_eq!(
+            additive_lines[0].spans[0].style.fg,
+            Some(Color::Rgb(255, 255, 255))
+        );
+
+        let counts = HashMap::from([(CategoryId::new(3), 4usize), (CategoryId::new(4), 4usize)]);
+        let colors = HashMap::from([
+            (CategoryId::new(3), Color::Rgb(255, 255, 0)),
+            (CategoryId::new(4), Color::Rgb(0, 0, 255)),
+        ]);
+        assert_eq!(
+            super::color_blend::blend_braille_color(
+                &counts,
+                &colors,
+                BrailleColorBlend::RgbAdditive,
+            ),
+            Color::Rgb(255, 255, 255)
+        );
+    }
+
+    #[test]
+    fn rgb_additive_preserves_non_canceling_legacy_rgb_mix_exactly() {
+        let mut engine = SandEngine::new(1, 1);
+        engine.clear();
+        let red = CategoryId::new(1);
+        let yellow = CategoryId::new(2);
+        for y in 0..engine.grid.len() {
+            for x in 0..engine.grid[y].len() {
+                engine.grid[y][x] = Some(if y < 2 { red } else { yellow });
+            }
+        }
+        let categories = [
+            test_category(1, Color::Rgb(255, 0, 0)),
+            test_category(2, Color::Rgb(255, 255, 0)),
+        ];
+
+        assert_eq!(
+            first_render_color(&engine, &categories, BrailleColorBlend::RgbAdditive),
+            first_render_color(&engine, &categories, BrailleColorBlend::Rgb)
+        );
+    }
+
+    #[test]
+    fn rgb_additive_does_not_brighten_neutral_source_mixtures() {
+        let counts = HashMap::from([(CategoryId::new(1), 4usize), (CategoryId::new(2), 4usize)]);
+        let colors = HashMap::from([
+            (CategoryId::new(1), Color::Rgb(0, 0, 0)),
+            (CategoryId::new(2), Color::Rgb(255, 255, 255)),
+        ]);
+        assert_eq!(
+            super::color_blend::blend_braille_color(
+                &counts,
+                &colors,
+                BrailleColorBlend::RgbAdditive,
+            ),
+            super::color_blend::blend_braille_color(
+                &counts,
+                &colors,
+                BrailleColorBlend::Rgb,
+            )
+        );
+    }
+
+    #[test]
+    fn rgb_additive_unequal_complements_lift_continuously_without_dominant_flip() {
+        let mut counts = HashMap::from([(CategoryId::new(1), 7usize), (CategoryId::new(2), 1usize)]);
+        let colors = HashMap::from([
+            (CategoryId::new(1), Color::Rgb(255, 0, 0)),
+            (CategoryId::new(2), Color::Rgb(0, 255, 255)),
+        ]);
+        assert_eq!(
+            super::color_blend::blend_braille_color(
+                &counts,
+                &colors,
+                BrailleColorBlend::RgbAdditive,
+            ),
+            Color::Rgb(225, 45, 45)
+        );
+
+        counts.insert(CategoryId::new(1), 5);
+        counts.insert(CategoryId::new(2), 3);
+        assert_eq!(
+            super::color_blend::blend_braille_color(
+                &counts,
+                &colors,
+                BrailleColorBlend::RgbAdditive,
+            ),
+            Color::Rgb(213, 185, 185)
         );
     }
 
@@ -2029,7 +2143,7 @@ mod tests {
 
 #[cfg(test)]
 mod organic_formation_tests {
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
 
     use crate::{
         domain::CategoryId,
@@ -2688,7 +2802,7 @@ mod organic_formation_tests {
 
 #[cfg(test)]
 mod conservation_tests {
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
 
     use crate::{domain::CategoryId, sand::SandEngine};
 
@@ -2775,7 +2889,7 @@ mod conservation_tests {
 
     #[cfg(test)]
     mod compressed_mass_tests {
-        use std::collections::HashSet;
+        use std::collections::{HashMap, HashSet};
 
         use crate::domain::CategoryId;
         use crate::sand::{PendingGrainRun, SandEngine, SandState, SandStateGrain};
