@@ -15,6 +15,8 @@ const CLASSIC_REPOSE_HIGH: u8 = 3;
 const CLASSIC_REPOSE_ANCHOR: u8 = 4;
 const GOLDEN_RATIO: f64 = 1.618_033_988_749_895;
 const RAIN_FOCUS_BIAS_ONE_IN: usize = 10;
+const CLASSIC_MOMENTUM_MIN_DROP_DEPTH: usize = 2;
+const CLASSIC_MOMENTUM_MAX_DROP_DEPTH: usize = 3;
 // At one ingress per second, a full focus traverse takes about twelve hours.
 const RAIN_FOCUS_EDGE_TO_EDGE_INGRESSES: usize = 43_200;
 
@@ -697,9 +699,16 @@ impl ClassicSandboxEngine {
         if y + 1 >= bounds.y_end || !self.classic_diagonal_is_available(bounds, x, next_x, y) {
             return;
         }
-        // The bonus hop is deliberately conservative: it only continues when
-        // that same direction has at least two dots of open relief below it.
-        if self.diagonal_drop_depth(bounds, next_x, y) < 2 {
+        // Keep momentum on slope-like relief rather than cliff faces. The
+        // accepted one-hop behavior looks natural once the receiving surface is
+        // only a few dots below the moving grain, but on very deep early-fill
+        // walls the same lateral hop reads like spawning. This bounded local
+        // depth gate suppresses only that cliff case; it adds no angle solver,
+        // lookahead, velocity, or additional hop.
+        let drop_depth = self.diagonal_drop_depth(bounds, next_x, y);
+        if !(CLASSIC_MOMENTUM_MIN_DROP_DEPTH..=CLASSIC_MOMENTUM_MAX_DROP_DEPTH)
+            .contains(&drop_depth)
+        {
             return;
         }
         self.surface.grid[y][x] = None;

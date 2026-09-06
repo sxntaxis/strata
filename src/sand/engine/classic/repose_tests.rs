@@ -466,8 +466,12 @@ fn momentum_profile_allows_at_most_one_bonus_same_direction_diagonal() {
     let y = bounds.y_start + 2;
     let category = CategoryId(1);
 
+    // Build a receiving surface two dots below the prospective bonus target:
+    // deep enough for momentum, but still in the local slope-like band.
     engine.surface.grid[y][x] = Some(category);
     engine.surface.grid[y + 1][x] = Some(category);
+    engine.surface.grid[y + 4][x - 2] = Some(category);
+    engine.surface.grid[y + 4][x + 2] = Some(category);
     engine.move_grain_once(bounds, x, y);
 
     let occupied = [(x - 2, y + 2), (x + 2, y + 2)]
@@ -476,9 +480,67 @@ fn momentum_profile_allows_at_most_one_bonus_same_direction_diagonal() {
         .count();
     assert_eq!(
         occupied, 1,
-        "momentum must add exactly one same-direction bonus hop"
+        "momentum must add exactly one same-direction bonus hop on slope-like relief"
     );
     assert_eq!(engine.diagonal_moves, 2);
+    assert_eq!(engine.surface.physical_grain_count(), 4);
+}
+
+#[test]
+fn momentum_profile_keeps_bonus_at_upper_slope_band_boundary() {
+    let mut engine = ClassicSandboxEngine::new(18, 14, 115, ClassicRainMode::Uniform);
+    engine.set_experiment_profile_name("momentum").unwrap();
+    engine.local_repose.fill(CLASSIC_REPOSE_LOW);
+    let bounds = engine.surface.viewport_bounds().expect("visible basin");
+    let x = bounds.x_start + (bounds.x_end - bounds.x_start) / 2;
+    let y = bounds.y_start + 2;
+    let category = CategoryId(1);
+
+    // Support at y+5 gives the prospective bonus column drop depth 3, the
+    // upper edge of the accepted local slope band.
+    engine.surface.grid[y][x] = Some(category);
+    engine.surface.grid[y + 1][x] = Some(category);
+    engine.surface.grid[y + 5][x - 2] = Some(category);
+    engine.surface.grid[y + 5][x + 2] = Some(category);
+    engine.move_grain_once(bounds, x, y);
+
+    let bonus_targets = [(x - 2, y + 2), (x + 2, y + 2)]
+        .into_iter()
+        .filter(|(px, py)| engine.surface.grid[*py][*px] == Some(category))
+        .count();
+    assert_eq!(bonus_targets, 1, "drop depth 3 must retain momentum");
+    assert_eq!(engine.diagonal_moves, 2);
+    assert_eq!(engine.surface.physical_grain_count(), 4);
+}
+
+#[test]
+fn momentum_profile_suppresses_bonus_hop_on_cliff_like_relief() {
+    let mut engine = ClassicSandboxEngine::new(18, 16, 117, ClassicRainMode::Uniform);
+    engine.set_experiment_profile_name("momentum").unwrap();
+    engine.local_repose.fill(CLASSIC_REPOSE_LOW);
+    let bounds = engine.surface.viewport_bounds().expect("visible basin");
+    let x = bounds.x_start + (bounds.x_end - bounds.x_start) / 2;
+    let y = bounds.y_start + 2;
+    let category = CategoryId(1);
+
+    // The ordinary Classic diagonal is valid, but both possible continuation
+    // columns are deep open cliffs. Momentum must stop after that first hop.
+    engine.surface.grid[y][x] = Some(category);
+    engine.surface.grid[y + 1][x] = Some(category);
+    engine.move_grain_once(bounds, x, y);
+
+    let ordinary_targets = [(x - 1, y + 1), (x + 1, y + 1)]
+        .into_iter()
+        .filter(|(px, py)| engine.surface.grid[*py][*px] == Some(category))
+        .count();
+    let bonus_targets = [(x - 2, y + 2), (x + 2, y + 2)]
+        .into_iter()
+        .filter(|(px, py)| engine.surface.grid[*py][*px] == Some(category))
+        .count();
+
+    assert_eq!(ordinary_targets, 1, "ordinary Classic diagonal must remain");
+    assert_eq!(bonus_targets, 0, "cliff-like relief must suppress momentum");
+    assert_eq!(engine.diagonal_moves, 1);
     assert_eq!(engine.surface.physical_grain_count(), 2);
 }
 

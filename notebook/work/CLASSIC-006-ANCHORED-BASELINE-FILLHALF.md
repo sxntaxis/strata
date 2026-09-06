@@ -1,7 +1,7 @@
 ---
 id: CLASSIC-006
 kind: work
-state: candidate
+state: completed
 created: 2026-09-06
 updated: 2026-09-06
 authority: working
@@ -90,6 +90,10 @@ Machine validation must prove:
 7. Fixture category provisioning stays on the existing idempotent path;
 8. parser/help expose `fillhalf`;
 9. Classic/Hybrid/Oslo regressions, fmt, strict Clippy, and full tests remain green.
+
+## Closure
+
+CLASSIC-006 passed local machine validation from the complete-history candidate and returned mechanically cleaned HEAD `c46e38790e4ab647131987c9a206a8ac2569e877`. The owner then human-smoked `testingcheats fillhalf` and reported that it works well. `anchored` therefore remains the selected default and the centered half-width fixture is accepted as the comparison convenience for the next momentum pass.
 
 ## Deferred CLASSIC-007 question
 

@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-06
 authority: working
-summary: CLASSIC-005 passed machine validation and owner visual comparison. Anchored is now the preferred default Classic experiment over the rugged texture base; momentum remains a promising non-default experiment pending one narrow cliff/steep-slope eligibility refinement. CLASSIC-006 also adds `testingcheats fillhalf`, the existing rainbow fixture restricted to the centered half of visible width.
-next: Validate CLASSIC-006, human-smoke `anchored` and `momentum` with `testingcheats fillhalf`, then design a narrow momentum cliff gate that suppresses lateral-looking bonus hops on near-vertical early-fill relief without weakening mature-slope avalanche continuation.
+summary: CLASSIC-006 is machine-green and owner-smoked: anchored is the default Classic experiment and `testingcheats fillhalf` works as intended. CLASSIC-007 is the active candidate, changing only momentum bonus-hop eligibility with a bounded local cliff gate so deep early-fill walls fall back to the ordinary Classic diagonal while mature-slope one-hop continuation is preserved.
+next: Natively validate CLASSIC-007, then human-compare anchored versus refined momentum with `testingcheats fillhalf`, checking that early-fill lateral-looking hops disappear without weakening mature-slope avalanche continuation.
 ---
 
 # NOW — Strata
