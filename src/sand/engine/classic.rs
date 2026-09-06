@@ -6,6 +6,9 @@ use crate::domain::{Category, CategoryId};
 
 use super::{SandEngine, ViewportBounds, centered_half_open_interval};
 
+mod grounded_index;
+use grounded_index::GroundedColumnIndex;
+
 const CLASSIC_PHYSICS_RNG_XOR: u64 = 0xC6BC_2796_92B5_CC83;
 const CLASSIC_RAIN_RNG_XOR: u64 = 0xD1B5_4A32_D192_ED03;
 const CLASSIC_REPOSE_RNG_XOR: u64 = 0xA5A5_5A5A_D3C1_B7E9;
@@ -271,7 +274,7 @@ impl ClassicSandboxEngine {
             local_repose,
             repose_memory_remaining,
             texture_profile: ClassicTextureProfile::Rugged,
-            experiment_profile: ClassicExperimentProfile::Anchored,
+            experiment_profile: ClassicExperimentProfile::MomentumGroundedContact,
             rain_focus_x: None,
             rain_focus_target_x: None,
             rain_focus_move_counter: 0,
@@ -635,12 +638,26 @@ impl ClassicSandboxEngine {
     }
 
     fn apply_gravity(&mut self) {
+        self.apply_gravity_with_grounded_index(true);
+    }
+
+    fn apply_gravity_with_grounded_index(&mut self, use_grounded_index: bool) {
         let Some(bounds) = self.surface.viewport_bounds() else {
             return;
         };
         if bounds.y_end.saturating_sub(bounds.y_start) < 2 {
             return;
         }
+
+        // CLASSIC-012 performance path: the accepted grounded-contact baseline
+        // otherwise rescans from nearly every direct blocker to the visible floor.
+        // Build one exact sweep-local bottom-connectivity index and update it after
+        // each in-place move. Existing profiles do not pay for or consult it.
+        let mut grounded_index = (use_grounded_index
+            && self
+                .experiment_profile
+                .ordinary_diagonal_requires_grounded_blocker())
+        .then(|| GroundedColumnIndex::from_grid(&self.surface.grid, bounds));
 
         let base_left_to_right = self.surface.sweep_left_to_right;
         self.surface.sweep_left_to_right = !self.surface.sweep_left_to_right;
@@ -653,24 +670,52 @@ impl ClassicSandboxEngine {
             };
             if left_to_right {
                 for x in bounds.x_start..bounds.x_end {
-                    self.move_grain_once(bounds, x, y);
+                    self.move_grain_once_with_grounded_index(
+                        bounds,
+                        x,
+                        y,
+                        grounded_index.as_mut(),
+                    );
                 }
             } else {
                 for x in (bounds.x_start..bounds.x_end).rev() {
-                    self.move_grain_once(bounds, x, y);
+                    self.move_grain_once_with_grounded_index(
+                        bounds,
+                        x,
+                        y,
+                        grounded_index.as_mut(),
+                    );
                 }
             }
         }
         self.sync_surface_metadata();
     }
 
+    #[cfg(test)]
+    fn apply_gravity_uncached_for_test(&mut self) {
+        self.apply_gravity_with_grounded_index(false);
+    }
+
     fn move_grain_once(&mut self, bounds: ViewportBounds, x: usize, y: usize) {
+        self.move_grain_once_with_grounded_index(bounds, x, y, None);
+    }
+
+    fn move_grain_once_with_grounded_index(
+        &mut self,
+        bounds: ViewportBounds,
+        x: usize,
+        y: usize,
+        mut grounded_index: Option<&mut GroundedColumnIndex>,
+    ) {
         let Some(category_id) = self.surface.grid[y][x] else {
             return;
         };
         if self.surface.grid[y + 1][x].is_none() {
             self.surface.grid[y][x] = None;
             self.surface.grid[y + 1][x] = Some(category_id);
+            if let Some(index) = grounded_index.as_deref_mut() {
+                index.record_move(&self.surface.grid, x, y, x, y + 1);
+            }
             self.vertical_moves = self.vertical_moves.saturating_add(1);
             return;
         }
@@ -679,13 +724,21 @@ impl ClassicSandboxEngine {
         // another grain in free fall is not surface contact. Wait one gravity
         // sweep instead of converting that transient collision into a lateral
         // Classic step. Existing profiles preserve their ordinary diagonal law.
-        if self
+        let ordinary_blocker_grounded = if self
             .experiment_profile
             .ordinary_diagonal_requires_grounded_blocker()
-            && !self.direct_blocker_is_grounded(bounds, x, y + 1)
         {
-            return;
-        }
+            let grounded = grounded_index.as_deref().map_or_else(
+                || self.direct_blocker_is_grounded(bounds, x, y + 1),
+                |index| index.is_grounded(&self.surface.grid, x, y + 1),
+            );
+            if !grounded {
+                return;
+            }
+            true
+        } else {
+            false
+        };
 
         // Classic still commits at most one ordinary diagonal choice per grain.
         // Experimental profiles may bias that choice toward the steeper side,
@@ -703,13 +756,20 @@ impl ClassicSandboxEngine {
         // Ordinary Classic diagonal behavior remains unchanged either way.
         let momentum_blocker_grounded =
             if self.experiment_profile.momentum_requires_grounded_blocker() {
-                self.direct_blocker_is_grounded(bounds, x, y + 1)
+                if ordinary_blocker_grounded && grounded_index.is_some() {
+                    true
+                } else {
+                    self.direct_blocker_is_grounded(bounds, x, y + 1)
+                }
             } else {
                 true
             };
 
         self.surface.grid[y][x] = None;
         self.surface.grid[y + 1][target_x] = Some(category_id);
+        if let Some(index) = grounded_index.as_deref_mut() {
+            index.record_move(&self.surface.grid, x, y, target_x, y + 1);
+        }
         self.diagonal_moves = self.diagonal_moves.saturating_add(1);
 
         if self.experiment_profile.uses_momentum() {
@@ -720,6 +780,7 @@ impl ClassicSandboxEngine {
                 step,
                 category_id,
                 momentum_blocker_grounded,
+                grounded_index.as_deref_mut(),
             );
         }
 
@@ -835,6 +896,7 @@ impl ClassicSandboxEngine {
         step: isize,
         category_id: CategoryId,
         blocker_grounded: bool,
+        grounded_index: Option<&mut GroundedColumnIndex>,
     ) {
         if !blocker_grounded {
             return;
@@ -861,6 +923,9 @@ impl ClassicSandboxEngine {
         }
         self.surface.grid[y][x] = None;
         self.surface.grid[y + 1][next_x] = Some(category_id);
+        if let Some(index) = grounded_index {
+            index.record_move(&self.surface.grid, x, y, next_x, y + 1);
+        }
         self.diagonal_moves = self.diagonal_moves.saturating_add(1);
         self.refresh_local_repose(next_x);
     }

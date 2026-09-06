@@ -1,7 +1,7 @@
 ---
 id: CLASSIC-011
 kind: work
-state: candidate
+state: completed
 created: 2026-09-06
 updated: 2026-09-06
 authority: working
@@ -109,3 +109,7 @@ Judge two things separately:
 2. **mature pile slope** — the entertaining repose-relative momentum avalanche should remain.
 
 The desired result is vertical free fall until true pile contact, followed by the same local Classic avalanche law already preferred in `momentum-repose-contact`.
+
+## Closure
+
+CLASSIC-011 passed native validation with 431 tests, strict Clippy, formatting, parser/help, all focused grounded-contact gates, and no mechanical fixes. Human review selected `momentum-grounded-contact` as practically perfect and promoted it to the preferred Classic baseline. The only observed regression is computational: the repeated bottom-connectivity scan can saturate roughly one CPU thread during dense `fillhalf` relaxation and slow visual cadence. Physics is accepted; CLASSIC-012 owns behavior-preserving optimization of that predicate and the default promotion.

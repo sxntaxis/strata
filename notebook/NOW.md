@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-06
 authority: working
-summary: CLASSIC-010 is machine-green, but human review still prefers momentum-repose-contact and identifies the remaining artifact earlier in the Classic law: an airborne grain may treat another airborne direct blocker as surface, take an ordinary diagonal, and accumulate lateral lane drift before genuine pile contact. CLASSIC-011 is the active candidate: preserve every prior profile and add momentum-grounded-contact, which waits in-lane on airborne direct blockers while retaining exact momentum-repose-contact behavior after bottom-connected pile contact.
-next: Natively validate CLASSIC-011, then human-compare momentum-repose-contact against momentum-grounded-contact with fresh `testingcheats fillhalf`, judging falling-wall lane branching separately from mature-slope momentum quality.
+summary: CLASSIC-011 is machine-green and human-accepted: momentum-grounded-contact is now the owner-selected Classic baseline because vertical free fall stays in-lane until genuine pile contact while mature-slope repose momentum remains entertaining. The remaining defect is implementation cost: repeated bottom-connectivity scans can saturate one CPU thread during dense fillhalf relaxation and visibly slow cadence. CLASSIC-012 is the active candidate: promote momentum-grounded-contact as the default and replace repeated floor scans with an exact sweep-local grounded-column index, with cached-vs-uncached state/RNG equivalence as a hard gate.
+next: Natively validate CLASSIC-012, require exact cached-versus-reference equality across dense multi-seed gravity passes plus full repository gates, report native CPU/frame-time improvement on fillhalf, then human-smoke the default for identical physics with restored visual cadence.
 ---
 
 # NOW — Strata

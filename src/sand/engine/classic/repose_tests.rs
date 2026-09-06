@@ -75,6 +75,8 @@ fn apex_height(profile: &[usize]) -> usize {
 fn local_repose_two_blocks_only_the_extra_unit_of_relief() {
     let mut low = ClassicSandboxEngine::new(8, 6, 23, ClassicRainMode::Uniform);
     let mut high = ClassicSandboxEngine::new(8, 6, 23, ClassicRainMode::Uniform);
+    low.set_experiment_profile_name("rugged").unwrap();
+    high.set_experiment_profile_name("rugged").unwrap();
     let bounds = low.surface.viewport_bounds().expect("visible basin");
     let x = bounds.x_start + (bounds.x_end - bounds.x_start) / 2;
     let floor = bounds.y_end - 1;
@@ -199,6 +201,8 @@ fn classic_and_hybrid_still_share_the_same_repose_and_gravity_law() {
 fn local_repose_three_requires_one_more_unit_of_relief_than_repose_two() {
     let mut mid = ClassicSandboxEngine::new(8, 7, 23, ClassicRainMode::Uniform);
     let mut high = ClassicSandboxEngine::new(8, 7, 23, ClassicRainMode::Uniform);
+    mid.set_experiment_profile_name("rugged").unwrap();
+    high.set_experiment_profile_name("rugged").unwrap();
     let bounds = mid.surface.viewport_bounds().expect("visible basin");
     let x = bounds.x_start + (bounds.x_end - bounds.x_start) / 2;
     let floor = bounds.y_end - 1;
@@ -391,10 +395,10 @@ fn classic_experiment_selection_is_nonretroactive_and_uses_rugged_texture_base()
 }
 
 #[test]
-fn anchored_is_the_owner_selected_default_classic_experiment() {
+fn grounded_contact_is_the_owner_selected_default_classic_experiment() {
     let engine = ClassicSandboxEngine::new(80, 10, 102, ClassicRainMode::Uniform);
     assert_eq!(engine.texture_profile_name(), "rugged");
-    assert_eq!(engine.experiment_profile_name(), "anchored");
+    assert_eq!(engine.experiment_profile_name(), "momentum-grounded-contact");
 }
 
 #[test]
@@ -1068,4 +1072,99 @@ fn classic_experiment_ladder_remains_mass_conserving_and_observable() {
         assert!(metrics.2 > 0, "profile={profile}");
         assert!(metrics.3 > 0, "profile={profile}");
     }
+}
+
+#[test]
+fn classic_012_cached_grounded_contact_matches_uncached_reference_exactly() {
+    for seed in [149_u64, 151, 157, 163] {
+        let mut cached = ClassicSandboxEngine::new(32, 12, seed, ClassicRainMode::Uniform);
+        let mut reference = ClassicSandboxEngine::new(32, 12, seed, ClassicRainMode::Uniform);
+        cached
+            .set_experiment_profile_name("momentum-grounded-contact")
+            .unwrap();
+        reference
+            .set_experiment_profile_name("momentum-grounded-contact")
+            .unwrap();
+        install_centered_compact_wall(&mut cached, 32, 28);
+        install_centered_compact_wall(&mut reference, 32, 28);
+
+        for pass in 0..160 {
+            cached.apply_gravity();
+            reference.apply_gravity_uncached_for_test();
+            assert_eq!(cached.surface.grid, reference.surface.grid, "seed={seed} pass={pass}");
+            assert_eq!(cached.physics_rng_state, reference.physics_rng_state, "seed={seed} pass={pass}");
+            assert_eq!(cached.repose_rng_state, reference.repose_rng_state, "seed={seed} pass={pass}");
+            assert_eq!(cached.local_repose, reference.local_repose, "seed={seed} pass={pass}");
+            assert_eq!(
+                cached.repose_memory_remaining,
+                reference.repose_memory_remaining,
+                "seed={seed} pass={pass}"
+            );
+            assert_eq!(cached.vertical_moves, reference.vertical_moves, "seed={seed} pass={pass}");
+            assert_eq!(cached.diagonal_moves, reference.diagonal_moves, "seed={seed} pass={pass}");
+            assert_eq!(
+                cached.surface.grain_count,
+                reference.surface.grain_count,
+                "seed={seed} pass={pass}"
+            );
+            assert_eq!(
+                cached.surface.sweep_left_to_right,
+                reference.surface.sweep_left_to_right,
+                "seed={seed} pass={pass}"
+            );
+        }
+    }
+}
+
+
+#[test]
+fn classic_012_perf_probe_reports_cached_vs_classic_011_scan_path() {
+    use std::time::Instant;
+
+    fn dense_engine(seed: u64) -> ClassicSandboxEngine {
+        let mut engine = ClassicSandboxEngine::new(80, 24, seed, ClassicRainMode::Uniform);
+        engine
+            .set_experiment_profile_name("momentum-grounded-contact")
+            .unwrap();
+        let bounds = engine.surface.viewport_bounds().expect("visible basin");
+        let width = (bounds.x_end - bounds.x_start) / 2;
+        let height = (bounds.y_end - bounds.y_start) * 4 / 5;
+        install_centered_compact_wall(&mut engine, width, height);
+        engine
+    }
+
+    let mut cached = dense_engine(167);
+    let mut reference = dense_engine(167);
+    let passes = 96;
+
+    let cached_started = Instant::now();
+    for _ in 0..passes {
+        cached.apply_gravity();
+    }
+    let cached_elapsed = cached_started.elapsed();
+
+    let reference_started = Instant::now();
+    for _ in 0..passes {
+        reference.apply_gravity_uncached_for_test();
+    }
+    let reference_elapsed = reference_started.elapsed();
+
+    assert_eq!(cached.surface.grid, reference.surface.grid);
+    assert_eq!(cached.physics_rng_state, reference.physics_rng_state);
+    assert_eq!(cached.repose_rng_state, reference.repose_rng_state);
+    assert_eq!(cached.local_repose, reference.local_repose);
+    assert_eq!(cached.repose_memory_remaining, reference.repose_memory_remaining);
+    assert_eq!(cached.vertical_moves, reference.vertical_moves);
+    assert_eq!(cached.diagonal_moves, reference.diagonal_moves);
+
+    let cached_us = cached_elapsed.as_micros();
+    let reference_us = reference_elapsed.as_micros();
+    let speedup = if cached_us == 0 {
+        f64::INFINITY
+    } else {
+        reference_us as f64 / cached_us as f64
+    };
+    eprintln!(
+        "CLASSIC_012_PERF cached_us={cached_us} classic_011_scan_us={reference_us} speedup={speedup:.2}x passes={passes}"
+    );
 }
