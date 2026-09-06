@@ -9,12 +9,12 @@ mod flowviz;
 mod flowviz_conservative;
 mod flowviz_conservative_render;
 mod flowviz_unit;
-#[cfg(debug_assertions)]
-mod flowviz_unit_live_trace;
 #[cfg(test)]
 mod flowviz_unit_coherent_tests;
 #[cfg(test)]
 mod flowviz_unit_direct_tests;
+#[cfg(debug_assertions)]
+mod flowviz_unit_live_trace;
 mod flowviz_unit_micro;
 #[cfg(test)]
 mod flowviz_unit_micro_tests;

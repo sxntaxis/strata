@@ -190,7 +190,13 @@ impl OsloSandboxEngine {
             }
         }
 
-        for (index, category_id) in self.flowviz_live_rainbow.categories.iter().copied().enumerate() {
+        for (index, category_id) in self
+            .flowviz_live_rainbow
+            .categories
+            .iter()
+            .copied()
+            .enumerate()
+        {
             let traces = self
                 .flowviz_live_rainbow
                 .episodes
@@ -231,7 +237,10 @@ impl OsloSandboxEngine {
             let mut inside = 0usize;
             let mut outside = 0usize;
             for (site, column) in self.columns.iter().enumerate() {
-                let count = column.iter().filter(|category_id| **category_id == green).count();
+                let count = column
+                    .iter()
+                    .filter(|category_id| **category_id == green)
+                    .count();
                 if site >= self.flowviz_live_rainbow.initial_visible_start
                     && site < self.flowviz_live_rainbow.initial_visible_end
                 {
@@ -335,11 +344,8 @@ mod tests {
             CategoryId(105),
             CategoryId(106),
         ];
-        let mut engine = OsloSandboxEngine::new_front_unit_visual_support_flowviz_vessel(
-            20,
-            10,
-            TEST_SEED,
-        );
+        let mut engine =
+            OsloSandboxEngine::new_front_unit_visual_support_flowviz_vessel(20, 10, TEST_SEED);
         engine.debug_fill_rainbow_80(&categories).unwrap();
         let physical_before = engine.columns.clone();
         let (start, end) = engine.visible_lattice_bounds();
@@ -362,11 +368,8 @@ mod tests {
 
     #[test]
     fn live_rainbow_trace_requires_fill_on_unit_model() {
-        let engine = OsloSandboxEngine::new_front_unit_visual_support_flowviz_vessel(
-            20,
-            10,
-            TEST_SEED,
-        );
+        let engine =
+            OsloSandboxEngine::new_front_unit_visual_support_flowviz_vessel(20, 10, TEST_SEED);
         assert!(engine.live_rainbow_provenance_report().is_err());
     }
 }
