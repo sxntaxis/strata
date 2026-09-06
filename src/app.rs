@@ -693,41 +693,20 @@ impl TestingSandEngine {
         }
     }
 
-    fn classic_repose_percent(&self) -> Result<u8, String> {
+    fn classic_texture_profile(&self) -> Result<&'static str, String> {
         match self {
-            Self::Classic(engine) => Ok(engine.high_repose_percent()),
+            Self::Classic(engine) => Ok(engine.texture_profile_name()),
             _ => Err(
-                "testingcheats classic repose is available only for classic/hybrid".to_string(),
+                "testingcheats classic texture is available only for classic/hybrid".to_string(),
             ),
         }
     }
 
-    fn classic_repose_default_percent(&self) -> Result<u8, String> {
+    fn set_classic_texture_profile(&mut self, profile: &str) -> Result<(), String> {
         match self {
-            Self::Classic(_) => Ok(ClassicSandboxEngine::default_high_repose_percent()),
+            Self::Classic(engine) => engine.set_texture_profile_name(profile),
             _ => Err(
-                "testingcheats classic repose is available only for classic/hybrid".to_string(),
-            ),
-        }
-    }
-
-    fn set_classic_repose_percent(&mut self, percent: u8) -> Result<(), String> {
-        match self {
-            Self::Classic(engine) => engine.set_high_repose_percent(percent),
-            _ => Err(
-                "testingcheats classic repose is available only for classic/hybrid".to_string(),
-            ),
-        }
-    }
-
-    fn reset_classic_repose_percent(&mut self) -> Result<u8, String> {
-        match self {
-            Self::Classic(engine) => {
-                engine.reset_high_repose_percent();
-                Ok(engine.high_repose_percent())
-            }
-            _ => Err(
-                "testingcheats classic repose is available only for classic/hybrid".to_string(),
+                "testingcheats classic texture is available only for classic/hybrid".to_string(),
             ),
         }
     }
@@ -785,7 +764,7 @@ impl TestingSandEngine {
                 let (canonical_w, canonical_h) = engine.canonical_dimensions();
                 let (vertical, diagonal) = engine.movement_counts();
                 format!(
-                    "{} sandbox · physical={} · pending={} · canonical={}x{} · vertical_moves={} · diagonal_moves={} · high_repose={}% · closed VW walls · no discharge",
+                    "{} sandbox · physical={} · pending={} · canonical={}x{} · vertical_moves={} · diagonal_moves={} · texture={} · closed VW walls · no discharge",
                     engine.model_name(),
                     engine.physical_grain_count(),
                     engine.pending_count(),
@@ -793,7 +772,7 @@ impl TestingSandEngine {
                     canonical_h,
                     vertical,
                     diagonal,
-                    engine.high_repose_percent()
+                    engine.texture_profile_name()
                 )
             }
             Self::Oslo(engine) => {
@@ -3978,7 +3957,7 @@ mod testing_cheats_clock_tests {
     }
 
     #[test]
-    fn testing_cheats_classic_wrapper_tunes_repose_without_switching_models() {
+    fn testing_cheats_classic_wrapper_selects_texture_profiles_without_switching_models() {
         let mut engine = TestingSandEngine::Classic(ClassicSandboxEngine::new(
             8,
             6,
@@ -3986,11 +3965,11 @@ mod testing_cheats_clock_tests {
             ClassicRainMode::Uniform,
         ));
 
-        assert_eq!(engine.classic_repose_percent().unwrap(), 5);
-        engine.set_classic_repose_percent(20).unwrap();
-        assert_eq!(engine.classic_repose_percent().unwrap(), 20);
+        assert_eq!(engine.classic_texture_profile().unwrap(), "baseline");
+        engine.set_classic_texture_profile("rugged").unwrap();
+        assert_eq!(engine.classic_texture_profile().unwrap(), "rugged");
         assert_eq!(engine.model_name(), "classic");
-        assert_eq!(engine.reset_classic_repose_percent().unwrap(), 5);
+        assert!(engine.set_classic_texture_profile("custom").is_err());
     }
 
     #[test]

@@ -88,7 +88,7 @@ fn local_repose_two_blocks_only_the_extra_unit_of_relief() {
         engine.surface.grid[floor][x + 1] = Some(category);
     }
     low.local_repose[x] = CLASSIC_REPOSE_LOW;
-    high.local_repose[x] = CLASSIC_REPOSE_HIGH;
+    high.local_repose[x] = CLASSIC_REPOSE_MID;
 
     low.move_grain_once(bounds, x, floor - 2);
     high.move_grain_once(bounds, x, floor - 2);
@@ -194,58 +194,152 @@ fn classic_and_hybrid_still_share_the_same_repose_and_gravity_law() {
 }
 
 #[test]
-fn repose_percentage_tuning_is_nonretroactive_and_fill_uses_the_new_value() {
-    let mut engine = ClassicSandboxEngine::new(20, 8, 29, ClassicRainMode::Uniform);
-    assert_eq!(
-        engine.high_repose_percent(),
-        ClassicSandboxEngine::default_high_repose_percent()
-    );
+fn local_repose_three_requires_one_more_unit_of_relief_than_repose_two() {
+    let mut mid = ClassicSandboxEngine::new(8, 7, 23, ClassicRainMode::Uniform);
+    let mut high = ClassicSandboxEngine::new(8, 7, 23, ClassicRainMode::Uniform);
+    let bounds = mid.surface.viewport_bounds().expect("visible basin");
+    let x = bounds.x_start + (bounds.x_end - bounds.x_start) / 2;
+    let floor = bounds.y_end - 1;
+    let category = CategoryId(1);
 
-    let before = engine.local_repose.clone();
-    engine
-        .set_high_repose_percent(100)
-        .expect("100 percent repose tuning");
-    assert_eq!(engine.local_repose, before, "tuning must not rewrite live columns");
-    let categories = [CategoryId(1), CategoryId(2)];
-    engine
-        .debug_fill_rainbow_80(&categories)
-        .expect("fill after 100 percent repose tuning");
-    assert!(
-        engine
-            .local_repose
-            .iter()
-            .all(|repose| *repose == CLASSIC_REPOSE_HIGH)
-    );
+    for engine in [&mut mid, &mut high] {
+        for y in floor - 3..=floor {
+            engine.surface.grid[y][x] = Some(category);
+        }
+        // Both diagonals have two empty cells below the source top, but the
+        // third cell is occupied. Repose=2 may release to either side; repose=3
+        // must wait regardless of the random left/right choice.
+        engine.surface.grid[floor][x - 1] = Some(category);
+        engine.surface.grid[floor][x + 1] = Some(category);
+    }
+    mid.local_repose[x] = CLASSIC_REPOSE_MID;
+    high.local_repose[x] = CLASSIC_REPOSE_HIGH;
 
-    engine
-        .set_high_repose_percent(0)
-        .expect("zero percent repose tuning");
-    engine
-        .debug_fill_rainbow_80(&categories)
-        .expect("fill after zero percent repose tuning");
-    assert!(
-        engine
-            .local_repose
-            .iter()
-            .all(|repose| *repose == CLASSIC_REPOSE_LOW)
-    );
+    mid.move_grain_once(bounds, x, floor - 3);
+    high.move_grain_once(bounds, x, floor - 3);
 
-    engine.reset_high_repose_percent();
-    assert_eq!(
-        engine.high_repose_percent(),
-        ClassicSandboxEngine::default_high_repose_percent()
-    );
-    assert!(engine.set_high_repose_percent(101).is_err());
+    assert_eq!(mid.surface.grid[floor - 3][x], None);
+    assert_eq!(high.surface.grid[floor - 3][x], Some(category));
 }
 
 #[test]
-fn tuned_repose_percentage_remains_deterministic_for_a_fixed_seed() {
-    let mut first = ClassicSandboxEngine::new(30, 10, 71, ClassicRainMode::Uniform);
-    let mut second = ClassicSandboxEngine::new(30, 10, 71, ClassicRainMode::Uniform);
-    first.set_high_repose_percent(20).unwrap();
-    second.set_high_repose_percent(20).unwrap();
-    first.clear();
-    second.clear();
-    assert_eq!(first.local_repose, second.local_repose);
-    assert_eq!(first.repose_rng_state, second.repose_rng_state);
+fn baseline_profile_preserves_classic_002_exact_repose_mapping() {
+    let engine = ClassicSandboxEngine::new(30, 10, 71, ClassicRainMode::Uniform);
+    assert_eq!(engine.texture_profile_name(), "baseline");
+    let high_sites = engine
+        .local_repose
+        .iter()
+        .enumerate()
+        .filter_map(|(x, repose)| (*repose == CLASSIC_REPOSE_MID).then_some(x))
+        .collect::<Vec<_>>();
+    assert_eq!(high_sites, vec![37]);
+    assert!(
+        engine
+            .local_repose
+            .iter()
+            .all(|repose| *repose <= CLASSIC_REPOSE_MID)
+    );
+}
+
+#[test]
+fn texture_profile_selection_is_nonretroactive_and_fill_resamples_cleanly() {
+    let mut engine = ClassicSandboxEngine::new(100, 8, 29, ClassicRainMode::Uniform);
+    assert_eq!(engine.texture_profile_name(), "baseline");
+    let before = engine.local_repose.clone();
+
+    engine
+        .set_texture_profile_name("textured")
+        .expect("textured profile");
+    assert_eq!(engine.local_repose, before, "profile selection must not rewrite live columns");
+    engine
+        .debug_fill_rainbow_80(&[CategoryId(1), CategoryId(2)])
+        .expect("textured fill");
+    assert_eq!(engine.texture_profile_name(), "textured");
+    assert!(engine.local_repose.contains(&CLASSIC_REPOSE_HIGH));
+
+    engine
+        .set_texture_profile_name("rugged")
+        .expect("rugged profile");
+    engine
+        .debug_fill_rainbow_80(&[CategoryId(1), CategoryId(2)])
+        .expect("rugged fill");
+    assert_eq!(engine.texture_profile_name(), "rugged");
+
+    engine
+        .set_texture_profile_name("terraced")
+        .expect("terraced profile");
+    engine
+        .debug_fill_rainbow_80(&[CategoryId(1), CategoryId(2)])
+        .expect("terraced fill");
+    assert_eq!(engine.texture_profile_name(), "terraced");
+    assert!(engine.set_texture_profile_name("custom").is_err());
+}
+
+#[test]
+fn texture_profiles_remain_deterministic_for_a_fixed_seed() {
+    for profile in ["baseline", "textured", "rugged", "terraced"] {
+        let mut first = ClassicSandboxEngine::new(40, 10, 71, ClassicRainMode::Uniform);
+        let mut second = ClassicSandboxEngine::new(40, 10, 71, ClassicRainMode::Uniform);
+        first.set_texture_profile_name(profile).unwrap();
+        second.set_texture_profile_name(profile).unwrap();
+        first.clear();
+        second.clear();
+        assert_eq!(first.local_repose, second.local_repose, "profile={profile}");
+        assert_eq!(first.repose_rng_state, second.repose_rng_state, "profile={profile}");
+    }
+}
+
+fn profile_metrics(profile: &str) -> (usize, usize, usize, usize) {
+    let mut engine = ClassicSandboxEngine::new(30, 10, 7, ClassicRainMode::Uniform);
+    engine.set_texture_profile_name(profile).unwrap();
+    install_centered_compact_wall(&mut engine, 30, 24);
+    let expected_mass = engine.surface.physical_grain_count();
+    relax_fixed(&mut engine, 800);
+    assert_eq!(engine.surface.physical_grain_count(), expected_mass);
+    let profile_heights = supported_height_profile(&engine);
+    (
+        second_difference_roughness(&profile_heights),
+        apex_height(&profile_heights),
+        footprint_width(&profile_heights),
+        expected_mass,
+    )
+}
+
+#[test]
+fn texture_profile_sweep_preserves_classic_macroform_and_offers_stronger_relief() {
+    let baseline = profile_metrics("baseline");
+    let textured = profile_metrics("textured");
+    let rugged = profile_metrics("rugged");
+    let terraced = profile_metrics("terraced");
+
+    for (name, metrics) in [
+        ("baseline", baseline),
+        ("textured", textured),
+        ("rugged", rugged),
+        ("terraced", terraced),
+    ] {
+        eprintln!(
+            "CLASSIC_004_METRICS profile={name} roughness={} apex={} width={} mass={}",
+            metrics.0, metrics.1, metrics.2, metrics.3
+        );
+        assert_eq!(metrics.3, baseline.3, "profile={name}");
+        assert!(baseline.1.abs_diff(metrics.1) <= 3, "profile={name}");
+        let width_tolerance = baseline.2.saturating_mul(15).div_ceil(100).max(1);
+        assert!(
+            baseline.2.abs_diff(metrics.2) <= width_tolerance,
+            "profile={name}: baseline_width={} width={} tolerance={width_tolerance}",
+            baseline.2,
+            metrics.2
+        );
+    }
+
+    let strongest = textured.0.max(rugged.0).max(terraced.0);
+    assert!(
+        strongest.saturating_mul(10) >= baseline.0.saturating_mul(11),
+        "no preset increased relief enough: baseline={} textured={} rugged={} terraced={}",
+        baseline.0,
+        textured.0,
+        rugged.0,
+        terraced.0
+    );
 }

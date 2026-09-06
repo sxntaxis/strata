@@ -1,7 +1,7 @@
 ---
 id: CLASSIC-003
 kind: work
-state: candidate
+state: superseded
 created: 2026-09-05
 updated: 2026-09-05
 authority: working
@@ -76,3 +76,7 @@ No changes are authorized to:
 ## Human gate
 
 After machine green, compare at least 10%, 20%, and 30% using a fresh `testingcheats fill` after each setting. Pick the smallest percentage that gives visibly richer relief while preserving the simple Classic macro avalanche.
+
+## Supersession
+
+Owner testing found the accepted 5% CLASSIC-002 baseline better than the uniform percentage sweep, including 100%. CLASSIC-004 supersedes this numeric tuning surface with four preplanned texture profiles so testing can vary short-range heterogeneity and rare repose=3 sites without exposing multiple low-level parameters.

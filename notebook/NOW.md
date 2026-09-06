@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-05
 authority: working
-summary: CLASSIC-002 recovered a strong simple avalanche with a mildly rougher 5% high-repose surface; CLASSIC-003 adds only a debug-only `testingcheats classic repose [0..100|default]` tuning control so the owner can compare stronger texture levels without changing the accepted 5% default, Classic rendering, or production authority.
-next: Natively validate CLASSIC-003, then compare 10%, 20%, and 30% with a fresh `testingcheats fill` after each setting and choose the smallest visually sufficient texture level.
+summary: CLASSIC-002 remains the owner-preferred simple avalanche baseline; CLASSIC-003 numeric repose tuning was rejected as visually unhelpful at stronger uniform percentages, and CLASSIC-004 now offers four fixed debug-only texture profiles that preserve baseline exactly while testing rare repose=3 sites and short spatial correlation for richer mesoscopic relief.
+next: Natively validate CLASSIC-004, inspect the emitted baseline/textured/rugged/terraced roughness and macroform metrics, then human-compare the four presets with a fresh `testingcheats fill` after each and freeze the best preset or keep baseline.
 ---
 
 # NOW — Strata

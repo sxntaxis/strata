@@ -10,11 +10,8 @@ const CLASSIC_PHYSICS_RNG_XOR: u64 = 0xC6BC_2796_92B5_CC83;
 const CLASSIC_RAIN_RNG_XOR: u64 = 0xD1B5_4A32_D192_ED03;
 const CLASSIC_REPOSE_RNG_XOR: u64 = 0xA5A5_5A5A_D3C1_B7E9;
 const CLASSIC_REPOSE_LOW: u8 = 1;
-const CLASSIC_REPOSE_HIGH: u8 = 2;
-// Weak heterogeneity default: five percent of columns temporarily tolerate one
-// additional unit of local relief before a diagonal release. Debug tooling may
-// tune this percentage without changing production or persisted authority.
-const CLASSIC_HIGH_REPOSE_PERCENT_DEFAULT: u8 = 5;
+const CLASSIC_REPOSE_MID: u8 = 2;
+const CLASSIC_REPOSE_HIGH: u8 = 3;
 const GOLDEN_RATIO: f64 = 1.618_033_988_749_895;
 const RAIN_FOCUS_BIAS_ONE_IN: usize = 10;
 // At one ingress per second, a full focus traverse takes about twelve hours.
@@ -24,6 +21,44 @@ const RAIN_FOCUS_EDGE_TO_EDGE_INGRESSES: usize = 43_200;
 pub(crate) enum ClassicRainMode {
     Uniform,
     WanderingFocus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClassicTextureProfile {
+    Baseline,
+    Textured,
+    Rugged,
+    Terraced,
+}
+
+impl ClassicTextureProfile {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Baseline => "baseline",
+            Self::Textured => "textured",
+            Self::Rugged => "rugged",
+            Self::Terraced => "terraced",
+        }
+    }
+
+    fn parse(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "baseline" => Some(Self::Baseline),
+            "textured" => Some(Self::Textured),
+            "rugged" => Some(Self::Rugged),
+            "terraced" => Some(Self::Terraced),
+            _ => None,
+        }
+    }
+
+    fn continuation_percent(self) -> u8 {
+        match self {
+            Self::Baseline => 0,
+            Self::Textured => 45,
+            Self::Rugged => 60,
+            Self::Terraced => 78,
+        }
+    }
 }
 
 /// Debug-only Strata sediment experiment.
@@ -54,7 +89,7 @@ pub(crate) struct ClassicSandboxEngine {
     initial_repose_rng_state: u64,
     repose_rng_state: u64,
     local_repose: Vec<u8>,
-    high_repose_percent: u8,
+    texture_profile: ClassicTextureProfile,
     rain_focus_x: Option<usize>,
     rain_focus_target_x: Option<usize>,
     rain_focus_move_counter: usize,
@@ -91,7 +126,7 @@ impl ClassicSandboxEngine {
             initial_repose_rng_state: repose_rng_state,
             repose_rng_state,
             local_repose,
-            high_repose_percent: CLASSIC_HIGH_REPOSE_PERCENT_DEFAULT,
+            texture_profile: ClassicTextureProfile::Baseline,
             rain_focus_x: None,
             rain_focus_target_x: None,
             rain_focus_move_counter: 0,
@@ -197,27 +232,22 @@ impl ClassicSandboxEngine {
         (self.vertical_moves, self.diagonal_moves)
     }
 
-    pub(crate) fn high_repose_percent(&self) -> u8 {
-        self.high_repose_percent
+    pub(crate) fn texture_profile_name(&self) -> &'static str {
+        self.texture_profile.name()
     }
 
-    pub(crate) fn set_high_repose_percent(&mut self, percent: u8) -> Result<(), String> {
-        if percent > 100 {
-            return Err("classic repose percentage must be between 0 and 100".to_string());
-        }
-        // Deliberately do not resample existing columns. This makes the cheat
-        // non-destructive to a live fixture; `testingcheats fill`/clear starts a
-        // clean comparison using the newly selected percentage.
-        self.high_repose_percent = percent;
+    pub(crate) fn set_texture_profile_name(&mut self, profile: &str) -> Result<(), String> {
+        let Some(profile) = ClassicTextureProfile::parse(profile) else {
+            return Err(
+                "classic texture profile must be baseline, textured, rugged, or terraced"
+                    .to_string(),
+            );
+        };
+        // Deliberately do not rewrite the live repose field. The profile becomes
+        // authoritative for future resamples; `testingcheats fill` starts a clean
+        // comparison from the selected preset.
+        self.texture_profile = profile;
         Ok(())
-    }
-
-    pub(crate) fn reset_high_repose_percent(&mut self) {
-        self.high_repose_percent = CLASSIC_HIGH_REPOSE_PERCENT_DEFAULT;
-    }
-
-    pub(crate) fn default_high_repose_percent() -> u8 {
-        CLASSIC_HIGH_REPOSE_PERCENT_DEFAULT
     }
 
     pub(crate) fn debug_fill_rainbow_80(
@@ -487,22 +517,36 @@ impl ClassicSandboxEngine {
         target_x: usize,
         source_y: usize,
     ) -> bool {
-        if self.local_repose[source_x] <= CLASSIC_REPOSE_LOW {
+        let repose = usize::from(self.local_repose[source_x]);
+        if repose <= usize::from(CLASSIC_REPOSE_LOW) {
             return true;
         }
 
-        // Classic's original diagonal vacancy test is equivalent to allowing a
-        // compact surface to relax when the local height relief is at least two.
-        // A rare repose=2 column tolerates exactly one extra relief unit, so the
-        // cell one step below the ordinary diagonal target must also be empty.
-        let deeper_y = source_y + 2;
-        deeper_y < bounds.y_end && self.surface.grid[deeper_y][target_x].is_none()
+        // Classic's original diagonal vacancy test is equivalent to repose=1.
+        // Higher presets remain the same one-diagonal Classic law: they merely
+        // require one or two extra empty cells below the ordinary target before
+        // release. No rolling layer, second-side retry, or Oslo toppling exists.
+        for extra_depth in 2..=repose {
+            let Some(deeper_y) = source_y.checked_add(extra_depth) else {
+                return false;
+            };
+            if deeper_y >= bounds.y_end || self.surface.grid[deeper_y][target_x].is_some() {
+                return false;
+            }
+        }
+        true
     }
 
     fn resample_all_local_repose(&mut self) {
+        let mut previous = CLASSIC_REPOSE_LOW;
         for x in 0..self.local_repose.len() {
-            let repose = self.sample_local_repose();
+            let repose = if x > 0 && self.texture_patch_continues() {
+                previous
+            } else {
+                self.sample_base_local_repose()
+            };
             self.local_repose[x] = repose;
+            previous = repose;
         }
     }
 
@@ -510,29 +554,61 @@ impl ClassicSandboxEngine {
         if x >= self.local_repose.len() {
             return;
         }
-        let repose = self.sample_local_repose();
+
+        let repose = if self.texture_patch_continues() {
+            let left = x.checked_sub(1).map(|index| self.local_repose[index]);
+            let right = (x + 1 < self.local_repose.len()).then(|| self.local_repose[x + 1]);
+            match (left, right) {
+                (Some(left), Some(right)) => {
+                    if self.next_repose_random_u64() & 1 == 0 {
+                        left
+                    } else {
+                        right
+                    }
+                }
+                (Some(value), None) | (None, Some(value)) => value,
+                (None, None) => self.sample_base_local_repose(),
+            }
+        } else {
+            self.sample_base_local_repose()
+        };
         self.local_repose[x] = repose;
     }
 
-    fn sample_local_repose(&mut self) -> u8 {
+    fn texture_patch_continues(&mut self) -> bool {
+        let percent = self.texture_profile.continuation_percent();
+        percent > 0 && self.next_repose_random_u64() % 100 < u64::from(percent)
+    }
+
+    fn sample_base_local_repose(&mut self) -> u8 {
         #[cfg(test)]
         if self.force_uniform_repose {
             return CLASSIC_REPOSE_LOW;
         }
 
         let random = self.next_repose_random_u64();
-        let high = match self.high_repose_percent {
-            // Preserve CLASSIC-002's exact 1-in-20 default mapping so merely
-            // adding the tuning cheat does not perturb the accepted 5% baseline.
-            CLASSIC_HIGH_REPOSE_PERCENT_DEFAULT => random as usize % 20 == 0,
-            0 => false,
-            100 => true,
-            percent => random % 100 < u64::from(percent),
-        };
-        if high {
-            CLASSIC_REPOSE_HIGH
-        } else {
-            CLASSIC_REPOSE_LOW
+        match self.texture_profile {
+            // Preserve CLASSIC-002's exact accepted mapping byte-for-byte in RNG
+            // consumption and 1-in-20 threshold selection.
+            ClassicTextureProfile::Baseline => {
+                if random % 20 == 0 {
+                    CLASSIC_REPOSE_MID
+                } else {
+                    CLASSIC_REPOSE_LOW
+                }
+            }
+            ClassicTextureProfile::Textured => match random % 100 {
+                0..=92 => CLASSIC_REPOSE_LOW,
+                93..=98 => CLASSIC_REPOSE_MID,
+                _ => CLASSIC_REPOSE_HIGH,
+            },
+            ClassicTextureProfile::Rugged | ClassicTextureProfile::Terraced => {
+                match random % 100 {
+                    0..=89 => CLASSIC_REPOSE_LOW,
+                    90..=97 => CLASSIC_REPOSE_MID,
+                    _ => CLASSIC_REPOSE_HIGH,
+                }
+            }
         }
     }
 
