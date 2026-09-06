@@ -670,21 +670,11 @@ impl ClassicSandboxEngine {
             };
             if left_to_right {
                 for x in bounds.x_start..bounds.x_end {
-                    self.move_grain_once_with_grounded_index(
-                        bounds,
-                        x,
-                        y,
-                        grounded_index.as_mut(),
-                    );
+                    self.move_grain_once_with_grounded_index(bounds, x, y, grounded_index.as_mut());
                 }
             } else {
                 for x in (bounds.x_start..bounds.x_end).rev() {
-                    self.move_grain_once_with_grounded_index(
-                        bounds,
-                        x,
-                        y,
-                        grounded_index.as_mut(),
-                    );
+                    self.move_grain_once_with_grounded_index(bounds, x, y, grounded_index.as_mut());
                 }
             }
         }
@@ -696,6 +686,7 @@ impl ClassicSandboxEngine {
         self.apply_gravity_with_grounded_index(false);
     }
 
+    #[cfg(test)]
     fn move_grain_once(&mut self, bounds: ViewportBounds, x: usize, y: usize) {
         self.move_grain_once_with_grounded_index(bounds, x, y, None);
     }
@@ -780,7 +771,7 @@ impl ClassicSandboxEngine {
                 step,
                 category_id,
                 momentum_blocker_grounded,
-                grounded_index.as_deref_mut(),
+                grounded_index,
             );
         }
 
@@ -888,6 +879,7 @@ impl ClassicSandboxEngine {
             && self.local_repose_allows_diagonal(bounds, source_x, target_x, source_y)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn try_one_bonus_diagonal(
         &mut self,
         bounds: ViewportBounds,

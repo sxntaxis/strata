@@ -398,7 +398,10 @@ fn classic_experiment_selection_is_nonretroactive_and_uses_rugged_texture_base()
 fn grounded_contact_is_the_owner_selected_default_classic_experiment() {
     let engine = ClassicSandboxEngine::new(80, 10, 102, ClassicRainMode::Uniform);
     assert_eq!(engine.texture_profile_name(), "rugged");
-    assert_eq!(engine.experiment_profile_name(), "momentum-grounded-contact");
+    assert_eq!(
+        engine.experiment_profile_name(),
+        "momentum-grounded-contact"
+    );
 }
 
 #[test]
@@ -1091,31 +1094,45 @@ fn classic_012_cached_grounded_contact_matches_uncached_reference_exactly() {
         for pass in 0..160 {
             cached.apply_gravity();
             reference.apply_gravity_uncached_for_test();
-            assert_eq!(cached.surface.grid, reference.surface.grid, "seed={seed} pass={pass}");
-            assert_eq!(cached.physics_rng_state, reference.physics_rng_state, "seed={seed} pass={pass}");
-            assert_eq!(cached.repose_rng_state, reference.repose_rng_state, "seed={seed} pass={pass}");
-            assert_eq!(cached.local_repose, reference.local_repose, "seed={seed} pass={pass}");
             assert_eq!(
-                cached.repose_memory_remaining,
-                reference.repose_memory_remaining,
-                "seed={seed} pass={pass}"
-            );
-            assert_eq!(cached.vertical_moves, reference.vertical_moves, "seed={seed} pass={pass}");
-            assert_eq!(cached.diagonal_moves, reference.diagonal_moves, "seed={seed} pass={pass}");
-            assert_eq!(
-                cached.surface.grain_count,
-                reference.surface.grain_count,
+                cached.surface.grid, reference.surface.grid,
                 "seed={seed} pass={pass}"
             );
             assert_eq!(
-                cached.surface.sweep_left_to_right,
-                reference.surface.sweep_left_to_right,
+                cached.physics_rng_state, reference.physics_rng_state,
+                "seed={seed} pass={pass}"
+            );
+            assert_eq!(
+                cached.repose_rng_state, reference.repose_rng_state,
+                "seed={seed} pass={pass}"
+            );
+            assert_eq!(
+                cached.local_repose, reference.local_repose,
+                "seed={seed} pass={pass}"
+            );
+            assert_eq!(
+                cached.repose_memory_remaining, reference.repose_memory_remaining,
+                "seed={seed} pass={pass}"
+            );
+            assert_eq!(
+                cached.vertical_moves, reference.vertical_moves,
+                "seed={seed} pass={pass}"
+            );
+            assert_eq!(
+                cached.diagonal_moves, reference.diagonal_moves,
+                "seed={seed} pass={pass}"
+            );
+            assert_eq!(
+                cached.surface.grain_count, reference.surface.grain_count,
+                "seed={seed} pass={pass}"
+            );
+            assert_eq!(
+                cached.surface.sweep_left_to_right, reference.surface.sweep_left_to_right,
                 "seed={seed} pass={pass}"
             );
         }
     }
 }
-
 
 #[test]
 fn classic_012_perf_probe_reports_cached_vs_classic_011_scan_path() {
@@ -1153,7 +1170,10 @@ fn classic_012_perf_probe_reports_cached_vs_classic_011_scan_path() {
     assert_eq!(cached.physics_rng_state, reference.physics_rng_state);
     assert_eq!(cached.repose_rng_state, reference.repose_rng_state);
     assert_eq!(cached.local_repose, reference.local_repose);
-    assert_eq!(cached.repose_memory_remaining, reference.repose_memory_remaining);
+    assert_eq!(
+        cached.repose_memory_remaining,
+        reference.repose_memory_remaining
+    );
     assert_eq!(cached.vertical_moves, reference.vertical_moves);
     assert_eq!(cached.diagonal_moves, reference.diagonal_moves);
 

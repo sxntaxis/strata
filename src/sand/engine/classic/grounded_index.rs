@@ -16,10 +16,7 @@ pub(super) struct GroundedColumnIndex {
 }
 
 impl GroundedColumnIndex {
-    pub(super) fn from_grid(
-        grid: &[Vec<Option<CategoryId>>],
-        bounds: ViewportBounds,
-    ) -> Self {
+    pub(super) fn from_grid(grid: &[Vec<Option<CategoryId>>], bounds: ViewportBounds) -> Self {
         let width = grid.first().map_or(0, Vec::len);
         let mut top = vec![bounds.y_end; width];
         for x in bounds.x_start..bounds.x_end {
@@ -36,12 +33,7 @@ impl GroundedColumnIndex {
         }
     }
 
-    pub(super) fn is_grounded(
-        &self,
-        grid: &[Vec<Option<CategoryId>>],
-        x: usize,
-        y: usize,
-    ) -> bool {
+    pub(super) fn is_grounded(&self, grid: &[Vec<Option<CategoryId>>], x: usize, y: usize) -> bool {
         y < self.y_end && y >= self.top[x] && grid[y][x].is_some()
     }
 
@@ -105,17 +97,20 @@ mod tests {
         };
         let category = CategoryId::new(1);
         let mut grid = vec![vec![None; 4]; 8];
-        for row in 4..8 {
-            grid[row][1] = Some(category);
+        for row in grid.iter_mut().take(8).skip(4) {
+            row[1] = Some(category);
         }
-        for row in 6..8 {
-            grid[row][2] = Some(category);
+        for row in grid.iter_mut().take(8).skip(6) {
+            row[2] = Some(category);
         }
 
         let mut index = GroundedColumnIndex::from_grid(&grid, bounds);
         for x in 0..4 {
             for y in 0..8 {
-                assert_eq!(index.is_grounded(&grid, x, y), scan_is_grounded(&grid, bounds, x, y));
+                assert_eq!(
+                    index.is_grounded(&grid, x, y),
+                    scan_is_grounded(&grid, bounds, x, y)
+                );
             }
         }
 
@@ -126,7 +121,10 @@ mod tests {
         index.record_move(&grid, 1, 4, 2, 5);
         for x in 0..4 {
             for y in 0..8 {
-                assert_eq!(index.is_grounded(&grid, x, y), scan_is_grounded(&grid, bounds, x, y));
+                assert_eq!(
+                    index.is_grounded(&grid, x, y),
+                    scan_is_grounded(&grid, bounds, x, y)
+                );
             }
         }
 
@@ -140,7 +138,10 @@ mod tests {
         grid[6][3] = Some(category);
         index.record_move(&grid, 3, 5, 3, 6);
         for y in 0..8 {
-            assert_eq!(index.is_grounded(&grid, 3, y), scan_is_grounded(&grid, bounds, 3, y));
+            assert_eq!(
+                index.is_grounded(&grid, 3, y),
+                scan_is_grounded(&grid, bounds, 3, y)
+            );
         }
     }
 }
