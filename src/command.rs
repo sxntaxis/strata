@@ -51,6 +51,10 @@ pub(crate) enum CommandIntent {
         profile: Option<String>,
     },
     #[cfg(debug_assertions)]
+    TestingCheatsClassicExperiment {
+        profile: Option<String>,
+    },
+    #[cfg(debug_assertions)]
     TestingCheatsStatus,
     #[cfg(debug_assertions)]
     TestingCheatsProvenance,
@@ -80,6 +84,7 @@ impl CommandIntent {
                         | Self::TestingCheatsClear
                         | Self::TestingCheatsFill
                         | Self::TestingCheatsClassicTexture { .. }
+                        | Self::TestingCheatsClassicExperiment { .. }
                         | Self::TestingCheatsStatus
                         | Self::TestingCheatsProvenance
                         | Self::TestingCheatsReset
@@ -135,7 +140,7 @@ pub(crate) fn parse(input: &str) -> Result<CommandIntent, String> {
 #[cfg(debug_assertions)]
 fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
     let Some((subcommand, rest)) = args.split_first() else {
-        return Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | clear | status | provenance | reset".to_string());
+        return Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | classic experiment [rugged|memory|slope|memory-slope|anchored|momentum] | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | clear | status | provenance | reset".to_string());
     };
 
     match subcommand.to_ascii_lowercase().as_str() {
@@ -202,12 +207,37 @@ fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
                 profile: Some(profile),
             })
         }
+        "classic" if rest.first().is_some_and(|token| token.eq_ignore_ascii_case("experiment")) => {
+            let experiment = &rest[1..];
+            if experiment.is_empty() {
+                return Ok(CommandIntent::TestingCheatsClassicExperiment { profile: None });
+            }
+            if experiment.len() != 1 {
+                return Err(
+                    "Usage: testingcheats classic experiment [rugged|memory|slope|memory-slope|anchored|momentum]"
+                        .to_string(),
+                );
+            }
+            let profile = experiment[0].to_ascii_lowercase();
+            if !matches!(
+                profile.as_str(),
+                "rugged" | "memory" | "slope" | "memory-slope" | "anchored" | "momentum"
+            ) {
+                return Err(
+                    "classic experiment profile must be rugged, memory, slope, memory-slope, anchored, or momentum"
+                        .to_string(),
+                );
+            }
+            Ok(CommandIntent::TestingCheatsClassicExperiment {
+                profile: Some(profile),
+            })
+        }
         "fill" if rest.is_empty() => Ok(CommandIntent::TestingCheatsFill),
         "clear" if rest.is_empty() => Ok(CommandIntent::TestingCheatsClear),
         "status" if rest.is_empty() => Ok(CommandIntent::TestingCheatsStatus),
         "provenance" if rest.is_empty() => Ok(CommandIntent::TestingCheatsProvenance),
         "reset" if rest.is_empty() => Ok(CommandIntent::TestingCheatsReset),
-        _ => Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | clear | status | provenance | reset".to_string()),
+        _ => Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | classic experiment [rugged|memory|slope|memory-slope|anchored|momentum] | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | clear | status | provenance | reset".to_string()),
     }
 }
 
@@ -694,6 +724,19 @@ mod tests {
                 profile: Some("terraced".to_string())
             }
         );
+        assert_eq!(
+            parse("testingcheats classic experiment").unwrap(),
+            CommandIntent::TestingCheatsClassicExperiment { profile: None }
+        );
+        for profile in ["rugged", "memory", "slope", "memory-slope", "anchored", "momentum"] {
+            assert_eq!(
+                parse(&format!("testingcheats classic experiment {profile}")).unwrap(),
+                CommandIntent::TestingCheatsClassicExperiment {
+                    profile: Some(profile.to_string())
+                }
+            );
+        }
+        assert!(parse("testingcheats classic experiment custom").is_err());
         assert!(parse("testingcheats classic texture custom").is_err());
         assert!(parse("testingcheats classic repose 20").is_err());
         assert_eq!(

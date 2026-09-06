@@ -224,7 +224,9 @@ fn local_repose_three_requires_one_more_unit_of_relief_than_repose_two() {
 
 #[test]
 fn baseline_profile_preserves_classic_002_exact_repose_mapping() {
-    let engine = ClassicSandboxEngine::new(30, 10, 71, ClassicRainMode::Uniform);
+    let mut engine = ClassicSandboxEngine::new(30, 10, 71, ClassicRainMode::Uniform);
+    engine.set_texture_profile_name("baseline").unwrap();
+    engine.clear();
     assert_eq!(engine.texture_profile_name(), "baseline");
     let high_sites = engine
         .local_repose
@@ -244,7 +246,7 @@ fn baseline_profile_preserves_classic_002_exact_repose_mapping() {
 #[test]
 fn texture_profile_selection_is_nonretroactive_and_fill_resamples_cleanly() {
     let mut engine = ClassicSandboxEngine::new(100, 8, 29, ClassicRainMode::Uniform);
-    assert_eq!(engine.texture_profile_name(), "baseline");
+    assert_eq!(engine.texture_profile_name(), "rugged");
     let before = engine.local_repose.clone();
 
     engine
@@ -342,4 +344,154 @@ fn texture_profile_sweep_preserves_classic_macroform_and_offers_stronger_relief(
         rugged.0,
         terraced.0
     );
+}
+
+#[test]
+fn classic_experiment_selection_is_nonretroactive_and_uses_rugged_texture_base() {
+    let mut engine = ClassicSandboxEngine::new(80, 10, 101, ClassicRainMode::Uniform);
+    let before = engine.local_repose.clone();
+
+    for profile in [
+        "rugged",
+        "memory",
+        "slope",
+        "memory-slope",
+        "anchored",
+        "momentum",
+    ] {
+        engine.set_experiment_profile_name(profile).unwrap();
+        assert_eq!(engine.experiment_profile_name(), profile);
+        assert_eq!(engine.texture_profile_name(), "rugged");
+        assert_eq!(
+            engine.local_repose, before,
+            "experiment selection must not rewrite live columns"
+        );
+    }
+    assert!(engine.set_experiment_profile_name("custom").is_err());
+}
+
+#[test]
+fn memory_profile_holds_local_repose_for_three_surface_refreshes() {
+    let mut engine = ClassicSandboxEngine::new(30, 10, 103, ClassicRainMode::Uniform);
+    engine.set_experiment_profile_name("memory").unwrap();
+    engine.clear();
+    let x = engine.local_repose.len() / 2;
+    engine.local_repose[x] = CLASSIC_REPOSE_HIGH;
+    engine.repose_memory_remaining[x] = 3;
+    let rng_before = engine.repose_rng_state;
+
+    for expected_remaining in [2, 1, 0] {
+        engine.refresh_local_repose(x);
+        assert_eq!(engine.local_repose[x], CLASSIC_REPOSE_HIGH);
+        assert_eq!(engine.repose_memory_remaining[x], expected_remaining);
+        assert_eq!(engine.repose_rng_state, rng_before);
+    }
+
+    engine.refresh_local_repose(x);
+    assert_ne!(engine.repose_rng_state, rng_before);
+    assert_eq!(engine.repose_memory_remaining[x], 3);
+}
+
+#[test]
+fn slope_profile_mildly_prefers_the_side_with_more_open_relief() {
+    let mut engine = ClassicSandboxEngine::new(24, 12, 107, ClassicRainMode::Uniform);
+    engine.set_experiment_profile_name("slope").unwrap();
+    let bounds = engine.surface.viewport_bounds().expect("visible basin");
+    let x = bounds.x_start + (bounds.x_end - bounds.x_start) / 2;
+    let y = bounds.y_start + 2;
+    let left = x - 1;
+    let right = x + 1;
+
+    // Left has deep open relief. Right is open for the ordinary diagonal but
+    // becomes supported immediately after it, making left the steeper side.
+    engine.surface.grid[y + 2][right] = Some(CategoryId(1));
+    engine.local_repose[x] = CLASSIC_REPOSE_LOW;
+
+    let mut left_choices = 0usize;
+    let samples = 128usize;
+    for _ in 0..samples {
+        if engine.choose_diagonal_step(bounds, x, y) == -1 {
+            left_choices += 1;
+        }
+    }
+    assert!(
+        left_choices >= 80,
+        "3:1 steep-side preference was not visible: left={left_choices}/{samples}, left_drop={}, right_drop={}",
+        engine.diagonal_drop_depth(bounds, left, y),
+        engine.diagonal_drop_depth(bounds, right, y)
+    );
+}
+
+#[test]
+fn anchored_profile_can_generate_rare_repose_four_sites() {
+    let mut engine = ClassicSandboxEngine::new(20, 10, 109, ClassicRainMode::Uniform);
+    engine.set_experiment_profile_name("anchored").unwrap();
+    let mut saw_anchor = false;
+    for _ in 0..10_000 {
+        if engine.sample_base_local_repose() == CLASSIC_REPOSE_ANCHOR {
+            saw_anchor = true;
+            break;
+        }
+    }
+    assert!(saw_anchor, "anchored profile never produced repose=4");
+}
+
+#[test]
+fn momentum_profile_allows_at_most_one_bonus_same_direction_diagonal() {
+    let mut engine = ClassicSandboxEngine::new(18, 12, 113, ClassicRainMode::Uniform);
+    engine.set_experiment_profile_name("momentum").unwrap();
+    engine.local_repose.fill(CLASSIC_REPOSE_LOW);
+    let bounds = engine.surface.viewport_bounds().expect("visible basin");
+    let x = bounds.x_start + (bounds.x_end - bounds.x_start) / 2;
+    let y = bounds.y_start + 2;
+    let category = CategoryId(1);
+
+    engine.surface.grid[y][x] = Some(category);
+    engine.surface.grid[y + 1][x] = Some(category);
+    engine.move_grain_once(bounds, x, y);
+
+    let occupied = [(x - 2, y + 2), (x + 2, y + 2)]
+        .into_iter()
+        .filter(|(px, py)| engine.surface.grid[*py][*px] == Some(category))
+        .count();
+    assert_eq!(occupied, 1, "momentum must add exactly one same-direction bonus hop");
+    assert_eq!(engine.diagonal_moves, 2);
+    assert_eq!(engine.surface.physical_grain_count(), 2);
+}
+
+fn experiment_metrics(profile: &str) -> (usize, usize, usize, usize) {
+    let mut engine = ClassicSandboxEngine::new(30, 10, 127, ClassicRainMode::Uniform);
+    engine.set_experiment_profile_name(profile).unwrap();
+    install_centered_compact_wall(&mut engine, 30, 24);
+    let expected_mass = engine.surface.physical_grain_count();
+    relax_fixed(&mut engine, 800);
+    assert_eq!(engine.surface.physical_grain_count(), expected_mass);
+    let heights = supported_height_profile(&engine);
+    (
+        second_difference_roughness(&heights),
+        apex_height(&heights),
+        footprint_width(&heights),
+        engine.diagonal_moves,
+    )
+}
+
+#[test]
+fn classic_experiment_ladder_remains_mass_conserving_and_observable() {
+    for profile in [
+        "rugged",
+        "memory",
+        "slope",
+        "memory-slope",
+        "anchored",
+        "momentum",
+    ] {
+        let metrics = experiment_metrics(profile);
+        eprintln!(
+            "CLASSIC_005_METRICS profile={profile} roughness={} apex={} width={} diagonal_moves={}",
+            metrics.0, metrics.1, metrics.2, metrics.3
+        );
+        assert!(metrics.1 > 0, "profile={profile}");
+        assert!(metrics.2 > 0, "profile={profile}");
+        assert!(metrics.3 > 0, "profile={profile}");
+    }
 }

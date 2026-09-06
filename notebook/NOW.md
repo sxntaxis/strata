@@ -3,10 +3,10 @@ id: NOW-001
 kind: status
 state: active
 created: 2026-08-01
-updated: 2026-09-05
+updated: 2026-09-06
 authority: working
-summary: CLASSIC-002 remains the owner-preferred simple avalanche baseline; CLASSIC-003 numeric repose tuning was rejected as visually unhelpful at stronger uniform percentages, and CLASSIC-004 now offers four fixed debug-only texture profiles that preserve baseline exactly while testing rare repose=3 sites and short spatial correlation for richer mesoscopic relief.
-next: Natively validate CLASSIC-004, inspect the emitted baseline/textured/rugged/terraced roughness and macroform metrics, then human-compare the four presets with a fresh `testingcheats fill` after each and freeze the best preset or keep baseline.
+summary: Rugged is now the owner-selected Classic texture baseline. CLASSIC-005 adds a six-step debug-only complexity ladder—rugged, memory, slope, memory-slope, anchored, momentum—so each bounded local mechanism can be human-compared with the same fill fixture before any added complexity is accepted.
+next: Natively validate CLASSIC-005, then compare `testingcheats classic experiment rugged|memory|slope|memory-slope|anchored|momentum` with a fresh `testingcheats fill` after each and freeze the last profile that preserves the preferred Classic avalanche character.
 ---
 
 # NOW — Strata

@@ -12,6 +12,7 @@ const CLASSIC_REPOSE_RNG_XOR: u64 = 0xA5A5_5A5A_D3C1_B7E9;
 const CLASSIC_REPOSE_LOW: u8 = 1;
 const CLASSIC_REPOSE_MID: u8 = 2;
 const CLASSIC_REPOSE_HIGH: u8 = 3;
+const CLASSIC_REPOSE_ANCHOR: u8 = 4;
 const GOLDEN_RATIO: f64 = 1.618_033_988_749_895;
 const RAIN_FOCUS_BIAS_ONE_IN: usize = 10;
 // At one ingress per second, a full focus traverse takes about twelve hours.
@@ -29,6 +30,57 @@ enum ClassicTextureProfile {
     Textured,
     Rugged,
     Terraced,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClassicExperimentProfile {
+    Rugged,
+    Memory,
+    Slope,
+    MemorySlope,
+    Anchored,
+    Momentum,
+}
+
+impl ClassicExperimentProfile {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Rugged => "rugged",
+            Self::Memory => "memory",
+            Self::Slope => "slope",
+            Self::MemorySlope => "memory-slope",
+            Self::Anchored => "anchored",
+            Self::Momentum => "momentum",
+        }
+    }
+
+    fn parse(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "rugged" => Some(Self::Rugged),
+            "memory" => Some(Self::Memory),
+            "slope" => Some(Self::Slope),
+            "memory-slope" => Some(Self::MemorySlope),
+            "anchored" => Some(Self::Anchored),
+            "momentum" => Some(Self::Momentum),
+            _ => None,
+        }
+    }
+
+    fn uses_memory(self) -> bool {
+        matches!(self, Self::Memory | Self::MemorySlope | Self::Anchored | Self::Momentum)
+    }
+
+    fn uses_slope_bias(self) -> bool {
+        matches!(self, Self::Slope | Self::MemorySlope | Self::Anchored | Self::Momentum)
+    }
+
+    fn uses_anchors(self) -> bool {
+        matches!(self, Self::Anchored | Self::Momentum)
+    }
+
+    fn uses_momentum(self) -> bool {
+        self == Self::Momentum
+    }
 }
 
 impl ClassicTextureProfile {
@@ -89,7 +141,9 @@ pub(crate) struct ClassicSandboxEngine {
     initial_repose_rng_state: u64,
     repose_rng_state: u64,
     local_repose: Vec<u8>,
+    repose_memory_remaining: Vec<u8>,
     texture_profile: ClassicTextureProfile,
+    experiment_profile: ClassicExperimentProfile,
     rain_focus_x: Option<usize>,
     rain_focus_target_x: Option<usize>,
     rain_focus_move_counter: usize,
@@ -118,6 +172,7 @@ impl ClassicSandboxEngine {
         }
         let surface = SandEngine::new(width, height);
         let local_repose = vec![CLASSIC_REPOSE_LOW; surface.grid_width_dots];
+        let repose_memory_remaining = vec![0; surface.grid_width_dots];
         let mut engine = Self {
             surface,
             mode,
@@ -126,7 +181,9 @@ impl ClassicSandboxEngine {
             initial_repose_rng_state: repose_rng_state,
             repose_rng_state,
             local_repose,
-            texture_profile: ClassicTextureProfile::Baseline,
+            repose_memory_remaining,
+            texture_profile: ClassicTextureProfile::Rugged,
+            experiment_profile: ClassicExperimentProfile::Rugged,
             rain_focus_x: None,
             rain_focus_target_x: None,
             rain_focus_move_counter: 0,
@@ -166,6 +223,7 @@ impl ClassicSandboxEngine {
     pub(crate) fn resize(&mut self, width: u16, height: u16) {
         let old_width = self.surface.grid_width_dots;
         let old_repose = self.local_repose.clone();
+        let old_memory = self.repose_memory_remaining.clone();
         self.surface.resize(width, height);
         let new_width = self.surface.grid_width_dots;
         let horizontal_offset = new_width.saturating_sub(old_width) / 2;
@@ -178,6 +236,12 @@ impl ClassicSandboxEngine {
                 expanded_repose[x + horizontal_offset] = repose;
             }
             self.local_repose = expanded_repose;
+
+            let mut expanded_memory = vec![self.experiment_memory_refreshes(); new_width];
+            for (x, remaining) in old_memory.into_iter().enumerate() {
+                expanded_memory[x + horizontal_offset] = remaining;
+            }
+            self.repose_memory_remaining = expanded_memory;
         }
         if horizontal_offset > 0 {
             self.rain_focus_x = self
@@ -247,6 +311,25 @@ impl ClassicSandboxEngine {
         // authoritative for future resamples; `testingcheats fill` starts a clean
         // comparison from the selected preset.
         self.texture_profile = profile;
+        Ok(())
+    }
+
+    pub(crate) fn experiment_profile_name(&self) -> &'static str {
+        self.experiment_profile.name()
+    }
+
+    pub(crate) fn set_experiment_profile_name(&mut self, profile: &str) -> Result<(), String> {
+        let Some(profile) = ClassicExperimentProfile::parse(profile) else {
+            return Err(
+                "classic experiment profile must be rugged, memory, slope, memory-slope, anchored, or momentum"
+                    .to_string(),
+            );
+        };
+        // Every experiment intentionally starts from the owner-selected rugged
+        // texture baseline. Selection remains non-retroactive; `fill` performs
+        // the clean field resample for comparison.
+        self.texture_profile = ClassicTextureProfile::Rugged;
+        self.experiment_profile = profile;
         Ok(())
     }
 
@@ -483,31 +566,110 @@ impl ClassicSandboxEngine {
             return;
         }
 
-        // This intentionally reproduces the pre-pause rule: choose exactly one
-        // diagonal. If that side is blocked, the grain waits for a later tick
-        // rather than trying the opposite side in the same update.
-        let step = if self.physics_random_bool() {
-            1isize
-        } else {
-            -1isize
-        };
+        // Classic still commits at most one ordinary diagonal choice per grain.
+        // Experimental profiles may bias that choice toward the steeper side,
+        // but never introduce a second-side retry when the chosen side is blocked.
+        let step = self.choose_diagonal_step(bounds, x, y);
         let Some(target_x) = x.checked_add_signed(step) else {
             return;
         };
-        if target_x < bounds.x_start || target_x >= bounds.x_end {
+        if !self.classic_diagonal_is_available(bounds, x, target_x, y) {
             return;
         }
-        if self.surface.grid[y + 1][target_x].is_some() {
-            return;
-        }
-        if !self.local_repose_allows_diagonal(bounds, x, target_x, y) {
-            return;
-        }
+
         self.surface.grid[y][x] = None;
         self.surface.grid[y + 1][target_x] = Some(category_id);
         self.diagonal_moves = self.diagonal_moves.saturating_add(1);
+
+        if self.experiment_profile.uses_momentum() {
+            self.try_one_bonus_diagonal(bounds, target_x, y + 1, step, category_id);
+        }
+
         self.refresh_local_repose(x);
         self.refresh_local_repose(target_x);
+    }
+
+    fn choose_diagonal_step(&mut self, bounds: ViewportBounds, x: usize, y: usize) -> isize {
+        let random_step = if self.physics_random_bool() { 1isize } else { -1isize };
+        if !self.experiment_profile.uses_slope_bias() {
+            return random_step;
+        }
+
+        let left = x.checked_sub(1).filter(|target| *target >= bounds.x_start);
+        let right = (x + 1 < bounds.x_end).then_some(x + 1);
+        let left_open = left.is_some_and(|target| self.surface.grid[y + 1][target].is_none());
+        let right_open = right.is_some_and(|target| self.surface.grid[y + 1][target].is_none());
+        // Preserve Classic's one-side behavior exactly. Relief only informs the
+        // choice when both ordinary diagonals are actually available.
+        if !left_open || !right_open {
+            return random_step;
+        }
+        let left_drop = self.diagonal_drop_depth(bounds, left.expect("left open"), y);
+        let right_drop = self.diagonal_drop_depth(bounds, right.expect("right open"), y);
+        if left_drop == right_drop {
+            return random_step;
+        }
+
+        // Mild 3:1 preference. The remaining quarter preserves Classic's
+        // stochastic character and prevents relief from becoming deterministic.
+        let prefer_steeper = self.next_physics_random_u64() % 4 != 0;
+        if prefer_steeper {
+            if left_drop > right_drop { -1 } else { 1 }
+        } else {
+            random_step
+        }
+    }
+
+    fn diagonal_drop_depth(&self, bounds: ViewportBounds, target_x: usize, source_y: usize) -> usize {
+        let mut depth = 0usize;
+        for y in source_y + 1..bounds.y_end {
+            if self.surface.grid[y][target_x].is_some() {
+                break;
+            }
+            depth += 1;
+            if depth >= 8 {
+                break;
+            }
+        }
+        depth
+    }
+
+    fn classic_diagonal_is_available(
+        &self,
+        bounds: ViewportBounds,
+        source_x: usize,
+        target_x: usize,
+        source_y: usize,
+    ) -> bool {
+        target_x >= bounds.x_start
+            && target_x < bounds.x_end
+            && self.surface.grid[source_y + 1][target_x].is_none()
+            && self.local_repose_allows_diagonal(bounds, source_x, target_x, source_y)
+    }
+
+    fn try_one_bonus_diagonal(
+        &mut self,
+        bounds: ViewportBounds,
+        x: usize,
+        y: usize,
+        step: isize,
+        category_id: CategoryId,
+    ) {
+        let Some(next_x) = x.checked_add_signed(step) else {
+            return;
+        };
+        if y + 1 >= bounds.y_end || !self.classic_diagonal_is_available(bounds, x, next_x, y) {
+            return;
+        }
+        // The bonus hop is deliberately conservative: it only continues when
+        // that same direction has at least two dots of open relief below it.
+        if self.diagonal_drop_depth(bounds, next_x, y) < 2 {
+            return;
+        }
+        self.surface.grid[y][x] = None;
+        self.surface.grid[y + 1][next_x] = Some(category_id);
+        self.diagonal_moves = self.diagonal_moves.saturating_add(1);
+        self.refresh_local_repose(next_x);
     }
 
     fn local_repose_allows_diagonal(
@@ -539,6 +701,7 @@ impl ClassicSandboxEngine {
 
     fn resample_all_local_repose(&mut self) {
         let mut previous = CLASSIC_REPOSE_LOW;
+        let memory = self.experiment_memory_refreshes();
         for x in 0..self.local_repose.len() {
             let repose = if x > 0 && self.texture_patch_continues() {
                 previous
@@ -546,12 +709,17 @@ impl ClassicSandboxEngine {
                 self.sample_base_local_repose()
             };
             self.local_repose[x] = repose;
+            self.repose_memory_remaining[x] = memory;
             previous = repose;
         }
     }
 
     fn refresh_local_repose(&mut self, x: usize) {
         if x >= self.local_repose.len() {
+            return;
+        }
+        if self.experiment_profile.uses_memory() && self.repose_memory_remaining[x] > 0 {
+            self.repose_memory_remaining[x] -= 1;
             return;
         }
 
@@ -573,6 +741,11 @@ impl ClassicSandboxEngine {
             self.sample_base_local_repose()
         };
         self.local_repose[x] = repose;
+        self.repose_memory_remaining[x] = self.experiment_memory_refreshes();
+    }
+
+    fn experiment_memory_refreshes(&self) -> u8 {
+        if self.experiment_profile.uses_memory() { 3 } else { 0 }
     }
 
     fn texture_patch_continues(&mut self) -> bool {
@@ -587,6 +760,14 @@ impl ClassicSandboxEngine {
         }
 
         let random = self.next_repose_random_u64();
+        if self.experiment_profile.uses_anchors() {
+            return match random % 1000 {
+                0..=899 => CLASSIC_REPOSE_LOW,
+                900..=979 => CLASSIC_REPOSE_MID,
+                980..=994 => CLASSIC_REPOSE_HIGH,
+                _ => CLASSIC_REPOSE_ANCHOR,
+            };
+        }
         match self.texture_profile {
             // Preserve CLASSIC-002's exact accepted mapping byte-for-byte in RNG
             // consumption and 1-in-20 threshold selection.

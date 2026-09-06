@@ -505,7 +505,7 @@ impl App {
             }
             #[cfg(debug_assertions)]
             CommandIntent::TestingCheatsHelp => Ok(
-                "testingcheats: default sandbox classic · model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> · classic texture [baseline|textured|rugged|terraced] · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · fill (classic/hybrid/Oslo; ensures six Fixture categories) · clear · status · provenance · reset"
+                "testingcheats: default sandbox classic · model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> · classic texture [baseline|textured|rugged|terraced] · classic experiment [rugged|memory|slope|memory-slope|anchored|momentum] · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · fill (classic/hybrid/Oslo; ensures six Fixture categories) · clear · status · provenance · reset"
                     .to_string(),
             ),
             #[cfg(debug_assertions)]
@@ -590,6 +590,24 @@ impl App {
                     let profile = testing.engine.classic_texture_profile()?;
                     Ok(format!(
                         "Testing sandbox {model} texture profile: {profile} (baseline preserves CLASSIC-002 exactly)"
+                    ))
+                }
+            }
+            #[cfg(debug_assertions)]
+            CommandIntent::TestingCheatsClassicExperiment { profile } => {
+                self.ensure_testing_cheats_preview()?;
+                let testing = self.testing_cheats.as_mut().expect("testing preview exists");
+                let model = testing.engine.model_name();
+                if let Some(profile) = profile {
+                    testing.engine.set_classic_experiment_profile(&profile)?;
+                    self.render_needed = true;
+                    Ok(format!(
+                        "Testing sandbox {model} Classic experiment: {profile} (rugged texture base; use `testingcheats fill` for a clean comparison)"
+                    ))
+                } else {
+                    let profile = testing.engine.classic_experiment_profile()?;
+                    Ok(format!(
+                        "Testing sandbox {model} Classic experiment: {profile}"
                     ))
                 }
             }
