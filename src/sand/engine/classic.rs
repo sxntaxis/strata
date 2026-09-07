@@ -1759,8 +1759,7 @@ mod tests {
             let first = start + focus_width / 3;
             let second = start + (focus_width * 2) / 3;
             let rng_before = engine.rain_rng_state;
-            let chosen =
-                engine.choose_compensational_waypoint(first, second, bounds, focus_width);
+            let chosen = engine.choose_compensational_waypoint(first, second, bounds, focus_width);
             assert_ne!(engine.rain_rng_state, rng_before);
             saw_first |= chosen == first;
             saw_second |= chosen == second;
