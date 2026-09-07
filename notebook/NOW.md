@@ -5,9 +5,14 @@ state: active
 created: 2026-08-01
 updated: 2026-09-07
 authority: working
-summary: RAIN-004 is machine-green and owner-selected as the best-so-far morphology reference, not a perfect/frozen endpoint; RAIN-005A now measures natural airborne, rain-kernel, equivalent-layer, mound, and adjacent-strata scales without changing behavior.
-next: Natively validate RAIN-005A measurement-only rainmetrics against exact RAIN-004 preservation, then capture a representative RAIN-004 report and use those measured scales to design RAIN-005B for equal-or-greater heterogeneity without nozzle regression.
+summary: RAIN-004 remains the best-so-far morphology reference family; RAIN-005A2 now characterizes its stochastic morphology and nozzle behavior across arbitrary viewport geometry rather than optimizing against one owner window/run.
+next: Natively run the RAIN-005A2 low-discrepancy viewport/seed morphology and analytical nozzle ensembles, then design RAIN-005B from normalized family-level evidence with equal-or-greater heterogeneity than RAIN-004 and no nozzle regression.
 ---
+
+
+## RAIN-005A2 morphology ensemble — 2026-09-07
+
+RAIN-005A machine validation passed and preserved RAIN-004 exactly, but the owner correctly noted that one later stochastic capture looked more thickness-homogeneous than the strongest prior RAIN-004 examples. RAIN-005A2 therefore makes no runtime change: it adds ignored native probes that characterize RAIN-004 across a low-discrepancy continuum of viewport shapes/seeds and an analytical arbitrary-geometry nozzle sweep. The goal is to establish a family-level statistical floor before RAIN-005B, not to optimize for the owner's current window or freeze one screenshot. See `notebook/work/RAIN-005A2-MORPHOLOGY-ENSEMBLE.md`.
 
 
 ## RAIN-005A derived morphology diagnostics — 2026-09-07

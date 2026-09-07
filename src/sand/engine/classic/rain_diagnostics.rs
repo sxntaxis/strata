@@ -783,4 +783,263 @@ mod tests {
         assert!(report.contains("profile_total_variation="));
         assert!(report.contains("centroid_shift_fraction="));
     }
+
+    fn advance_exact_grains(
+        engine: &mut ClassicSandboxEngine,
+        grains: usize,
+        category_id: CategoryId,
+    ) {
+        use std::time::Duration;
+
+        let tick = Duration::from_millis(TIME_SETTINGS.tick_ms);
+        let physics = Duration::from_millis(TIME_SETTINGS.physics_ms);
+        let simulated = Duration::from_millis(
+            TIME_SETTINGS
+                .tick_ms
+                .saturating_mul(u64::try_from(grains).expect("diagnostic grain count fits u64")),
+        );
+        let mut spawn_accumulator = Duration::ZERO;
+        let mut physics_accumulator = Duration::ZERO;
+        let mut remaining = simulated;
+
+        while !remaining.is_zero() {
+            let spawn_left = tick.saturating_sub(spawn_accumulator);
+            let physics_left = physics.saturating_sub(physics_accumulator);
+            let step = remaining.min(spawn_left.min(physics_left));
+            spawn_accumulator += step;
+            physics_accumulator += step;
+            remaining = remaining.saturating_sub(step);
+
+            let spawn_due = spawn_accumulator >= tick;
+            let physics_due = physics_accumulator >= physics;
+            if spawn_due {
+                spawn_accumulator = spawn_accumulator.saturating_sub(tick);
+                engine.spawn(category_id);
+            }
+            if physics_due {
+                physics_accumulator = physics_accumulator.saturating_sub(physics);
+                engine.update();
+            }
+            assert!(step > Duration::ZERO || spawn_due || physics_due);
+        }
+    }
+
+    fn halton(mut index: usize, base: usize) -> f64 {
+        let mut fraction = 1.0;
+        let mut value = 0.0;
+        while index > 0 {
+            fraction /= base as f64;
+            value += fraction * (index % base) as f64;
+            index /= base;
+        }
+        value
+    }
+
+    fn percentile(values: &[f64], quantile: f64) -> f64 {
+        assert!(!values.is_empty());
+        let mut sorted = values.to_vec();
+        sorted.sort_by(f64::total_cmp);
+        let index = ((sorted.len() - 1) as f64 * quantile)
+            .round()
+            .clamp(0.0, (sorted.len() - 1) as f64) as usize;
+        sorted[index]
+    }
+
+    fn mean_defined(values: impl Iterator<Item = Option<f64>>) -> Option<f64> {
+        let defined = values.flatten().collect::<Vec<_>>();
+        mean(&defined)
+    }
+
+    #[test]
+    #[ignore = "native RAIN-005A2 low-discrepancy viewport/seed morphology ensemble"]
+    fn rain_005a2_viewport_seed_morphology_ensemble_probe() {
+        // This is deliberately NOT a list of popular display resolutions. A
+        // low-discrepancy sequence covers the width/height plane continuously,
+        // so tiled panes, portrait-ish terminals, zoomed fonts and uncommon
+        // rectangles contribute to the baseline family instead of being rounded
+        // to a handful of device presets.
+        const CASES: usize = 16;
+        const MIN_WIDTH_CELLS: usize = 20;
+        const MAX_WIDTH_CELLS: usize = 200;
+        const MIN_HEIGHT_CELLS: usize = 10;
+        const MAX_HEIGHT_CELLS: usize = 60;
+        const CATEGORY_COUNT: usize = 5;
+
+        let categories = (1..=CATEGORY_COUNT)
+            .map(|id| category(id as u64, &format!("Ensemble {id}")))
+            .collect::<Vec<_>>();
+
+        let mut cvs = Vec::with_capacity(CASES);
+        let mut correlations = Vec::with_capacity(CASES);
+        let mut variations = Vec::with_capacity(CASES);
+        let mut shifts = Vec::with_capacity(CASES);
+        let mut centroid_spans = Vec::with_capacity(CASES);
+        let mut mound_els = Vec::with_capacity(CASES);
+
+        for case in 1..=CASES {
+            let width_cells = MIN_WIDTH_CELLS
+                + (halton(case, 2) * (MAX_WIDTH_CELLS - MIN_WIDTH_CELLS) as f64).round()
+                    as usize;
+            let height_cells = MIN_HEIGHT_CELLS
+                + (halton(case, 3) * (MAX_HEIGHT_CELLS - MIN_HEIGHT_CELLS) as f64).round()
+                    as usize;
+            let seed = 0xA11C_005A_2000_0000u64
+                ^ (case as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+            let mut engine = ClassicSandboxEngine::new(
+                u16::try_from(width_cells).expect("diagnostic width fits u16"),
+                u16::try_from(height_cells).expect("diagnostic height fits u16"),
+                seed,
+                ClassicRainMode::WanderingFocus,
+            );
+            engine.force_reference_gravity = false;
+
+            let bounds = engine.surface.viewport_bounds().expect("viewport");
+            let width_dots = bounds.x_end - bounds.x_start;
+            let free = (bounds.x_start..bounds.x_end).collect::<Vec<_>>();
+            let center = bounds.x_start + width_dots.saturating_sub(1) / 2;
+            let kernel = rain_distribution_metrics(
+                &free,
+                center,
+                RAIN_FOCUS_BIAS_PROBABILITY,
+                width_dots,
+            );
+            let mound_grains = kernel.one_dot_excess_mound_grains.round().max(1.0) as usize;
+            let mound_el = kernel.one_dot_excess_mound_grains / width_dots as f64;
+            mound_els.push(mound_el);
+
+            // Each category receives one analytically derived one-dot-excess
+            // mound timescale. This normalizes the observation window to the
+            // rain kernel instead of choosing a raw number of seconds/grains.
+            for category_index in 1..=CATEGORY_COUNT {
+                advance_exact_grains(
+                    &mut engine,
+                    mound_grains,
+                    CategoryId::new(category_index as u64),
+                );
+            }
+
+            let profiles = engine.category_profiles(bounds, &categories);
+            let pairs = adjacent_profile_metrics(&profiles, width_dots);
+            assert!(profiles.len() >= CATEGORY_COUNT - 1, "case={case} profiles={}", profiles.len());
+            assert!(pairs.len() >= CATEGORY_COUNT - 2, "case={case} pairs={}", pairs.len());
+
+            let mean_cv = mean(&profiles.iter().map(|profile| profile.thickness_cv).collect::<Vec<_>>())
+                .expect("profiles");
+            let mean_corr = mean_defined(pairs.iter().map(|pair| pair.correlation)).unwrap_or(0.0);
+            let mean_tv = mean(&pairs.iter().map(|pair| pair.total_variation).collect::<Vec<_>>())
+                .expect("pairs");
+            let mean_shift = mean(
+                &pairs
+                    .iter()
+                    .map(|pair| pair.centroid_shift_fraction)
+                    .collect::<Vec<_>>(),
+            )
+            .expect("pairs");
+            let min_centroid = profiles
+                .iter()
+                .map(|profile| profile.centroid_x_norm)
+                .fold(f64::INFINITY, f64::min);
+            let max_centroid = profiles
+                .iter()
+                .map(|profile| profile.centroid_x_norm)
+                .fold(f64::NEG_INFINITY, f64::max);
+            let centroid_span = max_centroid - min_centroid;
+
+            cvs.push(mean_cv);
+            correlations.push(mean_corr);
+            variations.push(mean_tv);
+            shifts.push(mean_shift);
+            centroid_spans.push(centroid_span);
+
+            println!(
+                "RAIN_005A2_MORPH_SAMPLE case={case} terminal={}x{} dots={}x{} aspect={:.4} seed={seed} category_mound_grains={mound_grains} mound_el={mound_el:.6} mean_thickness_cv={mean_cv:.9} mean_pair_corr={mean_corr:.9} mean_pair_tv={mean_tv:.9} mean_pair_centroid_shift={mean_shift:.9} centroid_span={centroid_span:.9}",
+                width_cells,
+                height_cells,
+                width_dots,
+                bounds.y_end - bounds.y_start,
+                width_cells as f64 / height_cells as f64,
+            );
+        }
+
+        println!(
+            "RAIN_005A2_MORPH_ENSEMBLE cases={CASES} cv_p10={:.9} cv_p50={:.9} cv_p90={:.9} corr_p10={:.9} corr_p50={:.9} corr_p90={:.9} tv_p10={:.9} tv_p50={:.9} tv_p90={:.9} shift_p10={:.9} shift_p50={:.9} shift_p90={:.9} centroid_span_p10={:.9} centroid_span_p50={:.9} centroid_span_p90={:.9} mound_el_p10={:.9} mound_el_p50={:.9} mound_el_p90={:.9}",
+            percentile(&cvs, 0.10),
+            percentile(&cvs, 0.50),
+            percentile(&cvs, 0.90),
+            percentile(&correlations, 0.10),
+            percentile(&correlations, 0.50),
+            percentile(&correlations, 0.90),
+            percentile(&variations, 0.10),
+            percentile(&variations, 0.50),
+            percentile(&variations, 0.90),
+            percentile(&shifts, 0.10),
+            percentile(&shifts, 0.50),
+            percentile(&shifts, 0.90),
+            percentile(&centroid_spans, 0.10),
+            percentile(&centroid_spans, 0.50),
+            percentile(&centroid_spans, 0.90),
+            percentile(&mound_els, 0.10),
+            percentile(&mound_els, 0.50),
+            percentile(&mound_els, 0.90),
+        );
+    }
+
+    #[test]
+    #[ignore = "native RAIN-005A2 analytical arbitrary-geometry/nozzle sweep"]
+    fn rain_005a2_analytical_arbitrary_geometry_nozzle_sweep_probe() {
+        const CASES: usize = 64;
+        let ingress_rate_hz = MILLIS_PER_SECOND / TIME_SETTINGS.tick_ms as f64;
+        let gravity_step_ms = TIME_SETTINGS.physics_ms.saturating_mul(2);
+        let rows_per_second = MILLIS_PER_SECOND / gravity_step_ms as f64;
+
+        let mut nozzle_bits = Vec::with_capacity(CASES);
+        let mut kernel_width_fraction = Vec::with_capacity(CASES);
+        let mut mound_el = Vec::with_capacity(CASES);
+
+        for case in 1..=CASES {
+            // Again use low-discrepancy coverage rather than named resolutions.
+            let width_dots = 24 + (halton(case, 2) * (640 - 24) as f64).round() as usize;
+            let height_dots = 24 + (halton(case, 3) * (320 - 24) as f64).round() as usize;
+            let focus_norm = halton(case, 5);
+            let sky_fraction = 0.05 + 0.90 * halton(case, 7);
+            let focus = ((width_dots - 1) as f64 * focus_norm).round() as usize;
+            let free = (0..width_dots).collect::<Vec<_>>();
+            let distribution = rain_distribution_metrics(
+                &free,
+                focus,
+                RAIN_FOCUS_BIAS_PROBABILITY,
+                width_dots,
+            );
+            let mean_drop_rows = height_dots as f64 * sky_fraction;
+            let expected_airborne = ingress_rate_hz * mean_drop_rows / rows_per_second;
+            let information = expected_airborne * distribution.kl_bits_per_grain;
+            let mound_equivalent_layers =
+                distribution.one_dot_excess_mound_grains / width_dots as f64;
+
+            nozzle_bits.push(information);
+            kernel_width_fraction.push(distribution.focus_rms_width_fraction);
+            mound_el.push(mound_equivalent_layers);
+
+            println!(
+                "RAIN_005A2_NOZZLE_SAMPLE case={case} width_dots={width_dots} height_dots={height_dots} focus_norm={focus_norm:.6} sky_fraction={sky_fraction:.6} expected_airborne={expected_airborne:.6} kl_bits_per_grain={:.9} nozzle_information_bits={information:.9} kernel_rms_width_fraction={:.9} mound_el={mound_equivalent_layers:.9}",
+                distribution.kl_bits_per_grain,
+                distribution.focus_rms_width_fraction,
+            );
+        }
+
+        println!(
+            "RAIN_005A2_NOZZLE_ENSEMBLE cases={CASES} information_p10={:.9} information_p50={:.9} information_p90={:.9} information_max={:.9} kernel_width_fraction_p10={:.9} kernel_width_fraction_p50={:.9} kernel_width_fraction_p90={:.9} mound_el_p10={:.9} mound_el_p50={:.9} mound_el_p90={:.9}",
+            percentile(&nozzle_bits, 0.10),
+            percentile(&nozzle_bits, 0.50),
+            percentile(&nozzle_bits, 0.90),
+            nozzle_bits.iter().copied().fold(0.0, f64::max),
+            percentile(&kernel_width_fraction, 0.10),
+            percentile(&kernel_width_fraction, 0.50),
+            percentile(&kernel_width_fraction, 0.90),
+            percentile(&mound_el, 0.10),
+            percentile(&mound_el, 0.50),
+            percentile(&mound_el, 0.90),
+        );
+    }
+
 }
