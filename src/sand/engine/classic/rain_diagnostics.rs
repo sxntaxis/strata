@@ -46,12 +46,18 @@ impl ClassicSandboxEngine {
         categories: &[Category],
     ) -> Result<String, String> {
         let Some(bounds) = self.surface.viewport_bounds() else {
-            return Err("testingcheats classic rainmetrics requires a non-empty classic/hybrid viewport".to_string());
+            return Err(
+                "testingcheats classic rainmetrics requires a non-empty classic/hybrid viewport"
+                    .to_string(),
+            );
         };
         let width = bounds.x_end.saturating_sub(bounds.x_start);
         let height = bounds.y_end.saturating_sub(bounds.y_start);
         if width == 0 || height == 0 {
-            return Err("testingcheats classic rainmetrics requires a non-empty classic/hybrid viewport".to_string());
+            return Err(
+                "testingcheats classic rainmetrics requires a non-empty classic/hybrid viewport"
+                    .to_string(),
+            );
         }
 
         let ingress_y = bounds.y_start;
@@ -80,12 +86,7 @@ impl ClassicSandboxEngine {
         };
 
         let distribution = if self.mode == ClassicRainMode::WanderingFocus {
-            rain_distribution_metrics(
-                &free_columns,
-                focus,
-                RAIN_FOCUS_BIAS_PROBABILITY,
-                width,
-            )
+            rain_distribution_metrics(&free_columns, focus, RAIN_FOCUS_BIAS_PROBABILITY, width)
         } else {
             uniform_distribution_metrics(free_columns.len())
         };
@@ -101,8 +102,7 @@ impl ClassicSandboxEngine {
             uniform_distribution_metrics(unobstructed_columns.len())
         };
 
-        let instant_nozzle_bits =
-            actual_airborne as f64 * distribution.kl_bits_per_grain;
+        let instant_nozzle_bits = actual_airborne as f64 * distribution.kl_bits_per_grain;
         let geometry_nozzle_bits =
             geometry_expected_airborne * unobstructed_distribution.kl_bits_per_grain;
         let equivalent_layer_grains = width as f64;
@@ -209,7 +209,10 @@ impl ClassicSandboxEngine {
             "equivalent_layer_grains={equivalent_layer_grains:.6} equivalent_layers_per_hour={equivalent_layers_per_hour:.6}"
         )
         .expect("String write");
-        if unobstructed_distribution.one_dot_excess_mound_grains.is_finite() {
+        if unobstructed_distribution
+            .one_dot_excess_mound_grains
+            .is_finite()
+        {
             writeln!(
                 report,
                 "one_dot_excess_mound_grains={:.6} one_dot_excess_mound_seconds_1x={mound_seconds:.6} mound_equivalent_layers={mound_equivalent_layers:.6}",
@@ -301,8 +304,7 @@ impl ClassicSandboxEngine {
 
         for x in bounds.x_start..bounds.x_end {
             let mut grounded_top = bounds.y_end;
-            while grounded_top > bounds.y_start
-                && self.surface.grid[grounded_top - 1][x].is_some()
+            while grounded_top > bounds.y_start && self.surface.grid[grounded_top - 1][x].is_some()
             {
                 grounded_top -= 1;
             }
@@ -324,8 +326,8 @@ impl ClassicSandboxEngine {
                 let first_occupied = (bounds.y_start + 1..bounds.y_end)
                     .find(|y| self.surface.grid[*y][x].is_some())
                     .unwrap_or(bounds.y_end);
-                open_drop_sum = open_drop_sum
-                    .saturating_add(first_occupied.saturating_sub(bounds.y_start));
+                open_drop_sum =
+                    open_drop_sum.saturating_add(first_occupied.saturating_sub(bounds.y_start));
             }
         }
 
@@ -363,8 +365,7 @@ impl ClassicSandboxEngine {
 
         for x in bounds.x_start..bounds.x_end {
             let mut grounded_top = bounds.y_end;
-            while grounded_top > bounds.y_start
-                && self.surface.grid[grounded_top - 1][x].is_some()
+            while grounded_top > bounds.y_start && self.surface.grid[grounded_top - 1][x].is_some()
             {
                 grounded_top -= 1;
             }
@@ -404,15 +405,13 @@ impl ClassicSandboxEngine {
                 } else {
                     0.0
                 };
-                let mean_x = x_sum.get(&category_id).copied().unwrap_or(0.0)
-                    / category_mass as f64;
+                let mean_x = x_sum.get(&category_id).copied().unwrap_or(0.0) / category_mass as f64;
                 let centroid_x_norm = if width <= 1 {
                     0.5
                 } else {
                     mean_x / (width - 1) as f64
                 };
-                let mean_y = y_sum.get(&category_id).copied().unwrap_or(0.0)
-                    / category_mass as f64;
+                let mean_y = y_sum.get(&category_id).copied().unwrap_or(0.0) / category_mass as f64;
                 Some(CategoryProfile {
                     category_id,
                     name: names
@@ -724,7 +723,8 @@ mod tests {
 
     #[test]
     fn diagnostics_are_read_only_and_derive_one_dot_per_second_clock() {
-        let mut engine = ClassicSandboxEngine::new(80, 30, 0xA11CE, ClassicRainMode::WanderingFocus);
+        let mut engine =
+            ClassicSandboxEngine::new(80, 30, 0xA11CE, ClassicRainMode::WanderingFocus);
         engine.spawn(CategoryId::new(1));
         for _ in 0..64 {
             engine.update();
@@ -736,7 +736,9 @@ mod tests {
             .rain_morphology_diagnostics_report(&[category(1, "One")])
             .expect("diagnostic report");
         assert!(report.contains("canonical_ingress_rate_grains_per_second=1.000000"));
-        assert!(report.contains("reference=RAIN-004 owner-selected best-so-far baseline; not a perfection/freeze target"));
+        assert!(report.contains(
+            "reference=RAIN-004 owner-selected best-so-far baseline; not a perfection/freeze target"
+        ));
         assert!(report.contains("RAIN_SCALE"));
         assert!(report.contains("STRATA_METRICS"));
         assert_eq!(engine.surface.grid, grid_before);
@@ -757,7 +759,8 @@ mod tests {
 
     #[test]
     fn adjacent_category_profiles_measure_real_lateral_difference() {
-        let mut engine = ClassicSandboxEngine::new(20, 12, 0x57A7A, ClassicRainMode::WanderingFocus);
+        let mut engine =
+            ClassicSandboxEngine::new(20, 12, 0x57A7A, ClassicRainMode::WanderingFocus);
         let bounds = engine.surface.viewport_bounds().expect("viewport");
         let bottom = bounds.y_end - 1;
         for x in bounds.x_start..bounds.x_end {
