@@ -5,10 +5,18 @@ state: active
 created: 2026-08-01
 updated: 2026-09-07
 authority: working
-summary: RAIN-004 is active after RAIN-003 owner morphology review: retain correlated meander, weak terrain steering, category-boundary rephase, free-site ingress, instant fallspeed debt ownership, PERF-001 and frozen Classic settlement, while removing focus-only side padding and raising broad focus bias from 25% to the small golden-ratio part (~38.2%).
-next: Natively validate RAIN-004 full-width focus plus golden-small broad bias while preserving RAIN-003 meander/rephase, RAIN-002 ingress/debt fixes, PERF-001 exactness/capacity, and frozen Classic settlement; then run the owner Hybrid 128x morphology/anti-nozzle gate.
+summary: RAIN-004 is machine-green and owner-selected as the best-so-far morphology reference, not a perfect/frozen endpoint; RAIN-005A now measures natural airborne, rain-kernel, equivalent-layer, mound, and adjacent-strata scales without changing behavior.
+next: Natively validate RAIN-005A measurement-only rainmetrics against exact RAIN-004 preservation, then capture a representative RAIN-004 report and use those measured scales to design RAIN-005B for equal-or-greater heterogeneity without nozzle regression.
 ---
 
+
+## RAIN-005A derived morphology diagnostics — 2026-09-07
+
+RAIN-004 passed machine validation and the owner selected it as the best-so-far morphology reference, while explicitly rejecting any interpretation that its current golden bias or meander timings are therefore perfect/final. RAIN-005A is a measurement-only pass: add `testingcheats classic rainmetrics` to quantify canonical-1x visible airborne population, analytical nozzleness of the current broad rain kernel, equivalent-layer and one-dot excess-mound scales, surface relief, and adjacent-category thickness-profile heterogeneity. Runtime morphology remains exactly RAIN-004. See `notebook/work/RAIN-005A-DERIVED-MORPHOLOGY-DIAGNOSTICS.md`.
+
+## RAIN-004 machine-green / owner reference — 2026-09-07
+
+RAIN-004 passed 509 tests with no failures, retained PERF capacity (median 1457.78x), and the owner judged its morphology the strongest result so far. It is the RAIN-005 comparison baseline, **not** a perfection claim or a freeze of its magic constants. Future candidates should target equal-or-greater heterogeneity while retaining broad/nozzle-free falling rain.
 
 ## RAIN-004 authored candidate — 2026-09-07
 

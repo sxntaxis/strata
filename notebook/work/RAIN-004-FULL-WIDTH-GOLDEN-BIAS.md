@@ -1,11 +1,11 @@
 ---
 id: RAIN-004
 kind: work
-state: candidate
+state: reference
 created: 2026-09-07
 updated: 2026-09-07
 authority: working
-summary: Retain RAIN-003 correlated meander, weak terrain steering, category rephase, RAIN-002 free-site ingress/debt ownership, PERF-001, and frozen Classic settlement, while removing focus-only side padding and increasing the broad focus-biased rain share from 25% to the small golden-ratio part (~38.2%).
+summary: Machine-green and owner-selected as the best-so-far morphology reference after full-width focus plus golden-small broad bias; it is a comparison baseline for further heterogeneity work, not a declaration that its magic constants are perfect or permanently frozen.
 ---
 
 # RAIN-004 — Full-width golden-bias correlated meander
@@ -118,3 +118,8 @@ Desired result:
 - `testingcheats fallspeed 1x` slows immediately.
 
 Do not introduce another morphology rule if this needs tuning. The next owner decision should judge the two authorized knobs themselves: full-width focus and golden-small bias.
+
+
+## Native + owner reference gate — 2026-09-07
+
+RAIN-004 passed machine validation (509 passed, 6 ignored; PERF median 1457.78x) and the owner judged its long-form morphology the best Strata result so far. It is therefore the reference/control for RAIN-005 work. This does **not** promote `1/phi^2`, 14,400/900/180 ingress timing, width/6 terrain offset, or width/12 smoothing/edge distances into final product constants. The owner explicitly wants the next derived model to pursue **equal or greater heterogeneity** while preserving the no-nozzle quality and avoiding RAIN-002 blandness or periodic Pepsi-like oscillation.
