@@ -1032,10 +1032,10 @@ impl ClassicSandboxEngine {
 
         self.surface.grid[y][x] = None;
         self.surface.grid[y + 1][target_x] = Some(category_id);
-        if let Some(index) = grounded_index.as_deref_mut() {
+        if let Some(index) = grounded_index.as_mut() {
             index.record_move(&self.surface.grid, x, y, target_x, y + 1);
         }
-        if let Some(index) = occupancy_index.as_deref_mut() {
+        if let Some(index) = occupancy_index.as_mut() {
             index.record_move(x, y, target_x, y + 1);
         }
         self.diagonal_moves = self.diagonal_moves.saturating_add(1);
@@ -1194,10 +1194,10 @@ impl ClassicSandboxEngine {
         }
         self.surface.grid[y][x] = None;
         self.surface.grid[y + 1][next_x] = Some(category_id);
-        if let Some(index) = grounded_index.as_deref_mut() {
+        if let Some(index) = grounded_index.as_mut() {
             index.record_move(&self.surface.grid, x, y, next_x, y + 1);
         }
-        if let Some(index) = occupancy_index.as_deref_mut() {
+        if let Some(index) = occupancy_index.as_mut() {
             index.record_move(x, y, next_x, y + 1);
         }
         self.diagonal_moves = self.diagonal_moves.saturating_add(1);
@@ -1419,8 +1419,7 @@ impl ClassicSandboxEngine {
             return false;
         }
         let left_blocked = x == bounds.x_start || self.surface.grid[y + 1][x - 1].is_some();
-        let right_blocked =
-            x + 1 >= bounds.x_end || self.surface.grid[y + 1][x + 1].is_some();
+        let right_blocked = x + 1 >= bounds.x_end || self.surface.grid[y + 1][x + 1].is_some();
         left_blocked && right_blocked
     }
 
@@ -2062,7 +2061,10 @@ mod perf_001_tests {
         assert_eq!(left.surface.grain_count, right.surface.grain_count);
         assert_eq!(left.surface.pending_runs, right.surface.pending_runs);
         assert_eq!(left.surface.ingress_focus_x, right.surface.ingress_focus_x);
-        assert_eq!(left.surface.sweep_left_to_right, right.surface.sweep_left_to_right);
+        assert_eq!(
+            left.surface.sweep_left_to_right,
+            right.surface.sweep_left_to_right
+        );
         assert_eq!(left.physics_rng_state, right.physics_rng_state);
         assert_eq!(left.rain_rng_state, right.rain_rng_state);
         assert_eq!(left.repose_rng_state, right.repose_rng_state);
@@ -2071,9 +2073,15 @@ mod perf_001_tests {
         assert_eq!(left.rain_focus_x, right.rain_focus_x);
         assert_eq!(left.rain_focus_target_x, right.rain_focus_target_x);
         assert_eq!(left.rain_focus_move_counter, right.rain_focus_move_counter);
-        assert_eq!(left.rain_left_padding_targets, right.rain_left_padding_targets);
+        assert_eq!(
+            left.rain_left_padding_targets,
+            right.rain_left_padding_targets
+        );
         assert_eq!(left.rain_corridor_targets, right.rain_corridor_targets);
-        assert_eq!(left.rain_right_padding_targets, right.rain_right_padding_targets);
+        assert_eq!(
+            left.rain_right_padding_targets,
+            right.rain_right_padding_targets
+        );
         assert_eq!(left.pending_drive, right.pending_drive);
         assert_eq!(left.frame_count, right.frame_count);
         assert_eq!(left.total_generated, right.total_generated);
@@ -2086,8 +2094,7 @@ mod perf_001_tests {
         for draws in [1usize, 2, 3, 17, 64, 255, 1_024, 65_537] {
             let mut individual =
                 ClassicSandboxEngine::new(8, 6, 0xA11C_E155, ClassicRainMode::Uniform);
-            let mut jumped =
-                ClassicSandboxEngine::new(8, 6, 0xA11C_E155, ClassicRainMode::Uniform);
+            let mut jumped = ClassicSandboxEngine::new(8, 6, 0xA11C_E155, ClassicRainMode::Uniform);
             for _ in 0..draws {
                 let _ = individual.next_physics_random_u64();
             }
@@ -2121,12 +2128,8 @@ mod perf_001_tests {
 
     #[test]
     fn o1_metadata_matches_exact_classic_mass_authority() {
-        let mut engine = ClassicSandboxEngine::new(
-            32,
-            12,
-            0xA11C_E204,
-            ClassicRainMode::WanderingFocus,
-        );
+        let mut engine =
+            ClassicSandboxEngine::new(32, 12, 0xA11C_E204, ClassicRainMode::WanderingFocus);
         engine.force_reference_gravity = false;
         advance_exact(&mut engine, Duration::from_secs(240));
         assert_eq!(engine.surface.grain_count, engine.total_generated);
@@ -2134,25 +2137,24 @@ mod perf_001_tests {
             engine.total_generated,
             engine.surface.physical_grain_count() + engine.pending_drive.len()
         );
-        assert!(engine.surface.mobilized.iter().flatten().all(|value| !*value));
+        assert!(
+            engine
+                .surface
+                .mobilized
+                .iter()
+                .flatten()
+                .all(|value| !*value)
+        );
     }
 
     #[test]
     #[ignore = "native PERF-001 exact Classic high-speed probe"]
     fn perf_001_hybrid_rate_probe() {
         let simulated = Duration::from_secs(900);
-        let mut reference = ClassicSandboxEngine::new(
-            190,
-            48,
-            0xA11C_E2F0,
-            ClassicRainMode::WanderingFocus,
-        );
-        let mut optimized = ClassicSandboxEngine::new(
-            190,
-            48,
-            0xA11C_E2F0,
-            ClassicRainMode::WanderingFocus,
-        );
+        let mut reference =
+            ClassicSandboxEngine::new(190, 48, 0xA11C_E2F0, ClassicRainMode::WanderingFocus);
+        let mut optimized =
+            ClassicSandboxEngine::new(190, 48, 0xA11C_E2F0, ClassicRainMode::WanderingFocus);
         optimized.force_reference_gravity = false;
 
         // Keep the reference sample bounded while still measuring the dense
@@ -2165,10 +2167,10 @@ mod perf_001_tests {
         let optimized_started = Instant::now();
         advance_exact(&mut optimized, simulated);
         let optimized_elapsed = optimized_started.elapsed();
-        let optimized_x = simulated.as_secs_f64()
-            / optimized_elapsed.as_secs_f64().max(f64::EPSILON);
-        let reference_x = reference_simulated.as_secs_f64()
-            / reference_elapsed.as_secs_f64().max(f64::EPSILON);
+        let optimized_x =
+            simulated.as_secs_f64() / optimized_elapsed.as_secs_f64().max(f64::EPSILON);
+        let reference_x =
+            reference_simulated.as_secs_f64() / reference_elapsed.as_secs_f64().max(f64::EPSILON);
         let speedup = optimized_x / reference_x.max(f64::EPSILON);
 
         println!(

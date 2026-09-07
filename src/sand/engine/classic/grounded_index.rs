@@ -49,12 +49,7 @@ impl GroundedColumnIndex {
         self.record_fill(grid, target_x, target_y);
     }
 
-    pub(super) fn record_new_fill(
-        &mut self,
-        grid: &[Vec<Option<CategoryId>>],
-        x: usize,
-        y: usize,
-    ) {
+    pub(super) fn record_new_fill(&mut self, grid: &[Vec<Option<CategoryId>>], x: usize, y: usize) {
         self.record_fill(grid, x, y);
     }
 

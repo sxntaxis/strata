@@ -4148,12 +4148,30 @@ mod testing_cheats_clock_tests {
 
     #[test]
     fn accelerated_classic_budget_scales_without_changing_low_speed_or_perceptual_budget() {
-        assert_eq!(testing_cheats_frame_budget(1, false), Duration::from_millis(4));
-        assert_eq!(testing_cheats_frame_budget(4, false), Duration::from_millis(4));
-        assert_eq!(testing_cheats_frame_budget(16, false), Duration::from_millis(8));
-        assert_eq!(testing_cheats_frame_budget(64, false), Duration::from_millis(16));
-        assert_eq!(testing_cheats_frame_budget(128, false), Duration::from_millis(32));
-        assert_eq!(testing_cheats_frame_budget(128, true), Duration::from_millis(12));
+        assert_eq!(
+            testing_cheats_frame_budget(1, false),
+            Duration::from_millis(4)
+        );
+        assert_eq!(
+            testing_cheats_frame_budget(4, false),
+            Duration::from_millis(4)
+        );
+        assert_eq!(
+            testing_cheats_frame_budget(16, false),
+            Duration::from_millis(8)
+        );
+        assert_eq!(
+            testing_cheats_frame_budget(64, false),
+            Duration::from_millis(16)
+        );
+        assert_eq!(
+            testing_cheats_frame_budget(128, false),
+            Duration::from_millis(32)
+        );
+        assert_eq!(
+            testing_cheats_frame_budget(128, true),
+            Duration::from_millis(12)
+        );
     }
 
     #[test]
