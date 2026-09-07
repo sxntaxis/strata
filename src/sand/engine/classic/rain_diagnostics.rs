@@ -878,13 +878,10 @@ mod tests {
 
         for case in 1..=CASES {
             let width_cells = MIN_WIDTH_CELLS
-                + (halton(case, 2) * (MAX_WIDTH_CELLS - MIN_WIDTH_CELLS) as f64).round()
-                    as usize;
+                + (halton(case, 2) * (MAX_WIDTH_CELLS - MIN_WIDTH_CELLS) as f64).round() as usize;
             let height_cells = MIN_HEIGHT_CELLS
-                + (halton(case, 3) * (MAX_HEIGHT_CELLS - MIN_HEIGHT_CELLS) as f64).round()
-                    as usize;
-            let seed = 0xA11C_005A_2000_0000u64
-                ^ (case as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+                + (halton(case, 3) * (MAX_HEIGHT_CELLS - MIN_HEIGHT_CELLS) as f64).round() as usize;
+            let seed = 0xA11C_005A_2000_0000u64 ^ (case as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
             let mut engine = ClassicSandboxEngine::new(
                 u16::try_from(width_cells).expect("diagnostic width fits u16"),
                 u16::try_from(height_cells).expect("diagnostic height fits u16"),
@@ -897,12 +894,8 @@ mod tests {
             let width_dots = bounds.x_end - bounds.x_start;
             let free = (bounds.x_start..bounds.x_end).collect::<Vec<_>>();
             let center = bounds.x_start + width_dots.saturating_sub(1) / 2;
-            let kernel = rain_distribution_metrics(
-                &free,
-                center,
-                RAIN_FOCUS_BIAS_PROBABILITY,
-                width_dots,
-            );
+            let kernel =
+                rain_distribution_metrics(&free, center, RAIN_FOCUS_BIAS_PROBABILITY, width_dots);
             let mound_grains = kernel.one_dot_excess_mound_grains.round().max(1.0) as usize;
             let mound_el = kernel.one_dot_excess_mound_grains / width_dots as f64;
             mound_els.push(mound_el);
@@ -920,14 +913,32 @@ mod tests {
 
             let profiles = engine.category_profiles(bounds, &categories);
             let pairs = adjacent_profile_metrics(&profiles, width_dots);
-            assert!(profiles.len() >= CATEGORY_COUNT - 1, "case={case} profiles={}", profiles.len());
-            assert!(pairs.len() >= CATEGORY_COUNT - 2, "case={case} pairs={}", pairs.len());
+            assert!(
+                profiles.len() >= CATEGORY_COUNT - 1,
+                "case={case} profiles={}",
+                profiles.len()
+            );
+            assert!(
+                pairs.len() >= CATEGORY_COUNT - 2,
+                "case={case} pairs={}",
+                pairs.len()
+            );
 
-            let mean_cv = mean(&profiles.iter().map(|profile| profile.thickness_cv).collect::<Vec<_>>())
-                .expect("profiles");
+            let mean_cv = mean(
+                &profiles
+                    .iter()
+                    .map(|profile| profile.thickness_cv)
+                    .collect::<Vec<_>>(),
+            )
+            .expect("profiles");
             let mean_corr = mean_defined(pairs.iter().map(|pair| pair.correlation)).unwrap_or(0.0);
-            let mean_tv = mean(&pairs.iter().map(|pair| pair.total_variation).collect::<Vec<_>>())
-                .expect("pairs");
+            let mean_tv = mean(
+                &pairs
+                    .iter()
+                    .map(|pair| pair.total_variation)
+                    .collect::<Vec<_>>(),
+            )
+            .expect("pairs");
             let mean_shift = mean(
                 &pairs
                     .iter()
@@ -1004,12 +1015,8 @@ mod tests {
             let sky_fraction = 0.05 + 0.90 * halton(case, 7);
             let focus = ((width_dots - 1) as f64 * focus_norm).round() as usize;
             let free = (0..width_dots).collect::<Vec<_>>();
-            let distribution = rain_distribution_metrics(
-                &free,
-                focus,
-                RAIN_FOCUS_BIAS_PROBABILITY,
-                width_dots,
-            );
+            let distribution =
+                rain_distribution_metrics(&free, focus, RAIN_FOCUS_BIAS_PROBABILITY, width_dots);
             let mean_drop_rows = height_dots as f64 * sky_fraction;
             let expected_airborne = ingress_rate_hz * mean_drop_rows / rows_per_second;
             let information = expected_airborne * distribution.kl_bits_per_grain;
@@ -1022,8 +1029,7 @@ mod tests {
 
             println!(
                 "RAIN_005A2_NOZZLE_SAMPLE case={case} width_dots={width_dots} height_dots={height_dots} focus_norm={focus_norm:.6} sky_fraction={sky_fraction:.6} expected_airborne={expected_airborne:.6} kl_bits_per_grain={:.9} nozzle_information_bits={information:.9} kernel_rms_width_fraction={:.9} mound_el={mound_equivalent_layers:.9}",
-                distribution.kl_bits_per_grain,
-                distribution.focus_rms_width_fraction,
+                distribution.kl_bits_per_grain, distribution.focus_rms_width_fraction,
             );
         }
 
@@ -1041,5 +1047,4 @@ mod tests {
             percentile(&mound_el, 0.90),
         );
     }
-
 }
