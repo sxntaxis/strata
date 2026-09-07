@@ -5,9 +5,14 @@ state: active
 created: 2026-08-01
 updated: 2026-09-07
 authority: working
-summary: RAIN-004 remains the best-so-far morphology reference family; RAIN-005A2 now characterizes its stochastic morphology and nozzle behavior across arbitrary viewport geometry rather than optimizing against one owner window/run.
-next: Natively run the RAIN-005A2 low-discrepancy viewport/seed morphology and analytical nozzle ensembles, then design RAIN-005B from normalized family-level evidence with equal-or-greater heterogeneity than RAIN-004 and no nozzle regression.
+summary: RAIN-004 remains the best-so-far morphology reference family; RAIN-005A3 now extends its machine-only morphology/nozzle characterization into large, portrait, ultrawide, tiled and extreme terminal geometries with paired seeds so RAIN-005B is not optimized for one owner window or stochastic run.
+next: Natively run the intentionally long RAIN-005A3 extended geometry/paired-seed morphology ensemble and dense analytical nozzle sweep, then design RAIN-005B from normalized family-level evidence with equal-or-greater heterogeneity than RAIN-004 and no nozzle regression.
 ---
+
+
+## RAIN-005A3 extended geometry ensemble — 2026-09-07
+
+RAIN-005A2 passed machine validation and showed useful scale stability, but the owner correctly noticed that its 16 morphology cases were concentrated in small/medium terminal sizes. RAIN-005A3 remains runtime-exact to RAIN-004 and expands machine evidence instead of asking for more manual review: 96 logarithmically sampled area/aspect geometries x two independent seeds (192 physical morphology runs), explicit geometry-vs-seed dependence measurements, and a 4096-case analytical nozzle sweep over much larger arbitrary dot geometry. One hour or more of native test time is acceptable; case count/range must not be reduced for convenience. See `notebook/work/RAIN-005A3-EXTENDED-GEOMETRY-ENSEMBLE.md`.
 
 
 ## RAIN-005A2 morphology ensemble — 2026-09-07
