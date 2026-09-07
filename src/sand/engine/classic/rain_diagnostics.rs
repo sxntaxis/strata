@@ -1260,12 +1260,8 @@ mod tests {
                 let seed = 0xA11C_005A_3000_0000u64
                     ^ (geometry as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
                     ^ ((seed_index as u64) + 1).wrapping_mul(0xD1B5_4A32_D192_ED03);
-                let sample = morphology_sample_for_geometry(
-                    width_cells,
-                    height_cells,
-                    seed,
-                    &categories,
-                );
+                let sample =
+                    morphology_sample_for_geometry(width_cells, height_cells, seed, &categories);
                 all_cv.push(sample.cv);
                 all_corr.push(sample.correlation);
                 all_tv.push(sample.total_variation);
@@ -1335,13 +1331,34 @@ mod tests {
         // Fail if later edits accidentally collapse this back into a small or
         // conventional-desktop-only ensemble. These are test-domain coverage
         // guards, never runtime morphology constants.
-        assert!(min_width <= 24.0, "extended ensemble lost narrow-pane coverage");
-        assert!(max_width >= 360.0, "extended ensemble lost large-width coverage");
-        assert!(min_height <= 14.0, "extended ensemble lost shallow-pane coverage");
-        assert!(max_height >= 120.0, "extended ensemble lost tall-terminal coverage");
-        assert!(min_aspect <= 0.30, "extended ensemble lost portrait coverage");
-        assert!(max_aspect >= 10.0, "extended ensemble lost ultrawide coverage");
-        assert!(max_area >= 25_000.0, "extended ensemble lost large-area coverage");
+        assert!(
+            min_width <= 24.0,
+            "extended ensemble lost narrow-pane coverage"
+        );
+        assert!(
+            max_width >= 360.0,
+            "extended ensemble lost large-width coverage"
+        );
+        assert!(
+            min_height <= 14.0,
+            "extended ensemble lost shallow-pane coverage"
+        );
+        assert!(
+            max_height >= 120.0,
+            "extended ensemble lost tall-terminal coverage"
+        );
+        assert!(
+            min_aspect <= 0.30,
+            "extended ensemble lost portrait coverage"
+        );
+        assert!(
+            max_aspect >= 10.0,
+            "extended ensemble lost ultrawide coverage"
+        );
+        assert!(
+            max_area >= 25_000.0,
+            "extended ensemble lost large-area coverage"
+        );
 
         println!(
             "RAIN_005A3_MORPH_ENSEMBLE geometries={GEOMETRIES} seeds_per_geometry={SEEDS_PER_GEOMETRY} runs={} width_min={} width_max={} height_min={} height_max={} area_min={} area_max={} aspect_min={:.6} aspect_max={:.6}",
@@ -1463,10 +1480,9 @@ mod tests {
             let width_dots = logarithmic_sample(MIN_WIDTH_DOTS, MAX_WIDTH_DOTS, halton(case, 2))
                 .round()
                 .max(2.0) as usize;
-            let height_dots =
-                logarithmic_sample(MIN_HEIGHT_DOTS, MAX_HEIGHT_DOTS, halton(case, 3))
-                    .round()
-                    .max(2.0) as usize;
+            let height_dots = logarithmic_sample(MIN_HEIGHT_DOTS, MAX_HEIGHT_DOTS, halton(case, 3))
+                .round()
+                .max(2.0) as usize;
             let focus_norm = halton(case, 5);
             let sky_fraction = 0.02 + 0.96 * halton(case, 7);
             let focus = ((width_dots - 1) as f64 * focus_norm).round() as usize;
@@ -1510,5 +1526,4 @@ mod tests {
             correlation_or_zero(&log_widths, &mound_el_values),
         );
     }
-
 }
