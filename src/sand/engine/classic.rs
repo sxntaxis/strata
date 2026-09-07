@@ -26,14 +26,15 @@ const CLASSIC_REPOSE_HIGH: u8 = 3;
 const CLASSIC_REPOSE_ANCHOR: u8 = 4;
 const GOLDEN_RATIO: f64 = 1.618_033_988_749_895;
 const RAIN_FOCUS_BIAS_ONE_IN: usize = 4;
-// RAIN-002 keeps each broad depositional locus long enough to build visible
-// relief, then relocates through a short transition. At one ingress per
-// simulated second this is roughly one hour of dwell followed by at most
-// thirty minutes of cross-corridor travel.
-const RAIN_FOCUS_DWELL_INGRESSES: usize = 3_600;
-const RAIN_FOCUS_TRANSITION_EDGE_TO_EDGE_INGRESSES: usize = 1_800;
-const RAIN_FOCUS_LOCAL_WANDER_INGRESSES: usize = 300;
-const RAIN_FOCUS_COMPENSATIONAL_CANDIDATES: usize = 3;
+// RAIN-003 keeps the human-approved broad 75/25 rain envelope but replaces
+// deterministic cross-corridor waypoints and RAIN-002 dwell/avulsion with an
+// aperiodic correlated meander. A hypothetical uninterrupted traverse takes
+// roughly four simulated hours: fast enough to vary successive strata while
+// remaining a low-frequency morphology signal rather than a visible nozzle.
+const RAIN_FOCUS_MEANDER_EDGE_TO_EDGE_INGRESSES: usize = 14_400;
+const RAIN_FOCUS_HEADING_INGRESSES: usize = 900;
+const RAIN_FOCUS_REPHASE_HEADING_INGRESSES: usize = 180;
+const RAIN_FOCUS_REPHASE_INGRESSES: usize = 900;
 const CLASSIC_MOMENTUM_MIN_DROP_DEPTH: usize = 2;
 const CLASSIC_MOMENTUM_MAX_DROP_DEPTH: usize = 3;
 
@@ -236,10 +237,13 @@ impl ClassicTextureProfile {
 ///
 /// `Uniform` uses full-width random rain. `WanderingFocus` changes only ingress
 /// sampling: 75% remains uniform over the full visible width and 25% uses a broad
-/// golden-corridor focus. RAIN-002 replaces the long continuous corridor sweep with
-/// depositional dwell, tiny local wander, and a three-candidate compensational
-/// avulsion toward lower broad relief. New grains are sampled directly from free
-/// visible-top sites rather than sampling an occupied target and relocating it.
+/// golden-corridor focus. RAIN-003 drives that focus with a continuous correlated
+/// meander: directional persistence is perturbed stochastically, broad terrain
+/// relief provides only weak steering, and corridor edges provide only soft inward
+/// steering. A category transition transiently decorrelates the heading without
+/// teleporting the focus, so successive strata can develop different envelopes.
+/// New grains are sampled directly from free visible-top sites rather than sampling
+/// an occupied target and relocating it.
 /// Nothing from this sandbox is persisted or becomes production authority.
 struct ClassicRuntimeIndex {
     occupancy: RowOccupancyIndex,
@@ -261,10 +265,11 @@ pub(crate) struct ClassicSandboxEngine {
     color_background_policy: BrailleColorBackground,
     last_rainbow_fill: Option<ClassicRainbowFillDescriptor>,
     rain_focus_x: Option<usize>,
-    rain_focus_target_x: Option<usize>,
+    rain_focus_direction: i8,
     rain_focus_move_counter: usize,
-    rain_focus_dwell_remaining: usize,
-    rain_focus_transitioning: bool,
+    rain_focus_heading_counter: usize,
+    rain_focus_rephase_remaining: usize,
+    rain_last_category_id: Option<CategoryId>,
     rain_left_padding_targets: usize,
     rain_corridor_targets: usize,
     rain_right_padding_targets: usize,
@@ -312,10 +317,11 @@ impl ClassicSandboxEngine {
             color_background_policy: BrailleColorBackground::Neutral,
             last_rainbow_fill: None,
             rain_focus_x: None,
-            rain_focus_target_x: None,
+            rain_focus_direction: 0,
             rain_focus_move_counter: 0,
-            rain_focus_dwell_remaining: 0,
-            rain_focus_transitioning: false,
+            rain_focus_heading_counter: 0,
+            rain_focus_rephase_remaining: 0,
+            rain_last_category_id: None,
             rain_left_padding_targets: 0,
             rain_corridor_targets: 0,
             rain_right_padding_targets: 0,
@@ -384,9 +390,6 @@ impl ClassicSandboxEngine {
             self.rain_focus_x = self
                 .rain_focus_x
                 .map(|x| x.saturating_add(horizontal_offset));
-            self.rain_focus_target_x = self
-                .rain_focus_target_x
-                .map(|x| x.saturating_add(horizontal_offset));
         }
         self.flush_pending_drive();
     }
@@ -397,10 +400,11 @@ impl ClassicSandboxEngine {
         self.last_rainbow_fill = None;
         self.pending_drive.clear();
         self.rain_focus_x = None;
-        self.rain_focus_target_x = None;
+        self.rain_focus_direction = 0;
         self.rain_focus_move_counter = 0;
-        self.rain_focus_dwell_remaining = 0;
-        self.rain_focus_transitioning = false;
+        self.rain_focus_heading_counter = 0;
+        self.rain_focus_rephase_remaining = 0;
+        self.rain_last_category_id = None;
         self.rain_left_padding_targets = 0;
         self.rain_corridor_targets = 0;
         self.rain_right_padding_targets = 0;
@@ -484,7 +488,7 @@ impl ClassicSandboxEngine {
     pub(crate) fn rain_profile_name(&self) -> &'static str {
         match self.mode {
             ClassicRainMode::Uniform => "uniform",
-            ClassicRainMode::WanderingFocus => "75/25-avulsion",
+            ClassicRainMode::WanderingFocus => "75/25-correlated",
         }
     }
 
@@ -607,8 +611,15 @@ impl ClassicSandboxEngine {
         let mut runtime = self.runtime_index.take();
 
         while !free_columns.is_empty() && !self.pending_drive.is_empty() {
-            // RAIN-002 samples from currently valid ingress sites. An occupied
+            // RAIN-002's free-site ingress remains authoritative: an occupied
             // top-row target is never sampled and then relocated sideways.
+            // RAIN-003 observes the actual FIFO ingress category before choosing
+            // its position so a real stratum boundary can rephase focus motion.
+            let category_id = *self
+                .pending_drive
+                .front()
+                .expect("pending drive exists");
+            self.note_ingress_category(category_id);
             let free_index = self.choose_free_rain_index(bounds, &free_columns);
             let x = free_columns.swap_remove(free_index);
             let category_id = self
@@ -675,11 +686,31 @@ impl ClassicSandboxEngine {
         if width <= 2 {
             return (bounds.x_start, bounds.x_end);
         }
-        let edge_fraction = ((1.0 - 1.0 / GOLDEN_RATIO) / 2.0) / GOLDEN_RATIO;
+        // One more recursive golden subdivision than RAIN-001/002: roughly
+        // 7.3% focus-only padding on each side, leaving ~85.4% for the meander.
+        // Physical terrain and ordinary rain still use the complete visible width.
+        let edge_fraction = (((1.0 - 1.0 / GOLDEN_RATIO) / 2.0) / GOLDEN_RATIO) / GOLDEN_RATIO;
         let padding = ((width as f64) * edge_fraction)
             .round()
             .min(((width - 1) / 2) as f64) as usize;
         (bounds.x_start + padding, bounds.x_end - padding)
+    }
+
+    fn note_ingress_category(&mut self, category_id: CategoryId) {
+        if self.mode != ClassicRainMode::WanderingFocus {
+            return;
+        }
+        if self
+            .rain_last_category_id
+            .is_some_and(|previous| previous != category_id)
+        {
+            // A category boundary is a depositional rephase, not a positional
+            // reset. Preserve the exact focus and its current heading, but make
+            // the next heading decision immediate and temporarily less inertial.
+            self.rain_focus_rephase_remaining = RAIN_FOCUS_REPHASE_INGRESSES;
+            self.rain_focus_heading_counter = RAIN_FOCUS_REPHASE_HEADING_INGRESSES;
+        }
+        self.rain_last_category_id = Some(category_id);
     }
 
     fn advance_rain_focus(&mut self, bounds: ViewportBounds) -> usize {
@@ -693,161 +724,144 @@ impl ClassicSandboxEngine {
         );
 
         if self.rain_focus_x.is_none() {
-            // Start by dwelling where the stochastic focus was born. A lobe is
-            // allowed to establish before the first compensational avulsion.
-            self.rain_focus_target_x = Some(focus);
+            self.rain_focus_direction = self.random_focus_direction();
             self.rain_focus_move_counter = 0;
-            self.rain_focus_dwell_remaining = RAIN_FOCUS_DWELL_INGRESSES;
-            self.rain_focus_transitioning = false;
+            self.rain_focus_heading_counter = 0;
             self.rain_focus_x = Some(focus);
             return focus;
         }
 
-        let mut target = self
-            .rain_focus_target_x
-            .filter(|target| (start..end).contains(target))
-            .unwrap_or(focus);
+        let in_rephase = self.rain_focus_rephase_remaining > 0;
+        if in_rephase {
+            self.rain_focus_rephase_remaining -= 1;
+        }
 
-        if !self.rain_focus_transitioning {
-            if self.rain_focus_dwell_remaining > 0 {
-                self.rain_focus_dwell_remaining -= 1;
-                self.rain_focus_move_counter = self.rain_focus_move_counter.saturating_add(1);
-                if self.rain_focus_move_counter >= RAIN_FOCUS_LOCAL_WANDER_INGRESSES {
-                    self.rain_focus_move_counter = 0;
-                    let local_radius = (focus_width / 24).max(1);
-                    let local_start = target.saturating_sub(local_radius).max(start);
-                    let local_end = target
-                        .saturating_add(local_radius)
-                        .saturating_add(1)
-                        .min(end);
-                    let direction = self.rain_random_index(3);
-                    let candidate = match direction {
-                        0 => focus.saturating_sub(1),
-                        1 => focus,
-                        _ => focus.saturating_add(1),
-                    };
-                    focus = candidate.clamp(local_start, local_end.saturating_sub(1));
-                }
-                if self.rain_focus_dwell_remaining > 0 {
-                    self.rain_focus_x = Some(focus);
-                    return focus;
-                }
-            }
-
-            if focus_width > 1 {
-                target = self.choose_focus_waypoint(focus, start, end);
-                self.rain_focus_target_x = Some(target);
-                self.rain_focus_move_counter = 0;
-                self.rain_focus_transitioning = target != focus;
-            }
-            if !self.rain_focus_transitioning {
-                self.rain_focus_dwell_remaining = RAIN_FOCUS_DWELL_INGRESSES;
-                self.rain_focus_x = Some(focus);
-                return focus;
-            }
+        let heading_interval = if in_rephase {
+            RAIN_FOCUS_REPHASE_HEADING_INGRESSES
+        } else {
+            RAIN_FOCUS_HEADING_INGRESSES
+        };
+        self.rain_focus_heading_counter = self.rain_focus_heading_counter.saturating_add(1);
+        if self.rain_focus_direction == 0
+            || self.rain_focus_heading_counter >= heading_interval
+        {
+            self.rain_focus_heading_counter = 0;
+            self.rain_focus_direction =
+                self.choose_meander_direction(focus, start, end, bounds, in_rephase);
         }
 
         let traversable_steps = focus_width.saturating_sub(1).max(1);
-        let ingresses_per_step = (RAIN_FOCUS_TRANSITION_EDGE_TO_EDGE_INGRESSES
-            / traversable_steps)
-            .max(1);
+        let ingresses_per_step =
+            (RAIN_FOCUS_MEANDER_EDGE_TO_EDGE_INGRESSES / traversable_steps).max(1);
         self.rain_focus_move_counter = self.rain_focus_move_counter.saturating_add(1);
         if self.rain_focus_move_counter >= ingresses_per_step {
             self.rain_focus_move_counter = 0;
-            focus = match focus.cmp(&target) {
-                std::cmp::Ordering::Less => focus + 1,
-                std::cmp::Ordering::Greater => focus - 1,
-                std::cmp::Ordering::Equal => focus,
-            }
-            .clamp(start, end - 1);
-            if focus == target {
-                self.rain_focus_transitioning = false;
-                self.rain_focus_dwell_remaining = RAIN_FOCUS_DWELL_INGRESSES;
+            match self.rain_focus_direction.cmp(&0) {
+                std::cmp::Ordering::Less if focus > start => focus -= 1,
+                std::cmp::Ordering::Greater if focus + 1 < end => focus += 1,
+                std::cmp::Ordering::Less => self.rain_focus_direction = 1,
+                std::cmp::Ordering::Greater => self.rain_focus_direction = -1,
+                std::cmp::Ordering::Equal => {}
             }
         }
 
-        self.rain_focus_target_x = Some(target);
         self.rain_focus_x = Some(focus);
         focus
     }
 
-    fn choose_focus_waypoint(&mut self, focus: usize, start: usize, end: usize) -> usize {
-        let focus_width = end.saturating_sub(start);
-        if focus_width <= 1 {
-            return start;
-        }
-
-        // An avulsion samples only a few broad alternative loci. Selecting the
-        // lowest of those three creates stochastic compensation without scanning
-        // the full surface for a perfect global minimum.
-        let min_distance = (focus_width / 6).max(1);
-        let candidates = (0..RAIN_FOCUS_COMPENSATIONAL_CANDIDATES)
-            .map(|_| self.sample_relocated_focus_candidate(focus, start, end, min_distance))
-            .collect::<Vec<_>>();
-        let Some(bounds) = self.surface.viewport_bounds() else {
-            return candidates[0];
-        };
-        self.choose_compensational_waypoint(&candidates, bounds, focus_width)
-    }
-
-    fn sample_relocated_focus_candidate(
+    fn choose_meander_direction(
         &mut self,
         focus: usize,
         start: usize,
         end: usize,
-        min_distance: usize,
-    ) -> usize {
-        let left_end = focus
-            .saturating_sub(min_distance)
-            .saturating_add(1)
-            .clamp(start, end);
-        let right_start = focus.saturating_add(min_distance).clamp(start, end);
-        let left_count = left_end.saturating_sub(start);
-        let right_count = end.saturating_sub(right_start);
-        let eligible = left_count.saturating_add(right_count);
-        if eligible == 0 {
-            let width = end.saturating_sub(start).max(1);
-            return start + self.rain_random_index(width);
+        bounds: ViewportBounds,
+        in_rephase: bool,
+    ) -> i8 {
+        let focus_width = end.saturating_sub(start);
+        if focus_width <= 1 {
+            return 0;
         }
-        let pick = self.rain_random_index(eligible);
-        if pick < left_count {
-            start + pick
+
+        let current = if self.rain_focus_direction == 0 {
+            self.random_focus_direction()
         } else {
-            right_start + (pick - left_count)
+            self.rain_focus_direction
+        };
+        let terrain = self.terrain_steering_direction(focus, start, end, bounds);
+        let edge = Self::edge_steering_direction(focus, start, end);
+        let roll = self.rain_random_index(8);
+
+        let proposed = if in_rephase {
+            match roll {
+                0 => current,
+                1..=3 if terrain != 0 => terrain,
+                1..=3 => self.random_focus_direction(),
+                4..=6 => self.random_focus_direction(),
+                _ if edge != 0 => edge,
+                _ => self.random_focus_direction(),
+            }
+        } else {
+            match roll {
+                0..=4 => current,
+                5 if terrain != 0 => terrain,
+                5 => current,
+                6 => self.random_focus_direction(),
+                _ if edge != 0 => edge,
+                _ => self.random_focus_direction(),
+            }
+        };
+
+        if proposed == 0 { current } else { proposed }
+    }
+
+    fn random_focus_direction(&mut self) -> i8 {
+        if self.rain_random_index(2) == 0 {
+            -1
+        } else {
+            1
         }
     }
 
-    fn choose_compensational_waypoint(
-        &mut self,
-        candidates: &[usize],
+    fn terrain_steering_direction(
+        &self,
+        focus: usize,
+        start: usize,
+        end: usize,
         bounds: ViewportBounds,
-        focus_width: usize,
-    ) -> usize {
-        debug_assert!(!candidates.is_empty());
-        let mut best = vec![candidates[0]];
-        let mut best_score = self.smoothed_grounded_height(candidates[0], bounds, focus_width);
-        for candidate in candidates.iter().copied().skip(1) {
-            let score = self.smoothed_grounded_height(candidate, bounds, focus_width);
-            let candidate_cross = (score.0 as u128) * (best_score.1 as u128);
-            let best_cross = (best_score.0 as u128) * (score.1 as u128);
-            match candidate_cross.cmp(&best_cross) {
-                std::cmp::Ordering::Less => {
-                    best.clear();
-                    best.push(candidate);
-                    best_score = score;
-                }
-                std::cmp::Ordering::Equal => {
-                    if !best.contains(&candidate) {
-                        best.push(candidate);
-                    }
-                }
-                std::cmp::Ordering::Greater => {}
-            }
+    ) -> i8 {
+        let focus_width = end.saturating_sub(start);
+        if focus_width <= 2 {
+            return 0;
         }
-        if best.len() == 1 {
-            best[0]
+        let offset = (focus_width / 6).max(1);
+        let left = focus.saturating_sub(offset).max(start);
+        let right = focus.saturating_add(offset).min(end - 1);
+        if left == right {
+            return 0;
+        }
+        let left_score = self.smoothed_grounded_height(left, bounds, focus_width);
+        let right_score = self.smoothed_grounded_height(right, bounds, focus_width);
+        let left_cross = (left_score.0 as u128) * (right_score.1 as u128);
+        let right_cross = (right_score.0 as u128) * (left_score.1 as u128);
+        match left_cross.cmp(&right_cross) {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Greater => 1,
+            std::cmp::Ordering::Equal => 0,
+        }
+    }
+
+    fn edge_steering_direction(focus: usize, start: usize, end: usize) -> i8 {
+        let focus_width = end.saturating_sub(start);
+        if focus_width <= 2 {
+            return 0;
+        }
+        let guard = (focus_width / 12).max(1);
+        if focus < start.saturating_add(guard) {
+            1
+        } else if focus >= end.saturating_sub(guard) {
+            -1
         } else {
-            best[self.rain_random_index(best.len())]
+            0
         }
     }
 
@@ -858,8 +872,9 @@ impl ClassicSandboxEngine {
         focus_width: usize,
     ) -> (usize, usize) {
         // One broad sample spans roughly one sixth of the focus corridor. This
-        // intentionally ignores grain-scale ruggedness and responds only to the
-        // larger depositional relief that should influence the next stratum.
+        // intentionally ignores grain-scale ruggedness. RAIN-003 uses the result
+        // only as weak directional steering; it never selects a destination or
+        // globally searches for the lowest accommodation.
         let radius = (focus_width / 12).max(1);
         let sample_start = candidate.saturating_sub(radius).max(bounds.x_start);
         let sample_end = candidate
@@ -2013,120 +2028,155 @@ mod tests {
     }
 
     #[test]
-    fn hybrid_focus_is_a_quarter_ingress_bias_inside_the_focus_corridor() {
+    fn hybrid_focus_is_a_quarter_ingress_bias_inside_the_smaller_focus_corridor() {
         assert_eq!(RAIN_FOCUS_BIAS_ONE_IN, 4);
-        let mut engine = ClassicSandboxEngine::new(40, 20, 11, ClassicRainMode::WanderingFocus);
+        let mut engine = ClassicSandboxEngine::new(100, 20, 17, ClassicRainMode::WanderingFocus);
         let bounds = engine.surface.viewport_bounds().expect("visible basin");
+        let width = bounds.x_end - bounds.x_start;
         let (start, end) = ClassicSandboxEngine::golden_focus_bounds(bounds);
-        for _ in 0..10_000 {
-            let focus = engine.advance_rain_focus(bounds);
-            assert!(focus >= start && focus < end);
-        }
-    }
-
-    #[test]
-    fn hybrid_focus_dwells_then_avulses_across_multiple_corridor_loci() {
-        assert_eq!(RAIN_FOCUS_DWELL_INGRESSES, 3_600);
-        assert_eq!(RAIN_FOCUS_TRANSITION_EDGE_TO_EDGE_INGRESSES, 1_800);
-        assert_eq!(RAIN_FOCUS_COMPENSATIONAL_CANDIDATES, 3);
-        let mut engine = ClassicSandboxEngine::new(80, 24, 13, ClassicRainMode::WanderingFocus);
-        let bounds = engine.surface.viewport_bounds().expect("visible basin");
-        let (start, end) = ClassicSandboxEngine::golden_focus_bounds(bounds);
-        let mut targets = Vec::new();
-        let mut saw_dwell = false;
-        let mut saw_transition = false;
-
+        let left_padding = start - bounds.x_start;
+        let right_padding = bounds.x_end - end;
+        assert_eq!(left_padding, right_padding);
+        let observed = left_padding as f64 / width as f64;
+        assert!((observed - 0.073).abs() < 0.01, "observed={observed}");
         for _ in 0..20_000 {
             let focus = engine.advance_rain_focus(bounds);
             assert!((start..end).contains(&focus));
-            let target = engine.rain_focus_target_x.expect("focus target");
-            assert!((start..end).contains(&target));
-            if targets.last().copied() != Some(target) {
-                targets.push(target);
-            }
-            saw_dwell |= !engine.rain_focus_transitioning
-                && engine.rain_focus_dwell_remaining > 0;
-            saw_transition |= engine.rain_focus_transitioning;
         }
-
-        targets.sort_unstable();
-        targets.dedup();
-        assert!(saw_dwell && saw_transition);
-        assert!(targets.len() >= 3, "targets={targets:?}");
     }
 
     #[test]
-    fn compensational_avulsion_prefers_lowest_of_three_broad_grounded_loci_without_rng() {
-        let mut engine = ClassicSandboxEngine::new(60, 20, 17, ClassicRainMode::WanderingFocus);
+    fn correlated_focus_meanders_aperiodically_in_both_directions() {
+        let mut engine = ClassicSandboxEngine::new(100, 20, 23, ClassicRainMode::WanderingFocus);
         let bounds = engine.surface.viewport_bounds().expect("visible basin");
         let (start, end) = ClassicSandboxEngine::golden_focus_bounds(bounds);
-        let focus_width = end - start;
-        let high = start + focus_width / 4;
-        let medium = start + focus_width / 2;
-        let low = start + (focus_width * 3) / 4;
-        let radius = (focus_width / 12).max(1);
-        let floor = bounds.y_end - 1;
+        let mut previous = engine.advance_rain_focus(bounds);
+        let mut saw_left = false;
+        let mut saw_right = false;
+        let mut reversals = 0usize;
+        let mut previous_direction = 0i8;
+        let mut min_focus = previous;
+        let mut max_focus = previous;
+        for _ in 0..60_000 {
+            let focus = engine.advance_rain_focus(bounds);
+            min_focus = min_focus.min(focus);
+            max_focus = max_focus.max(focus);
+            let direction = focus.cmp(&previous);
+            let signed = match direction {
+                std::cmp::Ordering::Less => -1,
+                std::cmp::Ordering::Greater => 1,
+                std::cmp::Ordering::Equal => 0,
+            };
+            saw_left |= signed < 0;
+            saw_right |= signed > 0;
+            if signed != 0 && previous_direction != 0 && signed != previous_direction {
+                reversals += 1;
+            }
+            if signed != 0 {
+                previous_direction = signed;
+            }
+            previous = focus;
+        }
+        assert!(saw_left && saw_right);
+        assert!(reversals >= 2, "reversals={reversals}");
+        assert!(max_focus - min_focus > (end - start) / 4);
+    }
 
-        for (candidate, height) in [(high, 8usize), (medium, 5), (low, 2)] {
-            for x in candidate.saturating_sub(radius)..=(candidate + radius).min(bounds.x_end - 1) {
-                for depth in 0..height {
+    #[test]
+    fn broad_terrain_is_weak_steering_not_a_forced_destination() {
+        let mut saw_leftward_persistence = false;
+        let mut saw_rightward_terrain = false;
+        for seed in 1..=96 {
+            let mut engine =
+                ClassicSandboxEngine::new(80, 20, seed, ClassicRainMode::WanderingFocus);
+            let bounds = engine.surface.viewport_bounds().expect("visible basin");
+            let (start, end) = ClassicSandboxEngine::golden_focus_bounds(bounds);
+            let focus = start + (end - start) / 2;
+            let focus_width = end - start;
+            let floor = bounds.y_end - 1;
+            let offset = (focus_width / 6).max(1);
+            let left_center = focus.saturating_sub(offset).max(start);
+            let radius = (focus_width / 12).max(1);
+            for x in left_center.saturating_sub(radius)..=(left_center + radius).min(bounds.x_end - 1) {
+                for depth in 0..8usize {
                     engine.surface.grid[floor - depth][x] = Some(CategoryId(1));
                 }
             }
+            engine.rain_focus_direction = -1;
+            assert_eq!(
+                engine.terrain_steering_direction(focus, start, end, bounds),
+                1
+            );
+            let chosen = engine.choose_meander_direction(focus, start, end, bounds, false);
+            saw_leftward_persistence |= chosen < 0;
+            saw_rightward_terrain |= chosen > 0;
         }
-
-        let rng_before = engine.rain_rng_state;
-        assert_eq!(
-            engine.choose_compensational_waypoint(&[high, medium, low], bounds, focus_width),
-            low
-        );
-        assert_eq!(engine.rain_rng_state, rng_before);
+        assert!(saw_leftward_persistence && saw_rightward_terrain);
     }
 
     #[test]
-    fn compensational_avulsion_equal_broad_relief_remains_stochastic() {
-        let mut saw = [false; 3];
-        for seed in 1..=64 {
-            let mut engine =
-                ClassicSandboxEngine::new(60, 20, seed, ClassicRainMode::WanderingFocus);
-            let bounds = engine.surface.viewport_bounds().expect("visible basin");
-            let (start, end) = ClassicSandboxEngine::golden_focus_bounds(bounds);
-            let focus_width = end - start;
-            let candidates = [
-                start + focus_width / 4,
-                start + focus_width / 2,
-                start + (focus_width * 3) / 4,
-            ];
-            let rng_before = engine.rain_rng_state;
-            let chosen = engine.choose_compensational_waypoint(&candidates, bounds, focus_width);
-            assert_ne!(engine.rain_rng_state, rng_before);
-            let index = candidates
-                .iter()
-                .position(|candidate| *candidate == chosen)
-                .expect("chosen candidate");
-            saw[index] = true;
-        }
-        assert!(saw.iter().filter(|value| **value).count() >= 2, "saw={saw:?}");
-    }
-
-    #[test]
-    fn avulsion_candidates_are_broadly_relocated_from_the_current_locus() {
-        let mut engine = ClassicSandboxEngine::new(80, 20, 23, ClassicRainMode::WanderingFocus);
+    fn category_change_rephases_heading_without_teleporting_focus() {
+        let mut engine = ClassicSandboxEngine::new(80, 20, 31, ClassicRainMode::WanderingFocus);
         let bounds = engine.surface.viewport_bounds().expect("visible basin");
-        let (start, end) = ClassicSandboxEngine::golden_focus_bounds(bounds);
-        let focus_width = end - start;
-        let focus = start + focus_width / 2;
-        let min_distance = (focus_width / 6).max(1);
-        for _ in 0..1_000 {
-            let candidate =
-                engine.sample_relocated_focus_candidate(focus, start, end, min_distance);
-            assert!((start..end).contains(&candidate));
-            assert!(candidate.abs_diff(focus) >= min_distance);
+        for _ in 0..2_000 {
+            engine.advance_rain_focus(bounds);
         }
+        engine.note_ingress_category(CategoryId(1));
+        let focus_before = engine.rain_focus_x;
+        let direction_before = engine.rain_focus_direction;
+        engine.note_ingress_category(CategoryId(2));
+        assert_eq!(engine.rain_focus_x, focus_before);
+        assert_eq!(engine.rain_focus_direction, direction_before);
+        assert_eq!(engine.rain_focus_rephase_remaining, RAIN_FOCUS_REPHASE_INGRESSES);
+        assert_eq!(
+            engine.rain_focus_heading_counter,
+            RAIN_FOCUS_REPHASE_HEADING_INGRESSES
+        );
+
+        engine.advance_rain_focus(bounds);
+        assert_eq!(engine.rain_focus_rephase_remaining, RAIN_FOCUS_REPHASE_INGRESSES - 1);
+        assert!(engine.rain_focus_x.is_some());
     }
 
     #[test]
-    fn avulsion_rain_stays_broad_and_reaches_both_focus_paddings() {
+    fn repeated_same_category_does_not_rephase_focus() {
+        let mut engine = ClassicSandboxEngine::new(40, 15, 37, ClassicRainMode::WanderingFocus);
+        engine.note_ingress_category(CategoryId(3));
+        assert_eq!(engine.rain_focus_rephase_remaining, 0);
+        engine.note_ingress_category(CategoryId(3));
+        assert_eq!(engine.rain_focus_rephase_remaining, 0);
+    }
+
+    #[test]
+    fn actual_fifo_ingress_category_change_arms_rephase_only_when_it_can_enter() {
+        let mut engine = ClassicSandboxEngine::new(8, 6, 41, ClassicRainMode::WanderingFocus);
+        let bounds = engine.surface.viewport_bounds().expect("visible basin");
+        let ingress_y = bounds.y_start;
+
+        engine.spawn(CategoryId(1));
+        assert_eq!(engine.rain_last_category_id, Some(CategoryId(1)));
+        assert_eq!(engine.rain_focus_rephase_remaining, 0);
+
+        for x in bounds.x_start..bounds.x_end {
+            engine.surface.grid[ingress_y][x] = Some(CategoryId(1));
+        }
+        engine.runtime_index = None;
+        engine.spawn(CategoryId(2));
+        assert_eq!(engine.pending_count(), 1);
+        assert_eq!(engine.rain_last_category_id, Some(CategoryId(1)));
+        assert_eq!(engine.rain_focus_rephase_remaining, 0);
+
+        let gap = bounds.x_start + 2;
+        engine.surface.grid[ingress_y][gap] = None;
+        engine.runtime_index = None;
+        engine.flush_pending_drive();
+        assert_eq!(engine.pending_count(), 0);
+        assert_eq!(engine.rain_last_category_id, Some(CategoryId(2)));
+        assert!(engine.rain_focus_rephase_remaining > 0);
+    }
+
+    #[test]
+    fn correlated_rain_stays_broad_and_reaches_both_focus_paddings() {
         let mut engine = ClassicSandboxEngine::new(60, 20, 29, ClassicRainMode::WanderingFocus);
         let bounds = engine.surface.viewport_bounds().expect("visible basin");
         let width = bounds.x_end - bounds.x_start;
@@ -2146,7 +2196,7 @@ mod tests {
         let max_bin = *bins.iter().max().expect("bins");
         assert!(max_bin < samples / 5, "anti-nozzle bins={bins:?}");
         println!(
-            "RAIN_002_METRICS samples={samples} left={left} corridor={corridor} right={right} max_bin={max_bin} bins={bins:?}"
+            "RAIN_003_METRICS samples={samples} left={left} corridor={corridor} right={right} max_bin={max_bin} bins={bins:?}"
         );
     }
 
@@ -2213,12 +2263,19 @@ mod perf_001_tests {
     use std::time::{Duration, Instant};
 
     fn advance_exact(engine: &mut ClassicSandboxEngine, simulated: Duration) {
+        advance_exact_with_category(engine, simulated, CategoryId::new(1));
+    }
+
+    fn advance_exact_with_category(
+        engine: &mut ClassicSandboxEngine,
+        simulated: Duration,
+        category: CategoryId,
+    ) {
         let tick = Duration::from_millis(crate::constants::TIME_SETTINGS.tick_ms);
         let physics = Duration::from_millis(crate::constants::TIME_SETTINGS.physics_ms);
         let mut spawn_accumulator = Duration::ZERO;
         let mut physics_accumulator = Duration::ZERO;
         let mut remaining = simulated;
-        let category = CategoryId::new(1);
 
         while !remaining.is_zero() {
             let spawn_left = tick.saturating_sub(spawn_accumulator);
@@ -2258,13 +2315,17 @@ mod perf_001_tests {
         assert_eq!(left.local_repose, right.local_repose);
         assert_eq!(left.repose_memory_remaining, right.repose_memory_remaining);
         assert_eq!(left.rain_focus_x, right.rain_focus_x);
-        assert_eq!(left.rain_focus_target_x, right.rain_focus_target_x);
+        assert_eq!(left.rain_focus_direction, right.rain_focus_direction);
         assert_eq!(left.rain_focus_move_counter, right.rain_focus_move_counter);
         assert_eq!(
-            left.rain_focus_dwell_remaining,
-            right.rain_focus_dwell_remaining
+            left.rain_focus_heading_counter,
+            right.rain_focus_heading_counter
         );
-        assert_eq!(left.rain_focus_transitioning, right.rain_focus_transitioning);
+        assert_eq!(
+            left.rain_focus_rephase_remaining,
+            right.rain_focus_rephase_remaining
+        );
+        assert_eq!(left.rain_last_category_id, right.rain_last_category_id);
         assert_eq!(
             left.rain_left_padding_targets,
             right.rain_left_padding_targets
@@ -2296,7 +2357,7 @@ mod perf_001_tests {
     }
 
     #[test]
-    fn optimized_classic_is_exact_against_dense_reference_for_uniform_and_rain_002() {
+    fn optimized_classic_is_exact_against_dense_reference_for_uniform_and_rain_003() {
         for mode in [ClassicRainMode::Uniform, ClassicRainMode::WanderingFocus] {
             for seed in [0xA11C_E201, 0xA11C_E202, 0xA11C_E203] {
                 let mut reference = ClassicSandboxEngine::new(48, 18, seed, mode);
@@ -2316,6 +2377,25 @@ mod perf_001_tests {
                 assert_exact(&reference, &optimized);
             }
         }
+    }
+
+    #[test]
+    fn optimized_hybrid_category_rephase_is_exact_against_dense_reference() {
+        let mut reference = ClassicSandboxEngine::new(64, 20, 0xA11C_E2C1, ClassicRainMode::WanderingFocus);
+        let mut optimized = ClassicSandboxEngine::new(64, 20, 0xA11C_E2C1, ClassicRainMode::WanderingFocus);
+        optimized.force_reference_gravity = false;
+
+        for category in [CategoryId::new(1), CategoryId::new(2), CategoryId::new(3)] {
+            advance_exact_with_category(&mut reference, Duration::from_secs(90), category);
+            advance_exact_with_category(&mut optimized, Duration::from_secs(90), category);
+            assert_exact(&reference, &optimized);
+        }
+
+        optimized.force_reference_gravity = true;
+        optimized.runtime_index = None;
+        advance_exact_with_category(&mut reference, Duration::from_secs(60), CategoryId::new(4));
+        advance_exact_with_category(&mut optimized, Duration::from_secs(60), CategoryId::new(4));
+        assert_exact(&reference, &optimized);
     }
 
     #[test]
