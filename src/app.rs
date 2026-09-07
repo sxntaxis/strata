@@ -1064,8 +1064,7 @@ impl TestingCheatsState {
             }
         } else {
             let accelerated = wall_delta.saturating_mul(self.speed_multiplier);
-            self.queued_speed_simulated =
-                self.queued_speed_simulated.saturating_add(accelerated);
+            self.queued_speed_simulated = self.queued_speed_simulated.saturating_add(accelerated);
             self.flow_wall_accumulator = Duration::ZERO;
             self.flow_spawn_wall_accumulator = Duration::ZERO;
         }
@@ -1096,7 +1095,6 @@ impl TestingCheatsState {
         self.queued_speed_simulated = self.queued_speed_simulated.saturating_sub(speed);
     }
 }
-
 
 struct App {
     time_tracker: TimeTracker,
@@ -4271,8 +4269,12 @@ mod testing_cheats_clock_tests {
 
     #[test]
     fn fallspeed_change_discards_only_multiplier_debt_and_preserves_explicit_advance() {
-        let engine =
-            TestingSandEngine::Classic(ClassicSandboxEngine::new(20, 10, 41, ClassicRainMode::Uniform));
+        let engine = TestingSandEngine::Classic(ClassicSandboxEngine::new(
+            20,
+            10,
+            41,
+            ClassicRainMode::Uniform,
+        ));
         let mut testing = state(engine, 128);
         testing.queue_explicit_simulated(Duration::from_secs(45));
         testing.accumulate_wall_time(Duration::from_secs(1));
@@ -4289,8 +4291,12 @@ mod testing_cheats_clock_tests {
 
     #[test]
     fn scheduler_consumes_explicit_advance_before_multiplier_debt() {
-        let engine =
-            TestingSandEngine::Classic(ClassicSandboxEngine::new(20, 10, 43, ClassicRainMode::Uniform));
+        let engine = TestingSandEngine::Classic(ClassicSandboxEngine::new(
+            20,
+            10,
+            43,
+            ClassicRainMode::Uniform,
+        ));
         let mut testing = state(engine, 64);
         testing.queue_explicit_simulated(Duration::from_secs(20));
 

@@ -615,10 +615,7 @@ impl ClassicSandboxEngine {
             // top-row target is never sampled and then relocated sideways.
             // RAIN-003 observes the actual FIFO ingress category before choosing
             // its position so a real stratum boundary can rephase focus motion.
-            let category_id = *self
-                .pending_drive
-                .front()
-                .expect("pending drive exists");
+            let category_id = *self.pending_drive.front().expect("pending drive exists");
             self.note_ingress_category(category_id);
             let free_index = self.choose_free_rain_index(bounds, &free_columns);
             let x = free_columns.swap_remove(free_index);
@@ -638,11 +635,7 @@ impl ClassicSandboxEngine {
         self.sync_surface_metadata();
     }
 
-    fn choose_free_rain_index(
-        &mut self,
-        bounds: ViewportBounds,
-        free_columns: &[usize],
-    ) -> usize {
+    fn choose_free_rain_index(&mut self, bounds: ViewportBounds, free_columns: &[usize]) -> usize {
         debug_assert!(!free_columns.is_empty());
         if self.mode == ClassicRainMode::Uniform {
             return self.rain_random_index(free_columns.len());
@@ -650,14 +643,13 @@ impl ClassicSandboxEngine {
 
         let focus = self.advance_rain_focus(bounds);
         let uniform_index = self.rain_random_index(free_columns.len());
-        let chosen_index = if free_columns.len() == 1
-            || self.rain_random_index(RAIN_FOCUS_BIAS_ONE_IN) != 0
-        {
-            uniform_index
-        } else {
-            self.sample_focus_biased_free_index(bounds, focus, free_columns)
-                .unwrap_or(uniform_index)
-        };
+        let chosen_index =
+            if free_columns.len() == 1 || self.rain_random_index(RAIN_FOCUS_BIAS_ONE_IN) != 0 {
+                uniform_index
+            } else {
+                self.sample_focus_biased_free_index(bounds, focus, free_columns)
+                    .unwrap_or(uniform_index)
+            };
         self.record_rain_region(free_columns[chosen_index], bounds);
         chosen_index
     }
@@ -742,9 +734,7 @@ impl ClassicSandboxEngine {
             RAIN_FOCUS_HEADING_INGRESSES
         };
         self.rain_focus_heading_counter = self.rain_focus_heading_counter.saturating_add(1);
-        if self.rain_focus_direction == 0
-            || self.rain_focus_heading_counter >= heading_interval
-        {
+        if self.rain_focus_direction == 0 || self.rain_focus_heading_counter >= heading_interval {
             self.rain_focus_heading_counter = 0;
             self.rain_focus_direction =
                 self.choose_meander_direction(focus, start, end, bounds, in_rephase);
@@ -2097,7 +2087,9 @@ mod tests {
             let offset = (focus_width / 6).max(1);
             let left_center = focus.saturating_sub(offset).max(start);
             let radius = (focus_width / 12).max(1);
-            for x in left_center.saturating_sub(radius)..=(left_center + radius).min(bounds.x_end - 1) {
+            for x in
+                left_center.saturating_sub(radius)..=(left_center + radius).min(bounds.x_end - 1)
+            {
                 for depth in 0..8usize {
                     engine.surface.grid[floor - depth][x] = Some(CategoryId(1));
                 }
@@ -2127,14 +2119,20 @@ mod tests {
         engine.note_ingress_category(CategoryId(2));
         assert_eq!(engine.rain_focus_x, focus_before);
         assert_eq!(engine.rain_focus_direction, direction_before);
-        assert_eq!(engine.rain_focus_rephase_remaining, RAIN_FOCUS_REPHASE_INGRESSES);
+        assert_eq!(
+            engine.rain_focus_rephase_remaining,
+            RAIN_FOCUS_REPHASE_INGRESSES
+        );
         assert_eq!(
             engine.rain_focus_heading_counter,
             RAIN_FOCUS_REPHASE_HEADING_INGRESSES
         );
 
         engine.advance_rain_focus(bounds);
-        assert_eq!(engine.rain_focus_rephase_remaining, RAIN_FOCUS_REPHASE_INGRESSES - 1);
+        assert_eq!(
+            engine.rain_focus_rephase_remaining,
+            RAIN_FOCUS_REPHASE_INGRESSES - 1
+        );
         assert!(engine.rain_focus_x.is_some());
     }
 
@@ -2217,7 +2215,10 @@ mod tests {
             engine.sync_surface_metadata();
 
             engine.spawn(CategoryId(2));
-            assert_eq!(engine.surface.grid[ingress_y][first_gap], Some(CategoryId(2)));
+            assert_eq!(
+                engine.surface.grid[ingress_y][first_gap],
+                Some(CategoryId(2))
+            );
             assert_eq!(engine.pending_count(), 0);
 
             engine.spawn(CategoryId(3));
@@ -2227,7 +2228,10 @@ mod tests {
             engine.surface.grid[ingress_y][second_gap] = None;
             engine.runtime_index = None;
             engine.flush_pending_drive();
-            assert_eq!(engine.surface.grid[ingress_y][second_gap], Some(CategoryId(3)));
+            assert_eq!(
+                engine.surface.grid[ingress_y][second_gap],
+                Some(CategoryId(3))
+            );
             assert_eq!(engine.pending_count(), 0);
         }
     }
@@ -2381,8 +2385,10 @@ mod perf_001_tests {
 
     #[test]
     fn optimized_hybrid_category_rephase_is_exact_against_dense_reference() {
-        let mut reference = ClassicSandboxEngine::new(64, 20, 0xA11C_E2C1, ClassicRainMode::WanderingFocus);
-        let mut optimized = ClassicSandboxEngine::new(64, 20, 0xA11C_E2C1, ClassicRainMode::WanderingFocus);
+        let mut reference =
+            ClassicSandboxEngine::new(64, 20, 0xA11C_E2C1, ClassicRainMode::WanderingFocus);
+        let mut optimized =
+            ClassicSandboxEngine::new(64, 20, 0xA11C_E2C1, ClassicRainMode::WanderingFocus);
         optimized.force_reference_gravity = false;
 
         for category in [CategoryId::new(1), CategoryId::new(2), CategoryId::new(3)] {
