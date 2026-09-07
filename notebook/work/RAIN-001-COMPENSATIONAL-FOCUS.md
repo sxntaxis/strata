@@ -1,11 +1,11 @@
 ---
 id: RAIN-001
 kind: work
-state: candidate
+state: superseded
 created: 2026-09-06
-updated: 2026-09-06
+updated: 2026-09-07
 authority: working
-summary: Evaluate a broad 75/25 Classic rain field with persistent focus wander and weak terrain-compensational waypoint selection, preserving the accepted momentum-grounded-contact settlement law and explicitly rejecting nozzle-like ingress.
+summary: Superseded after machine-green and partial human acceptance: broad 75/25 rain passed the anti-nozzle gate and produced attractive relief, but the continuous cross-corridor focus walk read as one dominant lump and occupied-target nearest-free ingress looked artificial near a full top row.
 ---
 
 # RAIN-001 — Compensational focus rain
@@ -127,3 +127,7 @@ Judge:
 - Classic avalanche character remains unchanged.
 
 If the 75/25 candidate is clearly too strong or too weak, only the bias fraction may be reconsidered next. Do not reopen Classic settlement physics.
+
+## Supersession — RAIN-002
+
+RAIN-001 passed machine validation and its 75/25 broad-rain envelope passed the owner's short-term airborne anti-nozzle gate. Human high-speed review after PERF-001 preferred the Hybrid relief but found the long continuous focus walk too dominated by one large lump and found top-row nearest-free relocation visually artificial once ingress became crowded. RAIN-002 retains 75/25 and the accepted Classic settlement law while replacing only focus temporal structure and ingress-site selection.

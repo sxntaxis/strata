@@ -1,9 +1,9 @@
 ---
 id: PERF-001
 kind: work
-state: candidate
+state: complete
 created: 2026-09-06
-updated: 2026-09-06
+updated: 2026-09-07
 authority: working
 summary: Make the accepted Classic/Rain-001 sandbox materially faster without changing physics, then require the debug testing runtime to make an honest attempt at its requested 128x cadence instead of being capped by a fixed 4 ms frame budget.
 ---
@@ -103,3 +103,7 @@ testingcheats fallspeed 128x
 ```
 
 The owner should be able to observe long-form RAIN-001 relief materially faster while short-term rain and resulting morphology remain the same model. If 128x still falls behind in practice, status/performance evidence should drive the next exact optimization rather than rain retuning.
+
+## Native + human closure — 2026-09-07
+
+PERF-001 passed exact optimized/reference validation and full repository checks. The native Hybrid probe reached a median 1691.83x headless capacity (samples 1691.83x, 1542.23x, 1700.34x), and the owner confirmed that interactive `testingcheats fallspeed 128x` now feels appropriately fast while preserving the accepted rain/Classic appearance. The resulting performance machinery is retained as the baseline for RAIN-002 and later Advance work.

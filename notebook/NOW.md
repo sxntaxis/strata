@@ -3,17 +3,22 @@ id: NOW-001
 kind: status
 state: active
 created: 2026-08-01
-updated: 2026-09-06
+updated: 2026-09-07
 authority: working
-summary: PERF-001 is the active bounded optimization unit after RAIN-001 machine-green and positive initial human review: preserve Classic/Rain-001 exactly while making high-speed morphology testing materially faster.
-next: Natively validate PERF-001 exact sparse Classic execution and dev-profile 128x Hybrid rate, then resume the same RAIN-001 human morphology comparison without retuning rain.
+summary: RAIN-002 is active after PERF-001 native/human closure: keep the accepted 75/25 broad Hybrid envelope and frozen Classic settlement, but create more diverse compensational loci, sample only free ingress sites, and make fallspeed slowdown discard stale multiplier debt.
+next: Natively validate RAIN-002 dwell/avulsion focus, free-site ingress, split testing debt, PERF-001 exactness/capacity, then run the owner Hybrid 128x morphology/top-row/128x-to-1x human gate.
 ---
 
-## PERF-001 authored candidate — 2026-09-06
 
-RAIN-001 is machine-green and the owner found both Classic and Hybrid airborne rain broad/non-nozzle, with the Hybrid relief already promising. The morphology gate is blocked by `fallspeed 128x` achieving only a small apparent multiple. PERF-001 changes cost only: persistent exact occupancy/grounded indexes, exact RNG jump over provably immobile grains, O(1) Classic metadata sync, optimized debug codegen, and a bounded speed-scaled testing budget. The required dev-profile Hybrid probe must actually reach at least 128 simulated seconds per wall second or stop without physics changes. See `notebook/work/PERF-001-CLASSIC-EXACT-HIGH-SPEED.md`.
+## RAIN-002 authored candidate — 2026-09-07
 
-## RAIN-001 authored candidate — 2026-09-06
+PERF-001 is machine-green and human-approved for interactive 128x testing. RAIN-001's 75/25 airborne envelope also passed the owner's anti-nozzle gate, but long-form review found one dominant focus lump, weakly visible compensation, nearest-free top-row relocation, and stale 128x debt after returning to 1x. RAIN-002 retains 75/25 and frozen `momentum-grounded-contact`, replacing only focus timing with one-hour dwell + three-candidate compensational avulsion + bounded local wander, sampling directly from free ingress sites, and splitting multiplier debt from explicit Advance debt so fallspeed changes are immediate. See `notebook/work/RAIN-002-AVULSION-FREE-INGRESS.md`.
+
+## PERF-001 native/human-green — 2026-09-07
+
+PERF-001 is machine-green and human-approved. Exact optimized/reference gates passed, the dev-profile Hybrid capacity probe reached a median 1691.83x, and the owner confirmed interactive `fallspeed 128x` is now fast enough for morphology review. Its sparse occupancy/grounded indexes, exact RNG jump, O(1) metadata, dev optimization, and bounded accelerated budgets are the retained performance baseline. See `notebook/work/PERF-001-CLASSIC-EXACT-HIGH-SPEED.md`.
+
+## RAIN-001 superseded by RAIN-002 — 2026-09-07
 
 Classic settlement physics is frozen at the owner-preferred `momentum-grounded-contact` baseline. RAIN-001 changes only the debug `hybrid` ingress comparison: restore the previously attractive 75/25 broad-rain envelope, keep the accepted slow cross-corridor focus walk, and choose each new long-lived waypoint by a two-candidate weak preference for lower broad grounded terrain. Uniform `classic` remains the control. No global terrain scan per grain, category-driven focus reset, nozzle emitter, persistence change, catch-up change, or Advance change is allowed. See `notebook/work/RAIN-001-COMPENSATIONAL-FOCUS.md`.
 
