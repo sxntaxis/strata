@@ -25,10 +25,13 @@ const CLASSIC_REPOSE_MID: u8 = 2;
 const CLASSIC_REPOSE_HIGH: u8 = 3;
 const CLASSIC_REPOSE_ANCHOR: u8 = 4;
 const GOLDEN_RATIO: f64 = 1.618_033_988_749_895;
-const RAIN_FOCUS_BIAS_ONE_IN: usize = 4;
-// RAIN-003 keeps the human-approved broad 75/25 rain envelope but replaces
-// deterministic cross-corridor waypoints and RAIN-002 dwell/avulsion with an
-// aperiodic correlated meander. A hypothetical uninterrupted traverse takes
+const RAIN_FOCUS_BIAS_PROBABILITY: f64 = 1.0 / (GOLDEN_RATIO * GOLDEN_RATIO);
+// RAIN-004 keeps RAIN-003 correlated meander/rephase semantics, removes the
+// focus-only side padding, and strengthens the broad focus-biased share to the
+// small part of the golden ratio (~38.2%) while remaining nozzle-free.
+// RAIN-003 replaced deterministic cross-corridor waypoints and RAIN-002
+// dwell/avulsion with an aperiodic correlated meander. A hypothetical
+// uninterrupted traverse takes
 // roughly four simulated hours: fast enough to vary successive strata while
 // remaining a low-frequency morphology signal rather than a visible nozzle.
 const RAIN_FOCUS_MEANDER_EDGE_TO_EDGE_INGRESSES: usize = 14_400;
@@ -236,11 +239,12 @@ impl ClassicTextureProfile {
 /// - no grain is discharged, buried, compressed, or deleted.
 ///
 /// `Uniform` uses full-width random rain. `WanderingFocus` changes only ingress
-/// sampling: 75% remains uniform over the full visible width and 25% uses a broad
-/// golden-corridor focus. RAIN-003 drives that focus with a continuous correlated
-/// meander: directional persistence is perturbed stochastically, broad terrain
-/// relief provides only weak steering, and corridor edges provide only soft inward
-/// steering. A category transition transiently decorrelates the heading without
+/// sampling: the large golden-ratio share remains uniform over the full visible
+/// width and the small golden-ratio share (~38.2%) uses a broad focus bias.
+/// RAIN-004 lets that focus meander across the complete active width. Directional
+/// persistence is perturbed stochastically, broad terrain relief provides only weak
+/// steering, and real active-width edges provide only soft inward steering. A
+/// category transition transiently decorrelates the heading without
 /// teleporting the focus, so successive strata can develop different envelopes.
 /// New grains are sampled directly from free visible-top sites rather than sampling
 /// an occupied target and relocating it.
@@ -488,7 +492,7 @@ impl ClassicSandboxEngine {
     pub(crate) fn rain_profile_name(&self) -> &'static str {
         match self.mode {
             ClassicRainMode::Uniform => "uniform",
-            ClassicRainMode::WanderingFocus => "75/25-correlated",
+            ClassicRainMode::WanderingFocus => "golden38-correlated-fullwidth",
         }
     }
 
@@ -644,7 +648,9 @@ impl ClassicSandboxEngine {
         let focus = self.advance_rain_focus(bounds);
         let uniform_index = self.rain_random_index(free_columns.len());
         let chosen_index =
-            if free_columns.len() == 1 || self.rain_random_index(RAIN_FOCUS_BIAS_ONE_IN) != 0 {
+            if free_columns.len() == 1
+                || !self.rain_random_probability(RAIN_FOCUS_BIAS_PROBABILITY)
+            {
                 uniform_index
             } else {
                 self.sample_focus_biased_free_index(bounds, focus, free_columns)
@@ -662,7 +668,7 @@ impl ClassicSandboxEngine {
     }
 
     fn record_rain_region(&mut self, target: usize, bounds: ViewportBounds) {
-        let (start, end) = Self::golden_focus_bounds(bounds);
+        let (start, end) = Self::rain_focus_bounds(bounds);
         if target < start {
             self.rain_left_padding_targets = self.rain_left_padding_targets.saturating_add(1);
         } else if target >= end {
@@ -672,20 +678,11 @@ impl ClassicSandboxEngine {
         }
     }
 
-    fn golden_focus_bounds(bounds: ViewportBounds) -> (usize, usize) {
-        let width = bounds.x_end.saturating_sub(bounds.x_start);
-        debug_assert!(width > 0);
-        if width <= 2 {
-            return (bounds.x_start, bounds.x_end);
-        }
-        // One more recursive golden subdivision than RAIN-001/002: roughly
-        // 7.3% focus-only padding on each side, leaving ~85.4% for the meander.
-        // Physical terrain and ordinary rain still use the complete visible width.
-        let edge_fraction = (((1.0 - 1.0 / GOLDEN_RATIO) / 2.0) / GOLDEN_RATIO) / GOLDEN_RATIO;
-        let padding = ((width as f64) * edge_fraction)
-            .round()
-            .min(((width - 1) / 2) as f64) as usize;
-        (bounds.x_start + padding, bounds.x_end - padding)
+    fn rain_focus_bounds(bounds: ViewportBounds) -> (usize, usize) {
+        // RAIN-004 removes focus-only side padding entirely. The meander may use
+        // the same complete active width as ordinary rain; soft edge steering is
+        // only a directional influence near the real active-width boundaries.
+        (bounds.x_start, bounds.x_end)
     }
 
     fn note_ingress_category(&mut self, category_id: CategoryId) {
@@ -706,7 +703,7 @@ impl ClassicSandboxEngine {
     }
 
     fn advance_rain_focus(&mut self, bounds: ViewportBounds) -> usize {
-        let (start, end) = Self::golden_focus_bounds(bounds);
+        let (start, end) = Self::rain_focus_bounds(bounds);
         let focus_width = end.saturating_sub(start);
         debug_assert!(focus_width > 0);
 
@@ -861,8 +858,8 @@ impl ClassicSandboxEngine {
         bounds: ViewportBounds,
         focus_width: usize,
     ) -> (usize, usize) {
-        // One broad sample spans roughly one sixth of the focus corridor. This
-        // intentionally ignores grain-scale ruggedness. RAIN-003 uses the result
+        // One broad sample spans roughly one sixth of the active focus width. This
+        // intentionally ignores grain-scale ruggedness. RAIN-004 retains the result
         // only as weak directional steering; it never selects a destination or
         // globally searches for the lowest accommodation.
         let radius = (focus_width / 12).max(1);
@@ -890,7 +887,7 @@ impl ClassicSandboxEngine {
         focus: usize,
         free_columns: &[usize],
     ) -> Option<usize> {
-        let (start, end) = Self::golden_focus_bounds(bounds);
+        let (start, end) = Self::rain_focus_bounds(bounds);
         let first = self.random_free_index_in_range(free_columns, start, end)?;
         let second = self.random_free_index_in_range(free_columns, start, end)?;
         match free_columns[first]
@@ -931,7 +928,7 @@ impl ClassicSandboxEngine {
                 ordinal -= 1;
             }
         }
-        unreachable!("counted free corridor site must be found")
+        unreachable!("counted free focus-domain site must be found")
     }
 
     fn apply_gravity(&mut self) {
@@ -1639,6 +1636,15 @@ impl ClassicSandboxEngine {
     fn rain_random_bool(&mut self) -> bool {
         self.next_rain_random_u64() & 1 == 0
     }
+
+    fn rain_random_probability(&mut self, probability: f64) -> bool {
+        debug_assert!((0.0..=1.0).contains(&probability));
+        // Use the upper 53 random bits to form a deterministic [0, 1) sample,
+        // matching f64 mantissa precision without introducing another RNG stream.
+        let sample =
+            (self.next_rain_random_u64() >> 11) as f64 * (1.0 / ((1u64 << 53) as f64));
+        sample < probability
+    }
 }
 
 #[cfg(test)]
@@ -2018,28 +2024,40 @@ mod tests {
     }
 
     #[test]
-    fn hybrid_focus_is_a_quarter_ingress_bias_inside_the_smaller_focus_corridor() {
-        assert_eq!(RAIN_FOCUS_BIAS_ONE_IN, 4);
+    fn hybrid_focus_uses_full_active_width_and_golden_small_bias() {
+        let golden_small = 1.0 / (GOLDEN_RATIO * GOLDEN_RATIO);
+        assert!((RAIN_FOCUS_BIAS_PROBABILITY - golden_small).abs() < f64::EPSILON);
+        assert!((RAIN_FOCUS_BIAS_PROBABILITY - 0.381_966_011_25).abs() < 1e-12);
+
         let mut engine = ClassicSandboxEngine::new(100, 20, 17, ClassicRainMode::WanderingFocus);
         let bounds = engine.surface.viewport_bounds().expect("visible basin");
-        let width = bounds.x_end - bounds.x_start;
-        let (start, end) = ClassicSandboxEngine::golden_focus_bounds(bounds);
-        let left_padding = start - bounds.x_start;
-        let right_padding = bounds.x_end - end;
-        assert_eq!(left_padding, right_padding);
-        let observed = left_padding as f64 / width as f64;
-        assert!((observed - 0.073).abs() < 0.01, "observed={observed}");
+        let (start, end) = ClassicSandboxEngine::rain_focus_bounds(bounds);
+        assert_eq!((start, end), (bounds.x_start, bounds.x_end));
         for _ in 0..20_000 {
             let focus = engine.advance_rain_focus(bounds);
-            assert!((start..end).contains(&focus));
+            assert!((bounds.x_start..bounds.x_end).contains(&focus));
         }
+    }
+
+    #[test]
+    fn golden_small_bias_probability_draw_matches_expected_share() {
+        let mut engine = ClassicSandboxEngine::new(20, 8, 19, ClassicRainMode::WanderingFocus);
+        let samples = 100_000usize;
+        let biased = (0..samples)
+            .filter(|_| engine.rain_random_probability(RAIN_FOCUS_BIAS_PROBABILITY))
+            .count();
+        let observed = biased as f64 / samples as f64;
+        assert!(
+            (observed - RAIN_FOCUS_BIAS_PROBABILITY).abs() < 0.01,
+            "observed={observed} expected={RAIN_FOCUS_BIAS_PROBABILITY}"
+        );
     }
 
     #[test]
     fn correlated_focus_meanders_aperiodically_in_both_directions() {
         let mut engine = ClassicSandboxEngine::new(100, 20, 23, ClassicRainMode::WanderingFocus);
         let bounds = engine.surface.viewport_bounds().expect("visible basin");
-        let (start, end) = ClassicSandboxEngine::golden_focus_bounds(bounds);
+        let (start, end) = ClassicSandboxEngine::rain_focus_bounds(bounds);
         let mut previous = engine.advance_rain_focus(bounds);
         let mut saw_left = false;
         let mut saw_right = false;
@@ -2080,7 +2098,7 @@ mod tests {
             let mut engine =
                 ClassicSandboxEngine::new(80, 20, seed, ClassicRainMode::WanderingFocus);
             let bounds = engine.surface.viewport_bounds().expect("visible basin");
-            let (start, end) = ClassicSandboxEngine::golden_focus_bounds(bounds);
+            let (start, end) = ClassicSandboxEngine::rain_focus_bounds(bounds);
             let focus = start + (end - start) / 2;
             let focus_width = end - start;
             let floor = bounds.y_end - 1;
@@ -2174,7 +2192,7 @@ mod tests {
     }
 
     #[test]
-    fn correlated_rain_stays_broad_and_reaches_both_focus_paddings() {
+    fn golden_bias_rain_stays_broad_across_full_active_width() {
         let mut engine = ClassicSandboxEngine::new(60, 20, 29, ClassicRainMode::WanderingFocus);
         let bounds = engine.surface.viewport_bounds().expect("visible basin");
         let width = bounds.x_end - bounds.x_start;
@@ -2187,14 +2205,15 @@ mod tests {
             let bin = (local * bin_count / width).min(bin_count - 1);
             bins[bin] += 1;
         }
-        let (left, corridor, right) = engine.rain_region_counts();
-        assert_eq!(left + corridor + right, samples);
-        assert!(left > 0 && right > 0, "left={left} right={right}");
+        let (left_padding, full_width, right_padding) = engine.rain_region_counts();
+        assert_eq!(left_padding + full_width + right_padding, samples);
+        assert_eq!((left_padding, right_padding), (0, 0));
+        assert_eq!(full_width, samples);
         assert!(bins.iter().all(|count| *count > samples / 40), "{bins:?}");
         let max_bin = *bins.iter().max().expect("bins");
         assert!(max_bin < samples / 5, "anti-nozzle bins={bins:?}");
         println!(
-            "RAIN_003_METRICS samples={samples} left={left} corridor={corridor} right={right} max_bin={max_bin} bins={bins:?}"
+            "RAIN_004_METRICS samples={samples} left_padding={left_padding} full_width={full_width} right_padding={right_padding} max_bin={max_bin} bins={bins:?}"
         );
     }
 
@@ -2361,7 +2380,7 @@ mod perf_001_tests {
     }
 
     #[test]
-    fn optimized_classic_is_exact_against_dense_reference_for_uniform_and_rain_003() {
+    fn optimized_classic_is_exact_against_dense_reference_for_uniform_and_rain_004() {
         for mode in [ClassicRainMode::Uniform, ClassicRainMode::WanderingFocus] {
             for seed in [0xA11C_E201, 0xA11C_E202, 0xA11C_E203] {
                 let mut reference = ClassicSandboxEngine::new(48, 18, seed, mode);
