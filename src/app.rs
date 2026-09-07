@@ -51,6 +51,25 @@ use terminal_lifecycle::{ManagedTerminal, TerminalSession};
 const TESTING_CHEATS_FRAME_BUDGET: Duration = Duration::from_millis(4);
 #[cfg(debug_assertions)]
 const TESTING_CHEATS_PERCEPTUAL_FRAME_BUDGET: Duration = Duration::from_millis(12);
+#[cfg(debug_assertions)]
+const TESTING_CHEATS_ACCELERATED_FRAME_BUDGET_16X: Duration = Duration::from_millis(8);
+#[cfg(debug_assertions)]
+const TESTING_CHEATS_ACCELERATED_FRAME_BUDGET_64X: Duration = Duration::from_millis(16);
+#[cfg(debug_assertions)]
+const TESTING_CHEATS_ACCELERATED_FRAME_BUDGET_128X: Duration = Duration::from_millis(32);
+
+#[cfg(debug_assertions)]
+fn testing_cheats_frame_budget(speed_multiplier: u32, perceptual: bool) -> Duration {
+    if perceptual {
+        return TESTING_CHEATS_PERCEPTUAL_FRAME_BUDGET;
+    }
+    match speed_multiplier {
+        0..=4 => TESTING_CHEATS_FRAME_BUDGET,
+        5..=16 => TESTING_CHEATS_ACCELERATED_FRAME_BUDGET_16X,
+        17..=64 => TESTING_CHEATS_ACCELERATED_FRAME_BUDGET_64X,
+        _ => TESTING_CHEATS_ACCELERATED_FRAME_BUDGET_128X,
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum UiMode {
@@ -2854,11 +2873,7 @@ impl App {
         let perceptual = testing.engine.unit_perceptual_flowviz_enabled();
         let truthful = testing.engine.unit_truthful_flowviz_enabled();
         let coherent = testing.engine.unit_coherent_flowviz_enabled();
-        let frame_budget = if perceptual {
-            TESTING_CHEATS_PERCEPTUAL_FRAME_BUDGET
-        } else {
-            TESTING_CHEATS_FRAME_BUDGET
-        };
+        let frame_budget = testing_cheats_frame_budget(testing.speed_multiplier, perceptual);
         let deadline = Instant::now() + frame_budget;
         let category_id = self.time_tracker.active_category_id();
         let mut changed = false;
@@ -4103,7 +4118,10 @@ mod day_end_snapshot_tests {
 
 #[cfg(all(test, debug_assertions))]
 mod testing_cheats_clock_tests {
-    use super::{TESTING_CHEATS_DEFAULT_MODEL, TestingCheatsState, TestingSandEngine};
+    use super::{
+        TESTING_CHEATS_DEFAULT_MODEL, TestingCheatsState, TestingSandEngine,
+        testing_cheats_frame_budget,
+    };
     use crate::{
         domain::CategoryId,
         sand::{ClassicRainMode, ClassicSandboxEngine, OsloSandboxEngine},
@@ -4126,6 +4144,16 @@ mod testing_cheats_clock_tests {
     #[test]
     fn testing_cheats_default_sandbox_is_classic() {
         assert_eq!(TESTING_CHEATS_DEFAULT_MODEL, "classic");
+    }
+
+    #[test]
+    fn accelerated_classic_budget_scales_without_changing_low_speed_or_perceptual_budget() {
+        assert_eq!(testing_cheats_frame_budget(1, false), Duration::from_millis(4));
+        assert_eq!(testing_cheats_frame_budget(4, false), Duration::from_millis(4));
+        assert_eq!(testing_cheats_frame_budget(16, false), Duration::from_millis(8));
+        assert_eq!(testing_cheats_frame_budget(64, false), Duration::from_millis(16));
+        assert_eq!(testing_cheats_frame_budget(128, false), Duration::from_millis(32));
+        assert_eq!(testing_cheats_frame_budget(128, true), Duration::from_millis(12));
     }
 
     #[test]

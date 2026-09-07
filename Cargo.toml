@@ -28,6 +28,12 @@ default = ["cli"]
 cli = []
 tui = []
 
+[profile.dev]
+# `testingcheats` is intentionally debug-only, so the interactive performance
+# lab must not run the Classic cellular solver at Cargo's unoptimized default.
+# Debug assertions remain enabled; only code generation is optimized.
+opt-level = 2
+
 [profile.release]
 strip = true
 lto = true

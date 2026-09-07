@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::sync::OnceLock;
 
 use ratatui::prelude::Line;
 
@@ -10,8 +11,10 @@ use super::{
 };
 
 mod grounded_index;
+mod occupancy_index;
 mod stratigraphy;
 use grounded_index::GroundedColumnIndex;
+use occupancy_index::RowOccupancyIndex;
 use stratigraphy::ClassicRainbowFillDescriptor;
 
 const CLASSIC_PHYSICS_RNG_XOR: u64 = 0xC6BC_2796_92B5_CC83;
@@ -232,6 +235,11 @@ impl ClassicTextureProfile {
 /// between two stochastic candidates so stacked strata compensate previous relief
 /// without turning rain into a nozzle or a global terrain-following optimizer.
 /// Nothing from this sandbox is persisted or becomes production authority.
+struct ClassicRuntimeIndex {
+    occupancy: RowOccupancyIndex,
+    grounded: Option<GroundedColumnIndex>,
+}
+
 pub(crate) struct ClassicSandboxEngine {
     surface: SandEngine,
     mode: ClassicRainMode,
@@ -257,6 +265,9 @@ pub(crate) struct ClassicSandboxEngine {
     total_generated: usize,
     vertical_moves: usize,
     diagonal_moves: usize,
+    runtime_index: Option<ClassicRuntimeIndex>,
+    #[cfg(test)]
+    force_reference_gravity: bool,
     #[cfg(test)]
     force_uniform_repose: bool,
 }
@@ -303,6 +314,9 @@ impl ClassicSandboxEngine {
             total_generated: 0,
             vertical_moves: 0,
             diagonal_moves: 0,
+            runtime_index: None,
+            #[cfg(test)]
+            force_reference_gravity: true,
             #[cfg(test)]
             force_uniform_repose: false,
         };
@@ -332,6 +346,7 @@ impl ClassicSandboxEngine {
     }
 
     pub(crate) fn resize(&mut self, width: u16, height: u16) {
+        self.runtime_index = None;
         let old_width = self.surface.grid_width_dots;
         let old_repose = self.local_repose.clone();
         let old_memory = self.repose_memory_remaining.clone();
@@ -367,6 +382,7 @@ impl ClassicSandboxEngine {
     }
 
     pub(crate) fn clear(&mut self) {
+        self.runtime_index = None;
         self.surface.clear();
         self.last_rainbow_fill = None;
         self.pending_drive.clear();
@@ -492,6 +508,7 @@ impl ClassicSandboxEngine {
         // Every experiment intentionally starts from the owner-selected rugged
         // texture baseline. Selection remains non-retroactive; `fill` performs
         // the clean field resample for comparison.
+        self.runtime_index = None;
         self.texture_profile = ClassicTextureProfile::Rugged;
         self.experiment_profile = profile;
         Ok(())
@@ -545,6 +562,8 @@ impl ClassicSandboxEngine {
             }
         }
 
+        self.runtime_index = None;
+
         self.last_rainbow_fill = Some(ClassicRainbowFillDescriptor::from_fill(
             category_ids,
             fill_x_start,
@@ -573,6 +592,7 @@ impl ClassicSandboxEngine {
         let mut free_columns = (bounds.x_start..bounds.x_end)
             .filter(|x| self.surface.grid[ingress_y][*x].is_none())
             .collect::<Vec<_>>();
+        let mut runtime = self.runtime_index.take();
 
         while !free_columns.is_empty() && !self.pending_drive.is_empty() {
             let target = self.choose_rain_target(bounds);
@@ -583,7 +603,14 @@ impl ClassicSandboxEngine {
                 .pop_front()
                 .expect("pending drive exists");
             self.surface.grid[ingress_y][x] = Some(category_id);
+            if let Some(index) = runtime.as_mut() {
+                index.occupancy.set(x, ingress_y, true);
+                if let Some(grounded) = index.grounded.as_mut() {
+                    grounded.record_new_fill(&self.surface.grid, x, ingress_y);
+                }
+            }
         }
+        self.runtime_index = runtime;
         self.sync_surface_metadata();
     }
 
@@ -798,10 +825,15 @@ impl ClassicSandboxEngine {
     }
 
     fn apply_gravity(&mut self) {
-        self.apply_gravity_with_grounded_index(true);
+        #[cfg(test)]
+        if self.force_reference_gravity {
+            self.apply_gravity_reference(true);
+            return;
+        }
+        self.apply_gravity_optimized();
     }
 
-    fn apply_gravity_with_grounded_index(&mut self, use_grounded_index: bool) {
+    fn apply_gravity_optimized(&mut self) {
         let Some(bounds) = self.surface.viewport_bounds() else {
             return;
         };
@@ -809,10 +841,98 @@ impl ClassicSandboxEngine {
             return;
         }
 
-        // CLASSIC-012 performance path: the accepted grounded-contact baseline
-        // otherwise rescans from nearly every direct blocker to the visible floor.
-        // Build one exact sweep-local bottom-connectivity index and update it after
-        // each in-place move. Existing profiles do not pay for or consult it.
+        // PERF-001 keeps both indexes across ordinary Classic sweeps. The grid
+        // remains authority; every production mutation updates the mirrors and
+        // resize/clear/fill/profile changes invalidate them. This removes the
+        // repeated dense occupancy scan and the CLASSIC-012 grounded rebuild.
+        let mut runtime = match self.runtime_index.take() {
+            Some(runtime) => runtime,
+            None => ClassicRuntimeIndex {
+                occupancy: RowOccupancyIndex::from_grid(&self.surface.grid),
+                grounded: self
+                    .experiment_profile
+                    .ordinary_diagonal_requires_grounded_blocker()
+                    .then(|| GroundedColumnIndex::from_grid(&self.surface.grid, bounds)),
+            },
+        };
+
+        let base_left_to_right = self.surface.sweep_left_to_right;
+        self.surface.sweep_left_to_right = !self.surface.sweep_left_to_right;
+
+        for y in (bounds.y_start..bounds.y_end - 1).rev() {
+            let left_to_right = if y.is_multiple_of(2) {
+                base_left_to_right
+            } else {
+                !base_left_to_right
+            };
+            if left_to_right {
+                let mut cursor = bounds.x_start;
+                let mut stable_rng_draws = 0usize;
+                while let Some(x) = runtime.occupancy.next_occupied(y, cursor, bounds.x_end) {
+                    if self.stable_blocked_grain_consumes_one_rng_only(
+                        bounds,
+                        x,
+                        y,
+                        runtime.grounded.as_ref(),
+                    ) {
+                        stable_rng_draws = stable_rng_draws.saturating_add(1);
+                    } else {
+                        self.advance_physics_rng_draws(stable_rng_draws);
+                        stable_rng_draws = 0;
+                        self.move_grain_once_with_indexes(
+                            bounds,
+                            x,
+                            y,
+                            runtime.grounded.as_mut(),
+                            Some(&mut runtime.occupancy),
+                        );
+                    }
+                    cursor = x.saturating_add(1);
+                }
+                self.advance_physics_rng_draws(stable_rng_draws);
+            } else {
+                let mut cursor = bounds.x_end;
+                let mut stable_rng_draws = 0usize;
+                while let Some(x) = runtime
+                    .occupancy
+                    .previous_occupied(y, bounds.x_start, cursor)
+                {
+                    if self.stable_blocked_grain_consumes_one_rng_only(
+                        bounds,
+                        x,
+                        y,
+                        runtime.grounded.as_ref(),
+                    ) {
+                        stable_rng_draws = stable_rng_draws.saturating_add(1);
+                    } else {
+                        self.advance_physics_rng_draws(stable_rng_draws);
+                        stable_rng_draws = 0;
+                        self.move_grain_once_with_indexes(
+                            bounds,
+                            x,
+                            y,
+                            runtime.grounded.as_mut(),
+                            Some(&mut runtime.occupancy),
+                        );
+                    }
+                    cursor = x;
+                }
+                self.advance_physics_rng_draws(stable_rng_draws);
+            }
+        }
+        self.runtime_index = Some(runtime);
+        self.sync_surface_metadata();
+    }
+
+    #[cfg(test)]
+    fn apply_gravity_reference(&mut self, use_grounded_index: bool) {
+        let Some(bounds) = self.surface.viewport_bounds() else {
+            return;
+        };
+        if bounds.y_end.saturating_sub(bounds.y_start) < 2 {
+            return;
+        }
+
         let mut grounded_index = (use_grounded_index
             && self
                 .experiment_profile
@@ -830,11 +950,11 @@ impl ClassicSandboxEngine {
             };
             if left_to_right {
                 for x in bounds.x_start..bounds.x_end {
-                    self.move_grain_once_with_grounded_index(bounds, x, y, grounded_index.as_mut());
+                    self.move_grain_once_with_indexes(bounds, x, y, grounded_index.as_mut(), None);
                 }
             } else {
                 for x in (bounds.x_start..bounds.x_end).rev() {
-                    self.move_grain_once_with_grounded_index(bounds, x, y, grounded_index.as_mut());
+                    self.move_grain_once_with_indexes(bounds, x, y, grounded_index.as_mut(), None);
                 }
             }
         }
@@ -843,20 +963,21 @@ impl ClassicSandboxEngine {
 
     #[cfg(test)]
     fn apply_gravity_uncached_for_test(&mut self) {
-        self.apply_gravity_with_grounded_index(false);
+        self.apply_gravity_reference(false);
     }
 
     #[cfg(test)]
     fn move_grain_once(&mut self, bounds: ViewportBounds, x: usize, y: usize) {
-        self.move_grain_once_with_grounded_index(bounds, x, y, None);
+        self.move_grain_once_with_indexes(bounds, x, y, None, None);
     }
 
-    fn move_grain_once_with_grounded_index(
+    fn move_grain_once_with_indexes(
         &mut self,
         bounds: ViewportBounds,
         x: usize,
         y: usize,
         mut grounded_index: Option<&mut GroundedColumnIndex>,
+        mut occupancy_index: Option<&mut RowOccupancyIndex>,
     ) {
         let Some(category_id) = self.surface.grid[y][x] else {
             return;
@@ -867,14 +988,13 @@ impl ClassicSandboxEngine {
             if let Some(index) = grounded_index.as_deref_mut() {
                 index.record_move(&self.surface.grid, x, y, x, y + 1);
             }
+            if let Some(index) = occupancy_index.as_deref_mut() {
+                index.record_move(x, y, x, y + 1);
+            }
             self.vertical_moves = self.vertical_moves.saturating_add(1);
             return;
         }
 
-        // CLASSIC-011 diagnostic: for the grounded-contact profile, catching
-        // another grain in free fall is not surface contact. Wait one gravity
-        // sweep instead of converting that transient collision into a lateral
-        // Classic step. Existing profiles preserve their ordinary diagonal law.
         let ordinary_blocker_grounded = if self
             .experiment_profile
             .ordinary_diagonal_requires_grounded_blocker()
@@ -891,9 +1011,6 @@ impl ClassicSandboxEngine {
             false
         };
 
-        // Classic still commits at most one ordinary diagonal choice per grain.
-        // Experimental profiles may bias that choice toward the steeper side,
-        // but never introduce a second-side retry when the chosen side is blocked.
         let step = self.choose_diagonal_step(bounds, x, y);
         let Some(target_x) = x.checked_add_signed(step) else {
             return;
@@ -902,9 +1019,6 @@ impl ClassicSandboxEngine {
             return;
         }
 
-        // Contact-gated momentum distinguishes a grain arriving at the actual
-        // supported pile from one merely catching another grain in flight.
-        // Ordinary Classic diagonal behavior remains unchanged either way.
         let momentum_blocker_grounded =
             if self.experiment_profile.momentum_requires_grounded_blocker() {
                 if ordinary_blocker_grounded && grounded_index.is_some() {
@@ -921,6 +1035,9 @@ impl ClassicSandboxEngine {
         if let Some(index) = grounded_index.as_deref_mut() {
             index.record_move(&self.surface.grid, x, y, target_x, y + 1);
         }
+        if let Some(index) = occupancy_index.as_deref_mut() {
+            index.record_move(x, y, target_x, y + 1);
+        }
         self.diagonal_moves = self.diagonal_moves.saturating_add(1);
 
         if self.experiment_profile.uses_momentum() {
@@ -932,6 +1049,7 @@ impl ClassicSandboxEngine {
                 category_id,
                 momentum_blocker_grounded,
                 grounded_index,
+                occupancy_index,
             );
         }
 
@@ -1048,7 +1166,8 @@ impl ClassicSandboxEngine {
         step: isize,
         category_id: CategoryId,
         blocker_grounded: bool,
-        grounded_index: Option<&mut GroundedColumnIndex>,
+        mut grounded_index: Option<&mut GroundedColumnIndex>,
+        mut occupancy_index: Option<&mut RowOccupancyIndex>,
     ) {
         if !blocker_grounded {
             return;
@@ -1075,8 +1194,11 @@ impl ClassicSandboxEngine {
         }
         self.surface.grid[y][x] = None;
         self.surface.grid[y + 1][next_x] = Some(category_id);
-        if let Some(index) = grounded_index {
+        if let Some(index) = grounded_index.as_deref_mut() {
             index.record_move(&self.surface.grid, x, y, next_x, y + 1);
+        }
+        if let Some(index) = occupancy_index.as_deref_mut() {
+            index.record_move(x, y, next_x, y + 1);
         }
         self.diagonal_moves = self.diagonal_moves.saturating_add(1);
         self.refresh_local_repose(next_x);
@@ -1267,15 +1389,97 @@ impl ClassicSandboxEngine {
     }
 
     fn sync_surface_metadata(&mut self) {
-        for row in &mut self.surface.mobilized {
-            row.fill(false);
-        }
+        // Classic never marks SandEngine mobility and never removes mass. The
+        // previous implementation cleared an already-false mobility matrix and
+        // rescanned the complete grid after every spawn/gravity sweep. Exact
+        // Classic mass authority is `total_generated = physical + pending`, so
+        // the same observable metadata is maintained in O(1).
+        #[cfg(test)]
+        debug_assert!(self.surface.mobilized.iter().flatten().all(|value| !*value));
         self.surface.pending_runs.clear();
         self.surface.ingress_focus_x = None;
-        self.surface.grain_count = self
-            .surface
-            .physical_grain_count()
-            .saturating_add(self.pending_drive.len());
+        self.surface.grain_count = self.total_generated;
+    }
+
+    fn stable_blocked_grain_consumes_one_rng_only(
+        &self,
+        bounds: ViewportBounds,
+        x: usize,
+        y: usize,
+        grounded: Option<&GroundedColumnIndex>,
+    ) -> bool {
+        if self.surface.grid[y][x].is_none() || self.surface.grid[y + 1][x].is_none() {
+            return false;
+        }
+        if self
+            .experiment_profile
+            .ordinary_diagonal_requires_grounded_blocker()
+            && grounded.is_none_or(|index| !index.is_grounded(&self.surface.grid, x, y + 1))
+        {
+            return false;
+        }
+        let left_blocked = x == bounds.x_start || self.surface.grid[y + 1][x - 1].is_some();
+        let right_blocked =
+            x + 1 >= bounds.x_end || self.surface.grid[y + 1][x + 1].is_some();
+        left_blocked && right_blocked
+    }
+
+    fn advance_physics_rng_draws(&mut self, draws: usize) {
+        if draws == 0 {
+            return;
+        }
+
+        fn step(mut x: u64) -> u64 {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        }
+        fn apply(transform: &[u64; 64], mut value: u64) -> u64 {
+            let mut result = 0u64;
+            while value != 0 {
+                let bit = value.trailing_zeros() as usize;
+                result ^= transform[bit];
+                value &= value - 1;
+            }
+            result
+        }
+        fn powers() -> &'static Vec<[u64; 64]> {
+            static POWERS: OnceLock<Vec<[u64; 64]>> = OnceLock::new();
+            POWERS.get_or_init(|| {
+                let mut base = [0u64; 64];
+                for (bit, image) in base.iter_mut().enumerate() {
+                    *image = step(1u64 << bit);
+                }
+                let mut powers = Vec::with_capacity(64);
+                powers.push(base);
+                for exponent in 1..64 {
+                    let previous = powers[exponent - 1];
+                    let mut squared = [0u64; 64];
+                    for (bit, image) in squared.iter_mut().enumerate() {
+                        *image = apply(&previous, previous[bit]);
+                    }
+                    powers.push(squared);
+                }
+                powers
+            })
+        }
+
+        let mut state = if self.physics_rng_state == 0 {
+            CLASSIC_PHYSICS_RNG_XOR
+        } else {
+            self.physics_rng_state
+        };
+        let mut remaining = draws as u64;
+        let mut bit = 0usize;
+        while remaining != 0 {
+            if remaining & 1 != 0 {
+                state = apply(&powers()[bit], state);
+            }
+            remaining >>= 1;
+            bit += 1;
+        }
+        self.physics_rng_state = state;
     }
 
     fn next_physics_random_u64(&mut self) -> u64 {
@@ -1814,6 +2018,167 @@ mod tests {
             hybrid.apply_gravity();
         }
         assert_eq!(uniform.surface.grid, hybrid.surface.grid);
+    }
+}
+
+#[cfg(test)]
+mod perf_001_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    fn advance_exact(engine: &mut ClassicSandboxEngine, simulated: Duration) {
+        let tick = Duration::from_millis(crate::constants::TIME_SETTINGS.tick_ms);
+        let physics = Duration::from_millis(crate::constants::TIME_SETTINGS.physics_ms);
+        let mut spawn_accumulator = Duration::ZERO;
+        let mut physics_accumulator = Duration::ZERO;
+        let mut remaining = simulated;
+        let category = CategoryId::new(1);
+
+        while !remaining.is_zero() {
+            let spawn_left = tick.saturating_sub(spawn_accumulator);
+            let physics_left = physics.saturating_sub(physics_accumulator);
+            let step = remaining.min(spawn_left.min(physics_left));
+            spawn_accumulator += step;
+            physics_accumulator += step;
+            remaining = remaining.saturating_sub(step);
+
+            let spawn_due = spawn_accumulator >= tick;
+            let physics_due = physics_accumulator >= physics;
+            if spawn_due {
+                spawn_accumulator = spawn_accumulator.saturating_sub(tick);
+                engine.spawn(category);
+            }
+            if physics_due {
+                physics_accumulator = physics_accumulator.saturating_sub(physics);
+                engine.update();
+            }
+            assert!(step > Duration::ZERO || spawn_due || physics_due);
+        }
+    }
+
+    fn assert_exact(left: &ClassicSandboxEngine, right: &ClassicSandboxEngine) {
+        assert_eq!(left.surface.grid, right.surface.grid);
+        assert_eq!(left.surface.mobilized, right.surface.mobilized);
+        assert_eq!(left.surface.grain_count, right.surface.grain_count);
+        assert_eq!(left.surface.pending_runs, right.surface.pending_runs);
+        assert_eq!(left.surface.ingress_focus_x, right.surface.ingress_focus_x);
+        assert_eq!(left.surface.sweep_left_to_right, right.surface.sweep_left_to_right);
+        assert_eq!(left.physics_rng_state, right.physics_rng_state);
+        assert_eq!(left.rain_rng_state, right.rain_rng_state);
+        assert_eq!(left.repose_rng_state, right.repose_rng_state);
+        assert_eq!(left.local_repose, right.local_repose);
+        assert_eq!(left.repose_memory_remaining, right.repose_memory_remaining);
+        assert_eq!(left.rain_focus_x, right.rain_focus_x);
+        assert_eq!(left.rain_focus_target_x, right.rain_focus_target_x);
+        assert_eq!(left.rain_focus_move_counter, right.rain_focus_move_counter);
+        assert_eq!(left.rain_left_padding_targets, right.rain_left_padding_targets);
+        assert_eq!(left.rain_corridor_targets, right.rain_corridor_targets);
+        assert_eq!(left.rain_right_padding_targets, right.rain_right_padding_targets);
+        assert_eq!(left.pending_drive, right.pending_drive);
+        assert_eq!(left.frame_count, right.frame_count);
+        assert_eq!(left.total_generated, right.total_generated);
+        assert_eq!(left.vertical_moves, right.vertical_moves);
+        assert_eq!(left.diagonal_moves, right.diagonal_moves);
+    }
+
+    #[test]
+    fn physics_rng_jump_matches_individual_draws_exactly() {
+        for draws in [1usize, 2, 3, 17, 64, 255, 1_024, 65_537] {
+            let mut individual =
+                ClassicSandboxEngine::new(8, 6, 0xA11C_E155, ClassicRainMode::Uniform);
+            let mut jumped =
+                ClassicSandboxEngine::new(8, 6, 0xA11C_E155, ClassicRainMode::Uniform);
+            for _ in 0..draws {
+                let _ = individual.next_physics_random_u64();
+            }
+            jumped.advance_physics_rng_draws(draws);
+            assert_eq!(individual.physics_rng_state, jumped.physics_rng_state);
+        }
+    }
+
+    #[test]
+    fn optimized_classic_is_exact_against_dense_reference_for_uniform_and_rain_001() {
+        for mode in [ClassicRainMode::Uniform, ClassicRainMode::WanderingFocus] {
+            for seed in [0xA11C_E201, 0xA11C_E202, 0xA11C_E203] {
+                let mut reference = ClassicSandboxEngine::new(48, 18, seed, mode);
+                let mut optimized = ClassicSandboxEngine::new(48, 18, seed, mode);
+                optimized.force_reference_gravity = false;
+
+                advance_exact(&mut reference, Duration::from_secs(180));
+                advance_exact(&mut optimized, Duration::from_secs(180));
+                assert_exact(&reference, &optimized);
+
+                // The optimized cache must not hide a divergence in subsequent
+                // canonical reference execution.
+                optimized.force_reference_gravity = true;
+                optimized.runtime_index = None;
+                advance_exact(&mut reference, Duration::from_secs(60));
+                advance_exact(&mut optimized, Duration::from_secs(60));
+                assert_exact(&reference, &optimized);
+            }
+        }
+    }
+
+    #[test]
+    fn o1_metadata_matches_exact_classic_mass_authority() {
+        let mut engine = ClassicSandboxEngine::new(
+            32,
+            12,
+            0xA11C_E204,
+            ClassicRainMode::WanderingFocus,
+        );
+        engine.force_reference_gravity = false;
+        advance_exact(&mut engine, Duration::from_secs(240));
+        assert_eq!(engine.surface.grain_count, engine.total_generated);
+        assert_eq!(
+            engine.total_generated,
+            engine.surface.physical_grain_count() + engine.pending_drive.len()
+        );
+        assert!(engine.surface.mobilized.iter().flatten().all(|value| !*value));
+    }
+
+    #[test]
+    #[ignore = "native PERF-001 exact Classic high-speed probe"]
+    fn perf_001_hybrid_rate_probe() {
+        let simulated = Duration::from_secs(900);
+        let mut reference = ClassicSandboxEngine::new(
+            190,
+            48,
+            0xA11C_E2F0,
+            ClassicRainMode::WanderingFocus,
+        );
+        let mut optimized = ClassicSandboxEngine::new(
+            190,
+            48,
+            0xA11C_E2F0,
+            ClassicRainMode::WanderingFocus,
+        );
+        optimized.force_reference_gravity = false;
+
+        // Keep the reference sample bounded while still measuring the dense
+        // path on the same viewport and rain law.
+        let reference_simulated = Duration::from_secs(120);
+        let reference_started = Instant::now();
+        advance_exact(&mut reference, reference_simulated);
+        let reference_elapsed = reference_started.elapsed();
+
+        let optimized_started = Instant::now();
+        advance_exact(&mut optimized, simulated);
+        let optimized_elapsed = optimized_started.elapsed();
+        let optimized_x = simulated.as_secs_f64()
+            / optimized_elapsed.as_secs_f64().max(f64::EPSILON);
+        let reference_x = reference_simulated.as_secs_f64()
+            / reference_elapsed.as_secs_f64().max(f64::EPSILON);
+        let speedup = optimized_x / reference_x.max(f64::EPSILON);
+
+        println!(
+            "PERF_001_HYBRID_RATE simulated_secs={} optimized_wall_us={} optimized_x={optimized_x:.2} reference_secs={} reference_wall_us={} reference_x={reference_x:.2} speedup={speedup:.2}x",
+            simulated.as_secs(),
+            optimized_elapsed.as_micros(),
+            reference_simulated.as_secs(),
+            reference_elapsed.as_micros(),
+        );
+        assert_eq!(optimized.total_generated, simulated.as_secs() as usize);
     }
 }
 

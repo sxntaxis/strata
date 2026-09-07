@@ -2,13 +2,13 @@ use crate::domain::CategoryId;
 
 use super::ViewportBounds;
 
-/// Ephemeral exact index for bottom-connected Classic pile columns.
+/// Exact non-persisted index for bottom-connected Classic pile columns.
 ///
 /// `top[x]` is the first occupied row in the contiguous suffix that reaches the
 /// visible bottom boundary, or `y_end` when that column currently has no
-/// bottom-connected grain. The index exists only for one gravity sweep and is
-/// updated after every in-place move, so it preserves Classic's current-sweep
-/// contact semantics without rescanning from each blocker to the floor.
+/// bottom-connected grain. PERF-001 retains this mirror across ordinary sweeps
+/// and updates it after every in-place mutation, preserving Classic contact
+/// semantics without repeated blocker-to-floor or sweep-start rescans.
 pub(super) struct GroundedColumnIndex {
     top: Vec<usize>,
     y_start: usize,
@@ -47,6 +47,15 @@ impl GroundedColumnIndex {
     ) {
         self.record_vacancy(source_x, source_y);
         self.record_fill(grid, target_x, target_y);
+    }
+
+    pub(super) fn record_new_fill(
+        &mut self,
+        grid: &[Vec<Option<CategoryId>>],
+        x: usize,
+        y: usize,
+    ) {
+        self.record_fill(grid, x, y);
     }
 
     fn record_vacancy(&mut self, x: usize, y: usize) {

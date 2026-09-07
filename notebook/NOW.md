@@ -5,9 +5,13 @@ state: active
 created: 2026-08-01
 updated: 2026-09-06
 authority: working
-summary: RAIN-001 is the active bounded ingress candidate: Classic settlement remains momentum-grounded-contact while hybrid rain tests 75% full-width / 25% broad focus bias plus weak compensational waypoint selection.
-next: Natively validate RAIN-001, then owner-compare uniform Classic against the single compensational hybrid candidate for anti-nozzle rain and layer-to-layer heterogeneity.
+summary: PERF-001 is the active bounded optimization unit after RAIN-001 machine-green and positive initial human review: preserve Classic/Rain-001 exactly while making high-speed morphology testing materially faster.
+next: Natively validate PERF-001 exact sparse Classic execution and dev-profile 128x Hybrid rate, then resume the same RAIN-001 human morphology comparison without retuning rain.
 ---
+
+## PERF-001 authored candidate — 2026-09-06
+
+RAIN-001 is machine-green and the owner found both Classic and Hybrid airborne rain broad/non-nozzle, with the Hybrid relief already promising. The morphology gate is blocked by `fallspeed 128x` achieving only a small apparent multiple. PERF-001 changes cost only: persistent exact occupancy/grounded indexes, exact RNG jump over provably immobile grains, O(1) Classic metadata sync, optimized debug codegen, and a bounded speed-scaled testing budget. The required dev-profile Hybrid probe must actually reach at least 128 simulated seconds per wall second or stop without physics changes. See `notebook/work/PERF-001-CLASSIC-EXACT-HIGH-SPEED.md`.
 
 ## RAIN-001 authored candidate — 2026-09-06
 
