@@ -106,4 +106,4 @@ The owner should be able to observe long-form RAIN-001 relief materially faster 
 
 ## Native + human closure — 2026-09-07
 
-PERF-001 passed exact optimized/reference validation and full repository checks. The native Hybrid probe reached a median 1691.83x headless capacity (samples 1691.83x, 1542.23x, 1700.34x), and the owner confirmed that interactive `testingcheats fallspeed 128x` now feels appropriately fast while preserving the accepted rain/Classic appearance. The resulting performance machinery is retained as the baseline for RAIN-002 and later Advance work.
+PERF-001 passed exact optimized/reference validation and full repository checks. The native Hybrid probe reached a median 1691.83x headless capacity (samples 1691.83x, 1542.23x, 1700.34x), and the owner confirmed that interactive `testingcheats fallspeed 128x` now feels appropriately fast while preserving the accepted rain/Classic appearance. The resulting performance machinery is retained as the baseline for RAIN-003 and later Advance work.

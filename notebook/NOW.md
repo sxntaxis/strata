@@ -5,10 +5,18 @@ state: active
 created: 2026-08-01
 updated: 2026-09-07
 authority: working
-summary: RAIN-002 is active after PERF-001 native/human closure: keep the accepted 75/25 broad Hybrid envelope and frozen Classic settlement, but create more diverse compensational loci, sample only free ingress sites, and make fallspeed slowdown discard stale multiplier debt.
-next: Natively validate RAIN-002 dwell/avulsion focus, free-site ingress, split testing debt, PERF-001 exactness/capacity, then run the owner Hybrid 128x morphology/top-row/128x-to-1x human gate.
+summary: RAIN-003 is active after RAIN-002 machine-green but owner-rejected morphology: retain 75/25 broad rain, free-site ingress, instant fallspeed debt ownership, PERF-001 and frozen Classic settlement, while replacing bland dwell/lowest-of-three avulsion with correlated meander, weak terrain steering, category-boundary rephase, and ~7.3% focus-only padding.
+next: Natively validate RAIN-003 correlated meander, weak terrain steering, category rephase, smaller golden focus padding, retained RAIN-002 ingress/debt fixes, and PERF-001 exactness/capacity; then run the owner Hybrid 128x stratigraphic morphology gate.
 ---
 
+
+## RAIN-003 authored candidate — 2026-09-07
+
+RAIN-002 is machine-green but its owner morphology gate rejected the one-hour dwell + lowest-of-three avulsion result as too homogeneous/bland. RAIN-003 retains the accepted 75/25 broad/nozzle-free envelope, free-site ingress, immediate fallspeed debt semantics, PERF-001 and frozen `momentum-grounded-contact`, but replaces focus morphology with a continuous aperiodic correlated meander (~4 h hypothetical traverse), weak broad left/right terrain steering, category-boundary rephase without teleport, and one further recursive-golden focus-padding reduction to ~7.3% per side. See `notebook/work/RAIN-003-STRATIGRAPHIC-CORRELATED-MEANDER.md`.
+
+## RAIN-002 machine-green / morphology rejected — 2026-09-07
+
+RAIN-002 passed all machine gates (483 tests, PERF median 1538.99x) and its free-site ingress plus 128x-to-1x debt ownership remain accepted. Human review rejected only the dwell/lowest-of-three focus morphology because successive strata looked too homogeneous. RAIN-003 supersedes that morphology while preserving those independent fixes.
 
 ## RAIN-002 authored candidate — 2026-09-07
 

@@ -1,7 +1,7 @@
 ---
 id: RAIN-002
 kind: work
-state: candidate
+state: superseded
 created: 2026-09-07
 updated: 2026-09-07
 authority: working
@@ -101,3 +101,7 @@ testingcheats fallspeed 1x
 ```
 
 The visual ingress cadence must slow immediately, except for any explicitly requested `testingcheats advance` debt that remains intentionally queued.
+
+## Supersession — RAIN-003
+
+RAIN-002 passed machine validation, including free-site ingress, split fallspeed/Advance debt, PERF exactness/capacity and all regressions. The owner rejected only its long-form morphology: one-hour dwell plus lowest-of-three broad compensational avulsion produced strata that looked too homogeneous/bland. RAIN-003 preserves the independent ingress/debt/performance fixes and replaces only focus morphology with correlated meander, weak terrain steering, category-boundary rephase and a wider focus corridor.
