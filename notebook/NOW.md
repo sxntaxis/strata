@@ -5,9 +5,14 @@ state: active
 created: 2026-08-01
 updated: 2026-09-07
 authority: working
-summary: RAIN-003 is active after RAIN-002 machine-green but owner-rejected morphology: retain 75/25 broad rain, free-site ingress, instant fallspeed debt ownership, PERF-001 and frozen Classic settlement, while replacing bland dwell/lowest-of-three avulsion with correlated meander, weak terrain steering, category-boundary rephase, and ~7.3% focus-only padding.
-next: Natively validate RAIN-003 correlated meander, weak terrain steering, category rephase, smaller golden focus padding, retained RAIN-002 ingress/debt fixes, and PERF-001 exactness/capacity; then run the owner Hybrid 128x stratigraphic morphology gate.
+summary: RAIN-004 is active after RAIN-003 owner morphology review: retain correlated meander, weak terrain steering, category-boundary rephase, free-site ingress, instant fallspeed debt ownership, PERF-001 and frozen Classic settlement, while removing focus-only side padding and raising broad focus bias from 25% to the small golden-ratio part (~38.2%).
+next: Natively validate RAIN-004 full-width focus plus golden-small broad bias while preserving RAIN-003 meander/rephase, RAIN-002 ingress/debt fixes, PERF-001 exactness/capacity, and frozen Classic settlement; then run the owner Hybrid 128x morphology/anti-nozzle gate.
 ---
+
+
+## RAIN-004 authored candidate — 2026-09-07
+
+RAIN-003's correlated meander/category rephase direction survived owner morphology review, but the owner wants the focus to use the complete active width and wants the broad focus-biased share strengthened from 25% to the small golden-ratio part (`1/phi^2`, ~38.2%). RAIN-004 makes only those two morphology changes while retaining free-site ingress, immediate fallspeed debt ownership, PERF-001, frozen `momentum-grounded-contact`, and the no-nozzle broad focus sampler. See `notebook/work/RAIN-004-FULL-WIDTH-GOLDEN-BIAS.md`.
 
 
 ## RAIN-003 authored candidate — 2026-09-07

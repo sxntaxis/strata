@@ -1,7 +1,7 @@
 ---
 id: RAIN-003
 kind: work
-state: candidate
+state: superseded
 created: 2026-09-07
 updated: 2026-09-07
 authority: working
@@ -161,3 +161,8 @@ Desired morphology:
 - `testingcheats fallspeed 1x` slows immediately.
 
 If morphology still needs adjustment, the first/only tuning axis should be correlated meander persistence/mobility. Do not reopen 75/25 or Classic settlement without new owner evidence.
+
+
+## Supersession — RAIN-004
+
+RAIN-003 passed into owner morphology review and established the retained correlated-meander/category-rephase direction. The owner then requested two bounded changes only: remove the remaining focus-only side padding and raise the broad focus-biased rain share from 25% to the small golden-ratio part (~38.2%). RAIN-004 preserves the rest of RAIN-003 plus RAIN-002 free ingress/debt ownership and PERF-001.
