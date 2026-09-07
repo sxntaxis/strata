@@ -1016,7 +1016,8 @@ struct TestingCheatsState {
     spawn_accumulator: Duration,
     physics_accumulator: Duration,
     speed_multiplier: u32,
-    queued_simulated: Duration,
+    queued_speed_simulated: Duration,
+    queued_explicit_simulated: Duration,
     flow_wall_accumulator: Duration,
     flow_spawn_wall_accumulator: Duration,
     visual_dirty: bool,
@@ -1063,12 +1064,39 @@ impl TestingCheatsState {
             }
         } else {
             let accelerated = wall_delta.saturating_mul(self.speed_multiplier);
-            self.queued_simulated = self.queued_simulated.saturating_add(accelerated);
+            self.queued_speed_simulated =
+                self.queued_speed_simulated.saturating_add(accelerated);
             self.flow_wall_accumulator = Duration::ZERO;
             self.flow_spawn_wall_accumulator = Duration::ZERO;
         }
     }
+
+    fn total_queued_simulated(&self) -> Duration {
+        self.queued_speed_simulated
+            .saturating_add(self.queued_explicit_simulated)
+    }
+
+    fn queue_explicit_simulated(&mut self, delta: Duration) {
+        self.queued_explicit_simulated = self.queued_explicit_simulated.saturating_add(delta);
+    }
+
+    fn set_speed_multiplier(&mut self, speed_multiplier: u32) {
+        self.speed_multiplier = speed_multiplier;
+        // A fallspeed command changes the live preview rate now. Synthetic time
+        // accrued only because of the previous multiplier is stale preview debt
+        // and must not keep the sandbox racing after a slowdown. Explicit
+        // `testingcheats advance` debt remains authoritative to the user's request.
+        self.queued_speed_simulated = Duration::ZERO;
+    }
+
+    fn consume_queued_simulated(&mut self, amount: Duration) {
+        let explicit = amount.min(self.queued_explicit_simulated);
+        self.queued_explicit_simulated = self.queued_explicit_simulated.saturating_sub(explicit);
+        let speed = amount.saturating_sub(explicit);
+        self.queued_speed_simulated = self.queued_speed_simulated.saturating_sub(speed);
+    }
 }
+
 
 struct App {
     time_tracker: TimeTracker,
@@ -2794,7 +2822,8 @@ impl App {
             spawn_accumulator: self.simulation.spawn_accumulator,
             physics_accumulator: self.simulation.physics_accumulator,
             speed_multiplier: 1,
-            queued_simulated: Duration::ZERO,
+            queued_speed_simulated: Duration::ZERO,
+            queued_explicit_simulated: Duration::ZERO,
             flow_wall_accumulator: Duration::ZERO,
             flow_spawn_wall_accumulator: Duration::ZERO,
             visual_dirty: false,
@@ -2820,7 +2849,8 @@ impl App {
             spawn_accumulator: self.simulation.spawn_accumulator,
             physics_accumulator: self.simulation.physics_accumulator,
             speed_multiplier,
-            queued_simulated: Duration::ZERO,
+            queued_speed_simulated: Duration::ZERO,
+            queued_explicit_simulated: Duration::ZERO,
             flow_wall_accumulator: Duration::ZERO,
             flow_spawn_wall_accumulator: Duration::ZERO,
             visual_dirty: false,
@@ -2853,7 +2883,7 @@ impl App {
             return;
         }
         if let Some(testing) = self.testing_cheats.as_mut() {
-            testing.queued_simulated = testing.queued_simulated.saturating_add(delta);
+            testing.queue_explicit_simulated(delta);
         }
     }
 
@@ -3063,7 +3093,7 @@ impl App {
             return;
         }
 
-        if testing.queued_simulated.is_zero() {
+        if testing.total_queued_simulated().is_zero() {
             if changed {
                 testing.visual_dirty = true;
                 self.render_needed = true;
@@ -3074,14 +3104,14 @@ impl App {
         // Quiescent fast-forward remains CPU-cooperative. Stop as soon as a
         // physical or presentation flow begins; preserve the remaining user-
         // requested debt and resume it after the event is visually complete.
-        while !testing.queued_simulated.is_zero() && Instant::now() < deadline {
+        while !testing.total_queued_simulated().is_zero() && Instant::now() < deadline {
             let spawn_left = tick_rate.saturating_sub(testing.spawn_accumulator);
             let physics_left = physics_rate.saturating_sub(testing.physics_accumulator);
             let next_event = spawn_left.min(physics_left);
-            let step = testing.queued_simulated.min(next_event);
+            let step = testing.total_queued_simulated().min(next_event);
             testing.spawn_accumulator += step;
             testing.physics_accumulator += step;
-            testing.queued_simulated = testing.queued_simulated.saturating_sub(step);
+            testing.consume_queued_simulated(step);
 
             let spawn_due = testing.spawn_accumulator >= tick_rate;
             let physics_due = testing.physics_accumulator >= physics_rate;
@@ -4134,7 +4164,8 @@ mod testing_cheats_clock_tests {
             spawn_accumulator: Duration::ZERO,
             physics_accumulator: Duration::ZERO,
             speed_multiplier,
-            queued_simulated: Duration::from_secs(30),
+            queued_speed_simulated: Duration::from_secs(30),
+            queued_explicit_simulated: Duration::ZERO,
             flow_wall_accumulator: Duration::ZERO,
             flow_spawn_wall_accumulator: Duration::ZERO,
             visual_dirty: false,
@@ -4234,8 +4265,39 @@ mod testing_cheats_clock_tests {
 
         testing.accumulate_wall_time(Duration::from_secs(1));
 
-        assert_eq!(testing.queued_simulated, Duration::from_secs(94));
+        assert_eq!(testing.total_queued_simulated(), Duration::from_secs(94));
         assert_eq!(testing.flow_wall_accumulator, Duration::ZERO);
+    }
+
+    #[test]
+    fn fallspeed_change_discards_only_multiplier_debt_and_preserves_explicit_advance() {
+        let engine =
+            TestingSandEngine::Classic(ClassicSandboxEngine::new(20, 10, 41, ClassicRainMode::Uniform));
+        let mut testing = state(engine, 128);
+        testing.queue_explicit_simulated(Duration::from_secs(45));
+        testing.accumulate_wall_time(Duration::from_secs(1));
+        assert_eq!(testing.queued_speed_simulated, Duration::from_secs(158));
+        assert_eq!(testing.queued_explicit_simulated, Duration::from_secs(45));
+
+        testing.set_speed_multiplier(1);
+
+        assert_eq!(testing.speed_multiplier, 1);
+        assert_eq!(testing.queued_speed_simulated, Duration::ZERO);
+        assert_eq!(testing.queued_explicit_simulated, Duration::from_secs(45));
+        assert_eq!(testing.total_queued_simulated(), Duration::from_secs(45));
+    }
+
+    #[test]
+    fn scheduler_consumes_explicit_advance_before_multiplier_debt() {
+        let engine =
+            TestingSandEngine::Classic(ClassicSandboxEngine::new(20, 10, 43, ClassicRainMode::Uniform));
+        let mut testing = state(engine, 64);
+        testing.queue_explicit_simulated(Duration::from_secs(20));
+
+        testing.consume_queued_simulated(Duration::from_secs(25));
+
+        assert_eq!(testing.queued_explicit_simulated, Duration::ZERO);
+        assert_eq!(testing.queued_speed_simulated, Duration::from_secs(25));
     }
 
     #[test]
@@ -4243,11 +4305,11 @@ mod testing_cheats_clock_tests {
         let mut engine = OsloSandboxEngine::new_front_vessel(20, 10, 7);
         engine.test_seed_visible_flow();
         let mut testing = state(TestingSandEngine::Oslo(Box::new(engine)), 64);
-        let debt_before = testing.queued_simulated;
+        let debt_before = testing.total_queued_simulated();
 
         testing.accumulate_wall_time(Duration::from_secs(1));
 
-        assert_eq!(testing.queued_simulated, debt_before);
+        assert_eq!(testing.total_queued_simulated(), debt_before);
         assert!(testing.flow_wall_accumulator > Duration::ZERO);
         assert_eq!(testing.flow_spawn_wall_accumulator, Duration::from_secs(1));
     }
@@ -4257,11 +4319,11 @@ mod testing_cheats_clock_tests {
         let mut engine = OsloSandboxEngine::new_front_unit_perceptual_flowviz_vessel(20, 10, 7);
         engine.test_seed_visible_flow();
         let mut testing = state(TestingSandEngine::Oslo(Box::new(engine)), 64);
-        let debt_before = testing.queued_simulated;
+        let debt_before = testing.total_queued_simulated();
 
         testing.accumulate_wall_time(Duration::from_secs(1));
 
-        assert_eq!(testing.queued_simulated, debt_before);
+        assert_eq!(testing.total_queued_simulated(), debt_before);
         assert_eq!(testing.flow_wall_accumulator, Duration::from_millis(4_096));
         assert_eq!(testing.flow_spawn_wall_accumulator, Duration::ZERO);
     }
@@ -4271,11 +4333,11 @@ mod testing_cheats_clock_tests {
         let mut engine = OsloSandboxEngine::new_front_unit_truthful_flowviz_vessel(20, 10, 7);
         engine.test_seed_visible_flow();
         let mut testing = state(TestingSandEngine::Oslo(Box::new(engine)), 64);
-        let debt_before = testing.queued_simulated;
+        let debt_before = testing.total_queued_simulated();
 
         testing.accumulate_wall_time(Duration::from_secs(1));
 
-        assert_eq!(testing.queued_simulated, debt_before);
+        assert_eq!(testing.total_queued_simulated(), debt_before);
         assert_eq!(testing.flow_wall_accumulator, Duration::from_millis(4_096));
         assert_eq!(testing.flow_spawn_wall_accumulator, Duration::from_secs(1));
     }
@@ -4285,11 +4347,11 @@ mod testing_cheats_clock_tests {
         let mut engine = OsloSandboxEngine::new_front_vessel(20, 10, 7);
         engine.test_seed_visual_transit();
         let mut testing = state(TestingSandEngine::Oslo(Box::new(engine)), 128);
-        let debt_before = testing.queued_simulated;
+        let debt_before = testing.total_queued_simulated();
 
         testing.accumulate_wall_time(Duration::from_millis(500));
 
-        assert_eq!(testing.queued_simulated, debt_before);
+        assert_eq!(testing.total_queued_simulated(), debt_before);
         assert!(testing.flow_wall_accumulator > Duration::ZERO);
         assert_eq!(
             testing.flow_spawn_wall_accumulator,

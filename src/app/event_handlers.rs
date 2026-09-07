@@ -513,7 +513,7 @@ impl App {
                 let source = match model.as_str() {
                     "h4" => "fresh clone of authoritative sediment",
                     "classic" => "fresh empty pre-pause grain physics + modern canonical/VW walls",
-                    "hybrid" => "classic physics + 90/10 slow wandering-focus rain",
+                    "hybrid" => "classic physics + 75/25 broad compensational avulsion rain",
                     "oslo-vessel-momentum" => {
                         "oslo-vessel + causal moving-grain momentum phase on steep local failures"
                     }
@@ -543,10 +543,10 @@ impl App {
                 self.ensure_testing_cheats_preview()?;
                 let selected = multiplier.unwrap_or_else(|| self.testing_cheats_cycle_fallspeed());
                 let testing = self.testing_cheats.as_mut().expect("testing preview exists");
-                testing.speed_multiplier = selected;
+                testing.set_speed_multiplier(selected);
                 self.render_needed = true;
                 Ok(format!(
-                    "Testing sandbox {} fallspeed: {selected}x (authoritative sediment unchanged)",
+                    "Testing sandbox {} fallspeed: {selected}x (stale multiplier debt cleared; explicit advance preserved; authoritative sediment unchanged)",
                     testing.engine.model_name()
                 ))
             }
@@ -562,7 +562,7 @@ impl App {
                         (
                             testing.engine.model_name(),
                             testing.engine.grain_count(),
-                            testing.queued_simulated,
+                            testing.total_queued_simulated(),
                         )
                     },
                 );
@@ -696,7 +696,8 @@ impl App {
                 let grains = testing.engine.fill_rainbow_80(&category_ids)?;
                 testing.spawn_accumulator = std::time::Duration::ZERO;
                 testing.physics_accumulator = std::time::Duration::ZERO;
-                testing.queued_simulated = std::time::Duration::ZERO;
+                testing.queued_speed_simulated = std::time::Duration::ZERO;
+                testing.queued_explicit_simulated = std::time::Duration::ZERO;
                 testing.flow_wall_accumulator = std::time::Duration::ZERO;
                 testing.visual_dirty = false;
                 self.render_needed = true;
@@ -713,7 +714,8 @@ impl App {
                 let grains = testing.engine.fill_rainbow_80_centered_half(&category_ids)?;
                 testing.spawn_accumulator = std::time::Duration::ZERO;
                 testing.physics_accumulator = std::time::Duration::ZERO;
-                testing.queued_simulated = std::time::Duration::ZERO;
+                testing.queued_speed_simulated = std::time::Duration::ZERO;
+                testing.queued_explicit_simulated = std::time::Duration::ZERO;
                 testing.flow_wall_accumulator = std::time::Duration::ZERO;
                 testing.visual_dirty = false;
                 self.render_needed = true;
@@ -729,7 +731,8 @@ impl App {
                 testing.engine.clear();
                 testing.spawn_accumulator = std::time::Duration::ZERO;
                 testing.physics_accumulator = std::time::Duration::ZERO;
-                testing.queued_simulated = std::time::Duration::ZERO;
+                testing.queued_speed_simulated = std::time::Duration::ZERO;
+                testing.queued_explicit_simulated = std::time::Duration::ZERO;
                 testing.flow_wall_accumulator = std::time::Duration::ZERO;
                 testing.visual_dirty = false;
                 self.render_needed = true;
@@ -741,12 +744,14 @@ impl App {
             CommandIntent::TestingCheatsStatus => {
                 if let Some(testing) = self.testing_cheats.as_ref() {
                     Ok(format!(
-                        "Testing sandbox: model={}, speed={}x, grains={} · {} · queued={} · reset returns to authoritative sediment",
+                        "Testing sandbox: model={}, speed={}x, grains={} · {} · queued={} (speed={} advance={}) · reset returns to authoritative sediment",
                         testing.engine.model_name(),
                         testing.speed_multiplier,
                         testing.engine.grain_count(),
                         testing.engine.detail_status(),
-                        command::format_hms(testing.queued_simulated.as_secs() as usize)
+                        command::format_hms(testing.total_queued_simulated().as_secs() as usize),
+                        command::format_hms(testing.queued_speed_simulated.as_secs() as usize),
+                        command::format_hms(testing.queued_explicit_simulated.as_secs() as usize)
                     ))
                 } else {
                     Ok("Testing sandbox inactive; authoritative live sediment is displayed".to_string())
