@@ -647,15 +647,14 @@ impl ClassicSandboxEngine {
 
         let focus = self.advance_rain_focus(bounds);
         let uniform_index = self.rain_random_index(free_columns.len());
-        let chosen_index =
-            if free_columns.len() == 1
-                || !self.rain_random_probability(RAIN_FOCUS_BIAS_PROBABILITY)
-            {
-                uniform_index
-            } else {
-                self.sample_focus_biased_free_index(bounds, focus, free_columns)
-                    .unwrap_or(uniform_index)
-            };
+        let chosen_index = if free_columns.len() == 1
+            || !self.rain_random_probability(RAIN_FOCUS_BIAS_PROBABILITY)
+        {
+            uniform_index
+        } else {
+            self.sample_focus_biased_free_index(bounds, focus, free_columns)
+                .unwrap_or(uniform_index)
+        };
         self.record_rain_region(free_columns[chosen_index], bounds);
         chosen_index
     }
@@ -1641,8 +1640,7 @@ impl ClassicSandboxEngine {
         debug_assert!((0.0..=1.0).contains(&probability));
         // Use the upper 53 random bits to form a deterministic [0, 1) sample,
         // matching f64 mantissa precision without introducing another RNG stream.
-        let sample =
-            (self.next_rain_random_u64() >> 11) as f64 * (1.0 / ((1u64 << 53) as f64));
+        let sample = (self.next_rain_random_u64() >> 11) as f64 * (1.0 / ((1u64 << 53) as f64));
         sample < probability
     }
 }
