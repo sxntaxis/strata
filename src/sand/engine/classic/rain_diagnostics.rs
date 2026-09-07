@@ -1047,4 +1047,468 @@ mod tests {
             percentile(&mound_el, 0.90),
         );
     }
+
+    fn logarithmic_sample(min: f64, max: f64, unit: f64) -> f64 {
+        assert!(min > 0.0 && max >= min);
+        (min.ln() + unit.clamp(0.0, 1.0) * (max.ln() - min.ln())).exp()
+    }
+
+    fn rain_005a3_geometry(index: usize) -> (usize, usize) {
+        // RAIN-005A3 deliberately samples geometry in area/aspect space rather
+        // than enumerating named display resolutions. Both dimensions are
+        // logarithmic so a tiled pane and a very large terminal receive useful
+        // representation without the large end dominating the ensemble.
+        const MIN_TERMINAL_AREA: f64 = 300.0;
+        const MAX_TERMINAL_AREA: f64 = 50_000.0;
+        const MIN_ASPECT: f64 = 0.18;
+        const MAX_ASPECT: f64 = 18.0;
+        const MIN_WIDTH: usize = 20;
+        const MAX_WIDTH: usize = 420;
+        const MIN_HEIGHT: usize = 10;
+        const MAX_HEIGHT: usize = 140;
+
+        let area = logarithmic_sample(MIN_TERMINAL_AREA, MAX_TERMINAL_AREA, halton(index, 2));
+        let aspect = logarithmic_sample(MIN_ASPECT, MAX_ASPECT, halton(index, 3));
+        let width = (area * aspect)
+            .sqrt()
+            .round()
+            .max(MIN_WIDTH as f64)
+            .min(MAX_WIDTH as f64) as usize;
+        let height = (area / aspect)
+            .sqrt()
+            .round()
+            .max(MIN_HEIGHT as f64)
+            .min(MAX_HEIGHT as f64) as usize;
+        (width, height)
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct MorphologySample {
+        cv: f64,
+        correlation: f64,
+        total_variation: f64,
+        centroid_shift: f64,
+        centroid_span: f64,
+        mound_el: f64,
+    }
+
+    fn morphology_sample_for_geometry(
+        width_cells: usize,
+        height_cells: usize,
+        seed: u64,
+        categories: &[Category],
+    ) -> MorphologySample {
+        let mut engine = ClassicSandboxEngine::new(
+            u16::try_from(width_cells).expect("diagnostic width fits u16"),
+            u16::try_from(height_cells).expect("diagnostic height fits u16"),
+            seed,
+            ClassicRainMode::WanderingFocus,
+        );
+        engine.force_reference_gravity = false;
+
+        let bounds = engine.surface.viewport_bounds().expect("viewport");
+        let width_dots = bounds.x_end - bounds.x_start;
+        let free = (bounds.x_start..bounds.x_end).collect::<Vec<_>>();
+        let center = bounds.x_start + width_dots.saturating_sub(1) / 2;
+        let kernel =
+            rain_distribution_metrics(&free, center, RAIN_FOCUS_BIAS_PROBABILITY, width_dots);
+        let mound_grains = kernel.one_dot_excess_mound_grains.round().max(1.0) as usize;
+        let mound_el = kernel.one_dot_excess_mound_grains / width_dots as f64;
+
+        for category in categories {
+            advance_exact_grains(&mut engine, mound_grains, category.id);
+        }
+
+        let profiles = engine.category_profiles(bounds, categories);
+        let pairs = adjacent_profile_metrics(&profiles, width_dots);
+        assert!(
+            profiles.len() >= categories.len().saturating_sub(1),
+            "terminal={width_cells}x{height_cells} profiles={} expected_at_least={}",
+            profiles.len(),
+            categories.len().saturating_sub(1)
+        );
+        assert!(
+            pairs.len() >= categories.len().saturating_sub(2),
+            "terminal={width_cells}x{height_cells} pairs={} expected_at_least={}",
+            pairs.len(),
+            categories.len().saturating_sub(2)
+        );
+
+        let cv = mean(
+            &profiles
+                .iter()
+                .map(|profile| profile.thickness_cv)
+                .collect::<Vec<_>>(),
+        )
+        .expect("profiles");
+        let correlation = mean_defined(pairs.iter().map(|pair| pair.correlation)).unwrap_or(0.0);
+        let total_variation = mean(
+            &pairs
+                .iter()
+                .map(|pair| pair.total_variation)
+                .collect::<Vec<_>>(),
+        )
+        .expect("pairs");
+        let centroid_shift = mean(
+            &pairs
+                .iter()
+                .map(|pair| pair.centroid_shift_fraction)
+                .collect::<Vec<_>>(),
+        )
+        .expect("pairs");
+        let min_centroid = profiles
+            .iter()
+            .map(|profile| profile.centroid_x_norm)
+            .fold(f64::INFINITY, f64::min);
+        let max_centroid = profiles
+            .iter()
+            .map(|profile| profile.centroid_x_norm)
+            .fold(f64::NEG_INFINITY, f64::max);
+
+        MorphologySample {
+            cv,
+            correlation,
+            total_variation,
+            centroid_shift,
+            centroid_span: max_centroid - min_centroid,
+            mound_el,
+        }
+    }
+
+    fn abs_delta(left: f64, right: f64) -> f64 {
+        (left - right).abs()
+    }
+
+    fn print_extended_percentiles(label: &str, values: &[f64]) {
+        println!(
+            "{label} p05={:.9} p10={:.9} p25={:.9} p50={:.9} p75={:.9} p90={:.9} p95={:.9} min={:.9} max={:.9}",
+            percentile(values, 0.05),
+            percentile(values, 0.10),
+            percentile(values, 0.25),
+            percentile(values, 0.50),
+            percentile(values, 0.75),
+            percentile(values, 0.90),
+            percentile(values, 0.95),
+            values.iter().copied().fold(f64::INFINITY, f64::min),
+            values.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        );
+    }
+
+    fn correlation_or_zero(left: &[f64], right: &[f64]) -> f64 {
+        pearson(left, right).unwrap_or(0.0)
+    }
+
+    #[test]
+    #[ignore = "native RAIN-005A3 extended geometry x paired-seed morphology ensemble; intentionally long-running"]
+    fn rain_005a3_extended_geometry_paired_seed_morphology_ensemble_probe() {
+        // 96 continuously sampled geometries x two independent seeds gives 192
+        // morphology runs. The domain spans tiny panes through terminals larger
+        // than common fullscreen use, portrait through extreme ultrawide. The
+        // geometry generator is low-discrepancy and logarithmic; there are no
+        // canonical user resolutions hidden in the test.
+        const GEOMETRIES: usize = 96;
+        const SEEDS_PER_GEOMETRY: usize = 2;
+        const CATEGORY_COUNT: usize = 5;
+
+        let categories = (1..=CATEGORY_COUNT)
+            .map(|id| category(id as u64, &format!("Extended {id}")))
+            .collect::<Vec<_>>();
+
+        let mut widths = Vec::with_capacity(GEOMETRIES);
+        let mut heights = Vec::with_capacity(GEOMETRIES);
+        let mut log_widths = Vec::with_capacity(GEOMETRIES);
+        let mut log_heights = Vec::with_capacity(GEOMETRIES);
+        let mut log_areas = Vec::with_capacity(GEOMETRIES);
+        let mut log_aspects = Vec::with_capacity(GEOMETRIES);
+        let mut abs_log_aspects = Vec::with_capacity(GEOMETRIES);
+
+        let mut geometry_mean_cv = Vec::with_capacity(GEOMETRIES);
+        let mut geometry_mean_corr = Vec::with_capacity(GEOMETRIES);
+        let mut geometry_mean_tv = Vec::with_capacity(GEOMETRIES);
+        let mut geometry_mean_shift = Vec::with_capacity(GEOMETRIES);
+        let mut geometry_mean_span = Vec::with_capacity(GEOMETRIES);
+        let mut geometry_mean_mound_el = Vec::with_capacity(GEOMETRIES);
+
+        let mut all_cv = Vec::with_capacity(GEOMETRIES * SEEDS_PER_GEOMETRY);
+        let mut all_corr = Vec::with_capacity(GEOMETRIES * SEEDS_PER_GEOMETRY);
+        let mut all_tv = Vec::with_capacity(GEOMETRIES * SEEDS_PER_GEOMETRY);
+        let mut all_shift = Vec::with_capacity(GEOMETRIES * SEEDS_PER_GEOMETRY);
+        let mut all_span = Vec::with_capacity(GEOMETRIES * SEEDS_PER_GEOMETRY);
+        let mut all_mound_el = Vec::with_capacity(GEOMETRIES * SEEDS_PER_GEOMETRY);
+
+        let mut seed_delta_cv = Vec::with_capacity(GEOMETRIES);
+        let mut seed_delta_corr = Vec::with_capacity(GEOMETRIES);
+        let mut seed_delta_tv = Vec::with_capacity(GEOMETRIES);
+        let mut seed_delta_shift = Vec::with_capacity(GEOMETRIES);
+        let mut seed_delta_span = Vec::with_capacity(GEOMETRIES);
+
+        for geometry in 1..=GEOMETRIES {
+            let (width_cells, height_cells) = rain_005a3_geometry(geometry);
+            let area = (width_cells * height_cells) as f64;
+            let aspect = width_cells as f64 / height_cells as f64;
+            widths.push(width_cells as f64);
+            heights.push(height_cells as f64);
+            log_widths.push((width_cells as f64).ln());
+            log_heights.push((height_cells as f64).ln());
+            log_areas.push(area.ln());
+            log_aspects.push(aspect.ln());
+            abs_log_aspects.push(aspect.ln().abs());
+
+            let mut samples = Vec::with_capacity(SEEDS_PER_GEOMETRY);
+            for seed_index in 0..SEEDS_PER_GEOMETRY {
+                let run_index = (geometry - 1) * SEEDS_PER_GEOMETRY + seed_index + 1;
+                let seed = 0xA11C_005A_3000_0000u64
+                    ^ (geometry as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                    ^ ((seed_index as u64) + 1).wrapping_mul(0xD1B5_4A32_D192_ED03);
+                let sample = morphology_sample_for_geometry(
+                    width_cells,
+                    height_cells,
+                    seed,
+                    &categories,
+                );
+                all_cv.push(sample.cv);
+                all_corr.push(sample.correlation);
+                all_tv.push(sample.total_variation);
+                all_shift.push(sample.centroid_shift);
+                all_span.push(sample.centroid_span);
+                all_mound_el.push(sample.mound_el);
+                samples.push(sample);
+
+                println!(
+                    "RAIN_005A3_MORPH_SAMPLE run={run_index} geometry={geometry} seed_slot={} terminal={}x{} dots={}x{} area={} aspect={aspect:.6} seed={seed} mound_el={:.9} mean_thickness_cv={:.9} mean_pair_corr={:.9} mean_pair_tv={:.9} mean_pair_centroid_shift={:.9} centroid_span={:.9}",
+                    seed_index + 1,
+                    width_cells,
+                    height_cells,
+                    width_cells * 2,
+                    height_cells * 4,
+                    width_cells * height_cells,
+                    sample.mound_el,
+                    sample.cv,
+                    sample.correlation,
+                    sample.total_variation,
+                    sample.centroid_shift,
+                    sample.centroid_span,
+                );
+            }
+
+            let first = samples[0];
+            let second = samples[1];
+            geometry_mean_cv.push((first.cv + second.cv) * 0.5);
+            geometry_mean_corr.push((first.correlation + second.correlation) * 0.5);
+            geometry_mean_tv.push((first.total_variation + second.total_variation) * 0.5);
+            geometry_mean_shift.push((first.centroid_shift + second.centroid_shift) * 0.5);
+            geometry_mean_span.push((first.centroid_span + second.centroid_span) * 0.5);
+            geometry_mean_mound_el.push((first.mound_el + second.mound_el) * 0.5);
+
+            seed_delta_cv.push(abs_delta(first.cv, second.cv));
+            seed_delta_corr.push(abs_delta(first.correlation, second.correlation));
+            seed_delta_tv.push(abs_delta(first.total_variation, second.total_variation));
+            seed_delta_shift.push(abs_delta(first.centroid_shift, second.centroid_shift));
+            seed_delta_span.push(abs_delta(first.centroid_span, second.centroid_span));
+        }
+
+        let min_width = widths.iter().copied().fold(f64::INFINITY, f64::min);
+        let max_width = widths.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let min_height = heights.iter().copied().fold(f64::INFINITY, f64::min);
+        let max_height = heights.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let min_area = widths
+            .iter()
+            .zip(heights.iter())
+            .map(|(width, height)| width * height)
+            .fold(f64::INFINITY, f64::min);
+        let max_area = widths
+            .iter()
+            .zip(heights.iter())
+            .map(|(width, height)| width * height)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let min_aspect = widths
+            .iter()
+            .zip(heights.iter())
+            .map(|(width, height)| width / height)
+            .fold(f64::INFINITY, f64::min);
+        let max_aspect = widths
+            .iter()
+            .zip(heights.iter())
+            .map(|(width, height)| width / height)
+            .fold(f64::NEG_INFINITY, f64::max);
+
+        // Fail if later edits accidentally collapse this back into a small or
+        // conventional-desktop-only ensemble. These are test-domain coverage
+        // guards, never runtime morphology constants.
+        assert!(min_width <= 24.0, "extended ensemble lost narrow-pane coverage");
+        assert!(max_width >= 360.0, "extended ensemble lost large-width coverage");
+        assert!(min_height <= 14.0, "extended ensemble lost shallow-pane coverage");
+        assert!(max_height >= 120.0, "extended ensemble lost tall-terminal coverage");
+        assert!(min_aspect <= 0.30, "extended ensemble lost portrait coverage");
+        assert!(max_aspect >= 10.0, "extended ensemble lost ultrawide coverage");
+        assert!(max_area >= 25_000.0, "extended ensemble lost large-area coverage");
+
+        println!(
+            "RAIN_005A3_MORPH_ENSEMBLE geometries={GEOMETRIES} seeds_per_geometry={SEEDS_PER_GEOMETRY} runs={} width_min={} width_max={} height_min={} height_max={} area_min={} area_max={} aspect_min={:.6} aspect_max={:.6}",
+            GEOMETRIES * SEEDS_PER_GEOMETRY,
+            min_width as usize,
+            max_width as usize,
+            min_height as usize,
+            max_height as usize,
+            min_area as usize,
+            max_area as usize,
+            min_aspect,
+            max_aspect,
+        );
+
+        print_extended_percentiles("RAIN_005A3_CV", &all_cv);
+        print_extended_percentiles("RAIN_005A3_CORR", &all_corr);
+        print_extended_percentiles("RAIN_005A3_TV", &all_tv);
+        print_extended_percentiles("RAIN_005A3_SHIFT", &all_shift);
+        print_extended_percentiles("RAIN_005A3_CENTROID_SPAN", &all_span);
+        print_extended_percentiles("RAIN_005A3_MOUND_EL", &all_mound_el);
+
+        println!(
+            "RAIN_005A3_SEED_VARIATION cv_delta_p50={:.9} cv_delta_p90={:.9} cv_delta_p95={:.9} corr_delta_p50={:.9} corr_delta_p90={:.9} corr_delta_p95={:.9} tv_delta_p50={:.9} tv_delta_p90={:.9} tv_delta_p95={:.9} shift_delta_p50={:.9} shift_delta_p90={:.9} shift_delta_p95={:.9} span_delta_p50={:.9} span_delta_p90={:.9} span_delta_p95={:.9}",
+            percentile(&seed_delta_cv, 0.50),
+            percentile(&seed_delta_cv, 0.90),
+            percentile(&seed_delta_cv, 0.95),
+            percentile(&seed_delta_corr, 0.50),
+            percentile(&seed_delta_corr, 0.90),
+            percentile(&seed_delta_corr, 0.95),
+            percentile(&seed_delta_tv, 0.50),
+            percentile(&seed_delta_tv, 0.90),
+            percentile(&seed_delta_tv, 0.95),
+            percentile(&seed_delta_shift, 0.50),
+            percentile(&seed_delta_shift, 0.90),
+            percentile(&seed_delta_shift, 0.95),
+            percentile(&seed_delta_span, 0.50),
+            percentile(&seed_delta_span, 0.90),
+            percentile(&seed_delta_span, 0.95),
+        );
+
+        println!(
+            "RAIN_005A3_GEOMETRY_DEPENDENCE metric=cv log_width={:.6} log_height={:.6} log_area={:.6} log_aspect={:.6} abs_log_aspect={:.6}",
+            correlation_or_zero(&log_widths, &geometry_mean_cv),
+            correlation_or_zero(&log_heights, &geometry_mean_cv),
+            correlation_or_zero(&log_areas, &geometry_mean_cv),
+            correlation_or_zero(&log_aspects, &geometry_mean_cv),
+            correlation_or_zero(&abs_log_aspects, &geometry_mean_cv),
+        );
+        println!(
+            "RAIN_005A3_GEOMETRY_DEPENDENCE metric=corr log_width={:.6} log_height={:.6} log_area={:.6} log_aspect={:.6} abs_log_aspect={:.6}",
+            correlation_or_zero(&log_widths, &geometry_mean_corr),
+            correlation_or_zero(&log_heights, &geometry_mean_corr),
+            correlation_or_zero(&log_areas, &geometry_mean_corr),
+            correlation_or_zero(&log_aspects, &geometry_mean_corr),
+            correlation_or_zero(&abs_log_aspects, &geometry_mean_corr),
+        );
+        println!(
+            "RAIN_005A3_GEOMETRY_DEPENDENCE metric=tv log_width={:.6} log_height={:.6} log_area={:.6} log_aspect={:.6} abs_log_aspect={:.6}",
+            correlation_or_zero(&log_widths, &geometry_mean_tv),
+            correlation_or_zero(&log_heights, &geometry_mean_tv),
+            correlation_or_zero(&log_areas, &geometry_mean_tv),
+            correlation_or_zero(&log_aspects, &geometry_mean_tv),
+            correlation_or_zero(&abs_log_aspects, &geometry_mean_tv),
+        );
+        println!(
+            "RAIN_005A3_GEOMETRY_DEPENDENCE metric=shift log_width={:.6} log_height={:.6} log_area={:.6} log_aspect={:.6} abs_log_aspect={:.6}",
+            correlation_or_zero(&log_widths, &geometry_mean_shift),
+            correlation_or_zero(&log_heights, &geometry_mean_shift),
+            correlation_or_zero(&log_areas, &geometry_mean_shift),
+            correlation_or_zero(&log_aspects, &geometry_mean_shift),
+            correlation_or_zero(&abs_log_aspects, &geometry_mean_shift),
+        );
+        println!(
+            "RAIN_005A3_GEOMETRY_DEPENDENCE metric=centroid_span log_width={:.6} log_height={:.6} log_area={:.6} log_aspect={:.6} abs_log_aspect={:.6}",
+            correlation_or_zero(&log_widths, &geometry_mean_span),
+            correlation_or_zero(&log_heights, &geometry_mean_span),
+            correlation_or_zero(&log_areas, &geometry_mean_span),
+            correlation_or_zero(&log_aspects, &geometry_mean_span),
+            correlation_or_zero(&abs_log_aspects, &geometry_mean_span),
+        );
+        println!(
+            "RAIN_005A3_GEOMETRY_DEPENDENCE metric=mound_el log_width={:.6} log_height={:.6} log_area={:.6} log_aspect={:.6} abs_log_aspect={:.6}",
+            correlation_or_zero(&log_widths, &geometry_mean_mound_el),
+            correlation_or_zero(&log_heights, &geometry_mean_mound_el),
+            correlation_or_zero(&log_areas, &geometry_mean_mound_el),
+            correlation_or_zero(&log_aspects, &geometry_mean_mound_el),
+            correlation_or_zero(&abs_log_aspects, &geometry_mean_mound_el),
+        );
+    }
+
+    #[test]
+    #[ignore = "native RAIN-005A3 extended analytical arbitrary-geometry/nozzle sweep"]
+    fn rain_005a3_extended_analytical_nozzle_geometry_probe() {
+        // This analytical sweep is intentionally much denser than the expensive
+        // morphology ensemble. It explores width/height logarithmically, focus
+        // across the entire active width, and nearly-empty through nearly-full
+        // sky, without choosing any user resolution as canonical.
+        const CASES: usize = 4096;
+        const MIN_WIDTH_DOTS: f64 = 40.0;
+        const MAX_WIDTH_DOTS: f64 = 840.0;
+        const MIN_HEIGHT_DOTS: f64 = 40.0;
+        const MAX_HEIGHT_DOTS: f64 = 560.0;
+
+        let ingress_rate_hz = MILLIS_PER_SECOND / TIME_SETTINGS.tick_ms as f64;
+        let gravity_step_ms = TIME_SETTINGS.physics_ms.saturating_mul(2);
+        let rows_per_second = MILLIS_PER_SECOND / gravity_step_ms as f64;
+
+        let mut expected_airborne_values = Vec::with_capacity(CASES);
+        let mut kl_values = Vec::with_capacity(CASES);
+        let mut information_values = Vec::with_capacity(CASES);
+        let mut kernel_width_values = Vec::with_capacity(CASES);
+        let mut mound_el_values = Vec::with_capacity(CASES);
+        let mut log_widths = Vec::with_capacity(CASES);
+        let mut log_heights = Vec::with_capacity(CASES);
+        let mut focus_edge_distances = Vec::with_capacity(CASES);
+        let mut sky_fractions = Vec::with_capacity(CASES);
+
+        for case in 1..=CASES {
+            let width_dots = logarithmic_sample(MIN_WIDTH_DOTS, MAX_WIDTH_DOTS, halton(case, 2))
+                .round()
+                .max(2.0) as usize;
+            let height_dots =
+                logarithmic_sample(MIN_HEIGHT_DOTS, MAX_HEIGHT_DOTS, halton(case, 3))
+                    .round()
+                    .max(2.0) as usize;
+            let focus_norm = halton(case, 5);
+            let sky_fraction = 0.02 + 0.96 * halton(case, 7);
+            let focus = ((width_dots - 1) as f64 * focus_norm).round() as usize;
+            let free = (0..width_dots).collect::<Vec<_>>();
+            let distribution =
+                rain_distribution_metrics(&free, focus, RAIN_FOCUS_BIAS_PROBABILITY, width_dots);
+            let mean_drop_rows = height_dots as f64 * sky_fraction;
+            let expected_airborne = ingress_rate_hz * mean_drop_rows / rows_per_second;
+            let information = expected_airborne * distribution.kl_bits_per_grain;
+            let mound_el = distribution.one_dot_excess_mound_grains / width_dots as f64;
+            let edge_distance = focus_norm.min(1.0 - focus_norm);
+
+            expected_airborne_values.push(expected_airborne);
+            kl_values.push(distribution.kl_bits_per_grain);
+            information_values.push(information);
+            kernel_width_values.push(distribution.focus_rms_width_fraction);
+            mound_el_values.push(mound_el);
+            log_widths.push((width_dots as f64).ln());
+            log_heights.push((height_dots as f64).ln());
+            focus_edge_distances.push(edge_distance);
+            sky_fractions.push(sky_fraction);
+        }
+
+        println!(
+            "RAIN_005A3_NOZZLE_ENSEMBLE cases={CASES} width_dots_min={MIN_WIDTH_DOTS:.0} width_dots_max={MAX_WIDTH_DOTS:.0} height_dots_min={MIN_HEIGHT_DOTS:.0} height_dots_max={MAX_HEIGHT_DOTS:.0}"
+        );
+        print_extended_percentiles("RAIN_005A3_EXPECTED_AIRBORNE", &expected_airborne_values);
+        print_extended_percentiles("RAIN_005A3_KL_BITS_PER_GRAIN", &kl_values);
+        print_extended_percentiles("RAIN_005A3_NOZZLE_INFORMATION_BITS", &information_values);
+        print_extended_percentiles("RAIN_005A3_KERNEL_WIDTH_FRACTION", &kernel_width_values);
+        print_extended_percentiles("RAIN_005A3_NOZZLE_MOUND_EL", &mound_el_values);
+        println!(
+            "RAIN_005A3_NOZZLE_DEPENDENCE information_vs_airborne={:.9} information_vs_log_width={:.9} information_vs_log_height={:.9} information_vs_sky_fraction={:.9} kl_vs_log_width={:.9} kl_vs_focus_edge_distance={:.9} kernel_width_vs_focus_edge_distance={:.9} mound_el_vs_log_width={:.9}",
+            correlation_or_zero(&expected_airborne_values, &information_values),
+            correlation_or_zero(&log_widths, &information_values),
+            correlation_or_zero(&log_heights, &information_values),
+            correlation_or_zero(&sky_fractions, &information_values),
+            correlation_or_zero(&log_widths, &kl_values),
+            correlation_or_zero(&focus_edge_distances, &kl_values),
+            correlation_or_zero(&focus_edge_distances, &kernel_width_values),
+            correlation_or_zero(&log_widths, &mound_el_values),
+        );
+    }
+
 }
