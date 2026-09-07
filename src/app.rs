@@ -847,8 +847,9 @@ impl TestingSandEngine {
             Self::Classic(engine) => {
                 let (canonical_w, canonical_h) = engine.canonical_dimensions();
                 let (vertical, diagonal) = engine.movement_counts();
+                let (rain_left, rain_center, rain_right) = engine.rain_region_counts();
                 format!(
-                    "{} sandbox · physical={} · pending={} · canonical={}x{} · vertical_moves={} · diagonal_moves={} · texture={} · experiment={} · colorblend={} · colorbackground={} · closed VW walls · no discharge",
+                    "{} sandbox · physical={} · pending={} · canonical={}x{} · vertical_moves={} · diagonal_moves={} · texture={} · experiment={} · rain={} targets={}/{}/{} · colorblend={} · colorbackground={} · closed VW walls · no discharge",
                     engine.model_name(),
                     engine.physical_grain_count(),
                     engine.pending_count(),
@@ -858,6 +859,10 @@ impl TestingSandEngine {
                     diagonal,
                     engine.texture_profile_name(),
                     engine.experiment_profile_name(),
+                    engine.rain_profile_name(),
+                    rain_left,
+                    rain_center,
+                    rain_right,
                     engine.color_blend_profile_name(),
                     engine.color_background_policy_name()
                 )

@@ -5,13 +5,17 @@ state: active
 created: 2026-08-01
 updated: 2026-09-06
 authority: working
-summary: APPEARANCE-001 is the active authored candidate: manual theme TOML, arbitrary named palettes and sand subsets, OKLCH color cycling, theme-independent category anchors, and rgb-luma-safe as the accepted Classic blend baseline; native validation remains pending.
-next: Natively validate APPEARANCE-001, then owner-smoke a custom theme through Settings and Layers. Keep terminal auto light/dark detection and strict/soft/safe contrast adaptation for the next appearance unit.
+summary: RAIN-001 is the active bounded ingress candidate: Classic settlement remains momentum-grounded-contact while hybrid rain tests 75% full-width / 25% broad focus bias plus weak compensational waypoint selection.
+next: Natively validate RAIN-001, then owner-compare uniform Classic against the single compensational hybrid candidate for anti-nozzle rain and layer-to-layer heterogeneity.
 ---
 
-## APPEARANCE-001 authored candidate — 2026-09-06
+## RAIN-001 authored candidate — 2026-09-06
 
-Manual theme authority is now the active authored candidate: arbitrary named palettes, optional arbitrary-length sand subsets, OKLCH-derived Layer color cycling, profile-local theme selection, theme-independent category RGB anchors, `default` external-color semantics, and `rgb-luma-safe` as Classic blend baseline. Physics remains `momentum-grounded-contact`. Native validation and owner theme smoke are required before publication; terminal auto light/dark and contrast adaptation remain the next appearance unit, not part of this candidate.
+Classic settlement physics is frozen at the owner-preferred `momentum-grounded-contact` baseline. RAIN-001 changes only the debug `hybrid` ingress comparison: restore the previously attractive 75/25 broad-rain envelope, keep the accepted slow cross-corridor focus walk, and choose each new long-lived waypoint by a two-candidate weak preference for lower broad grounded terrain. Uniform `classic` remains the control. No global terrain scan per grain, category-driven focus reset, nozzle emitter, persistence change, catch-up change, or Advance change is allowed. See `notebook/work/RAIN-001-COMPENSATIONAL-FOCUS.md`.
+
+## APPEARANCE-001 human-smoked — 2026-09-06
+
+Manual theme authority is machine-green and the disposable-profile btop-inspired theme worked live, including theme selection and arbitrary theme palette behavior. `rgb-luma-safe` remains the accepted Classic blend baseline. Terminal auto light/dark and strict/soft/safe contrast adaptation remain deferred until after the current rain/performance/advance sequence.
 
 # NOW — Strata
 
