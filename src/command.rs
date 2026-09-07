@@ -67,6 +67,8 @@ pub(crate) enum CommandIntent {
     #[cfg(debug_assertions)]
     TestingCheatsClassicStratigraphy,
     #[cfg(debug_assertions)]
+    TestingCheatsClassicRainMetrics,
+    #[cfg(debug_assertions)]
     TestingCheatsStatus,
     #[cfg(debug_assertions)]
     TestingCheatsProvenance,
@@ -101,6 +103,7 @@ impl CommandIntent {
                         | Self::TestingCheatsClassicColorBlend { .. }
                         | Self::TestingCheatsClassicColorBackground { .. }
                         | Self::TestingCheatsClassicStratigraphy
+                        | Self::TestingCheatsClassicRainMetrics
                         | Self::TestingCheatsStatus
                         | Self::TestingCheatsProvenance
                         | Self::TestingCheatsReset
@@ -156,7 +159,7 @@ pub(crate) fn parse(input: &str) -> Result<CommandIntent, String> {
 #[cfg(debug_assertions)]
 fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
     let Some((subcommand, rest)) = args.split_first() else {
-        return Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft|momentum-contact|momentum-repose-contact|momentum-surface|momentum-grounded-contact] | classic colorblend [rgb|rgb-additive|rgb-luma|rgb-luma-safe|rgb-mid|rgb-contrast|linear|oklab|dominant|dominant-soft] | classic colorbackground [neutral|dark|light] | classic stratigraphy | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | fillhalf | clear | status | provenance | reset".to_string());
+        return Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft|momentum-contact|momentum-repose-contact|momentum-surface|momentum-grounded-contact] | classic colorblend [rgb|rgb-additive|rgb-luma|rgb-luma-safe|rgb-mid|rgb-contrast|linear|oklab|dominant|dominant-soft] | classic colorbackground [neutral|dark|light] | classic stratigraphy | classic rainmetrics | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | fillhalf | clear | status | provenance | reset".to_string());
     };
 
     match subcommand.to_ascii_lowercase().as_str() {
@@ -321,13 +324,16 @@ fn parse_testing_cheats(args: &[String]) -> Result<CommandIntent, String> {
         "classic" if rest.len() == 1 && rest[0].eq_ignore_ascii_case("stratigraphy") => {
             Ok(CommandIntent::TestingCheatsClassicStratigraphy)
         }
+        "classic" if rest.len() == 1 && rest[0].eq_ignore_ascii_case("rainmetrics") => {
+            Ok(CommandIntent::TestingCheatsClassicRainMetrics)
+        }
         "fill" if rest.is_empty() => Ok(CommandIntent::TestingCheatsFill),
         "fillhalf" if rest.is_empty() => Ok(CommandIntent::TestingCheatsFillHalf),
         "clear" if rest.is_empty() => Ok(CommandIntent::TestingCheatsClear),
         "status" if rest.is_empty() => Ok(CommandIntent::TestingCheatsStatus),
         "provenance" if rest.is_empty() => Ok(CommandIntent::TestingCheatsProvenance),
         "reset" if rest.is_empty() => Ok(CommandIntent::TestingCheatsReset),
-        _ => Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft|momentum-contact|momentum-repose-contact|momentum-surface|momentum-grounded-contact] | classic colorblend [rgb|rgb-additive|rgb-luma|rgb-luma-safe|rgb-mid|rgb-contrast|linear|oklab|dominant|dominant-soft] | classic colorbackground [neutral|dark|light] | classic stratigraphy | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | fillhalf | clear | status | provenance | reset".to_string()),
+        _ => Err("Usage: testingcheats help | model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> | classic texture [baseline|textured|rugged|terraced] | classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft|momentum-contact|momentum-repose-contact|momentum-surface|momentum-grounded-contact] | classic colorblend [rgb|rgb-additive|rgb-luma|rgb-luma-safe|rgb-mid|rgb-contrast|linear|oklab|dominant|dominant-soft] | classic colorbackground [neutral|dark|light] | classic stratigraphy | classic rainmetrics | fallspeed [1x|4x|16x|64x|128x] | advance <duration> | fill | fillhalf | clear | status | provenance | reset".to_string()),
     }
 }
 
@@ -883,6 +889,11 @@ mod tests {
             CommandIntent::TestingCheatsClassicStratigraphy
         );
         assert!(parse("testingcheats classic stratigraphy extra").is_err());
+        assert_eq!(
+            parse("testingcheats classic rainmetrics").unwrap(),
+            CommandIntent::TestingCheatsClassicRainMetrics
+        );
+        assert!(parse("testingcheats classic rainmetrics extra").is_err());
         assert!(parse("testingcheats classic texture custom").is_err());
         assert!(parse("testingcheats classic repose 20").is_err());
         assert_eq!(

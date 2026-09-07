@@ -504,7 +504,7 @@ impl App {
             }
             #[cfg(debug_assertions)]
             CommandIntent::TestingCheatsHelp => Ok(
-                "testingcheats: default sandbox classic · model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> · classic texture [baseline|textured|rugged|terraced] · classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft|momentum-contact|momentum-repose-contact|momentum-surface|momentum-grounded-contact] · classic colorblend [rgb|rgb-additive|rgb-luma|rgb-luma-safe|rgb-mid|rgb-contrast|linear|oklab|dominant|dominant-soft] · classic colorbackground [neutral|dark|light] · classic stratigraphy · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · fill (classic/hybrid/Oslo; ensures six Fixture categories) · fillhalf (same fill, centered half-width) · clear · status · provenance · reset"
+                "testingcheats: default sandbox classic · model <h4|classic|hybrid|oslo-zero|oslo-box|oslo-vessel|oslo-vessel-momentum|oslo-vessel-front|oslo-vessel-front-flowviz|oslo-vessel-front-parcels|oslo-vessel-front-grains|oslo-vessel-fluid> · classic texture [baseline|textured|rugged|terraced] · classic experiment [rugged|memory|slope|memory-slope|anchored|momentum|momentum-repose|momentum-tangent|momentum-soft|momentum-contact|momentum-repose-contact|momentum-surface|momentum-grounded-contact] · classic colorblend [rgb|rgb-additive|rgb-luma|rgb-luma-safe|rgb-mid|rgb-contrast|linear|oklab|dominant|dominant-soft] · classic colorbackground [neutral|dark|light] · classic stratigraphy · classic rainmetrics · fallspeed [1x|4x|16x|64x|128x] · advance <duration> · fill (classic/hybrid/Oslo; ensures six Fixture categories) · fillhalf (same fill, centered half-width) · clear · status · provenance · reset"
                     .to_string(),
             ),
             #[cfg(debug_assertions)]
@@ -513,7 +513,7 @@ impl App {
                 let source = match model.as_str() {
                     "h4" => "fresh clone of authoritative sediment",
                     "classic" => "fresh empty pre-pause grain physics + modern canonical/VW walls",
-                    "hybrid" => "classic physics + 75/25 broad compensational avulsion rain",
+                    "hybrid" => "classic physics + RAIN-004 full-width correlated meander and broad golden-small focus bias",
                     "oslo-vessel-momentum" => {
                         "oslo-vessel + causal moving-grain momentum phase on steep local failures"
                     }
@@ -684,6 +684,49 @@ impl App {
                 })?;
                 Ok(format!(
                     "Classic stratigraphy report written to {} (read-only distribution diagnostic; physics and testing sediment unchanged)",
+                    path.display()
+                ))
+            }
+            #[cfg(debug_assertions)]
+            CommandIntent::TestingCheatsClassicRainMetrics => {
+                let Some(testing) = self.testing_cheats.as_ref() else {
+                    return Err(
+                        "testingcheats classic rainmetrics requires an active classic/hybrid testing sandbox"
+                            .to_string(),
+                    );
+                };
+                let categories = self.time_tracker.categories_ordered();
+                let report = testing
+                    .engine
+                    .classic_rain_morphology_diagnostics_report(&categories)?;
+                let cache_root = std::env::var_os("XDG_CACHE_HOME")
+                    .map(std::path::PathBuf::from)
+                    .or_else(|| {
+                        std::env::var_os("HOME")
+                            .map(std::path::PathBuf::from)
+                            .map(|home| home.join(".cache"))
+                    })
+                    .ok_or_else(|| {
+                        "testingcheats classic rainmetrics could not resolve a cache directory"
+                            .to_string()
+                    })?;
+                let path = cache_root.join("strata").join("classic-rain-metrics.txt");
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent).map_err(|error| {
+                        format!(
+                            "testingcheats classic rainmetrics could not create {}: {error}",
+                            parent.display()
+                        )
+                    })?;
+                }
+                std::fs::write(&path, report.as_bytes()).map_err(|error| {
+                    format!(
+                        "testingcheats classic rainmetrics could not write {}: {error}",
+                        path.display()
+                    )
+                })?;
+                Ok(format!(
+                    "Classic rain morphology diagnostics written to {} (measurement-only; RAIN-004 behavior unchanged)",
                     path.display()
                 ))
             }

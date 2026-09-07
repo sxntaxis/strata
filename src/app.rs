@@ -814,6 +814,19 @@ impl TestingSandEngine {
         }
     }
 
+    fn classic_rain_morphology_diagnostics_report(
+        &self,
+        categories: &[Category],
+    ) -> Result<String, String> {
+        match self {
+            Self::Classic(engine) => engine.rain_morphology_diagnostics_report(categories),
+            _ => Err(
+                "testingcheats classic rainmetrics is available only for classic/hybrid"
+                    .to_string(),
+            ),
+        }
+    }
+
     fn sync_for_render(&mut self) {
         if let Self::Oslo(engine) = self {
             engine.sync_for_render();

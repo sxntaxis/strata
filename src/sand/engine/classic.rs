@@ -12,6 +12,7 @@ use super::{
 
 mod grounded_index;
 mod occupancy_index;
+mod rain_diagnostics;
 mod stratigraphy;
 use grounded_index::GroundedColumnIndex;
 use occupancy_index::RowOccupancyIndex;
