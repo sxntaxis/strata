@@ -1701,9 +1701,11 @@ impl ClassicSandboxEngine {
             .filter(|index| *index >= bounds.x_start)
             .map(|index| self.supported_column_height(index) as isize)
             .unwrap_or(center);
-        let right = (x + 1 < bounds.x_end)
-            .then(|| self.supported_column_height(x + 1) as isize)
-            .unwrap_or(center);
+        let right = if x + 1 < bounds.x_end {
+            self.supported_column_height(x + 1) as isize
+        } else {
+            center
+        };
         center
             .saturating_mul(2)
             .saturating_sub(left)
