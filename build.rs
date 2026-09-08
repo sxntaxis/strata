@@ -16,9 +16,9 @@ fn main() {
 
     println!("cargo:rerun-if-changed=.git/HEAD");
     println!("cargo:rerun-if-changed=.git/index");
-    if let Ok(head) = fs::read_to_string(".git/HEAD") {
-        if let Some(reference) = head.trim().strip_prefix("ref: ") {
-            println!("cargo:rerun-if-changed=.git/{reference}");
-        }
+    if let Ok(head) = fs::read_to_string(".git/HEAD")
+        && let Some(reference) = head.trim().strip_prefix("ref: ")
+    {
+        println!("cargo:rerun-if-changed=.git/{reference}");
     }
 }
