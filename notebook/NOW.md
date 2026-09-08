@@ -5,9 +5,14 @@ state: active
 created: 2026-08-01
 updated: 2026-09-07
 authority: working
-summary: RAIN-004 remains the best-so-far morphology reference family; RAIN-005A3 now extends its machine-only morphology/nozzle characterization into large, portrait, ultrawide, tiled and extreme terminal geometries with paired seeds so RAIN-005B is not optimized for one owner window or stochastic run.
-next: Natively run the intentionally long RAIN-005A3 extended geometry/paired-seed morphology ensemble and dense analytical nozzle sweep, then design RAIN-005B from normalized family-level evidence with equal-or-greater heterogeneity than RAIN-004 and no nozzle regression.
+summary: RAIN-005B1 is exhausted after D2 found no derived mobility point that preserves RAIN-004 thickness CV while retaining its lateral gains; RAIN-005B2 returns runtime morphology to exact RAIN-004/A3 and changes only focused-authority timing from IID Bernoulli draws to the same-p low-discrepancy golden schedule to suppress short airborne-window bursts.
+next: Natively validate RAIN-005B2 focused discrepancy/nozzle controls, exact RAIN-004 IID control reproduction, the full 192-run paired morphology Pareto ensemble, PERF exactness, fmt/clippy/full tests and help smoke; human rain/morphology review only after machine PASS.
 ---
+
+
+## RAIN-005B2 golden low-discrepancy ingress — 2026-09-07
+
+RAIN-005B1/R1/R2/R3 all failed the unchanged thickness-CV Pareto floor. D1 ruled out terrain/edge steering, and D2 found no derived mobility subset frontier: the full `L` jump retains lateral gains while losing CV, whereas `E*L` and `E*W+` recover CV only by losing shift/span and worsening width dependence beyond RAIN-004. B1 is therefore exhausted rather than interpolated. B2 branches from exact RAIN-005A3/RAIN-004 runtime and preserves the marginal `1/phi^2` bias, focused two-candidate kernel and RAIN-004 meander. It changes only serial focus-authority timing: a seed-phased 53-bit low-discrepancy rotation guarantees less than one focused-ingress count error in every contiguous eligible window, so an `N_airborne`-sized visible interval cannot receive an IID burst of focused authority. See `notebook/work/RAIN-005B2-GOLDEN-DISCREPANCY-INGRESS.md`.
 
 
 ## RAIN-005A3 extended geometry ensemble — 2026-09-07

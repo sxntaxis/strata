@@ -5,6 +5,8 @@ use crate::constants::TIME_SETTINGS;
 use crate::domain::{Category, CategoryId};
 
 use super::{ClassicRainMode, ClassicSandboxEngine, RAIN_FOCUS_BIAS_PROBABILITY};
+#[cfg(test)]
+use super::RainBiasScheduleProbe;
 
 const MILLIS_PER_SECOND: f64 = 1_000.0;
 const SECONDS_PER_HOUR: f64 = 3_600.0;
@@ -36,11 +38,10 @@ struct RainDistributionMetrics {
 impl ClassicSandboxEngine {
     /// Read-only RAIN-005A diagnostic report.
     ///
-    /// RAIN-004 remains the owner-selected reference baseline. This report does
-    /// not promote its golden-ratio bias or current meander constants into
-    /// permanent authority; it measures the natural spatial/temporal scales that
-    /// a later morphology pass can derive from the canonical 1 grain/s ingress,
-    /// visible airborne population, active width and actual rain kernel.
+    /// RAIN-004 remains the owner-selected morphology reference. RAIN-005B2
+    /// keeps its marginal golden-small bias and focused kernel but distributes
+    /// focused authority through a seed-phased low-discrepancy schedule so a
+    /// short airborne window cannot accumulate an IID burst of focused ingresses.
     pub(crate) fn rain_morphology_diagnostics_report(
         &self,
         categories: &[Category],
@@ -131,7 +132,7 @@ impl ClassicSandboxEngine {
         writeln!(report, "experiment={}", self.experiment_profile_name()).expect("String write");
         writeln!(
             report,
-            "reference=RAIN-004 owner-selected best-so-far baseline; not a perfection/freeze target; future derived morphology must target equal-or-greater heterogeneity without an airborne-nozzle regression"
+            "reference=RAIN-004 owner-selected morphology baseline; runtime_candidate=RAIN-005B2 golden low-discrepancy focus-authority schedule; marginal bias/kernel/meander unchanged"
         )
         .expect("String write");
         writeln!(report).expect("String write");
@@ -185,6 +186,15 @@ impl ClassicSandboxEngine {
             unobstructed_distribution.kl_bits_per_grain
         )
         .expect("String write");
+        if self.mode == ClassicRainMode::WanderingFocus {
+            writeln!(
+                report,
+                "focus_bias_schedule=golden-low-discrepancy effective_probability={:.15} phase_modulus={} max_prefix_count_error_lt=1 max_contiguous_window_count_error_lt=1",
+                ClassicSandboxEngine::rain_focus_bias_effective_probability(),
+                super::RAIN_FOCUS_BIAS_PHASE_MODULUS,
+            )
+            .expect("String write");
+        }
         writeln!(
             report,
             "nozzle_information_bits_now={instant_nozzle_bits:.9} nozzle_information_bits_geometry_1x={geometry_nozzle_bits:.9}"
@@ -737,7 +747,7 @@ mod tests {
             .expect("diagnostic report");
         assert!(report.contains("canonical_ingress_rate_grains_per_second=1.000000"));
         assert!(report.contains(
-            "reference=RAIN-004 owner-selected best-so-far baseline; not a perfection/freeze target"
+            "reference=RAIN-004 owner-selected morphology baseline; runtime_candidate=RAIN-005B2"
         ));
         assert!(report.contains("RAIN_SCALE"));
         assert!(report.contains("STRATA_METRICS"));
@@ -1098,6 +1108,22 @@ mod tests {
         seed: u64,
         categories: &[Category],
     ) -> MorphologySample {
+        morphology_sample_for_geometry_with_bias_schedule(
+            width_cells,
+            height_cells,
+            seed,
+            categories,
+            RainBiasScheduleProbe::Runtime,
+        )
+    }
+
+    fn morphology_sample_for_geometry_with_bias_schedule(
+        width_cells: usize,
+        height_cells: usize,
+        seed: u64,
+        categories: &[Category],
+        schedule: RainBiasScheduleProbe,
+    ) -> MorphologySample {
         let mut engine = ClassicSandboxEngine::new(
             u16::try_from(width_cells).expect("diagnostic width fits u16"),
             u16::try_from(height_cells).expect("diagnostic height fits u16"),
@@ -1105,6 +1131,7 @@ mod tests {
             ClassicRainMode::WanderingFocus,
         );
         engine.force_reference_gravity = false;
+        engine.rain_bias_schedule_probe = schedule;
 
         let bounds = engine.surface.viewport_bounds().expect("viewport");
         let width_dots = bounds.x_end - bounds.x_start;
@@ -1526,4 +1553,180 @@ mod tests {
             correlation_or_zero(&log_widths, &mound_el_values),
         );
     }
+
+    #[derive(Debug, Clone, Copy)]
+    struct Rain004ReferenceSample {
+        run: usize,
+        geometry: usize,
+        seed_slot: usize,
+        width_cells: usize,
+        height_cells: usize,
+        seed: u64,
+        mound_el: f64,
+        cv: f64,
+        correlation: f64,
+        total_variation: f64,
+        centroid_shift: f64,
+        centroid_span: f64,
+    }
+
+    fn rain_005a3_rain004_reference_samples() -> Vec<Rain004ReferenceSample> {
+        const REFERENCE: &str = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/rain_005a3_rain004_morph_reference.csv"
+        ));
+        REFERENCE
+            .lines()
+            .skip(1)
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| {
+                let fields = line.split(',').collect::<Vec<_>>();
+                assert_eq!(fields.len(), 16, "invalid RAIN-005A3 reference row: {line}");
+                Rain004ReferenceSample {
+                    run: fields[0].parse().expect("run"),
+                    geometry: fields[1].parse().expect("geometry"),
+                    seed_slot: fields[2].parse().expect("seed slot"),
+                    width_cells: fields[3].parse().expect("terminal width"),
+                    height_cells: fields[4].parse().expect("terminal height"),
+                    seed: fields[9].parse().expect("seed"),
+                    mound_el: fields[10].parse().expect("mound el"),
+                    cv: fields[11].parse().expect("cv"),
+                    correlation: fields[12].parse().expect("correlation"),
+                    total_variation: fields[13].parse().expect("total variation"),
+                    centroid_shift: fields[14].parse().expect("centroid shift"),
+                    centroid_span: fields[15].parse().expect("centroid span"),
+                }
+            })
+            .collect()
+    }
+
+    fn assert_printed_nine_eq(label: &str, actual: f64, expected: f64) {
+        assert_eq!(
+            format!("{actual:.9}"),
+            format!("{expected:.9}"),
+            "{label}: actual={actual:.12} expected={expected:.12}"
+        );
+    }
+
+    #[test]
+    #[ignore = "native RAIN-005B2 exact RAIN-004 IID control reproduction on a bounded A3 subset"]
+    fn rain_005b2_iid_rain004_control_reproduction_probe() {
+        const CATEGORY_COUNT: usize = 5;
+        let categories = (1..=CATEGORY_COUNT)
+            .map(|id| category(id as u64, &format!("B2 control {id}")))
+            .collect::<Vec<_>>();
+        let reference = rain_005a3_rain004_reference_samples();
+        let selected = reference
+            .iter()
+            .filter(|sample| sample.seed_slot == 1 && sample.geometry % 8 == 1)
+            .collect::<Vec<_>>();
+        assert_eq!(selected.len(), 12);
+
+        for expected in selected {
+            let control = morphology_sample_for_geometry_with_bias_schedule(
+                expected.width_cells,
+                expected.height_cells,
+                expected.seed,
+                &categories,
+                RainBiasScheduleProbe::IidRain004,
+            );
+            assert_printed_nine_eq("mound_el", control.mound_el, expected.mound_el);
+            assert_printed_nine_eq("cv", control.cv, expected.cv);
+            assert_printed_nine_eq("corr", control.correlation, expected.correlation);
+            assert_printed_nine_eq(
+                "tv",
+                control.total_variation,
+                expected.total_variation,
+            );
+            assert_printed_nine_eq(
+                "shift",
+                control.centroid_shift,
+                expected.centroid_shift,
+            );
+            assert_printed_nine_eq("span", control.centroid_span, expected.centroid_span);
+        }
+        println!("RAIN_005B2_CONTROL_REPRODUCTION runs=12 result=PASS_SAMPLE_LEVEL_9DP");
+    }
+
+    #[test]
+    #[ignore = "native RAIN-005B2 paired morphology ensemble against exact RAIN-004 A3 runs; intentionally long-running"]
+    fn rain_005b2_paired_morphology_against_rain004_probe() {
+        const CATEGORY_COUNT: usize = 5;
+        let categories = (1..=CATEGORY_COUNT)
+            .map(|id| category(id as u64, &format!("B2 {id}")))
+            .collect::<Vec<_>>();
+        let reference = rain_005a3_rain004_reference_samples();
+        assert_eq!(reference.len(), 192);
+
+        let mut delta_cv = Vec::with_capacity(reference.len());
+        let mut delta_corr = Vec::with_capacity(reference.len());
+        let mut delta_tv = Vec::with_capacity(reference.len());
+        let mut delta_shift = Vec::with_capacity(reference.len());
+        let mut delta_span = Vec::with_capacity(reference.len());
+        let mut candidate_shift = Vec::with_capacity(reference.len());
+        let mut candidate_span = Vec::with_capacity(reference.len());
+        let mut log_width = Vec::with_capacity(reference.len());
+
+        for expected in &reference {
+            let candidate = morphology_sample_for_geometry(
+                expected.width_cells,
+                expected.height_cells,
+                expected.seed,
+                &categories,
+            );
+            assert!(
+                (candidate.mound_el - expected.mound_el).abs() < 1e-6,
+                "run={} candidate_mound_el={} reference_mound_el={}",
+                expected.run,
+                candidate.mound_el,
+                expected.mound_el
+            );
+
+            let cv = candidate.cv - expected.cv;
+            let corr = candidate.correlation - expected.correlation;
+            let tv = candidate.total_variation - expected.total_variation;
+            let shift = candidate.centroid_shift - expected.centroid_shift;
+            let span = candidate.centroid_span - expected.centroid_span;
+            delta_cv.push(cv);
+            delta_corr.push(corr);
+            delta_tv.push(tv);
+            delta_shift.push(shift);
+            delta_span.push(span);
+            candidate_shift.push(candidate.centroid_shift);
+            candidate_span.push(candidate.centroid_span);
+            log_width.push((expected.width_cells as f64).ln());
+
+            println!(
+                "RAIN_005B2_PAIRED_SAMPLE run={} geometry={} seed_slot={} terminal={}x{} seed={} delta_cv={cv:.9} delta_corr={corr:.9} delta_tv={tv:.9} delta_shift={shift:.9} delta_span={span:.9} candidate_shift={:.9} candidate_span={:.9}",
+                expected.run,
+                expected.geometry,
+                expected.seed_slot,
+                expected.width_cells,
+                expected.height_cells,
+                expected.seed,
+                candidate.centroid_shift,
+                candidate.centroid_span,
+            );
+        }
+
+        print_extended_percentiles("RAIN_005B2_DELTA_CV", &delta_cv);
+        print_extended_percentiles("RAIN_005B2_DELTA_CORR", &delta_corr);
+        print_extended_percentiles("RAIN_005B2_DELTA_TV", &delta_tv);
+        print_extended_percentiles("RAIN_005B2_DELTA_SHIFT", &delta_shift);
+        print_extended_percentiles("RAIN_005B2_DELTA_SPAN", &delta_span);
+        println!(
+            "RAIN_005B2_GEOMETRY_DEPENDENCE shift_vs_log_width={:.9} span_vs_log_width={:.9}",
+            correlation_or_zero(&log_width, &candidate_shift),
+            correlation_or_zero(&log_width, &candidate_span),
+        );
+        println!(
+            "RAIN_005B2_PARETO_MEDIANS cv={:.9} corr={:.9} tv={:.9} shift={:.9} span={:.9}",
+            percentile(&delta_cv, 0.50),
+            percentile(&delta_corr, 0.50),
+            percentile(&delta_tv, 0.50),
+            percentile(&delta_shift, 0.50),
+            percentile(&delta_span, 0.50),
+        );
+    }
+
 }

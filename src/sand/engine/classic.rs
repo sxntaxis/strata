@@ -27,6 +27,12 @@ const CLASSIC_REPOSE_HIGH: u8 = 3;
 const CLASSIC_REPOSE_ANCHOR: u8 = 4;
 const GOLDEN_RATIO: f64 = 1.618_033_988_749_895;
 const RAIN_FOCUS_BIAS_PROBABILITY: f64 = 1.0 / (GOLDEN_RATIO * GOLDEN_RATIO);
+// RAIN-005B2 keeps RAIN-004's exact long-run golden-small focus authority,
+// but distributes that authority with a seed-phased low-discrepancy rotation.
+// 53 phase bits match the precision of `rain_random_probability`; this is a
+// numerical representation choice, not a morphology or viewport knob.
+const RAIN_FOCUS_BIAS_PHASE_BITS: u32 = 53;
+const RAIN_FOCUS_BIAS_PHASE_MODULUS: u64 = 1u64 << RAIN_FOCUS_BIAS_PHASE_BITS;
 // RAIN-004 keeps RAIN-003 correlated meander/rephase semantics, removes the
 // focus-only side padding, and strengthens the broad focus-biased share to the
 // small part of the golden ratio (~38.2%) while remaining nozzle-free.
@@ -46,6 +52,13 @@ const CLASSIC_MOMENTUM_MAX_DROP_DEPTH: usize = 3;
 pub(crate) enum ClassicRainMode {
     Uniform,
     WanderingFocus,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RainBiasScheduleProbe {
+    Runtime,
+    IidRain004,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -242,11 +255,13 @@ impl ClassicTextureProfile {
 /// `Uniform` uses full-width random rain. `WanderingFocus` changes only ingress
 /// sampling: the large golden-ratio share remains uniform over the full visible
 /// width and the small golden-ratio share (~38.2%) uses a broad focus bias.
-/// RAIN-004 lets that focus meander across the complete active width. Directional
-/// persistence is perturbed stochastically, broad terrain relief provides only weak
-/// steering, and real active-width edges provide only soft inward steering. A
-/// category transition transiently decorrelates the heading without
-/// teleporting the focus, so successive strata can develop different envelopes.
+/// RAIN-005B2 keeps RAIN-004's full-width correlated meander and exact marginal
+/// golden-small bias/kernel, but distributes focused-authority slots with a
+/// seed-phased low-discrepancy rotation instead of IID Bernoulli timing. Thus
+/// every contiguous eligible ingress window has less than one focused-slot count
+/// of discrepancy from N*p, suppressing short airborne-window bursts without an
+/// airborne-count knob. Directional persistence, weak broad terrain steering,
+/// soft real-edge steering and category rephase remain RAIN-004.
 /// New grains are sampled directly from free visible-top sites rather than sampling
 /// an occupied target and relocating it.
 /// Nothing from this sandbox is persisted or becomes production authority.
@@ -275,6 +290,10 @@ pub(crate) struct ClassicSandboxEngine {
     rain_focus_heading_counter: usize,
     rain_focus_rephase_remaining: usize,
     rain_last_category_id: Option<CategoryId>,
+    initial_rain_focus_bias_phase: u64,
+    rain_focus_bias_phase: u64,
+    #[cfg(test)]
+    rain_bias_schedule_probe: RainBiasScheduleProbe,
     rain_left_padding_targets: usize,
     rain_corridor_targets: usize,
     rain_right_padding_targets: usize,
@@ -304,6 +323,9 @@ impl ClassicSandboxEngine {
         if repose_rng_state == 0 {
             repose_rng_state = CLASSIC_REPOSE_RNG_XOR;
         }
+        let initial_rain_focus_bias_phase =
+            (rain_rng_state >> (64 - RAIN_FOCUS_BIAS_PHASE_BITS))
+                % RAIN_FOCUS_BIAS_PHASE_MODULUS;
         let surface = SandEngine::new(width, height);
         let local_repose = vec![CLASSIC_REPOSE_LOW; surface.grid_width_dots];
         let repose_memory_remaining = vec![0; surface.grid_width_dots];
@@ -327,6 +349,10 @@ impl ClassicSandboxEngine {
             rain_focus_heading_counter: 0,
             rain_focus_rephase_remaining: 0,
             rain_last_category_id: None,
+            initial_rain_focus_bias_phase,
+            rain_focus_bias_phase: initial_rain_focus_bias_phase,
+            #[cfg(test)]
+            rain_bias_schedule_probe: RainBiasScheduleProbe::Runtime,
             rain_left_padding_targets: 0,
             rain_corridor_targets: 0,
             rain_right_padding_targets: 0,
@@ -410,6 +436,7 @@ impl ClassicSandboxEngine {
         self.rain_focus_heading_counter = 0;
         self.rain_focus_rephase_remaining = 0;
         self.rain_last_category_id = None;
+        self.rain_focus_bias_phase = self.initial_rain_focus_bias_phase;
         self.rain_left_padding_targets = 0;
         self.rain_corridor_targets = 0;
         self.rain_right_padding_targets = 0;
@@ -648,9 +675,7 @@ impl ClassicSandboxEngine {
 
         let focus = self.advance_rain_focus(bounds);
         let uniform_index = self.rain_random_index(free_columns.len());
-        let chosen_index = if free_columns.len() == 1
-            || !self.rain_random_probability(RAIN_FOCUS_BIAS_PROBABILITY)
-        {
+        let chosen_index = if free_columns.len() == 1 || !self.next_focus_bias_slot() {
             uniform_index
         } else {
             self.sample_focus_biased_free_index(bounds, focus, free_columns)
@@ -1637,6 +1662,37 @@ impl ClassicSandboxEngine {
         self.next_rain_random_u64() & 1 == 0
     }
 
+    fn rain_focus_bias_phase_step() -> u64 {
+        (RAIN_FOCUS_BIAS_PROBABILITY * RAIN_FOCUS_BIAS_PHASE_MODULUS as f64).round() as u64
+    }
+
+    fn rain_focus_bias_effective_probability() -> f64 {
+        Self::rain_focus_bias_phase_step() as f64 / RAIN_FOCUS_BIAS_PHASE_MODULUS as f64
+    }
+
+    fn next_focus_bias_slot(&mut self) -> bool {
+        #[cfg(test)]
+        if self.rain_bias_schedule_probe == RainBiasScheduleProbe::IidRain004 {
+            return self.rain_random_probability(RAIN_FOCUS_BIAS_PROBABILITY);
+        }
+
+        // Consume the same one rain-RNG draw that RAIN-004 used for its IID
+        // focus/uniform decision. The draw is intentionally not the decision
+        // authority in B2; preserving it limits unrelated RNG-stream drift.
+        let _ = self.next_rain_random_u64();
+
+        let step = Self::rain_focus_bias_phase_step();
+        let next = self.rain_focus_bias_phase + step;
+        if next >= RAIN_FOCUS_BIAS_PHASE_MODULUS {
+            self.rain_focus_bias_phase = next - RAIN_FOCUS_BIAS_PHASE_MODULUS;
+            true
+        } else {
+            self.rain_focus_bias_phase = next;
+            false
+        }
+    }
+
+    #[cfg(test)]
     fn rain_random_probability(&mut self, probability: f64) -> bool {
         debug_assert!((0.0..=1.0).contains(&probability));
         // Use the upper 53 random bits to form a deterministic [0, 1) sample,
@@ -2038,18 +2094,108 @@ mod tests {
         }
     }
 
+    fn rolling_max_true_count(values: &[bool], window: usize) -> usize {
+        assert!(window > 0 && window <= values.len());
+        let mut current = values[..window].iter().filter(|value| **value).count();
+        let mut maximum = current;
+        for index in window..values.len() {
+            current += values[index] as usize
+            current -= values[index - window] as usize
+            maximum = maximum.max(current);
+        }
+        maximum
+    }
+
     #[test]
-    fn golden_small_bias_probability_draw_matches_expected_share() {
-        let mut engine = ClassicSandboxEngine::new(20, 8, 19, ClassicRainMode::WanderingFocus);
-        let samples = 100_000usize;
-        let biased = (0..samples)
-            .filter(|_| engine.rain_random_probability(RAIN_FOCUS_BIAS_PROBABILITY))
-            .count();
-        let observed = biased as f64 / samples as f64;
+    fn golden_small_bias_phase_quantization_matches_reference_probability() {
+        let effective = ClassicSandboxEngine::rain_focus_bias_effective_probability();
+        let phase_quantum = 1.0 / RAIN_FOCUS_BIAS_PHASE_MODULUS as f64;
         assert!(
-            (observed - RAIN_FOCUS_BIAS_PROBABILITY).abs() < 0.01,
-            "observed={observed} expected={RAIN_FOCUS_BIAS_PROBABILITY}"
+            (effective - RAIN_FOCUS_BIAS_PROBABILITY).abs() <= phase_quantum,
+            "effective={effective:.17} reference={RAIN_FOCUS_BIAS_PROBABILITY:.17} quantum={phase_quantum:.17}"
         );
+    }
+
+    #[test]
+    fn golden_bias_scheduler_has_subunit_prefix_and_window_discrepancy() {
+        let probability = ClassicSandboxEngine::rain_focus_bias_effective_probability();
+        for seed in [1u64, 19, 23, 0xA11C_005B_2000_0001, u64::MAX - 1] {
+            let mut engine = ClassicSandboxEngine::new(20, 8, seed, ClassicRainMode::WanderingFocus);
+            let samples = 16_384usize;
+            let slots = (0..samples)
+                .map(|_| engine.next_focus_bias_slot())
+                .collect::<Vec<_>>();
+
+            let mut focused = 0usize;
+            for (index, slot) in slots.iter().copied().enumerate() {
+                focused += slot as usize
+                let expected = (index + 1) as f64 * probability;
+                assert!(
+                    (focused as f64 - expected).abs() < 1.0 + 1e-9,
+                    "seed={seed} prefix={} focused={focused} expected={expected}",
+                    index + 1
+                );
+            }
+
+            for window in 1..=64usize {
+                let expected = window as f64 * probability;
+                let mut count = slots[..window].iter().filter(|value| **value).count();
+                assert!((count as f64 - expected).abs() < 1.0 + 1e-9);
+                for index in window..slots.len() {
+                    count += slots[index] as usize
+                    count -= slots[index - window] as usize
+                    assert!(
+                        (count as f64 - expected).abs() < 1.0 + 1e-9,
+                        "seed={seed} window={window} ending_at={index} count={count} expected={expected}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn golden_bias_scheduler_has_no_short_period() {
+        let mut engine = ClassicSandboxEngine::new(20, 8, 0xA11C_005B_2000_0002, ClassicRainMode::WanderingFocus);
+        let slots = (0..8_192)
+            .map(|_| engine.next_focus_bias_slot())
+            .collect::<Vec<_>>();
+        for lag in 1..=512usize {
+            assert!(
+                slots[..slots.len() - lag] != slots[lag..],
+                "unexpected short period lag={lag}"
+            );
+        }
+    }
+
+    #[test]
+    fn golden_bias_scheduler_suppresses_airborne_window_focus_bursts() {
+        // RAIN-005A3 measured expected airborne populations around 4 grains at
+        // p50 and 20 grains at p95. These are diagnostic windows only; B2's
+        // runtime scheduler has no airborne-count or window-size parameter.
+        let samples = 100_000usize;
+        for window in [4usize, 20] {
+            let mut runtime = ClassicSandboxEngine::new(20, 8, 0xA11C_005B_2000_0003, ClassicRainMode::WanderingFocus);
+            let mut iid = ClassicSandboxEngine::new(20, 8, 0xA11C_005B_2000_0003, ClassicRainMode::WanderingFocus);
+            iid.rain_bias_schedule_probe = RainBiasScheduleProbe::IidRain004;
+            let runtime_slots = (0..samples)
+                .map(|_| runtime.next_focus_bias_slot())
+                .collect::<Vec<_>>();
+            let iid_slots = (0..samples)
+                .map(|_| iid.next_focus_bias_slot())
+                .collect::<Vec<_>>();
+            let runtime_max = rolling_max_true_count(&runtime_slots, window);
+            let iid_max = rolling_max_true_count(&iid_slots, window);
+            let probability = ClassicSandboxEngine::rain_focus_bias_effective_probability();
+            let balanced_ceiling = (window as f64 * probability).ceil() as usize;
+            assert!(runtime_max <= balanced_ceiling);
+            assert!(
+                iid_max > runtime_max,
+                "window={window} runtime_max={runtime_max} iid_max={iid_max}"
+            );
+            println!(
+                "RAIN_005B2_AIRBORNE_WINDOW window={window} runtime_max_focused={runtime_max} iid_rain004_max_focused={iid_max} balanced_ceiling={balanced_ceiling}"
+            );
+        }
     }
 
     #[test]
@@ -2212,7 +2358,7 @@ mod tests {
         let max_bin = *bins.iter().max().expect("bins");
         assert!(max_bin < samples / 5, "anti-nozzle bins={bins:?}");
         println!(
-            "RAIN_004_METRICS samples={samples} left_padding={left_padding} full_width={full_width} right_padding={right_padding} max_bin={max_bin} bins={bins:?}"
+            "RAIN_005B2_METRICS samples={samples} left_padding={left_padding} full_width={full_width} right_padding={right_padding} max_bin={max_bin} bins={bins:?}"
         );
     }
 
@@ -2348,6 +2494,11 @@ mod perf_001_tests {
             right.rain_focus_rephase_remaining
         );
         assert_eq!(left.rain_last_category_id, right.rain_last_category_id);
+        assert_eq!(
+            left.initial_rain_focus_bias_phase,
+            right.initial_rain_focus_bias_phase
+        );
+        assert_eq!(left.rain_focus_bias_phase, right.rain_focus_bias_phase);
         assert_eq!(
             left.rain_left_padding_targets,
             right.rain_left_padding_targets
