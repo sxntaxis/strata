@@ -4,12 +4,12 @@ use std::fmt::Write as _;
 use crate::constants::TIME_SETTINGS;
 use crate::domain::{Category, CategoryId};
 
-use super::{ClassicRainMode, ClassicSandboxEngine, RAIN_FOCUS_BIAS_PROBABILITY};
 #[cfg(test)]
 use super::{
     CLASSIC_REPOSE_ANCHOR, CLASSIC_REPOSE_HIGH, CLASSIC_REPOSE_LOW, CLASSIC_REPOSE_MID,
     RainBiasScheduleProbe, ReposeStabilityProbe,
 };
+use super::{ClassicRainMode, ClassicSandboxEngine, RAIN_FOCUS_BIAS_PROBABILITY};
 
 const MILLIS_PER_SECOND: f64 = 1_000.0;
 const SECONDS_PER_HOUR: f64 = 3_600.0;
@@ -2237,9 +2237,13 @@ mod tests {
             .fold(f64::NEG_INFINITY, f64::max);
 
         let heights = supported_height_profile_for_bounds(&engine, bounds);
+        let pike_heights = heights
+            .iter()
+            .map(|height| *height as usize)
+            .collect::<Vec<_>>();
         let (pinchout_fraction, continuity_fraction) = profile_pinchout_and_continuity(&profiles);
         let (narrow_pike_density_le3, narrow_pike_excess_le3) =
-            narrow_pike_metrics_le3(&heights);
+            narrow_pike_metrics_le3(&pike_heights);
         let cascade_fraction = if observation.moves.is_empty() {
             0.0
         } else {
@@ -2899,18 +2903,12 @@ mod tests {
         fn probe(self) -> Option<ReposeStabilityProbe> {
             match self {
                 Self::RuntimeC1R1 => None,
-                Self::AnchorBuriedActivation => {
-                    Some(ReposeStabilityProbe::ConvexityAnchorBuried)
-                }
-                Self::AnchorStationary => {
-                    Some(ReposeStabilityProbe::ConvexityAnchorStationary)
-                }
+                Self::AnchorBuriedActivation => Some(ReposeStabilityProbe::ConvexityAnchorBuried),
+                Self::AnchorStationary => Some(ReposeStabilityProbe::ConvexityAnchorStationary),
                 Self::DeferredRouting => Some(ReposeStabilityProbe::ConvexityDeferred),
                 Self::ShoulderRoute => Some(ReposeStabilityProbe::ShoulderRoute),
                 Self::AnchorShoulder => Some(ReposeStabilityProbe::ConvexityAnchorShoulder),
-                Self::AnchorApexLatent => {
-                    Some(ReposeStabilityProbe::ConvexityAnchorApexLatent)
-                }
+                Self::AnchorApexLatent => Some(ReposeStabilityProbe::ConvexityAnchorApexLatent),
                 Self::StrongShoulder => Some(ReposeStabilityProbe::ConvexityStrongShoulder),
             }
         }
@@ -2955,8 +2953,7 @@ mod tests {
         }
 
         fn pike_improves(self) -> bool {
-            self.paired_delta_pike_density_le3 < 0.0
-                || self.paired_delta_pike_excess_le3 < 0.0
+            self.paired_delta_pike_density_le3 < 0.0 || self.paired_delta_pike_excess_le3 < 0.0
         }
 
         fn preserves_owner_macro_floor(self, control: Self) -> bool {
@@ -2975,8 +2972,7 @@ mod tests {
     fn rain_005c2_dominates(left: Rain005C2Summary, right: Rain005C2Summary) -> bool {
         let left = left.objectives();
         let right = right.objectives();
-        left.iter().zip(right).all(|(l, r)| *l >= r)
-            && left.iter().zip(right).any(|(l, r)| *l > r)
+        left.iter().zip(right).all(|(l, r)| *l >= r) && left.iter().zip(right).any(|(l, r)| *l > r)
     }
 
     fn rain_005c2_run_arm(
@@ -3002,9 +2998,21 @@ mod tests {
                 ),
             };
             if variant == Rain005C2Variant::RuntimeC1R1 {
-                assert_printed_nine_eq("C2 control relief d2", sample.relief_d2, expected.relief_d2);
-                assert_printed_nine_eq("C2 control relief d4", sample.relief_d4, expected.relief_d4);
-                assert_printed_nine_eq("C2 control relief d8", sample.relief_d8, expected.relief_d8);
+                assert_printed_nine_eq(
+                    "C2 control relief d2",
+                    sample.relief_d2,
+                    expected.relief_d2,
+                );
+                assert_printed_nine_eq(
+                    "C2 control relief d4",
+                    sample.relief_d4,
+                    expected.relief_d4,
+                );
+                assert_printed_nine_eq(
+                    "C2 control relief d8",
+                    sample.relief_d8,
+                    expected.relief_d8,
+                );
                 assert_printed_nine_eq(
                     "C2 control curvature d4",
                     sample.curvature_d4,
@@ -3096,9 +3104,7 @@ mod tests {
             .samples
             .iter()
             .zip(&baseline.samples)
-            .map(|(sample, control)| {
-                sample.narrow_pike_excess_le3 - control.narrow_pike_excess_le3
-            })
+            .map(|(sample, control)| sample.narrow_pike_excess_le3 - control.narrow_pike_excess_le3)
             .collect::<Vec<_>>();
         Rain005C2Summary {
             variant: result.variant,
@@ -3117,8 +3123,7 @@ mod tests {
         assert!((excess - 1.0).abs() < 1e-12);
         assert_eq!(narrow_pike_metrics_le3(&[5, 5, 9, 5, 5]), (0.0, 0.0));
 
-        let mut buried =
-            ClassicSandboxEngine::new(8, 6, 0xC2A1, ClassicRainMode::WanderingFocus);
+        let mut buried = ClassicSandboxEngine::new(8, 6, 0xC2A1, ClassicRainMode::WanderingFocus);
         buried.clear();
         let bounds = buried.surface.viewport_bounds().expect("viewport");
         let x = bounds.x_start + (bounds.x_end - bounds.x_start) / 2;
@@ -3152,8 +3157,7 @@ mod tests {
         stationary.route_local_repose_probe(x);
         assert_eq!(stationary.local_repose[x - 1], CLASSIC_REPOSE_ANCHOR);
 
-        let mut deferred =
-            ClassicSandboxEngine::new(8, 6, 0xC2A3, ClassicRainMode::WanderingFocus);
+        let mut deferred = ClassicSandboxEngine::new(8, 6, 0xC2A3, ClassicRainMode::WanderingFocus);
         deferred.repose_stability_probe = ReposeStabilityProbe::ConvexityDeferred;
         let before = deferred.local_repose.clone();
         deferred.route_local_repose_probe(x);
@@ -3176,16 +3180,39 @@ mod tests {
         anchor_shoulder.route_local_repose_probe(x);
         assert_ne!(anchor_shoulder.local_repose[x], CLASSIC_REPOSE_ANCHOR);
 
-        let mut apex_latent = buried;
+        let mut apex_latent =
+            ClassicSandboxEngine::new(8, 6, 0xC2A1, ClassicRainMode::WanderingFocus);
+        apex_latent.clear();
+        let apex_bounds = apex_latent.surface.viewport_bounds().expect("viewport");
+        let apex_x = apex_bounds.x_start + (apex_bounds.x_end - apex_bounds.x_start) / 2;
+        let apex_bottom = apex_bounds.y_end - 1;
+        apex_latent.surface.grid[apex_bottom][apex_x - 1] = Some(CategoryId::new(1));
+        apex_latent.surface.grid[apex_bottom][apex_x + 1] = Some(CategoryId::new(1));
+        for y in apex_bounds.y_end - 3..apex_bounds.y_end {
+            apex_latent.surface.grid[y][apex_x] = Some(CategoryId::new(1));
+        }
+        apex_latent.local_repose[apex_x - 1] = CLASSIC_REPOSE_ANCHOR;
+        apex_latent.local_repose[apex_x] = CLASSIC_REPOSE_LOW;
+        apex_latent.local_repose[apex_x + 1] = CLASSIC_REPOSE_MID;
+        apex_latent.repose_memory_remaining[apex_x - 1..=apex_x + 1].fill(3);
+        apex_latent.repose_stability_probe = ReposeStabilityProbe::ConvexityAnchorBuried;
+        apex_latent.route_local_repose_probe(apex_x);
+        let apex_old_height = apex_latent.supported_column_height(apex_x);
+        let apex_new_y = apex_bounds.y_end - apex_old_height - 1;
+        apex_latent.surface.grid[apex_new_y][apex_x] = Some(CategoryId::new(1));
+        apex_latent.probe_after_grain_move(apex_bounds, apex_x, apex_new_y);
         apex_latent.repose_stability_probe = ReposeStabilityProbe::ConvexityAnchorApexLatent;
-        apex_latent.local_repose[x] = CLASSIC_REPOSE_ANCHOR;
-        assert_eq!(apex_latent.effective_local_repose(x), CLASSIC_REPOSE_HIGH);
-        let center_height = apex_latent.supported_column_height(x);
-        for y in bounds.y_end - center_height..bounds.y_end {
-            apex_latent.surface.grid[y][x - 1] = Some(CategoryId::new(1));
+        apex_latent.local_repose[apex_x] = CLASSIC_REPOSE_ANCHOR;
+        assert_eq!(
+            apex_latent.effective_local_repose(apex_x),
+            CLASSIC_REPOSE_HIGH
+        );
+        let center_height = apex_latent.supported_column_height(apex_x);
+        for y in apex_bounds.y_end - center_height..apex_bounds.y_end {
+            apex_latent.surface.grid[y][apex_x - 1] = Some(CategoryId::new(1));
         }
         assert_eq!(
-            apex_latent.effective_local_repose(x),
+            apex_latent.effective_local_repose(apex_x),
             CLASSIC_REPOSE_ANCHOR
         );
     }
@@ -3210,16 +3237,20 @@ mod tests {
             .into_iter()
             .filter(|expected| (expected.geometry - 1) % GEOMETRY_STRIDE == 0)
             .collect::<Vec<_>>();
-        assert_eq!(reference.len(), 64, "32 spread geometries x both exact seeds");
+        assert_eq!(
+            reference.len(),
+            64,
+            "32 spread geometries x both exact seeds"
+        );
 
         let mut results = std::thread::scope(|scope| {
             let mut handles = Vec::new();
             for variant in VARIANTS {
                 let categories = categories.clone();
                 let reference = reference.clone();
-                handles.push(scope.spawn(move || {
-                    rain_005c2_run_arm(variant, &reference, &categories)
-                }));
+                handles.push(
+                    scope.spawn(move || rain_005c2_run_arm(variant, &reference, &categories)),
+                );
             }
             handles
                 .into_iter()
@@ -3277,7 +3308,8 @@ mod tests {
                 macro_summary.pinchout_fraction,
                 macro_summary.pinchout_fraction - baseline_summary.macro_summary.pinchout_fraction,
                 macro_summary.continuity_fraction,
-                macro_summary.continuity_fraction - baseline_summary.macro_summary.continuity_fraction,
+                macro_summary.continuity_fraction
+                    - baseline_summary.macro_summary.continuity_fraction,
                 macro_summary.avalanche_p95_moves,
                 macro_summary.avalanche_p95_span,
             );
@@ -3380,16 +3412,20 @@ mod tests {
             .into_iter()
             .filter(|expected| (expected.geometry - 1) % GEOMETRY_STRIDE == 0)
             .collect::<Vec<_>>();
-        assert_eq!(reference.len(), 64, "32 spread geometries x both exact seeds");
+        assert_eq!(
+            reference.len(),
+            64,
+            "32 spread geometries x both exact seeds"
+        );
 
         let mut results = std::thread::scope(|scope| {
             let mut handles = Vec::new();
             for variant in VARIANTS {
                 let categories = categories.clone();
                 let reference = reference.clone();
-                handles.push(scope.spawn(move || {
-                    rain_005c2_run_arm(variant, &reference, &categories)
-                }));
+                handles.push(
+                    scope.spawn(move || rain_005c2_run_arm(variant, &reference, &categories)),
+                );
             }
             handles
                 .into_iter()

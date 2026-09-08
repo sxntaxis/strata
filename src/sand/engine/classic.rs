@@ -1785,16 +1785,10 @@ impl ClassicSandboxEngine {
                     self.route_local_repose_by_shoulder(x);
                 }
                 ReposeStabilityProbe::ConvexityAnchorShoulder => {
-                    self.route_local_repose_by_convexity_with_apex_guard(
-                        x,
-                        CLASSIC_REPOSE_ANCHOR,
-                    );
+                    self.route_local_repose_by_convexity_with_apex_guard(x, CLASSIC_REPOSE_ANCHOR);
                 }
                 ReposeStabilityProbe::ConvexityStrongShoulder => {
-                    self.route_local_repose_by_convexity_with_apex_guard(
-                        x,
-                        CLASSIC_REPOSE_HIGH,
-                    );
+                    self.route_local_repose_by_convexity_with_apex_guard(x, CLASSIC_REPOSE_HIGH);
                 }
                 ReposeStabilityProbe::ConvexityAnchorApexLatent => {
                     self.route_local_repose_by_convexity(x);
@@ -1837,8 +1831,7 @@ impl ClassicSandboxEngine {
             } else if before_repose == CLASSIC_REPOSE_ANCHOR {
                 self.repose_anchor_latent_height[index] = before_latent;
             } else {
-                self.repose_anchor_latent_height[index] =
-                    Some(self.supported_column_height(index));
+                self.repose_anchor_latent_height[index] = Some(self.supported_column_height(index));
             }
         }
     }
@@ -2015,8 +2008,7 @@ impl ClassicSandboxEngine {
             return false;
         }
         let center = self.supported_column_height(x);
-        center > self.supported_column_height(left)
-            && center > self.supported_column_height(x + 1)
+        center > self.supported_column_height(left) && center > self.supported_column_height(x + 1)
     }
 
     #[cfg(test)]
