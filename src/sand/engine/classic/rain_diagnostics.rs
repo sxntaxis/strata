@@ -6,7 +6,10 @@ use crate::domain::{Category, CategoryId};
 
 use super::{ClassicRainMode, ClassicSandboxEngine, RAIN_FOCUS_BIAS_PROBABILITY};
 #[cfg(test)]
-use super::{RainBiasScheduleProbe, ReposeStabilityProbe};
+use super::{
+    CLASSIC_REPOSE_ANCHOR, CLASSIC_REPOSE_HIGH, CLASSIC_REPOSE_LOW, CLASSIC_REPOSE_MID,
+    RainBiasScheduleProbe, ReposeStabilityProbe,
+};
 
 const MILLIS_PER_SECOND: f64 = 1_000.0;
 const SECONDS_PER_HOUR: f64 = 3_600.0;
@@ -1946,6 +1949,8 @@ mod tests {
         curvature_d8: f64,
         pinchout_fraction: f64,
         continuity_fraction: f64,
+        narrow_pike_density_le3: f64,
+        narrow_pike_excess_le3: f64,
         avalanche_mean_moves: f64,
         avalanche_p95_moves: f64,
         avalanche_max_moves: f64,
@@ -2099,6 +2104,30 @@ mod tests {
         )
     }
 
+    fn narrow_pike_metrics_le3(heights: &[usize]) -> (f64, f64) {
+        if heights.len() < 3 {
+            return (0.0, 0.0);
+        }
+        let mut count = 0usize;
+        let mut excess = 0usize;
+        for x in 1..heights.len() - 1 {
+            let shoulder = heights[x - 1].max(heights[x + 1]);
+            if heights[x] <= shoulder {
+                continue;
+            }
+            let prominence = heights[x] - shoulder;
+            if prominence <= 3 {
+                count += 1;
+                excess += prominence;
+            }
+        }
+        let interior = heights.len() - 2;
+        (
+            count as f64 / interior as f64,
+            excess as f64 / interior as f64,
+        )
+    }
+
     fn macrorelief_sample_for_geometry(
         width_cells: usize,
         height_cells: usize,
@@ -2209,6 +2238,8 @@ mod tests {
 
         let heights = supported_height_profile_for_bounds(&engine, bounds);
         let (pinchout_fraction, continuity_fraction) = profile_pinchout_and_continuity(&profiles);
+        let (narrow_pike_density_le3, narrow_pike_excess_le3) =
+            narrow_pike_metrics_le3(&heights);
         let cascade_fraction = if observation.moves.is_empty() {
             0.0
         } else {
@@ -2242,6 +2273,8 @@ mod tests {
             curvature_d8: normalized_block_curvature(&heights, 8),
             pinchout_fraction,
             continuity_fraction,
+            narrow_pike_density_le3,
+            narrow_pike_excess_le3,
             avalanche_mean_moves: mean(&observation.moves).unwrap_or(0.0),
             avalanche_p95_moves: percentile(&observation.moves, 0.95),
             avalanche_max_moves: observation.moves.iter().copied().fold(0.0, f64::max),
@@ -2834,6 +2867,454 @@ mod tests {
         }
         println!(
             "RAIN_005C1R1_PROMOTION_CONTROL result=PASS_SAMPLE_LEVEL_9DP runs=192 fixture_sha256=138c979e64e046bcdb5597d2eed71b468257635a53d7caef838d21899132c6f1"
+        );
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Rain005C2Variant {
+        RuntimeC1R1,
+        AnchorBuriedActivation,
+        AnchorStationary,
+        DeferredRouting,
+        ShoulderRoute,
+    }
+
+    impl Rain005C2Variant {
+        fn name(self) -> &'static str {
+            match self {
+                Self::RuntimeC1R1 => "runtime-c1r1",
+                Self::AnchorBuriedActivation => "anchor-buried-activation",
+                Self::AnchorStationary => "anchor-stationary",
+                Self::DeferredRouting => "deferred-routing",
+                Self::ShoulderRoute => "shoulder-route",
+            }
+        }
+
+        fn probe(self) -> Option<ReposeStabilityProbe> {
+            match self {
+                Self::RuntimeC1R1 => None,
+                Self::AnchorBuriedActivation => {
+                    Some(ReposeStabilityProbe::ConvexityAnchorBuried)
+                }
+                Self::AnchorStationary => {
+                    Some(ReposeStabilityProbe::ConvexityAnchorStationary)
+                }
+                Self::DeferredRouting => Some(ReposeStabilityProbe::ConvexityDeferred),
+                Self::ShoulderRoute => Some(ReposeStabilityProbe::ShoulderRoute),
+            }
+        }
+
+        fn summary_probe(self) -> ReposeStabilityProbe {
+            self.probe().unwrap_or(ReposeStabilityProbe::ConvexityRoute)
+        }
+    }
+
+    #[derive(Debug)]
+    struct Rain005C2ArmResult {
+        variant: Rain005C2Variant,
+        samples: Vec<MacroreliefSample>,
+        macro_summary: MacroreliefSummary,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct Rain005C2Summary {
+        variant: Rain005C2Variant,
+        macro_summary: MacroreliefSummary,
+        pike_density_le3: f64,
+        pike_excess_le3: f64,
+        paired_delta_pike_density_le3: f64,
+        paired_delta_pike_excess_le3: f64,
+    }
+
+    impl Rain005C2Summary {
+        fn objectives(self) -> [f64; 10] {
+            let morphology = self.macro_summary.morphology_objectives();
+            [
+                -self.pike_density_le3,
+                -self.pike_excess_le3,
+                morphology[0],
+                morphology[1],
+                morphology[2],
+                morphology[3],
+                morphology[4],
+                morphology[5],
+                morphology[6],
+                morphology[7],
+            ]
+        }
+
+        fn pike_improves(self) -> bool {
+            self.paired_delta_pike_density_le3 < 0.0
+                || self.paired_delta_pike_excess_le3 < 0.0
+        }
+    }
+
+    fn rain_005c2_dominates(left: Rain005C2Summary, right: Rain005C2Summary) -> bool {
+        let left = left.objectives();
+        let right = right.objectives();
+        left.iter().zip(right).all(|(l, r)| *l >= r)
+            && left.iter().zip(right).any(|(l, r)| *l > r)
+    }
+
+    fn rain_005c2_run_arm(
+        variant: Rain005C2Variant,
+        reference: &[Rain005C1ConvexityFullReference],
+        categories: &[Category],
+    ) -> Rain005C2ArmResult {
+        let mut samples = Vec::with_capacity(reference.len());
+        for expected in reference {
+            let sample = match variant.probe() {
+                None => macrorelief_runtime_sample_for_geometry(
+                    expected.width_cells,
+                    expected.height_cells,
+                    expected.seed,
+                    categories,
+                ),
+                Some(probe) => macrorelief_sample_for_geometry(
+                    expected.width_cells,
+                    expected.height_cells,
+                    expected.seed,
+                    categories,
+                    probe,
+                ),
+            };
+            if variant == Rain005C2Variant::RuntimeC1R1 {
+                assert_printed_nine_eq("C2 control relief d2", sample.relief_d2, expected.relief_d2);
+                assert_printed_nine_eq("C2 control relief d4", sample.relief_d4, expected.relief_d4);
+                assert_printed_nine_eq("C2 control relief d8", sample.relief_d8, expected.relief_d8);
+                assert_printed_nine_eq(
+                    "C2 control curvature d4",
+                    sample.curvature_d4,
+                    expected.curvature_d4,
+                );
+                assert_printed_nine_eq(
+                    "C2 control curvature d8",
+                    sample.curvature_d8,
+                    expected.curvature_d8,
+                );
+                assert_printed_nine_eq(
+                    "C2 control thickness cv",
+                    sample.legacy.cv,
+                    expected.thickness_cv,
+                );
+                assert_printed_nine_eq(
+                    "C2 control pinchout",
+                    sample.pinchout_fraction,
+                    expected.pinchout,
+                );
+                assert_printed_nine_eq(
+                    "C2 control continuity",
+                    sample.continuity_fraction,
+                    expected.continuity,
+                );
+                assert_printed_nine_eq(
+                    "C2 control legacy corr",
+                    sample.legacy.correlation,
+                    expected.legacy_corr,
+                );
+                assert_printed_nine_eq(
+                    "C2 control legacy tv",
+                    sample.legacy.total_variation,
+                    expected.legacy_tv,
+                );
+                assert_printed_nine_eq(
+                    "C2 control legacy shift",
+                    sample.legacy.centroid_shift,
+                    expected.legacy_shift,
+                );
+                assert_printed_nine_eq(
+                    "C2 control legacy span",
+                    sample.legacy.centroid_span,
+                    expected.legacy_span,
+                );
+                assert_printed_nine_eq(
+                    "C2 control avalanche p95 moves",
+                    sample.avalanche_p95_moves,
+                    expected.avalanche_p95_moves,
+                );
+                assert_printed_nine_eq(
+                    "C2 control avalanche p95 span",
+                    sample.avalanche_p95_span,
+                    expected.avalanche_p95_span,
+                );
+            }
+            samples.push(sample);
+        }
+        Rain005C2ArmResult {
+            variant,
+            macro_summary: summarize_macrorelief(variant.summary_probe(), &samples),
+            samples,
+        }
+    }
+
+    fn rain_005c2_summary(
+        result: &Rain005C2ArmResult,
+        baseline: &Rain005C2ArmResult,
+    ) -> Rain005C2Summary {
+        let pike_density = result
+            .samples
+            .iter()
+            .map(|sample| sample.narrow_pike_density_le3)
+            .collect::<Vec<_>>();
+        let pike_excess = result
+            .samples
+            .iter()
+            .map(|sample| sample.narrow_pike_excess_le3)
+            .collect::<Vec<_>>();
+        let delta_density = result
+            .samples
+            .iter()
+            .zip(&baseline.samples)
+            .map(|(sample, control)| {
+                sample.narrow_pike_density_le3 - control.narrow_pike_density_le3
+            })
+            .collect::<Vec<_>>();
+        let delta_excess = result
+            .samples
+            .iter()
+            .zip(&baseline.samples)
+            .map(|(sample, control)| {
+                sample.narrow_pike_excess_le3 - control.narrow_pike_excess_le3
+            })
+            .collect::<Vec<_>>();
+        Rain005C2Summary {
+            variant: result.variant,
+            macro_summary: result.macro_summary,
+            pike_density_le3: percentile(&pike_density, 0.50),
+            pike_excess_le3: percentile(&pike_excess, 0.50),
+            paired_delta_pike_density_le3: percentile(&delta_density, 0.50),
+            paired_delta_pike_excess_le3: percentile(&delta_excess, 0.50),
+        }
+    }
+
+    #[test]
+    fn rain_005c2_pike_metric_and_route_semantics_are_bounded() {
+        let (density, excess) = narrow_pike_metrics_le3(&[5, 5, 8, 5, 5]);
+        assert!((density - 1.0 / 3.0).abs() < 1e-12);
+        assert!((excess - 1.0).abs() < 1e-12);
+        assert_eq!(narrow_pike_metrics_le3(&[5, 5, 9, 5, 5]), (0.0, 0.0));
+
+        let mut buried =
+            ClassicSandboxEngine::new(8, 6, 0xC2A1, ClassicRainMode::WanderingFocus);
+        buried.clear();
+        let bounds = buried.surface.viewport_bounds().expect("viewport");
+        let x = bounds.x_start + (bounds.x_end - bounds.x_start) / 2;
+        let bottom = bounds.y_end - 1;
+        buried.surface.grid[bottom][x - 1] = Some(CategoryId::new(1));
+        buried.surface.grid[bottom][x + 1] = Some(CategoryId::new(1));
+        for y in bounds.y_end - 3..bounds.y_end {
+            buried.surface.grid[y][x] = Some(CategoryId::new(1));
+        }
+        buried.local_repose[x - 1] = CLASSIC_REPOSE_ANCHOR;
+        buried.local_repose[x] = CLASSIC_REPOSE_LOW;
+        buried.local_repose[x + 1] = CLASSIC_REPOSE_MID;
+        buried.repose_memory_remaining[x - 1..=x + 1].fill(3);
+        buried.repose_stability_probe = ReposeStabilityProbe::ConvexityAnchorBuried;
+        buried.route_local_repose_probe(x);
+        assert_eq!(buried.local_repose[x], CLASSIC_REPOSE_ANCHOR);
+        assert_eq!(buried.effective_local_repose(x), CLASSIC_REPOSE_HIGH);
+        let old_height = buried.supported_column_height(x);
+        let new_y = bounds.y_end - old_height - 1;
+        buried.surface.grid[new_y][x] = Some(CategoryId::new(1));
+        buried.probe_after_grain_move(bounds, x, new_y);
+        assert_eq!(buried.effective_local_repose(x), CLASSIC_REPOSE_ANCHOR);
+
+        let mut stationary =
+            ClassicSandboxEngine::new(8, 6, 0xC2A2, ClassicRainMode::WanderingFocus);
+        stationary.clear();
+        stationary.local_repose[x - 1] = CLASSIC_REPOSE_ANCHOR;
+        stationary.local_repose[x] = CLASSIC_REPOSE_LOW;
+        stationary.local_repose[x + 1] = CLASSIC_REPOSE_MID;
+        stationary.repose_stability_probe = ReposeStabilityProbe::ConvexityAnchorStationary;
+        stationary.route_local_repose_probe(x);
+        assert_eq!(stationary.local_repose[x - 1], CLASSIC_REPOSE_ANCHOR);
+
+        let mut deferred =
+            ClassicSandboxEngine::new(8, 6, 0xC2A3, ClassicRainMode::WanderingFocus);
+        deferred.repose_stability_probe = ReposeStabilityProbe::ConvexityDeferred;
+        let before = deferred.local_repose.clone();
+        deferred.route_local_repose_probe(x);
+        assert_eq!(deferred.local_repose, before);
+        assert!(deferred.repose_deferred_route_pending[x]);
+
+        let mut shoulder = buried;
+        shoulder.repose_stability_probe = ReposeStabilityProbe::ShoulderRoute;
+        shoulder.local_repose[x - 1] = CLASSIC_REPOSE_ANCHOR;
+        shoulder.local_repose[x] = CLASSIC_REPOSE_LOW;
+        shoulder.local_repose[x + 1] = CLASSIC_REPOSE_MID;
+        shoulder.route_local_repose_probe(x);
+        assert_ne!(shoulder.local_repose[x], CLASSIC_REPOSE_ANCHOR);
+    }
+
+    #[test]
+    #[ignore = "native RAIN-005C2 pike-artifact factorial: 32 spread A3 geometries x both exact seeds x five arms, internally parallel"]
+    fn rain_005c2_pike_artifact_factorial_probe() {
+        const CATEGORY_COUNT: usize = 5;
+        const GEOMETRY_STRIDE: usize = 3;
+        const VARIANTS: [Rain005C2Variant; 5] = [
+            Rain005C2Variant::RuntimeC1R1,
+            Rain005C2Variant::AnchorBuriedActivation,
+            Rain005C2Variant::AnchorStationary,
+            Rain005C2Variant::DeferredRouting,
+            Rain005C2Variant::ShoulderRoute,
+        ];
+
+        let categories = (1..=CATEGORY_COUNT)
+            .map(|id| category(id as u64, &format!("C2 {id}")))
+            .collect::<Vec<_>>();
+        let reference = rain_005c1_convexity_full_reference()
+            .into_iter()
+            .filter(|expected| (expected.geometry - 1) % GEOMETRY_STRIDE == 0)
+            .collect::<Vec<_>>();
+        assert_eq!(reference.len(), 64, "32 spread geometries x both exact seeds");
+
+        let mut results = std::thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for variant in VARIANTS {
+                let categories = categories.clone();
+                let reference = reference.clone();
+                handles.push(scope.spawn(move || {
+                    rain_005c2_run_arm(variant, &reference, &categories)
+                }));
+            }
+            handles
+                .into_iter()
+                .map(|handle| handle.join().expect("C2 arm worker"))
+                .collect::<Vec<_>>()
+        });
+        results.sort_by_key(|result| {
+            VARIANTS
+                .iter()
+                .position(|variant| *variant == result.variant)
+                .expect("known C2 variant")
+        });
+
+        let baseline = results
+            .iter()
+            .find(|result| result.variant == Rain005C2Variant::RuntimeC1R1)
+            .expect("C2 baseline");
+        let summaries = results
+            .iter()
+            .map(|result| rain_005c2_summary(result, baseline))
+            .collect::<Vec<_>>();
+        let baseline_summary = summaries
+            .iter()
+            .copied()
+            .find(|summary| summary.variant == Rain005C2Variant::RuntimeC1R1)
+            .expect("C2 baseline summary");
+
+        println!(
+            "RAIN_005C2_CONTROL_REPRODUCTION result=PASS_SAMPLE_LEVEL_9DP runs=64 geometries=32 seeds_per_geometry=2 stride=3 fixture_sha256=138c979e64e046bcdb5597d2eed71b468257635a53d7caef838d21899132c6f1"
+        );
+        for summary in &summaries {
+            let macro_summary = summary.macro_summary;
+            let safe = summary.variant == Rain005C2Variant::RuntimeC1R1
+                || macro_summary.avalanche_safe(baseline_summary.macro_summary);
+            println!(
+                "RAIN_005C2_SUMMARY variant={} runs={} pike_density_le3={:.9} pike_excess_le3={:.9} delta_pike_density_le3={:+.9} delta_pike_excess_le3={:+.9} relief_d2={:.9} delta_relief_d2={:+.9} relief_d4={:.9} delta_relief_d4={:+.9} relief_d8={:.9} delta_relief_d8={:+.9} curvature_d4={:.9} delta_curvature_d4={:+.9} curvature_d8={:.9} delta_curvature_d8={:+.9} thickness_cv={:.9} delta_thickness_cv={:+.9} pinchout={:.9} delta_pinchout={:+.9} continuity={:.9} delta_continuity={:+.9} avalanche_p95_moves={:.9} avalanche_p95_span={:.9} avalanche_safe={safe}",
+                summary.variant.name(),
+                macro_summary.runs,
+                summary.pike_density_le3,
+                summary.pike_excess_le3,
+                summary.paired_delta_pike_density_le3,
+                summary.paired_delta_pike_excess_le3,
+                macro_summary.relief_d2,
+                macro_summary.relief_d2 - baseline_summary.macro_summary.relief_d2,
+                macro_summary.relief_d4,
+                macro_summary.relief_d4 - baseline_summary.macro_summary.relief_d4,
+                macro_summary.relief_d8,
+                macro_summary.relief_d8 - baseline_summary.macro_summary.relief_d8,
+                macro_summary.curvature_d4,
+                macro_summary.curvature_d4 - baseline_summary.macro_summary.curvature_d4,
+                macro_summary.curvature_d8,
+                macro_summary.curvature_d8 - baseline_summary.macro_summary.curvature_d8,
+                macro_summary.thickness_cv,
+                macro_summary.thickness_cv - baseline_summary.macro_summary.thickness_cv,
+                macro_summary.pinchout_fraction,
+                macro_summary.pinchout_fraction - baseline_summary.macro_summary.pinchout_fraction,
+                macro_summary.continuity_fraction,
+                macro_summary.continuity_fraction - baseline_summary.macro_summary.continuity_fraction,
+                macro_summary.avalanche_p95_moves,
+                macro_summary.avalanche_p95_span,
+            );
+        }
+
+        let safe = summaries
+            .iter()
+            .copied()
+            .filter(|summary| {
+                summary.variant == Rain005C2Variant::RuntimeC1R1
+                    || summary
+                        .macro_summary
+                        .avalanche_safe(baseline_summary.macro_summary)
+            })
+            .collect::<Vec<_>>();
+        let frontier = safe
+            .iter()
+            .copied()
+            .filter(|candidate| {
+                !safe.iter().copied().any(|other| {
+                    other.variant != candidate.variant && rain_005c2_dominates(other, *candidate)
+                })
+            })
+            .collect::<Vec<_>>();
+        let human = frontier
+            .iter()
+            .copied()
+            .filter(|summary| {
+                summary.variant != Rain005C2Variant::RuntimeC1R1 && summary.pike_improves()
+            })
+            .collect::<Vec<_>>();
+
+        let mut selected = Vec::new();
+        if let Some(artifact) = human.iter().copied().min_by(|left, right| {
+            left.pike_excess_le3
+                .partial_cmp(&right.pike_excess_le3)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    left.pike_density_le3
+                        .partial_cmp(&right.pike_density_le3)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+        }) {
+            selected.push(artifact.variant);
+        }
+        if let Some(density) = human.iter().copied().min_by(|left, right| {
+            left.pike_density_le3
+                .partial_cmp(&right.pike_density_le3)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    left.pike_excess_le3
+                        .partial_cmp(&right.pike_excess_le3)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+        }) {
+            if !selected.contains(&density.variant) {
+                selected.push(density.variant);
+            }
+        }
+
+        println!(
+            "RAIN_005C2_SAFE_PARETO variants={}",
+            frontier
+                .iter()
+                .map(|summary| summary.variant.name())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        println!(
+            "RAIN_005C2_FINAL classification={} human_candidates={} variants={}",
+            if selected.is_empty() {
+                "NO_PIKE_IMPROVING_SAFE_FRONTIER"
+            } else {
+                "PIKE_HUMAN_CANDIDATES_READY"
+            },
+            selected.len(),
+            selected
+                .iter()
+                .map(|variant| variant.name())
+                .collect::<Vec<_>>()
+                .join(",")
         );
     }
 

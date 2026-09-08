@@ -66,6 +66,10 @@ enum ReposeStabilityProbe {
     ConvexityRoute,
     ConvexityAnchorLocked,
     ConvexityStrongTail,
+    ConvexityAnchorBuried,
+    ConvexityAnchorStationary,
+    ConvexityDeferred,
+    ShoulderRoute,
 }
 
 #[cfg(test)]
@@ -81,6 +85,10 @@ impl ReposeStabilityProbe {
             Self::ConvexityRoute => "convexity-route",
             Self::ConvexityAnchorLocked => "convexity-route-anchor-locked",
             Self::ConvexityStrongTail => "convexity-route-strong-tail",
+            Self::ConvexityAnchorBuried => "convexity-anchor-buried",
+            Self::ConvexityAnchorStationary => "convexity-anchor-stationary",
+            Self::ConvexityDeferred => "convexity-deferred",
+            Self::ShoulderRoute => "shoulder-route",
         }
     }
 
@@ -109,7 +117,10 @@ impl ReposeStabilityProbe {
     fn routes_by_convexity(self) -> bool {
         matches!(
             self,
-            Self::ConvexityRoute | Self::ConvexityAnchorLocked | Self::ConvexityStrongTail
+            Self::ConvexityRoute
+                | Self::ConvexityAnchorLocked
+                | Self::ConvexityStrongTail
+                | Self::ConvexityAnchorBuried
         )
     }
 }
@@ -394,6 +405,10 @@ pub(crate) struct ClassicSandboxEngine {
     #[cfg(test)]
     repose_stability_probe: ReposeStabilityProbe,
     #[cfg(test)]
+    repose_anchor_latent_height: Vec<Option<usize>>,
+    #[cfg(test)]
+    repose_deferred_route_pending: Vec<bool>,
+    #[cfg(test)]
     diagnostic_move_min_x: Option<usize>,
     #[cfg(test)]
     diagnostic_move_max_x: Option<usize>,
@@ -432,6 +447,10 @@ impl ClassicSandboxEngine {
         let surface = SandEngine::new(width, height);
         let local_repose = vec![CLASSIC_REPOSE_LOW; surface.grid_width_dots];
         let repose_memory_remaining = vec![0; surface.grid_width_dots];
+        #[cfg(test)]
+        let repose_anchor_latent_height = vec![None; surface.grid_width_dots];
+        #[cfg(test)]
+        let repose_deferred_route_pending = vec![false; surface.grid_width_dots];
         let mut engine = Self {
             surface,
             mode,
@@ -458,6 +477,10 @@ impl ClassicSandboxEngine {
             rain_bias_schedule_probe: RainBiasScheduleProbe::Runtime,
             #[cfg(test)]
             repose_stability_probe: ReposeStabilityProbe::ConvexityRoute,
+            #[cfg(test)]
+            repose_anchor_latent_height,
+            #[cfg(test)]
+            repose_deferred_route_pending,
             #[cfg(test)]
             diagnostic_move_min_x: None,
             #[cfg(test)]
@@ -507,6 +530,10 @@ impl ClassicSandboxEngine {
         let old_width = self.surface.grid_width_dots;
         let old_repose = self.local_repose.clone();
         let old_memory = self.repose_memory_remaining.clone();
+        #[cfg(test)]
+        let old_latent = self.repose_anchor_latent_height.clone();
+        #[cfg(test)]
+        let old_deferred = self.repose_deferred_route_pending.clone();
         self.surface.resize(width, height);
         self.last_rainbow_fill = None;
         let new_width = self.surface.grid_width_dots;
@@ -526,6 +553,21 @@ impl ClassicSandboxEngine {
                 expanded_memory[x + horizontal_offset] = remaining;
             }
             self.repose_memory_remaining = expanded_memory;
+
+            #[cfg(test)]
+            {
+                let mut expanded_latent = vec![None; new_width];
+                for (x, marker) in old_latent.into_iter().enumerate() {
+                    expanded_latent[x + horizontal_offset] = marker;
+                }
+                self.repose_anchor_latent_height = expanded_latent;
+
+                let mut expanded_deferred = vec![false; new_width];
+                for (x, pending) in old_deferred.into_iter().enumerate() {
+                    expanded_deferred[x + horizontal_offset] = pending;
+                }
+                self.repose_deferred_route_pending = expanded_deferred;
+            }
         }
         if horizontal_offset > 0 {
             self.rain_focus_x = self
@@ -1278,6 +1320,8 @@ impl ClassicSandboxEngine {
                 index.record_move(x, y, x, y + 1);
             }
             self.vertical_moves = self.vertical_moves.saturating_add(1);
+            #[cfg(test)]
+            self.probe_after_grain_move(bounds, x, y + 1);
             return;
         }
 
@@ -1341,6 +1385,8 @@ impl ClassicSandboxEngine {
             );
         }
 
+        #[cfg(test)]
+        self.probe_after_grain_move(bounds, target_x, y + 1);
         self.refresh_local_repose(x);
         self.refresh_local_repose(target_x);
     }
@@ -1490,7 +1536,10 @@ impl ClassicSandboxEngine {
         }
         self.diagonal_moves = self.diagonal_moves.saturating_add(1);
         #[cfg(test)]
-        self.record_diagnostic_diagonal_span(x, next_x);
+        {
+            self.record_diagnostic_diagonal_span(x, next_x);
+            self.probe_after_grain_move(bounds, next_x, y + 1);
+        }
         self.refresh_local_repose(next_x);
     }
 
@@ -1518,7 +1567,7 @@ impl ClassicSandboxEngine {
                 // A: reuse Classic's own local stability threshold. Momentum is
                 // eligible only on relief at, or one dot beyond, the source
                 // column's local repose instead of using a globally fixed band.
-                let repose = usize::from(self.local_repose[source_x]);
+                let repose = usize::from(self.effective_local_repose(source_x));
                 (repose..=repose.saturating_add(1)).contains(&drop_depth)
             }
             ClassicExperimentProfile::MomentumTangent => {
@@ -1544,7 +1593,7 @@ impl ClassicSandboxEngine {
                 // C: turn the repose-relative upper edge into a soft transition.
                 // Exact local repose always continues, one extra dot continues
                 // 60% of the time, and anything steeper is treated as a cliff.
-                let repose = usize::from(self.local_repose[source_x]);
+                let repose = usize::from(self.effective_local_repose(source_x));
                 match drop_depth.checked_sub(repose) {
                     Some(0) => true,
                     Some(1) => self.next_physics_random_u64() % 5 < 3,
@@ -1555,6 +1604,26 @@ impl ClassicSandboxEngine {
         }
     }
 
+    fn effective_local_repose(&self, x: usize) -> u8 {
+        #[cfg(test)]
+        if self.repose_stability_probe == ReposeStabilityProbe::ConvexityAnchorBuried
+            && self
+                .repose_anchor_latent_height
+                .get(x)
+                .copied()
+                .flatten()
+                .is_some()
+            && self.local_repose.get(x).copied() == Some(CLASSIC_REPOSE_ANCHOR)
+        {
+            // C2 diagnostic semantics: routing an existing anchor onto a fresh
+            // crest does not grant its final extra unit of authority until later
+            // supported accretion grows that column. The state budget itself is
+            // unchanged; only the routed anchor's fourth repose unit is latent.
+            return CLASSIC_REPOSE_HIGH;
+        }
+        self.local_repose[x]
+    }
+
     fn local_repose_allows_diagonal(
         &self,
         bounds: ViewportBounds,
@@ -1562,7 +1631,7 @@ impl ClassicSandboxEngine {
         target_x: usize,
         source_y: usize,
     ) -> bool {
-        let repose = usize::from(self.local_repose[source_x]);
+        let repose = usize::from(self.effective_local_repose(source_x));
         if repose <= usize::from(CLASSIC_REPOSE_LOW) {
             return true;
         }
@@ -1583,6 +1652,11 @@ impl ClassicSandboxEngine {
     }
 
     fn resample_all_local_repose(&mut self) {
+        #[cfg(test)]
+        {
+            self.repose_anchor_latent_height.fill(None);
+            self.repose_deferred_route_pending.fill(false);
+        }
         let mut previous = CLASSIC_REPOSE_LOW;
         let memory = self.experiment_memory_refreshes();
         for x in 0..self.local_repose.len() {
@@ -1606,11 +1680,17 @@ impl ClassicSandboxEngine {
         let locked = self.repose_stability_probe.locks(self.local_repose[x]);
         #[cfg(not(test))]
         let locked = false;
+        #[cfg(test)]
+        let mut resampled = false;
 
         if !locked {
             if self.experiment_profile.uses_memory() && self.repose_memory_remaining[x] > 0 {
                 self.repose_memory_remaining[x] -= 1;
             } else {
+                #[cfg(test)]
+                {
+                    resampled = true;
+                }
                 let repose = if self.texture_patch_continues() {
                     let left = x.checked_sub(1).map(|index| self.local_repose[index]);
                     let right = (x + 1 < self.local_repose.len()).then(|| self.local_repose[x + 1]);
@@ -1634,7 +1714,16 @@ impl ClassicSandboxEngine {
         }
 
         #[cfg(test)]
-        self.route_local_repose_probe(x);
+        {
+            if self.repose_stability_probe == ReposeStabilityProbe::ConvexityAnchorBuried
+                && (resampled || self.local_repose[x] != CLASSIC_REPOSE_ANCHOR)
+            {
+                // A natural refresh starts a new state lifetime. Only an anchor
+                // subsequently moved by the routing step may become latent.
+                self.repose_anchor_latent_height[x] = None;
+            }
+            self.route_local_repose_probe(x);
+        }
         #[cfg(not(test))]
         self.route_local_repose_by_convexity(x);
     }
@@ -1666,8 +1755,124 @@ impl ClassicSandboxEngine {
                 self.local_repose[index] = state.0;
                 self.repose_memory_remaining[index] = state.1;
             }
-        } else if self.repose_stability_probe.routes_by_convexity() {
-            self.route_local_repose_by_convexity(x);
+        } else {
+            match self.repose_stability_probe {
+                ReposeStabilityProbe::ConvexityAnchorStationary => {
+                    self.route_local_repose_by_convexity_without_anchor(x);
+                }
+                ReposeStabilityProbe::ConvexityDeferred => {
+                    if x < self.repose_deferred_route_pending.len() {
+                        self.repose_deferred_route_pending[x] = true;
+                    }
+                }
+                ReposeStabilityProbe::ShoulderRoute => {
+                    self.route_local_repose_by_shoulder(x);
+                }
+                ReposeStabilityProbe::ConvexityAnchorBuried => {
+                    self.route_local_repose_by_convexity_with_buried_anchor(x);
+                }
+                probe if probe.routes_by_convexity() => {
+                    self.route_local_repose_by_convexity(x);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn route_local_repose_by_convexity_with_buried_anchor(&mut self, x: usize) {
+        let Some(bounds) = self.surface.viewport_bounds() else {
+            return;
+        };
+        let start = x.saturating_sub(1).max(bounds.x_start);
+        let end = (x + 2).min(bounds.x_end);
+        if end.saturating_sub(start) < 2 {
+            return;
+        }
+
+        let before = (start..end)
+            .map(|index| {
+                (
+                    self.local_repose[index],
+                    self.repose_anchor_latent_height[index],
+                )
+            })
+            .collect::<Vec<_>>();
+        self.route_local_repose_by_convexity(x);
+        for (offset, index) in (start..end).enumerate() {
+            let (before_repose, before_latent) = before[offset];
+            if self.local_repose[index] != CLASSIC_REPOSE_ANCHOR {
+                self.repose_anchor_latent_height[index] = None;
+            } else if before_repose == CLASSIC_REPOSE_ANCHOR {
+                self.repose_anchor_latent_height[index] = before_latent;
+            } else {
+                self.repose_anchor_latent_height[index] =
+                    Some(self.supported_column_height(index));
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn route_local_repose_by_convexity_without_anchor(&mut self, x: usize) {
+        let Some(bounds) = self.surface.viewport_bounds() else {
+            return;
+        };
+        let start = x.saturating_sub(1).max(bounds.x_start);
+        let end = (x + 2).min(bounds.x_end);
+        let mut positions = (start..end)
+            .filter(|index| self.local_repose[*index] != CLASSIC_REPOSE_ANCHOR)
+            .collect::<Vec<_>>();
+        if positions.len() < 2 {
+            return;
+        }
+        positions.sort_by_key(|index| (self.local_convexity_score(*index), *index));
+        let mut states = positions
+            .iter()
+            .map(|index| {
+                (
+                    self.local_repose[*index],
+                    self.repose_memory_remaining[*index],
+                )
+            })
+            .collect::<Vec<_>>();
+        states.sort_by_key(|state| (state.0, state.1));
+        for (index, state) in positions.into_iter().zip(states) {
+            self.local_repose[index] = state.0;
+            self.repose_memory_remaining[index] = state.1;
+        }
+    }
+
+    #[cfg(test)]
+    fn route_local_repose_by_shoulder(&mut self, x: usize) {
+        let Some(bounds) = self.surface.viewport_bounds() else {
+            return;
+        };
+        let start = x.saturating_sub(1).max(bounds.x_start);
+        let end = (x + 2).min(bounds.x_end);
+        if end.saturating_sub(start) < 2 {
+            return;
+        }
+
+        let mut positions = (start..end).collect::<Vec<_>>();
+        positions.sort_by_key(|index| {
+            (
+                u8::from(!self.is_strict_one_column_apex(*index)),
+                self.local_convexity_score(*index),
+                *index,
+            )
+        });
+        let mut states = (start..end)
+            .map(|index| {
+                (
+                    self.local_repose[index],
+                    self.repose_memory_remaining[index],
+                )
+            })
+            .collect::<Vec<_>>();
+        states.sort_by_key(|state| (state.0, state.1));
+        for (index, state) in positions.into_iter().zip(states) {
+            self.local_repose[index] = state.0;
+            self.repose_memory_remaining[index] = state.1;
         }
     }
 
@@ -1731,6 +1936,55 @@ impl ClassicSandboxEngine {
             .saturating_mul(2)
             .saturating_sub(left)
             .saturating_sub(right)
+    }
+
+    #[cfg(test)]
+    fn is_strict_one_column_apex(&self, x: usize) -> bool {
+        let Some(bounds) = self.surface.viewport_bounds() else {
+            return false;
+        };
+        let Some(left) = x.checked_sub(1).filter(|left| *left >= bounds.x_start) else {
+            return false;
+        };
+        if x + 1 >= bounds.x_end {
+            return false;
+        }
+        let center = self.supported_column_height(x);
+        center > self.supported_column_height(left)
+            && center > self.supported_column_height(x + 1)
+    }
+
+    #[cfg(test)]
+    fn probe_after_grain_move(&mut self, bounds: ViewportBounds, x: usize, y: usize) {
+        if self.repose_stability_probe == ReposeStabilityProbe::ConvexityAnchorBuried
+            && x < self.repose_anchor_latent_height.len()
+        {
+            if let Some(marker) = self.repose_anchor_latent_height[x]
+                && self.supported_column_height(x) > marker
+            {
+                self.repose_anchor_latent_height[x] = None;
+            }
+        }
+
+        if self.repose_stability_probe != ReposeStabilityProbe::ConvexityDeferred
+            || x >= self.repose_deferred_route_pending.len()
+        {
+            return;
+        }
+        let supported_height = self.supported_column_height(x);
+        if supported_height == 0 || bounds.y_end.saturating_sub(supported_height) != y {
+            return;
+        }
+
+        let start = x.saturating_sub(1).max(bounds.x_start);
+        let end = (x + 2).min(bounds.x_end);
+        let centers = (start..end)
+            .filter(|center| self.repose_deferred_route_pending[*center])
+            .collect::<Vec<_>>();
+        for center in centers {
+            self.repose_deferred_route_pending[center] = false;
+            self.route_local_repose_by_convexity(center);
+        }
     }
 
     #[cfg(test)]

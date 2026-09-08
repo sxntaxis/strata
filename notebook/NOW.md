@@ -5,9 +5,13 @@ state: active
 created: 2026-08-01
 updated: 2026-09-08
 authority: working
-summary: RAIN-005C1 selected convexity-route as the sole full avalanche-safe human finalist. Because the owner is back at the machine and the measured gain is modest, RAIN-005C1R1 now uses a bounded 24-run promotion smoke before human review; the frozen 192-row gate remains the later certification step only if the visual change is worth retaining.
-next: Run the bounded RAIN-005C1R1 promotion smoke: compile, preserve the focused R1/B2 invariants, and reproduce 24 systematically spread frozen convexity-route samples (12 geometries x both exact seeds) at nine printed decimals. If green, advance immediately to human macro-topography review. Run the full 192-row promotion certification only if the owner sees a worthwhile visual improvement.
+summary: RAIN-005C1R1 convexity-route passed the bounded promotion smoke and the owner accepted its small but clearly visible macrorelief gain as the new preferred Classic morphology baseline. RAIN-005C2 now tests four bounded explanations for the newly noticed one-to-three-dot pike artifact without changing the accepted rain, avalanche, repose-budget, or macrorelief baseline.
+next: Run the internally parallel RAIN-005C2 pike-artifact factorial: 32 systematically spread A3 geometries x both exact seeds x five arms. Exact C1R1 control must reproduce its frozen fixture; return at most two avalanche-safe Pareto candidates that reduce the pike diagnostic without semantic tuning. Human-review any candidate before final 192-row baseline certification.
 ---
+
+## RAIN-005C2 pike-artifact factorial — 2026-09-08
+
+The owner accepted C1R1 `convexity-route` as the new preferred Classic morphology baseline after the 24-run promotion smoke and direct visual review: the gain is small but clearly visible in large-scale relief, crests/valleys, and lateral stratal variation. That review also exposed occasional narrow one-column pikes of roughly one to three dots. C2 keeps the accepted C1R1 runtime as its exact control and tests four test-only causal alternatives: delay only a newly routed anchor's fourth repose unit until later supported accretion, keep anchors stationary while routing the weaker states, defer routing until later supported accretion, and route toward shoulders/non-apex convex support rather than strict one-column apices. A new final-surface pike density/excess diagnostic is paired with the existing macrorelief and avalanche-safety metrics. The five 64-run arms execute concurrently on scoped worker threads. No runtime candidate, full 192-row certification, merge, or push is authorized by this unit. See `notebook/work/RAIN-005C2-PIKE-ARTIFACT-FACTORIAL.md`.
 
 ## RAIN-005C1R1 bounded human-smoke gate — 2026-09-08
 

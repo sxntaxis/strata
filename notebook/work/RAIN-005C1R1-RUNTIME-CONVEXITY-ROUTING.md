@@ -101,3 +101,9 @@ If promotion-equivalence, formatting, strict Clippy, full tests, help/version sm
 - with modern avalanche behavior still visually alive.
 
 Do not merge or push before that verdict.
+
+## Owner human verdict — 2026-09-08
+
+The bounded 24-run promotion smoke reproduced the frozen C1 convexity finalist sample-by-sample at nine printed decimals. The owner then reviewed the exact C1R1 runtime and **accepted `convexity-route` as the new preferred Classic morphology baseline**. The improvement over R1 is small but clearly visible and positive in the intended properties: large-scale relief, crests/valleys, and lateral stratal variation.
+
+The same review identified a narrower possible C1R1 artifact: occasional one-column pikes of roughly one to three dots. RAIN-005C2 owns a bounded artifact factorial before the final 192-row C1R1 certification. C1R1 remains the control and quality floor; the pike investigation must not trade away the accepted macrorelief gain merely to smooth the surface.
