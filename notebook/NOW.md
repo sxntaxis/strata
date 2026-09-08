@@ -5,9 +5,14 @@ state: active
 created: 2026-08-01
 updated: 2026-09-08
 authority: working
-summary: RAIN-005B2R1 passed full machine validation and is accepted as the new best-in-class morphology baseline, but the owner wants the historical H4 installed build's large-scale relief, crests/valleys and lateral stratal thickening/pinch-out without restoring its rejected avalanche behavior. RAIN-005C1 is an unattended test-only stability factorial over the exact R1 runtime.
-next: Natively run the single RAIN-005C1 unattended macrorelief stability suite. It must reproduce R1 control exactly, evaluate all nine stability arms over 64 seed-1 geometries, automatically select at most two safe Pareto finalists, then run those finalists plus R1 control over the full 192 A3 geometry/seed rows. Return the report and bundle without authoring, merging or pushing a runtime morphology candidate.
+summary: RAIN-005C1 completed its unattended stability search and selected convexity-route as the sole full avalanche-safe human finalist; RAIN-005C1R1 now promotes exactly that budget-neutral local repose routing to runtime with a 192-row promotion-equivalence gate.
+next: Natively validate RAIN-005C1R1. Runtime must reproduce all 192 frozen convexity-route full samples at nine printed decimals, preserve R1/B2 anti-nozzle and boundary-avulsion behavior, and pass formatting, strict Clippy, full tests, help/version smoke and PERF-001. If green, stop machine search and advance exactly that candidate to one human macro-topography review.
 ---
+
+## RAIN-005C1R1 runtime convexity routing — 2026-09-08
+
+RAIN-005C1 completed 960 physical runs and selected `convexity-route` as its only unique full human-eligible finalist. The arm preserves the exact local repose-state budget and RNG stream, but after an ordinary movement-triggered refresh it permutes the touched radius-one neighborhood so stronger `(repose, memory)` states occupy the more locally convex supported columns. Full 192-run evidence improved all five coarse relief/curvature objectives and also raised thickness CV and pinch-out while remaining avalanche-safe. C1R1 promotes only that exact mechanism; no anchor probability, persistence interval, radius, threshold, or avalanche law changes. Promotion must reproduce the frozen 192 selected samples before human review. See `notebook/work/RAIN-005C1R1-RUNTIME-CONVEXITY-ROUTING.md`.
+
 
 ## RAIN-005C1 macrorelief stability factorial — 2026-09-08
 

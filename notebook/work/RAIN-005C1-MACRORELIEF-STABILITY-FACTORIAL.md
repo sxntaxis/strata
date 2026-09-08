@@ -1,11 +1,11 @@
 ---
 id: RAIN-005C1
 kind: work
-state: authored
+state: complete
 created: 2026-09-08
 updated: 2026-09-08
 authority: working
-summary: One unattended test-only factorial asks whether Classic local stability can recover H4-like large-scale relief, crests/valleys, stratal thickening and pinch-out while RAIN-005B2R1 rain and modern avalanche behavior remain unchanged.
+summary: Native unattended C1 completed; convexity-route was the sole unique full human-eligible finalist, improving every coarse relief/curvature objective while remaining avalanche-safe.
 ---
 
 # RAIN-005C1 — macrorelief stability factorial
@@ -96,3 +96,17 @@ No runtime candidate is authored by this unit. Human review occurs only after th
 Parent must be exact R1 native-green return HEAD `83fde2f50ab3ada57159666ddcbdd9d380ff9baf` / TREE `c7c66e6e52bf016e1a2fc009f0caf13c3bf74752`.
 
 C1 also adds behavior-neutral CLI provenance: `strata --version` reports Cargo semver plus the build-time Git commit short hash. This is separate from the test-only morphology experiment and exists so future installed binaries can identify their source lineage directly.
+## Native result — 2026-09-08
+
+The exact C1 handoff passed transport, scope, fixtures, compile, focused C1 gates, R1/B2 preservation, sample-level R1 control reproduction, formatting, strict Clippy, full tests, help/version smoke and PERF-001. The complete unattended suite ran for `7858.54` seconds.
+
+Stage 1 completed `64 geometries x 1 seed x 9 arms = 576` physical runs. Every arm except `strong-locked` remained on the safe Pareto frontier, but the predeclared simple and macro selection rules independently chose the same unique finalist: `convexity-route`.
+
+Stage 2 therefore ran exact full evidence for R1 control and that finalist only: `192 + 192 = 384` physical runs. Full medians were:
+
+```text
+runtime-control:  relief_d2=0.090879794 relief_d4=0.250406504 relief_d8=0.341726837 curvature_d4=0.140056022 curvature_d8=0.073316283 thickness_cv=0.344785759 pinchout=0.001529052 continuity=0.979844961 avalanche_safe=true
+convexity-route:  relief_d2=0.095018506 relief_d4=0.254031588 relief_d8=0.349065791 curvature_d4=0.143704758 curvature_d8=0.078469649 thickness_cv=0.354764624 pinchout=0.001851852 continuity=0.972854291 avalanche_safe=true
+```
+
+`convexity-route` remained on the full safe Pareto frontier and was the sole human-eligible arm. C1 therefore closes the broad stability search: do not tune anchor probabilities, lock durations, or structural-routing radii. The next bounded unit is RAIN-005C1R1, which promotes exactly the selected budget-neutral radius-one convexity permutation to runtime and requires exact 192-row promotion reproduction before human review.

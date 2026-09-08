@@ -2106,6 +2106,31 @@ mod tests {
         categories: &[Category],
         probe: ReposeStabilityProbe,
     ) -> MacroreliefSample {
+        macrorelief_sample_for_geometry_with_probe(
+            width_cells,
+            height_cells,
+            seed,
+            categories,
+            Some(probe),
+        )
+    }
+
+    fn macrorelief_runtime_sample_for_geometry(
+        width_cells: usize,
+        height_cells: usize,
+        seed: u64,
+        categories: &[Category],
+    ) -> MacroreliefSample {
+        macrorelief_sample_for_geometry_with_probe(width_cells, height_cells, seed, categories, None)
+    }
+
+    fn macrorelief_sample_for_geometry_with_probe(
+        width_cells: usize,
+        height_cells: usize,
+        seed: u64,
+        categories: &[Category],
+        probe: Option<ReposeStabilityProbe>,
+    ) -> MacroreliefSample {
         let mut engine = ClassicSandboxEngine::new(
             u16::try_from(width_cells).expect("diagnostic width fits u16"),
             u16::try_from(height_cells).expect("diagnostic height fits u16"),
@@ -2113,7 +2138,9 @@ mod tests {
             ClassicRainMode::WanderingFocus,
         );
         engine.force_reference_gravity = false;
-        engine.repose_stability_probe = probe;
+        if let Some(probe) = probe {
+            engine.repose_stability_probe = probe;
+        }
         engine.repose_rng_state = engine.initial_repose_rng_state;
         engine.resample_all_local_repose();
 
@@ -2549,6 +2576,163 @@ mod tests {
             "C1 control delta span",
             sample.legacy.centroid_span - expected.centroid_span,
             expected_r1.delta_span,
+        );
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct Rain005C1ConvexityFullReference {
+        run: usize,
+        geometry: usize,
+        seed_slot: usize,
+        width_cells: usize,
+        height_cells: usize,
+        seed: u64,
+        relief_d2: f64,
+        relief_d4: f64,
+        relief_d8: f64,
+        curvature_d4: f64,
+        curvature_d8: f64,
+        thickness_cv: f64,
+        pinchout: f64,
+        continuity: f64,
+        legacy_corr: f64,
+        legacy_tv: f64,
+        legacy_shift: f64,
+        legacy_span: f64,
+        avalanche_p95_moves: f64,
+        avalanche_p95_span: f64,
+    }
+
+    fn rain_005c1_convexity_full_reference() -> Vec<Rain005C1ConvexityFullReference> {
+        const REFERENCE: &str = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/rain_005c1_convexity_full_reference.csv"
+        ));
+        REFERENCE
+            .lines()
+            .skip(1)
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| {
+                let fields = line.split(',').collect::<Vec<_>>();
+                assert_eq!(fields.len(), 20, "invalid RAIN-005C1 convexity row: {line}");
+                Rain005C1ConvexityFullReference {
+                    run: fields[0].parse().expect("run"),
+                    geometry: fields[1].parse().expect("geometry"),
+                    seed_slot: fields[2].parse().expect("seed slot"),
+                    width_cells: fields[3].parse().expect("terminal width"),
+                    height_cells: fields[4].parse().expect("terminal height"),
+                    seed: fields[5].parse().expect("seed"),
+                    relief_d2: fields[6].parse().expect("relief d2"),
+                    relief_d4: fields[7].parse().expect("relief d4"),
+                    relief_d8: fields[8].parse().expect("relief d8"),
+                    curvature_d4: fields[9].parse().expect("curvature d4"),
+                    curvature_d8: fields[10].parse().expect("curvature d8"),
+                    thickness_cv: fields[11].parse().expect("thickness cv"),
+                    pinchout: fields[12].parse().expect("pinchout"),
+                    continuity: fields[13].parse().expect("continuity"),
+                    legacy_corr: fields[14].parse().expect("legacy corr"),
+                    legacy_tv: fields[15].parse().expect("legacy tv"),
+                    legacy_shift: fields[16].parse().expect("legacy shift"),
+                    legacy_span: fields[17].parse().expect("legacy span"),
+                    avalanche_p95_moves: fields[18].parse().expect("avalanche p95 moves"),
+                    avalanche_p95_span: fields[19].parse().expect("avalanche p95 span"),
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn rain_005c1r1_runtime_repose_routing_is_selected_convexity_arm() {
+        let engine = ClassicSandboxEngine::new(30, 20, 0xC1C1, ClassicRainMode::WanderingFocus);
+        assert_eq!(
+            engine.repose_stability_probe,
+            ReposeStabilityProbe::ConvexityRoute
+        );
+    }
+
+    #[test]
+    #[ignore = "native RAIN-005C1R1 exact runtime-promotion reproduction of the 192-run C1 convexity finalist"]
+    fn rain_005c1r1_runtime_promotion_reproduces_c1_convexity_full() {
+        const CATEGORY_COUNT: usize = 5;
+        let categories = (1..=CATEGORY_COUNT)
+            .map(|id| category(id as u64, &format!("C1R1 {id}")))
+            .collect::<Vec<_>>();
+        let reference = rain_005c1_convexity_full_reference();
+        assert_eq!(reference.len(), 192);
+
+        for expected in &reference {
+            let sample = macrorelief_runtime_sample_for_geometry(
+                expected.width_cells,
+                expected.height_cells,
+                expected.seed,
+                &categories,
+            );
+            assert_printed_nine_eq("C1R1 relief d2", sample.relief_d2, expected.relief_d2);
+            assert_printed_nine_eq("C1R1 relief d4", sample.relief_d4, expected.relief_d4);
+            assert_printed_nine_eq("C1R1 relief d8", sample.relief_d8, expected.relief_d8);
+            assert_printed_nine_eq(
+                "C1R1 curvature d4",
+                sample.curvature_d4,
+                expected.curvature_d4,
+            );
+            assert_printed_nine_eq(
+                "C1R1 curvature d8",
+                sample.curvature_d8,
+                expected.curvature_d8,
+            );
+            assert_printed_nine_eq("C1R1 thickness cv", sample.legacy.cv, expected.thickness_cv);
+            assert_printed_nine_eq(
+                "C1R1 pinchout",
+                sample.pinchout_fraction,
+                expected.pinchout,
+            );
+            assert_printed_nine_eq(
+                "C1R1 continuity",
+                sample.continuity_fraction,
+                expected.continuity,
+            );
+            assert_printed_nine_eq(
+                "C1R1 legacy corr",
+                sample.legacy.correlation,
+                expected.legacy_corr,
+            );
+            assert_printed_nine_eq(
+                "C1R1 legacy tv",
+                sample.legacy.total_variation,
+                expected.legacy_tv,
+            );
+            assert_printed_nine_eq(
+                "C1R1 legacy shift",
+                sample.legacy.centroid_shift,
+                expected.legacy_shift,
+            );
+            assert_printed_nine_eq(
+                "C1R1 legacy span",
+                sample.legacy.centroid_span,
+                expected.legacy_span,
+            );
+            assert_printed_nine_eq(
+                "C1R1 avalanche p95 moves",
+                sample.avalanche_p95_moves,
+                expected.avalanche_p95_moves,
+            );
+            assert_printed_nine_eq(
+                "C1R1 avalanche p95 span",
+                sample.avalanche_p95_span,
+                expected.avalanche_p95_span,
+            );
+            println!(
+                "RAIN_005C1R1_PROMOTION_SAMPLE run={} geometry={} seed_slot={} terminal={}x{} seed={} result=PASS_SAMPLE_LEVEL_9DP",
+                expected.run,
+                expected.geometry,
+                expected.seed_slot,
+                expected.width_cells,
+                expected.height_cells,
+                expected.seed,
+            );
+        }
+        println!(
+            "RAIN_005C1R1_PROMOTION_CONTROL result=PASS_SAMPLE_LEVEL_9DP runs=192 fixture_sha256=138c979e64e046bcdb5597d2eed71b468257635a53d7caef838d21899132c6f1"
         );
     }
 

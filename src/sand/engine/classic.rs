@@ -457,7 +457,7 @@ impl ClassicSandboxEngine {
             #[cfg(test)]
             rain_bias_schedule_probe: RainBiasScheduleProbe::Runtime,
             #[cfg(test)]
-            repose_stability_probe: ReposeStabilityProbe::RuntimeControl,
+            repose_stability_probe: ReposeStabilityProbe::ConvexityRoute,
             #[cfg(test)]
             diagnostic_move_min_x: None,
             #[cfg(test)]
@@ -1635,15 +1635,43 @@ impl ClassicSandboxEngine {
 
         #[cfg(test)]
         self.route_local_repose_probe(x);
+        #[cfg(not(test))]
+        self.route_local_repose_by_convexity(x);
     }
 
     #[cfg(test)]
     fn route_local_repose_probe(&mut self, x: usize) {
-        if !self.repose_stability_probe.routes_by_height()
-            && !self.repose_stability_probe.routes_by_convexity()
-        {
-            return;
+        if self.repose_stability_probe.routes_by_height() {
+            let Some(bounds) = self.surface.viewport_bounds() else {
+                return;
+            };
+            let start = x.saturating_sub(1).max(bounds.x_start);
+            let end = (x + 2).min(bounds.x_end);
+            if end.saturating_sub(start) < 2 {
+                return;
+            }
+
+            let mut positions = (start..end).collect::<Vec<_>>();
+            positions.sort_by_key(|index| (self.supported_column_height(*index), *index));
+            let mut states = (start..end)
+                .map(|index| {
+                    (
+                        self.local_repose[index],
+                        self.repose_memory_remaining[index],
+                    )
+                })
+                .collect::<Vec<_>>();
+            states.sort_by_key(|state| (state.0, state.1));
+            for (index, state) in positions.into_iter().zip(states) {
+                self.local_repose[index] = state.0;
+                self.repose_memory_remaining[index] = state.1;
+            }
+        } else if self.repose_stability_probe.routes_by_convexity() {
+            self.route_local_repose_by_convexity(x);
         }
+    }
+
+    fn route_local_repose_by_convexity(&mut self, x: usize) {
         let Some(bounds) = self.surface.viewport_bounds() else {
             return;
         };
@@ -1654,12 +1682,7 @@ impl ClassicSandboxEngine {
         }
 
         let mut positions = (start..end).collect::<Vec<_>>();
-        if self.repose_stability_probe.routes_by_height() {
-            positions.sort_by_key(|index| (self.supported_column_height(*index), *index));
-        } else {
-            positions.sort_by_key(|index| (self.local_convexity_score(*index), *index));
-        }
-
+        positions.sort_by_key(|index| (self.local_convexity_score(*index), *index));
         let mut states = (start..end)
             .map(|index| {
                 (
@@ -1675,7 +1698,6 @@ impl ClassicSandboxEngine {
         }
     }
 
-    #[cfg(test)]
     fn supported_column_height(&self, x: usize) -> usize {
         let Some(bounds) = self.surface.viewport_bounds() else {
             return 0;
@@ -1690,7 +1712,6 @@ impl ClassicSandboxEngine {
         bounds.y_end.saturating_sub(top)
     }
 
-    #[cfg(test)]
     fn local_convexity_score(&self, x: usize) -> isize {
         let center = self.supported_column_height(x) as isize;
         let Some(bounds) = self.surface.viewport_bounds() else {
