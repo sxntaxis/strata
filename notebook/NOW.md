@@ -5,9 +5,13 @@ state: active
 created: 2026-08-01
 updated: 2026-09-08
 authority: working
-summary: RAIN-005C1 completed its unattended stability search and selected convexity-route as the sole full avalanche-safe human finalist; RAIN-005C1R1 now promotes exactly that budget-neutral local repose routing to runtime with a 192-row promotion-equivalence gate.
-next: Natively validate RAIN-005C1R1. Runtime must reproduce all 192 frozen convexity-route full samples at nine printed decimals, preserve R1/B2 anti-nozzle and boundary-avulsion behavior, and pass formatting, strict Clippy, full tests, help/version smoke and PERF-001. If green, stop machine search and advance exactly that candidate to one human macro-topography review.
+summary: RAIN-005C1 selected convexity-route as the sole full avalanche-safe human finalist. Because the owner is back at the machine and the measured gain is modest, RAIN-005C1R1 now uses a bounded 24-run promotion smoke before human review; the frozen 192-row gate remains the later certification step only if the visual change is worth retaining.
+next: Run the bounded RAIN-005C1R1 promotion smoke: compile, preserve the focused R1/B2 invariants, and reproduce 24 systematically spread frozen convexity-route samples (12 geometries x both exact seeds) at nine printed decimals. If green, advance immediately to human macro-topography review. Run the full 192-row promotion certification only if the owner sees a worthwhile visual improvement.
 ---
+
+## RAIN-005C1R1 bounded human-smoke gate — 2026-09-08
+
+The owner returned before the planned full 192-row promotion certification and correctly questioned whether the measured C1 gains (roughly low-single-digit coarse-relief improvements) will be visually meaningful. To avoid spending another long native pass on an implementation-equivalence question before human value is established, C1R1 now adds a test-only bounded promotion smoke. It selects every eighth A3 geometry from the frozen 192-row convexity-route reference (12 geometries spanning the exact geometry order) and runs both exact seeds, for 24 physical runs total. Every reported morphology and avalanche summary field must reproduce the C1 experimental winner at nine printed decimals. This does not weaken the eventual certification: if the owner visually accepts C1R1, the unchanged full 192-row promotion gate remains required before freezing or merging.
 
 ## RAIN-005C1R1 runtime convexity routing — 2026-09-08
 

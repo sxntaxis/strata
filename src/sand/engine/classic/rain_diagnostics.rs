@@ -2651,6 +2651,101 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "native RAIN-005C1R1 bounded promotion smoke across 12 spread geometries x both exact seeds"]
+    fn rain_005c1r1_runtime_promotion_smoke_reproduces_c1_convexity_spread() {
+        const CATEGORY_COUNT: usize = 5;
+        const GEOMETRY_STRIDE: usize = 8;
+        let categories = (1..=CATEGORY_COUNT)
+            .map(|id| category(id as u64, &format!("C1R1 smoke {id}")))
+            .collect::<Vec<_>>();
+        let reference = rain_005c1_convexity_full_reference();
+        let selected = reference
+            .iter()
+            .filter(|expected| (expected.geometry - 1) % GEOMETRY_STRIDE == 0)
+            .collect::<Vec<_>>();
+        assert_eq!(selected.len(), 24, "12 spread geometries x both exact seeds");
+
+        for expected in selected {
+            let sample = macrorelief_runtime_sample_for_geometry(
+                expected.width_cells,
+                expected.height_cells,
+                expected.seed,
+                &categories,
+            );
+            assert_printed_nine_eq("C1R1 smoke relief d2", sample.relief_d2, expected.relief_d2);
+            assert_printed_nine_eq("C1R1 smoke relief d4", sample.relief_d4, expected.relief_d4);
+            assert_printed_nine_eq("C1R1 smoke relief d8", sample.relief_d8, expected.relief_d8);
+            assert_printed_nine_eq(
+                "C1R1 smoke curvature d4",
+                sample.curvature_d4,
+                expected.curvature_d4,
+            );
+            assert_printed_nine_eq(
+                "C1R1 smoke curvature d8",
+                sample.curvature_d8,
+                expected.curvature_d8,
+            );
+            assert_printed_nine_eq(
+                "C1R1 smoke thickness cv",
+                sample.legacy.cv,
+                expected.thickness_cv,
+            );
+            assert_printed_nine_eq(
+                "C1R1 smoke pinchout",
+                sample.pinchout_fraction,
+                expected.pinchout,
+            );
+            assert_printed_nine_eq(
+                "C1R1 smoke continuity",
+                sample.continuity_fraction,
+                expected.continuity,
+            );
+            assert_printed_nine_eq(
+                "C1R1 smoke legacy corr",
+                sample.legacy.correlation,
+                expected.legacy_corr,
+            );
+            assert_printed_nine_eq(
+                "C1R1 smoke legacy tv",
+                sample.legacy.total_variation,
+                expected.legacy_tv,
+            );
+            assert_printed_nine_eq(
+                "C1R1 smoke legacy shift",
+                sample.legacy.centroid_shift,
+                expected.legacy_shift,
+            );
+            assert_printed_nine_eq(
+                "C1R1 smoke legacy span",
+                sample.legacy.centroid_span,
+                expected.legacy_span,
+            );
+            assert_printed_nine_eq(
+                "C1R1 smoke avalanche p95 moves",
+                sample.avalanche_p95_moves,
+                expected.avalanche_p95_moves,
+            );
+            assert_printed_nine_eq(
+                "C1R1 smoke avalanche p95 span",
+                sample.avalanche_p95_span,
+                expected.avalanche_p95_span,
+            );
+            println!(
+                "RAIN_005C1R1_SMOKE_SAMPLE run={} geometry={} seed_slot={} terminal={}x{} seed={} result=PASS_SAMPLE_LEVEL_9DP",
+                expected.run,
+                expected.geometry,
+                expected.seed_slot,
+                expected.width_cells,
+                expected.height_cells,
+                expected.seed,
+            );
+        }
+        println!(
+            "RAIN_005C1R1_PROMOTION_SMOKE result=PASS_SAMPLE_LEVEL_9DP runs=24 geometries=12 seeds_per_geometry=2 stride=8 fixture_sha256=138c979e64e046bcdb5597d2eed71b468257635a53d7caef838d21899132c6f1"
+        );
+    }
+
+    #[test]
     #[ignore = "native RAIN-005C1R1 exact runtime-promotion reproduction of the 192-run C1 convexity finalist"]
     fn rain_005c1r1_runtime_promotion_reproduces_c1_convexity_full() {
         const CATEGORY_COUNT: usize = 5;
