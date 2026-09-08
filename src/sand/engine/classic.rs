@@ -56,6 +56,65 @@ pub(crate) enum ClassicRainMode {
 
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReposeStabilityProbe {
+    RuntimeControl,
+    NoAnchor,
+    StrongTail,
+    AnchorLocked,
+    StrongLocked,
+    HeightRoute,
+    ConvexityRoute,
+    ConvexityAnchorLocked,
+    ConvexityStrongTail,
+}
+
+#[cfg(test)]
+impl ReposeStabilityProbe {
+    fn name(self) -> &'static str {
+        match self {
+            Self::RuntimeControl => "runtime-control",
+            Self::NoAnchor => "no-anchor",
+            Self::StrongTail => "strong-tail",
+            Self::AnchorLocked => "anchor-locked",
+            Self::StrongLocked => "strong-locked",
+            Self::HeightRoute => "height-route",
+            Self::ConvexityRoute => "convexity-route",
+            Self::ConvexityAnchorLocked => "convexity-route-anchor-locked",
+            Self::ConvexityStrongTail => "convexity-route-strong-tail",
+        }
+    }
+
+    fn maps_sample(self, repose: u8) -> u8 {
+        match self {
+            Self::NoAnchor if repose == CLASSIC_REPOSE_ANCHOR => CLASSIC_REPOSE_HIGH,
+            Self::StrongTail | Self::ConvexityStrongTail
+                if repose >= CLASSIC_REPOSE_HIGH => CLASSIC_REPOSE_ANCHOR,
+            _ => repose,
+        }
+    }
+
+    fn locks(self, repose: u8) -> bool {
+        match self {
+            Self::AnchorLocked | Self::ConvexityAnchorLocked => repose == CLASSIC_REPOSE_ANCHOR,
+            Self::StrongLocked => repose >= CLASSIC_REPOSE_HIGH,
+            _ => false,
+        }
+    }
+
+    fn routes_by_height(self) -> bool {
+        matches!(self, Self::HeightRoute)
+    }
+
+    fn routes_by_convexity(self) -> bool {
+        matches!(
+            self,
+            Self::ConvexityRoute | Self::ConvexityAnchorLocked | Self::ConvexityStrongTail
+        )
+    }
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RainBiasScheduleProbe {
     Runtime,
     B2Control,
@@ -331,6 +390,12 @@ pub(crate) struct ClassicSandboxEngine {
     rain_focus_bias_phase: u64,
     #[cfg(test)]
     rain_bias_schedule_probe: RainBiasScheduleProbe,
+    #[cfg(test)]
+    repose_stability_probe: ReposeStabilityProbe,
+    #[cfg(test)]
+    diagnostic_move_min_x: Option<usize>,
+    #[cfg(test)]
+    diagnostic_move_max_x: Option<usize>,
     rain_boundary_avulsion_index: u64,
     rain_left_padding_targets: usize,
     rain_corridor_targets: usize,
@@ -390,6 +455,12 @@ impl ClassicSandboxEngine {
             rain_focus_bias_phase: initial_rain_focus_bias_phase,
             #[cfg(test)]
             rain_bias_schedule_probe: RainBiasScheduleProbe::Runtime,
+            #[cfg(test)]
+            repose_stability_probe: ReposeStabilityProbe::RuntimeControl,
+            #[cfg(test)]
+            diagnostic_move_min_x: None,
+            #[cfg(test)]
+            diagnostic_move_max_x: None,
             rain_boundary_avulsion_index: 0,
             rain_left_padding_targets: 0,
             rain_corridor_targets: 0,
@@ -1253,6 +1324,8 @@ impl ClassicSandboxEngine {
             index.record_move(x, y, target_x, y + 1);
         }
         self.diagonal_moves = self.diagonal_moves.saturating_add(1);
+        #[cfg(test)]
+        self.record_diagnostic_diagonal_span(x, target_x);
 
         if self.experiment_profile.uses_momentum() {
             self.try_one_bonus_diagonal(
@@ -1415,6 +1488,8 @@ impl ClassicSandboxEngine {
             index.record_move(x, y, next_x, y + 1);
         }
         self.diagonal_moves = self.diagonal_moves.saturating_add(1);
+        #[cfg(test)]
+        self.record_diagnostic_diagonal_span(x, next_x);
         self.refresh_local_repose(next_x);
     }
 
@@ -1525,30 +1600,137 @@ impl ClassicSandboxEngine {
         if x >= self.local_repose.len() {
             return;
         }
-        if self.experiment_profile.uses_memory() && self.repose_memory_remaining[x] > 0 {
-            self.repose_memory_remaining[x] -= 1;
+
+        #[cfg(test)]
+        let locked = self.repose_stability_probe.locks(self.local_repose[x]);
+        #[cfg(not(test))]
+        let locked = false;
+
+        if !locked {
+            if self.experiment_profile.uses_memory() && self.repose_memory_remaining[x] > 0 {
+                self.repose_memory_remaining[x] -= 1;
+            } else {
+                let repose = if self.texture_patch_continues() {
+                    let left = x.checked_sub(1).map(|index| self.local_repose[index]);
+                    let right =
+                        (x + 1 < self.local_repose.len()).then(|| self.local_repose[x + 1]);
+                    match (left, right) {
+                        (Some(left), Some(right)) => {
+                            if self.next_repose_random_u64() & 1 == 0 {
+                                left
+                            } else {
+                                right
+                            }
+                        }
+                        (Some(value), None) | (None, Some(value)) => value,
+                        (None, None) => self.sample_base_local_repose(),
+                    }
+                } else {
+                    self.sample_base_local_repose()
+                };
+                self.local_repose[x] = repose;
+                self.repose_memory_remaining[x] = self.experiment_memory_refreshes();
+            }
+        }
+
+        #[cfg(test)]
+        self.route_local_repose_probe(x);
+    }
+
+    #[cfg(test)]
+    fn route_local_repose_probe(&mut self, x: usize) {
+        if !self.repose_stability_probe.routes_by_height()
+            && !self.repose_stability_probe.routes_by_convexity()
+        {
+            return;
+        }
+        let Some(bounds) = self.surface.viewport_bounds() else {
+            return;
+        };
+        let start = x.saturating_sub(1).max(bounds.x_start);
+        let end = (x + 2).min(bounds.x_end);
+        if end.saturating_sub(start) < 2 {
             return;
         }
 
-        let repose = if self.texture_patch_continues() {
-            let left = x.checked_sub(1).map(|index| self.local_repose[index]);
-            let right = (x + 1 < self.local_repose.len()).then(|| self.local_repose[x + 1]);
-            match (left, right) {
-                (Some(left), Some(right)) => {
-                    if self.next_repose_random_u64() & 1 == 0 {
-                        left
-                    } else {
-                        right
-                    }
-                }
-                (Some(value), None) | (None, Some(value)) => value,
-                (None, None) => self.sample_base_local_repose(),
-            }
+        let mut positions = (start..end).collect::<Vec<_>>();
+        if self.repose_stability_probe.routes_by_height() {
+            positions.sort_by_key(|index| (self.supported_column_height(*index), *index));
         } else {
-            self.sample_base_local_repose()
+            positions.sort_by_key(|index| (self.local_convexity_score(*index), *index));
+        }
+
+        let mut states = (start..end)
+            .map(|index| (self.local_repose[index], self.repose_memory_remaining[index]))
+            .collect::<Vec<_>>();
+        states.sort_by_key(|state| (state.0, state.1));
+        for (index, state) in positions.into_iter().zip(states) {
+            self.local_repose[index] = state.0;
+            self.repose_memory_remaining[index] = state.1;
+        }
+    }
+
+    #[cfg(test)]
+    fn supported_column_height(&self, x: usize) -> usize {
+        let Some(bounds) = self.surface.viewport_bounds() else {
+            return 0;
         };
-        self.local_repose[x] = repose;
-        self.repose_memory_remaining[x] = self.experiment_memory_refreshes();
+        if x < bounds.x_start || x >= bounds.x_end {
+            return 0;
+        }
+        let mut top = bounds.y_end;
+        while top > bounds.y_start && self.surface.grid[top - 1][x].is_some() {
+            top -= 1;
+        }
+        bounds.y_end.saturating_sub(top)
+    }
+
+    #[cfg(test)]
+    fn local_convexity_score(&self, x: usize) -> isize {
+        let center = self.supported_column_height(x) as isize;
+        let Some(bounds) = self.surface.viewport_bounds() else {
+            return 0;
+        };
+        let left = x
+            .checked_sub(1)
+            .filter(|index| *index >= bounds.x_start)
+            .map(|index| self.supported_column_height(index) as isize)
+            .unwrap_or(center);
+        let right = (x + 1 < bounds.x_end)
+            .then(|| self.supported_column_height(x + 1) as isize)
+            .unwrap_or(center);
+        center
+            .saturating_mul(2)
+            .saturating_sub(left)
+            .saturating_sub(right)
+    }
+
+    #[cfg(test)]
+    fn record_diagnostic_diagonal_span(&mut self, source_x: usize, target_x: usize) {
+        let low = source_x.min(target_x);
+        let high = source_x.max(target_x);
+        self.diagnostic_move_min_x = Some(
+            self.diagnostic_move_min_x
+                .map_or(low, |current| current.min(low)),
+        );
+        self.diagnostic_move_max_x = Some(
+            self.diagnostic_move_max_x
+                .map_or(high, |current| current.max(high)),
+        );
+    }
+
+    #[cfg(test)]
+    fn reset_diagnostic_diagonal_span(&mut self) {
+        self.diagnostic_move_min_x = None;
+        self.diagnostic_move_max_x = None;
+    }
+
+    #[cfg(test)]
+    fn diagnostic_diagonal_span(&self) -> usize {
+        match (self.diagnostic_move_min_x, self.diagnostic_move_max_x) {
+            (Some(low), Some(high)) => high.saturating_sub(low),
+            _ => 0,
+        }
     }
 
     fn experiment_memory_refreshes(&self) -> u8 {
@@ -1571,34 +1753,46 @@ impl ClassicSandboxEngine {
         }
 
         let random = self.next_repose_random_u64();
-        if self.experiment_profile.uses_anchors() {
-            return match random % 1000 {
+        let sampled = if self.experiment_profile.uses_anchors() {
+            match random % 1000 {
                 0..=899 => CLASSIC_REPOSE_LOW,
                 900..=979 => CLASSIC_REPOSE_MID,
                 980..=994 => CLASSIC_REPOSE_HIGH,
                 _ => CLASSIC_REPOSE_ANCHOR,
-            };
-        }
-        match self.texture_profile {
-            // Preserve CLASSIC-002's exact accepted mapping byte-for-byte in RNG
-            // consumption and 1-in-20 threshold selection.
-            ClassicTextureProfile::Baseline => {
-                if random.is_multiple_of(20) {
-                    CLASSIC_REPOSE_MID
-                } else {
-                    CLASSIC_REPOSE_LOW
+            }
+        } else {
+            match self.texture_profile {
+                // Preserve CLASSIC-002's exact accepted mapping byte-for-byte in RNG
+                // consumption and 1-in-20 threshold selection.
+                ClassicTextureProfile::Baseline => {
+                    if random.is_multiple_of(20) {
+                        CLASSIC_REPOSE_MID
+                    } else {
+                        CLASSIC_REPOSE_LOW
+                    }
+                }
+                ClassicTextureProfile::Textured => match random % 100 {
+                    0..=92 => CLASSIC_REPOSE_LOW,
+                    93..=98 => CLASSIC_REPOSE_MID,
+                    _ => CLASSIC_REPOSE_HIGH,
+                },
+                ClassicTextureProfile::Rugged | ClassicTextureProfile::Terraced => {
+                    match random % 100 {
+                        0..=89 => CLASSIC_REPOSE_LOW,
+                        90..=97 => CLASSIC_REPOSE_MID,
+                        _ => CLASSIC_REPOSE_HIGH,
+                    }
                 }
             }
-            ClassicTextureProfile::Textured => match random % 100 {
-                0..=92 => CLASSIC_REPOSE_LOW,
-                93..=98 => CLASSIC_REPOSE_MID,
-                _ => CLASSIC_REPOSE_HIGH,
-            },
-            ClassicTextureProfile::Rugged | ClassicTextureProfile::Terraced => match random % 100 {
-                0..=89 => CLASSIC_REPOSE_LOW,
-                90..=97 => CLASSIC_REPOSE_MID,
-                _ => CLASSIC_REPOSE_HIGH,
-            },
+        };
+
+        #[cfg(test)]
+        {
+            self.repose_stability_probe.maps_sample(sampled)
+        }
+        #[cfg(not(test))]
+        {
+            sampled
         }
     }
 

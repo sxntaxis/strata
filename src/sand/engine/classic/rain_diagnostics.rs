@@ -5,7 +5,7 @@ use crate::constants::TIME_SETTINGS;
 use crate::domain::{Category, CategoryId};
 
 #[cfg(test)]
-use super::RainBiasScheduleProbe;
+use super::{RainBiasScheduleProbe, ReposeStabilityProbe};
 use super::{ClassicRainMode, ClassicSandboxEngine, RAIN_FOCUS_BIAS_PROBABILITY};
 
 const MILLIS_PER_SECOND: f64 = 1_000.0;
@@ -305,7 +305,7 @@ impl ClassicSandboxEngine {
 
     fn airborne_and_surface_metrics(
         &self,
-        bounds: super::ViewportBounds,
+        bounds: super::super::ViewportBounds,
     ) -> (usize, usize, f64, SurfaceHeightStats) {
         let mut airborne = 0usize;
         let mut grounded = 0usize;
@@ -1933,6 +1933,843 @@ mod tests {
             && shift_vs_log_width > -0.412_362;
         println!(
             "RAIN_005B2R1_PARETO_GATE pass={pareto_pass} a3_shift_vs_log_width_reference=-0.412362000"
+        );
+    }
+
+
+    #[derive(Debug, Clone, Copy)]
+    struct MacroreliefSample {
+        legacy: MorphologySample,
+        relief_d2: f64,
+        relief_d4: f64,
+        relief_d8: f64,
+        curvature_d4: f64,
+        curvature_d8: f64,
+        pinchout_fraction: f64,
+        continuity_fraction: f64,
+        avalanche_mean_moves: f64,
+        avalanche_p95_moves: f64,
+        avalanche_max_moves: f64,
+        avalanche_cascade_fraction: f64,
+        avalanche_p95_span: f64,
+        avalanche_max_span: f64,
+        avalanche_multicolumn_fraction: f64,
+        pending_fraction: f64,
+    }
+
+    #[derive(Debug, Default)]
+    struct AvalancheObservation {
+        initialized: bool,
+        last_diagonal_moves: usize,
+        moves: Vec<f64>,
+        spans: Vec<f64>,
+    }
+
+    fn advance_exact_grains_observed(
+        engine: &mut ClassicSandboxEngine,
+        grains: usize,
+        category_id: CategoryId,
+        observation: &mut AvalancheObservation,
+    ) {
+        use std::time::Duration;
+
+        let tick = Duration::from_millis(TIME_SETTINGS.tick_ms);
+        let physics = Duration::from_millis(TIME_SETTINGS.physics_ms);
+        let simulated = Duration::from_millis(
+            TIME_SETTINGS
+                .tick_ms
+                .saturating_mul(u64::try_from(grains).expect("diagnostic grain count fits u64")),
+        );
+        let mut spawn_accumulator = Duration::ZERO;
+        let mut physics_accumulator = Duration::ZERO;
+        let mut remaining = simulated;
+
+        while !remaining.is_zero() {
+            let spawn_left = tick.saturating_sub(spawn_accumulator);
+            let physics_left = physics.saturating_sub(physics_accumulator);
+            let step = remaining.min(spawn_left.min(physics_left));
+            spawn_accumulator += step;
+            physics_accumulator += step;
+            remaining = remaining.saturating_sub(step);
+
+            let spawn_due = spawn_accumulator >= tick;
+            let physics_due = physics_accumulator >= physics;
+            if spawn_due {
+                spawn_accumulator = spawn_accumulator.saturating_sub(tick);
+                if observation.initialized {
+                    observation.moves.push(
+                        engine
+                            .diagonal_moves
+                            .saturating_sub(observation.last_diagonal_moves)
+                            as f64,
+                    );
+                    observation
+                        .spans
+                        .push(engine.diagnostic_diagonal_span() as f64);
+                } else {
+                    observation.initialized = true;
+                }
+                engine.reset_diagnostic_diagonal_span();
+                observation.last_diagonal_moves = engine.diagonal_moves;
+                engine.spawn(category_id);
+            }
+            if physics_due {
+                physics_accumulator = physics_accumulator.saturating_sub(physics);
+                engine.update();
+            }
+            assert!(step > Duration::ZERO || spawn_due || physics_due);
+        }
+    }
+
+    fn supported_height_profile_for_bounds(
+        engine: &ClassicSandboxEngine,
+        bounds: super::ViewportBounds,
+    ) -> Vec<f64> {
+        (bounds.x_start..bounds.x_end)
+            .map(|x| engine.supported_column_height(x) as f64)
+            .collect()
+    }
+
+    fn dyadic_block_means(samples: &[f64], blocks: usize) -> Vec<f64> {
+        assert!(blocks > 0 && samples.len() >= blocks);
+        (0..blocks)
+            .map(|block| {
+                let start = block * samples.len() / blocks;
+                let end = (block + 1) * samples.len() / blocks;
+                mean(&samples[start..end]).expect("non-empty dyadic block")
+            })
+            .collect()
+    }
+
+    fn normalized_block_range(samples: &[f64], blocks: usize) -> f64 {
+        let block_means = dyadic_block_means(samples, blocks);
+        let low = block_means.iter().copied().fold(f64::INFINITY, f64::min);
+        let high = block_means
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        let scale = mean(samples).unwrap_or(0.0).max(1.0);
+        (high - low) / scale
+    }
+
+    fn normalized_block_curvature(samples: &[f64], blocks: usize) -> f64 {
+        let block_means = dyadic_block_means(samples, blocks);
+        let curvature = block_means
+            .windows(3)
+            .map(|window| (window[0] - 2.0 * window[1] + window[2]).abs())
+            .collect::<Vec<_>>();
+        let scale = mean(samples).unwrap_or(0.0).max(1.0);
+        mean(&curvature).unwrap_or(0.0) / scale
+    }
+
+    fn profile_pinchout_and_continuity(profiles: &[CategoryProfile]) -> (f64, f64) {
+        let mut pinchout = Vec::with_capacity(profiles.len());
+        let mut continuity = Vec::with_capacity(profiles.len());
+        for profile in profiles {
+            let width = profile.thickness.len();
+            if width == 0 {
+                continue;
+            }
+            let nonzero = profile
+                .thickness
+                .iter()
+                .filter(|value| **value > 0.0)
+                .count();
+            let zero = width.saturating_sub(nonzero);
+            pinchout.push(zero as f64 / width as f64);
+
+            let mut largest_run = 0usize;
+            let mut current_run = 0usize;
+            for value in &profile.thickness {
+                if *value > 0.0 {
+                    current_run += 1;
+                    largest_run = largest_run.max(current_run);
+                } else {
+                    current_run = 0;
+                }
+            }
+            continuity.push(if nonzero == 0 {
+                0.0
+            } else {
+                largest_run as f64 / nonzero as f64
+            });
+        }
+        (
+            mean(&pinchout).unwrap_or(0.0),
+            mean(&continuity).unwrap_or(0.0),
+        )
+    }
+
+    fn macrorelief_sample_for_geometry(
+        width_cells: usize,
+        height_cells: usize,
+        seed: u64,
+        categories: &[Category],
+        probe: ReposeStabilityProbe,
+    ) -> MacroreliefSample {
+        let mut engine = ClassicSandboxEngine::new(
+            u16::try_from(width_cells).expect("diagnostic width fits u16"),
+            u16::try_from(height_cells).expect("diagnostic height fits u16"),
+            seed,
+            ClassicRainMode::WanderingFocus,
+        );
+        engine.force_reference_gravity = false;
+        engine.repose_stability_probe = probe;
+        engine.repose_rng_state = engine.initial_repose_rng_state;
+        engine.resample_all_local_repose();
+
+        let bounds = engine.surface.viewport_bounds().expect("viewport");
+        let width_dots = bounds.x_end - bounds.x_start;
+        let free = (bounds.x_start..bounds.x_end).collect::<Vec<_>>();
+        let center = bounds.x_start + width_dots.saturating_sub(1) / 2;
+        let kernel =
+            rain_distribution_metrics(&free, center, RAIN_FOCUS_BIAS_PROBABILITY, width_dots);
+        let mound_grains = kernel.one_dot_excess_mound_grains.round().max(1.0) as usize;
+        let mound_el = kernel.one_dot_excess_mound_grains / width_dots as f64;
+
+        let mut observation = AvalancheObservation::default();
+        engine.reset_diagnostic_diagonal_span();
+        for category in categories {
+            advance_exact_grains_observed(&mut engine, mound_grains, category.id, &mut observation);
+        }
+
+        assert_eq!(
+            engine.physical_grain_count() + engine.pending_count(),
+            engine.grain_count(),
+            "macrorelief diagnostic must conserve physical + pending mass"
+        );
+
+        let profiles = engine.category_profiles(bounds, categories);
+        let pairs = adjacent_profile_metrics(&profiles, width_dots);
+        assert!(profiles.len() >= categories.len().saturating_sub(1));
+        assert!(pairs.len() >= categories.len().saturating_sub(2));
+
+        let cv = mean(
+            &profiles
+                .iter()
+                .map(|profile| profile.thickness_cv)
+                .collect::<Vec<_>>(),
+        )
+        .expect("profiles");
+        let correlation = mean_defined(pairs.iter().map(|pair| pair.correlation)).unwrap_or(0.0);
+        let total_variation = mean(
+            &pairs
+                .iter()
+                .map(|pair| pair.total_variation)
+                .collect::<Vec<_>>(),
+        )
+        .expect("pairs");
+        let centroid_shift = mean(
+            &pairs
+                .iter()
+                .map(|pair| pair.centroid_shift_fraction)
+                .collect::<Vec<_>>(),
+        )
+        .expect("pairs");
+        let min_centroid = profiles
+            .iter()
+            .map(|profile| profile.centroid_x_norm)
+            .fold(f64::INFINITY, f64::min);
+        let max_centroid = profiles
+            .iter()
+            .map(|profile| profile.centroid_x_norm)
+            .fold(f64::NEG_INFINITY, f64::max);
+
+        let heights = supported_height_profile_for_bounds(&engine, bounds);
+        let (pinchout_fraction, continuity_fraction) =
+            profile_pinchout_and_continuity(&profiles);
+        let cascade_fraction = if observation.moves.is_empty() {
+            0.0
+        } else {
+            observation.moves.iter().filter(|moves| **moves > 1.0).count() as f64
+                / observation.moves.len() as f64
+        };
+        let multicolumn_fraction = if observation.spans.is_empty() {
+            0.0
+        } else {
+            observation.spans.iter().filter(|span| **span > 1.0).count() as f64
+                / observation.spans.len() as f64
+        };
+
+        MacroreliefSample {
+            legacy: MorphologySample {
+                cv,
+                correlation,
+                total_variation,
+                centroid_shift,
+                centroid_span: max_centroid - min_centroid,
+                mound_el,
+            },
+            relief_d2: normalized_block_range(&heights, 2),
+            relief_d4: normalized_block_range(&heights, 4),
+            relief_d8: normalized_block_range(&heights, 8),
+            curvature_d4: normalized_block_curvature(&heights, 4),
+            curvature_d8: normalized_block_curvature(&heights, 8),
+            pinchout_fraction,
+            continuity_fraction,
+            avalanche_mean_moves: mean(&observation.moves).unwrap_or(0.0),
+            avalanche_p95_moves: percentile(&observation.moves, 0.95),
+            avalanche_max_moves: observation.moves.iter().copied().fold(0.0, f64::max),
+            avalanche_cascade_fraction: cascade_fraction,
+            avalanche_p95_span: percentile(&observation.spans, 0.95),
+            avalanche_max_span: observation.spans.iter().copied().fold(0.0, f64::max),
+            avalanche_multicolumn_fraction: multicolumn_fraction,
+            pending_fraction: if engine.grain_count() == 0 {
+                0.0
+            } else {
+                engine.pending_count() as f64 / engine.grain_count() as f64
+            },
+        }
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct MacroreliefSummary {
+        probe: ReposeStabilityProbe,
+        runs: usize,
+        relief_d2: f64,
+        relief_d4: f64,
+        relief_d8: f64,
+        curvature_d4: f64,
+        curvature_d8: f64,
+        thickness_cv: f64,
+        pinchout_fraction: f64,
+        continuity_fraction: f64,
+        legacy_corr: f64,
+        legacy_tv: f64,
+        legacy_shift: f64,
+        legacy_span: f64,
+        avalanche_mean_moves: f64,
+        avalanche_p95_moves: f64,
+        avalanche_max_moves: f64,
+        avalanche_cascade_fraction: f64,
+        avalanche_p95_span: f64,
+        avalanche_max_span: f64,
+        avalanche_multicolumn_fraction: f64,
+        pending_fraction: f64,
+    }
+
+    impl MacroreliefSummary {
+        fn morphology_objectives(self) -> [f64; 8] {
+            [
+                self.relief_d2,
+                self.relief_d4,
+                self.relief_d8,
+                self.curvature_d4,
+                self.curvature_d8,
+                self.thickness_cv,
+                self.pinchout_fraction,
+                self.continuity_fraction,
+            ]
+        }
+
+        fn macro_objectives(self) -> [f64; 5] {
+            [
+                self.relief_d2,
+                self.relief_d4,
+                self.relief_d8,
+                self.curvature_d4,
+                self.curvature_d8,
+            ]
+        }
+
+        fn avalanche_semantically_alive(self) -> bool {
+            self.avalanche_max_moves > 1.0
+                && self.avalanche_max_span > 1.0
+                && self.avalanche_cascade_fraction > 0.0
+                && self.avalanche_multicolumn_fraction > 0.0
+        }
+
+        fn avalanche_not_jointly_worse_than(self, control: Self) -> bool {
+            !(self.avalanche_p95_moves < control.avalanche_p95_moves
+                && self.avalanche_p95_span < control.avalanche_p95_span
+                && self.avalanche_cascade_fraction < control.avalanche_cascade_fraction
+                && self.avalanche_multicolumn_fraction
+                    < control.avalanche_multicolumn_fraction)
+        }
+
+        fn avalanche_safe(self, control: Self) -> bool {
+            self.pending_fraction <= control.pending_fraction
+                && self.avalanche_semantically_alive()
+                && self.avalanche_not_jointly_worse_than(control)
+        }
+    }
+
+    fn summarize_macrorelief(
+        probe: ReposeStabilityProbe,
+        samples: &[MacroreliefSample],
+    ) -> MacroreliefSummary {
+        let med = |f: fn(&MacroreliefSample) -> f64| {
+            percentile(&samples.iter().map(f).collect::<Vec<_>>(), 0.50)
+        };
+        MacroreliefSummary {
+            probe,
+            runs: samples.len(),
+            relief_d2: med(|sample| sample.relief_d2),
+            relief_d4: med(|sample| sample.relief_d4),
+            relief_d8: med(|sample| sample.relief_d8),
+            curvature_d4: med(|sample| sample.curvature_d4),
+            curvature_d8: med(|sample| sample.curvature_d8),
+            thickness_cv: med(|sample| sample.legacy.cv),
+            pinchout_fraction: med(|sample| sample.pinchout_fraction),
+            continuity_fraction: med(|sample| sample.continuity_fraction),
+            legacy_corr: med(|sample| sample.legacy.correlation),
+            legacy_tv: med(|sample| sample.legacy.total_variation),
+            legacy_shift: med(|sample| sample.legacy.centroid_shift),
+            legacy_span: med(|sample| sample.legacy.centroid_span),
+            avalanche_mean_moves: med(|sample| sample.avalanche_mean_moves),
+            avalanche_p95_moves: med(|sample| sample.avalanche_p95_moves),
+            avalanche_max_moves: med(|sample| sample.avalanche_max_moves),
+            avalanche_cascade_fraction: med(|sample| sample.avalanche_cascade_fraction),
+            avalanche_p95_span: med(|sample| sample.avalanche_p95_span),
+            avalanche_max_span: med(|sample| sample.avalanche_max_span),
+            avalanche_multicolumn_fraction: med(|sample| {
+                sample.avalanche_multicolumn_fraction
+            }),
+            pending_fraction: med(|sample| sample.pending_fraction),
+        }
+    }
+
+    fn macrorelief_dominates(left: MacroreliefSummary, right: MacroreliefSummary) -> bool {
+        let left = left.morphology_objectives();
+        let right = right.morphology_objectives();
+        left.iter().zip(right).all(|(l, r)| *l >= r)
+            && left.iter().zip(right).any(|(l, r)| *l > r)
+    }
+
+    fn rank_for_metric(
+        summaries: &[MacroreliefSummary],
+        candidate: MacroreliefSummary,
+        metric: usize,
+        macro_only: bool,
+    ) -> usize {
+        let candidate_value = if macro_only {
+            candidate.macro_objectives()[metric]
+        } else {
+            candidate.morphology_objectives()[metric]
+        };
+        1 + summaries
+            .iter()
+            .filter(|other| {
+                let value = if macro_only {
+                    other.macro_objectives()[metric]
+                } else {
+                    other.morphology_objectives()[metric]
+                };
+                value > candidate_value
+            })
+            .count()
+    }
+
+    fn worst_rank(
+        summaries: &[MacroreliefSummary],
+        candidate: MacroreliefSummary,
+        macro_only: bool,
+    ) -> usize {
+        let count = if macro_only { 5 } else { 8 };
+        (0..count)
+            .map(|metric| rank_for_metric(summaries, candidate, metric, macro_only))
+            .max()
+            .unwrap_or(usize::MAX)
+    }
+
+    fn mechanism_count(probe: ReposeStabilityProbe) -> usize {
+        match probe {
+            ReposeStabilityProbe::RuntimeControl => 0,
+            ReposeStabilityProbe::ConvexityAnchorLocked
+            | ReposeStabilityProbe::ConvexityStrongTail => 2,
+            _ => 1,
+        }
+    }
+
+    fn print_macrorelief_summary(stage: &str, summary: MacroreliefSummary, safe: bool) {
+        println!(
+            "RAIN_005C1_{stage}_SUMMARY variant={} runs={} relief_d2={:.9} relief_d4={:.9} relief_d8={:.9} curvature_d4={:.9} curvature_d8={:.9} thickness_cv={:.9} pinchout={:.9} continuity={:.9} legacy_corr={:.9} legacy_tv={:.9} legacy_shift={:.9} legacy_span={:.9} avalanche_mean_moves={:.9} avalanche_p95_moves={:.9} avalanche_max_moves={:.9} avalanche_cascade_fraction={:.9} avalanche_p95_span={:.9} avalanche_max_span={:.9} avalanche_multicolumn_fraction={:.9} pending_fraction={:.9} avalanche_safe={safe}",
+            summary.probe.name(),
+            summary.runs,
+            summary.relief_d2,
+            summary.relief_d4,
+            summary.relief_d8,
+            summary.curvature_d4,
+            summary.curvature_d8,
+            summary.thickness_cv,
+            summary.pinchout_fraction,
+            summary.continuity_fraction,
+            summary.legacy_corr,
+            summary.legacy_tv,
+            summary.legacy_shift,
+            summary.legacy_span,
+            summary.avalanche_mean_moves,
+            summary.avalanche_p95_moves,
+            summary.avalanche_max_moves,
+            summary.avalanche_cascade_fraction,
+            summary.avalanche_p95_span,
+            summary.avalanche_max_span,
+            summary.avalanche_multicolumn_fraction,
+            summary.pending_fraction,
+        );
+    }
+
+    fn macrorelief_probe_order() -> [ReposeStabilityProbe; 9] {
+        [
+            ReposeStabilityProbe::RuntimeControl,
+            ReposeStabilityProbe::NoAnchor,
+            ReposeStabilityProbe::StrongTail,
+            ReposeStabilityProbe::AnchorLocked,
+            ReposeStabilityProbe::StrongLocked,
+            ReposeStabilityProbe::HeightRoute,
+            ReposeStabilityProbe::ConvexityRoute,
+            ReposeStabilityProbe::ConvexityAnchorLocked,
+            ReposeStabilityProbe::ConvexityStrongTail,
+        ]
+    }
+
+    fn select_stage1_finalists(
+        summaries: &[MacroreliefSummary],
+        control: MacroreliefSummary,
+    ) -> Vec<ReposeStabilityProbe> {
+        let safe = summaries
+            .iter()
+            .copied()
+            .filter(|summary| summary.probe == ReposeStabilityProbe::RuntimeControl || summary.avalanche_safe(control))
+            .collect::<Vec<_>>();
+        let frontier = safe
+            .iter()
+            .copied()
+            .filter(|candidate| {
+                !safe.iter().copied().any(|other| {
+                    other.probe != candidate.probe && macrorelief_dominates(other, *candidate)
+                })
+            })
+            .collect::<Vec<_>>();
+        println!(
+            "RAIN_005C1_STAGE1_SAFE_PARETO variants={}",
+            frontier
+                .iter()
+                .map(|summary| summary.probe.name())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+
+        let non_control = frontier
+            .iter()
+            .copied()
+            .filter(|summary| summary.probe != ReposeStabilityProbe::RuntimeControl)
+            .collect::<Vec<_>>();
+        if non_control.is_empty() {
+            return Vec::new();
+        }
+
+        let min_mechanisms = non_control
+            .iter()
+            .map(|summary| mechanism_count(summary.probe))
+            .min()
+            .expect("non-control frontier");
+        let simple_pool = non_control
+            .iter()
+            .copied()
+            .filter(|summary| mechanism_count(summary.probe) == min_mechanisms)
+            .collect::<Vec<_>>();
+        let simple = simple_pool
+            .iter()
+            .copied()
+            .min_by_key(|summary| (worst_rank(&safe, *summary, false), summary.probe.name()))
+            .expect("simple pool");
+        let macro_best = non_control
+            .iter()
+            .copied()
+            .min_by_key(|summary| (worst_rank(&safe, *summary, true), mechanism_count(summary.probe), summary.probe.name()))
+            .expect("non-control frontier");
+
+        let mut selected = vec![simple.probe];
+        if macro_best.probe != simple.probe {
+            selected.push(macro_best.probe);
+        }
+        println!(
+            "RAIN_005C1_STAGE1_SELECTION simple={} macro={} unique_finalists={}",
+            simple.probe.name(),
+            macro_best.probe.name(),
+            selected.len()
+        );
+        selected
+    }
+
+    #[test]
+    fn rain_005c1_runtime_control_preserves_r1_reference_sample() {
+        const CATEGORY_COUNT: usize = 5;
+        let categories = (1..=CATEGORY_COUNT)
+            .map(|id| category(id as u64, &format!("C1 control {id}")))
+            .collect::<Vec<_>>();
+        let reference = rain_005a3_rain004_reference_samples();
+        let expected = reference
+            .iter()
+            .find(|sample| sample.geometry == 1 && sample.seed_slot == 1)
+            .expect("A3 geometry 1 seed 1");
+        let selected = rain_005b2d2_selected_boundary_control();
+        let expected_r1 = &selected[0];
+        let sample = macrorelief_sample_for_geometry(
+            expected.width_cells,
+            expected.height_cells,
+            expected.seed,
+            &categories,
+            ReposeStabilityProbe::RuntimeControl,
+        );
+        assert_printed_nine_eq("C1 control mound", sample.legacy.mound_el, expected.mound_el);
+        assert_printed_nine_eq(
+            "C1 control delta cv",
+            sample.legacy.cv - expected.cv,
+            expected_r1.delta_cv,
+        );
+        assert_printed_nine_eq(
+            "C1 control delta corr",
+            sample.legacy.correlation - expected.correlation,
+            expected_r1.delta_corr,
+        );
+        assert_printed_nine_eq(
+            "C1 control delta tv",
+            sample.legacy.total_variation - expected.total_variation,
+            expected_r1.delta_tv,
+        );
+        assert_printed_nine_eq(
+            "C1 control delta shift",
+            sample.legacy.centroid_shift - expected.centroid_shift,
+            expected_r1.delta_shift,
+        );
+        assert_printed_nine_eq(
+            "C1 control delta span",
+            sample.legacy.centroid_span - expected.centroid_span,
+            expected_r1.delta_span,
+        );
+    }
+
+    #[test]
+    fn rain_005c1_repose_probe_is_test_only_and_budget_routing_is_permutative() {
+        let mut engine = ClassicSandboxEngine::new(30, 20, 0xC1A5, ClassicRainMode::WanderingFocus);
+        let before = engine.local_repose.clone();
+        engine.repose_stability_probe = ReposeStabilityProbe::ConvexityRoute;
+        engine.route_local_repose_probe(10);
+        let mut before_sorted = before[9..12].to_vec();
+        let mut after_sorted = engine.local_repose[9..12].to_vec();
+        before_sorted.sort_unstable();
+        after_sorted.sort_unstable();
+        assert_eq!(before_sorted, after_sorted);
+    }
+
+    #[test]
+    #[ignore = "native unattended RAIN-005C1 macrorelief stability suite: 64x9 stage-1 plus full 192 control and up to two automatically selected finalists"]
+    fn rain_005c1_macrorelief_stability_unattended_suite() {
+        const STAGE1_GEOMETRIES: usize = 64;
+        const CATEGORY_COUNT: usize = 5;
+        let categories = (1..=CATEGORY_COUNT)
+            .map(|id| category(id as u64, &format!("C1 {id}")))
+            .collect::<Vec<_>>();
+        let reference = rain_005a3_rain004_reference_samples();
+        let selected_r1 = rain_005b2d2_selected_boundary_control();
+        assert_eq!(reference.len(), 192);
+        assert_eq!(selected_r1.len(), 64);
+
+        let stage1_reference = reference
+            .iter()
+            .filter(|sample| sample.geometry <= STAGE1_GEOMETRIES && sample.seed_slot == 1)
+            .collect::<Vec<_>>();
+        assert_eq!(stage1_reference.len(), STAGE1_GEOMETRIES);
+
+        let mut stage1_summaries = Vec::new();
+        for probe in macrorelief_probe_order() {
+            let mut samples = Vec::with_capacity(STAGE1_GEOMETRIES);
+            for expected in &stage1_reference {
+                let sample = macrorelief_sample_for_geometry(
+                    expected.width_cells,
+                    expected.height_cells,
+                    expected.seed,
+                    &categories,
+                    probe,
+                );
+                if probe == ReposeStabilityProbe::RuntimeControl {
+                    let expected_r1 = &selected_r1[expected.geometry - 1];
+                    assert_printed_nine_eq(
+                        "C1 stage1 control delta cv",
+                        sample.legacy.cv - expected.cv,
+                        expected_r1.delta_cv,
+                    );
+                    assert_printed_nine_eq(
+                        "C1 stage1 control delta corr",
+                        sample.legacy.correlation - expected.correlation,
+                        expected_r1.delta_corr,
+                    );
+                    assert_printed_nine_eq(
+                        "C1 stage1 control delta tv",
+                        sample.legacy.total_variation - expected.total_variation,
+                        expected_r1.delta_tv,
+                    );
+                    assert_printed_nine_eq(
+                        "C1 stage1 control delta shift",
+                        sample.legacy.centroid_shift - expected.centroid_shift,
+                        expected_r1.delta_shift,
+                    );
+                    assert_printed_nine_eq(
+                        "C1 stage1 control delta span",
+                        sample.legacy.centroid_span - expected.centroid_span,
+                        expected_r1.delta_span,
+                    );
+                }
+                println!(
+                    "RAIN_005C1_STAGE1_SAMPLE variant={} geometry={} terminal={}x{} seed={} relief_d2={:.9} relief_d4={:.9} relief_d8={:.9} curvature_d4={:.9} curvature_d8={:.9} thickness_cv={:.9} pinchout={:.9} continuity={:.9} avalanche_p95_moves={:.9} avalanche_p95_span={:.9}",
+                    probe.name(),
+                    expected.geometry,
+                    expected.width_cells,
+                    expected.height_cells,
+                    expected.seed,
+                    sample.relief_d2,
+                    sample.relief_d4,
+                    sample.relief_d8,
+                    sample.curvature_d4,
+                    sample.curvature_d8,
+                    sample.legacy.cv,
+                    sample.pinchout_fraction,
+                    sample.continuity_fraction,
+                    sample.avalanche_p95_moves,
+                    sample.avalanche_p95_span,
+                );
+                samples.push(sample);
+            }
+            stage1_summaries.push(summarize_macrorelief(probe, &samples));
+        }
+        println!(
+            "RAIN_005C1_STAGE1_CONTROL_REPRODUCTION result=PASS_SAMPLE_LEVEL_9DP runs=64"
+        );
+        let stage1_control = stage1_summaries
+            .iter()
+            .copied()
+            .find(|summary| summary.probe == ReposeStabilityProbe::RuntimeControl)
+            .expect("stage1 control");
+        for summary in &stage1_summaries {
+            print_macrorelief_summary(
+                "STAGE1",
+                *summary,
+                summary.probe == ReposeStabilityProbe::RuntimeControl
+                    || summary.avalanche_safe(stage1_control),
+            );
+        }
+
+        let finalists = select_stage1_finalists(&stage1_summaries, stage1_control);
+        if finalists.is_empty() {
+            println!(
+                "RAIN_005C1_FINAL classification=NO_SAFE_NONCONTROL_STAGE1_FRONTIER human_candidates=0"
+            );
+            return;
+        }
+
+        let mut full_probes = vec![ReposeStabilityProbe::RuntimeControl];
+        for probe in finalists {
+            if !full_probes.contains(&probe) {
+                full_probes.push(probe);
+            }
+        }
+
+        let mut full_summaries = Vec::new();
+        for probe in full_probes {
+            let mut samples = Vec::with_capacity(reference.len());
+            for expected in &reference {
+                let sample = macrorelief_sample_for_geometry(
+                    expected.width_cells,
+                    expected.height_cells,
+                    expected.seed,
+                    &categories,
+                    probe,
+                );
+                println!(
+                    "RAIN_005C1_FULL_SAMPLE variant={} run={} geometry={} seed_slot={} terminal={}x{} seed={} relief_d2={:.9} relief_d4={:.9} relief_d8={:.9} curvature_d4={:.9} curvature_d8={:.9} thickness_cv={:.9} pinchout={:.9} continuity={:.9} legacy_corr={:.9} legacy_tv={:.9} legacy_shift={:.9} legacy_span={:.9} avalanche_p95_moves={:.9} avalanche_p95_span={:.9}",
+                    probe.name(),
+                    expected.run,
+                    expected.geometry,
+                    expected.seed_slot,
+                    expected.width_cells,
+                    expected.height_cells,
+                    expected.seed,
+                    sample.relief_d2,
+                    sample.relief_d4,
+                    sample.relief_d8,
+                    sample.curvature_d4,
+                    sample.curvature_d8,
+                    sample.legacy.cv,
+                    sample.pinchout_fraction,
+                    sample.continuity_fraction,
+                    sample.legacy.correlation,
+                    sample.legacy.total_variation,
+                    sample.legacy.centroid_shift,
+                    sample.legacy.centroid_span,
+                    sample.avalanche_p95_moves,
+                    sample.avalanche_p95_span,
+                );
+                samples.push(sample);
+            }
+            full_summaries.push(summarize_macrorelief(probe, &samples));
+        }
+
+        let full_control = full_summaries
+            .iter()
+            .copied()
+            .find(|summary| summary.probe == ReposeStabilityProbe::RuntimeControl)
+            .expect("full control");
+        for summary in &full_summaries {
+            print_macrorelief_summary(
+                "FULL",
+                *summary,
+                summary.probe == ReposeStabilityProbe::RuntimeControl
+                    || summary.avalanche_safe(full_control),
+            );
+        }
+
+        let full_safe = full_summaries
+            .iter()
+            .copied()
+            .filter(|summary| {
+                summary.probe == ReposeStabilityProbe::RuntimeControl
+                    || summary.avalanche_safe(full_control)
+            })
+            .collect::<Vec<_>>();
+        let full_frontier = full_safe
+            .iter()
+            .copied()
+            .filter(|candidate| {
+                !full_safe.iter().copied().any(|other| {
+                    other.probe != candidate.probe && macrorelief_dominates(other, *candidate)
+                })
+            })
+            .collect::<Vec<_>>();
+        let human = full_frontier
+            .iter()
+            .copied()
+            .filter(|candidate| {
+                candidate.probe != ReposeStabilityProbe::RuntimeControl
+                    && candidate
+                        .macro_objectives()
+                        .iter()
+                        .zip(full_control.macro_objectives())
+                        .any(|(value, control)| *value > control)
+            })
+            .collect::<Vec<_>>();
+        println!(
+            "RAIN_005C1_FULL_SAFE_PARETO variants={}",
+            full_frontier
+                .iter()
+                .map(|summary| summary.probe.name())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        println!(
+            "RAIN_005C1_FINAL classification={} human_candidates={} variants={}",
+            if human.is_empty() {
+                "NO_FULL_HUMAN_CANDIDATE"
+            } else {
+                "FULL_HUMAN_CANDIDATES_READY"
+            },
+            human.len(),
+            human
+                .iter()
+                .map(|summary| summary.probe.name())
+                .collect::<Vec<_>>()
+                .join(",")
         );
     }
 

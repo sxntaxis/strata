@@ -5,9 +5,14 @@ state: active
 created: 2026-08-01
 updated: 2026-09-08
 authority: working
-summary: RAIN-005B2D2 passed and selected the minimum-change subset frontier: original B2 golden-small authority plus positional focus avulsion only at actually-entered stratum boundaries. RAIN-005B2R1 promotes exactly that arm to runtime for full A3 validation.
-next: Natively validate RAIN-005B2R1 over the full 192-run A3 paired ensemble. Require B2 anti-nozzle preservation, runtime boundary-authority proofs, unchanged Classic physics/kernel/authority, and the unchanged Pareto floor. On machine pass, advance this exact candidate to human morphology review; on failure, stop without local semantic tuning.
+summary: RAIN-005B2R1 passed full machine validation and is accepted as the new best-in-class morphology baseline, but the owner wants the historical H4 installed build's large-scale relief, crests/valleys and lateral stratal thickening/pinch-out without restoring its rejected avalanche behavior. RAIN-005C1 is an unattended test-only stability factorial over the exact R1 runtime.
+next: Natively run the single RAIN-005C1 unattended macrorelief stability suite. It must reproduce R1 control exactly, evaluate all nine stability arms over 64 seed-1 geometries, automatically select at most two safe Pareto finalists, then run those finalists plus R1 control over the full 192 A3 geometry/seed rows. Return the report and bundle without authoring, merging or pushing a runtime morphology candidate.
 ---
+
+## RAIN-005C1 macrorelief stability factorial — 2026-09-08
+
+RAIN-005B2R1 passed its full 192-run machine gate and is the new owner baseline, but human review preserved a narrower target from the exact historical H4 installed binary (`b6f3af...f3559f93`): large-scale relief, crests, valleys, and laterally thickening/pinching strata. The Notebook already proves that installed SHA belongs to published H4 v5 (`67ffd84...`). C1 freezes R1 runtime and tests only local stability semantics. A factual correction matters: current repose refresh is already movement-coupled, so “persist until movement” would not be a new mechanism. The unattended suite instead tests anchor ablation, strong-tail remap, explicit high-repose locks, and two budget-neutral structural-routing laws (height and local convexity), including two interactions. Stage 1 is 64 geometries x 1 seed x 9 arms; it automatically selects at most two avalanche-safe Pareto finalists and immediately runs full 192-row evidence for those finalists plus R1 control. Primary metrics now directly target coarse relief/curvature, thickness CV, pinch-out and continuity. See `notebook/work/RAIN-005C1-MACRORELIEF-STABILITY-FACTORIAL.md`.
+
 
 ## RAIN-005B2R1 runtime boundary avulsion — 2026-09-08
 
