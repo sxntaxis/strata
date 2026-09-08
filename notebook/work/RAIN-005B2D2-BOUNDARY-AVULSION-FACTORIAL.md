@@ -1,11 +1,11 @@
 ---
 id: RAIN-005B2D2
 kind: work
-state: candidate
+state: complete
 created: 2026-09-07
-updated: 2026-09-07
+updated: 2026-09-08
 authority: working
-summary: Test whether B2 can keep strong within-stratum concentration while removing cross-stratum focus inheritance by relocating only the invisible focus at an actually-entered category boundary; production runtime remains exact B2 and the factorial is test-only.
+summary: Native factorial passed and selected the minimum-change frontier: original golden-small B2 authority plus a positional focus avulsion only at actually-entered stratum boundaries.
 ---
 
 # RAIN-005B2D2 — Boundary-avulsion factorial
@@ -93,3 +93,24 @@ boundary-avulsion-golden-small
 ```
 
 If only the raised-authority arm passes, it becomes the sole candidate for a later full 192-run runtime repair. If neither passes, classify `NO_BOUNDARY_AVULSION_SUBSET_FRONTIER`; do not tune jump distance, probability, or category cadence locally.
+
+
+## Native result — 2026-09-08
+
+The exact D2 handoff passed transport, scope, fixture, compile, focused, B2-preservation, sample-level control-reproduction, formatting, strict Clippy, full-test, help-smoke, and PERF-001 gates. The 192-run factorial completed in 1803.24 seconds.
+
+The two boundary-avulsion arms both passed the predefined subset Pareto floor. The minimum-change arm was selected exactly as frozen before execution:
+
+```text
+boundary-avulsion-golden-small
+p = 0.381966011250
+median delta CV    = +0.001302657
+median delta corr  = -0.315065940
+median delta TV    = +0.035007331
+median delta shift = +0.046770031
+median delta span  = +0.082278422
+shift_vs_log_width = -0.026201417
+subset_pass        = true
+```
+
+The raised-authority arm also passed, but is rejected by the predeclared smallest-semantic-change rule. D2 therefore establishes a bounded mechanism: retain B2's original `1/phi^2` authority and low-discrepancy anti-nozzle schedule; add only positional decorrelation at a category transition that has actually entered the physical FIFO. The next unit is RAIN-005B2R1, which promotes exactly that arm to runtime and requires the full 192-run A3 Pareto ensemble before any human morphology review.

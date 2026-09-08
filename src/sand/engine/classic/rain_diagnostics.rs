@@ -1648,6 +1648,41 @@ mod tests {
             .collect()
     }
 
+    fn rain_005b2d2_selected_boundary_control() -> Vec<Rain005B2RuntimeControl> {
+        const CONTROL: &str = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/rain_005b2d2_selected_boundary_control.csv"
+        ));
+        CONTROL
+            .lines()
+            .skip(1)
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| {
+                let fields = line.split(',').collect::<Vec<_>>();
+                assert_eq!(
+                    fields.len(),
+                    13,
+                    "invalid RAIN-005B2D2 selected control row: {line}"
+                );
+                Rain005B2RuntimeControl {
+                    run: fields[0].parse().expect("run"),
+                    geometry: fields[1].parse().expect("geometry"),
+                    seed_slot: fields[2].parse().expect("seed slot"),
+                    width_cells: fields[3].parse().expect("terminal width"),
+                    height_cells: fields[4].parse().expect("terminal height"),
+                    seed: fields[5].parse().expect("seed"),
+                    delta_cv: fields[6].parse().expect("delta cv"),
+                    delta_corr: fields[7].parse().expect("delta corr"),
+                    delta_tv: fields[8].parse().expect("delta tv"),
+                    delta_shift: fields[9].parse().expect("delta shift"),
+                    delta_span: fields[10].parse().expect("delta span"),
+                    candidate_shift: fields[11].parse().expect("candidate shift"),
+                    candidate_span: fields[12].parse().expect("candidate span"),
+                }
+            })
+            .collect()
+    }
+
     fn assert_printed_nine_eq(label: &str, actual: f64, expected: f64) {
         assert_eq!(
             format!("{actual:.9}"),
@@ -1708,11 +1743,12 @@ mod tests {
         let mut log_width = Vec::with_capacity(reference.len());
 
         for expected in &reference {
-            let candidate = morphology_sample_for_geometry(
+            let candidate = morphology_sample_for_geometry_with_bias_schedule(
                 expected.width_cells,
                 expected.height_cells,
                 expected.seed,
                 &categories,
+                RainBiasScheduleProbe::B2Control,
             );
             assert!(
                 (candidate.mound_el - expected.mound_el).abs() < 1e-6,
@@ -1770,12 +1806,143 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "native RAIN-005B2R1 full paired morphology ensemble against exact RAIN-004 A3 runs; intentionally long-running"]
+    fn rain_005b2r1_paired_morphology_against_rain004_probe() {
+        const CATEGORY_COUNT: usize = 5;
+        let categories = (1..=CATEGORY_COUNT)
+            .map(|id| category(id as u64, &format!("B2R1 {id}")))
+            .collect::<Vec<_>>();
+        let reference = rain_005a3_rain004_reference_samples();
+        let selected_control = rain_005b2d2_selected_boundary_control();
+        assert_eq!(reference.len(), 192);
+        assert_eq!(selected_control.len(), 64);
+
+        let mut delta_cv = Vec::with_capacity(reference.len());
+        let mut delta_corr = Vec::with_capacity(reference.len());
+        let mut delta_tv = Vec::with_capacity(reference.len());
+        let mut delta_shift = Vec::with_capacity(reference.len());
+        let mut delta_span = Vec::with_capacity(reference.len());
+        let mut candidate_shift = Vec::with_capacity(reference.len());
+        let mut candidate_span = Vec::with_capacity(reference.len());
+        let mut log_width = Vec::with_capacity(reference.len());
+
+        for expected in &reference {
+            let candidate = morphology_sample_for_geometry(
+                expected.width_cells,
+                expected.height_cells,
+                expected.seed,
+                &categories,
+            );
+            assert!(
+                (candidate.mound_el - expected.mound_el).abs() < 1e-6,
+                "run={} candidate_mound_el={} reference_mound_el={}",
+                expected.run,
+                candidate.mound_el,
+                expected.mound_el
+            );
+
+            let cv = candidate.cv - expected.cv;
+            let corr = candidate.correlation - expected.correlation;
+            let tv = candidate.total_variation - expected.total_variation;
+            let shift = candidate.centroid_shift - expected.centroid_shift;
+            let span = candidate.centroid_span - expected.centroid_span;
+            if expected.seed_slot == 1 && expected.geometry <= 64 {
+                let expected_control = &selected_control[expected.geometry - 1];
+                assert_eq!(expected.run, expected_control.run);
+                assert_eq!(expected.geometry, expected_control.geometry);
+                assert_eq!(expected.seed_slot, expected_control.seed_slot);
+                assert_eq!(expected.width_cells, expected_control.width_cells);
+                assert_eq!(expected.height_cells, expected_control.height_cells);
+                assert_eq!(expected.seed, expected_control.seed);
+                assert_printed_nine_eq("R1 promotion delta cv", cv, expected_control.delta_cv);
+                assert_printed_nine_eq(
+                    "R1 promotion delta corr",
+                    corr,
+                    expected_control.delta_corr,
+                );
+                assert_printed_nine_eq("R1 promotion delta tv", tv, expected_control.delta_tv);
+                assert_printed_nine_eq(
+                    "R1 promotion delta shift",
+                    shift,
+                    expected_control.delta_shift,
+                );
+                assert_printed_nine_eq(
+                    "R1 promotion delta span",
+                    span,
+                    expected_control.delta_span,
+                );
+                assert_printed_nine_eq(
+                    "R1 promotion candidate shift",
+                    candidate.centroid_shift,
+                    expected_control.candidate_shift,
+                );
+                assert_printed_nine_eq(
+                    "R1 promotion candidate span",
+                    candidate.centroid_span,
+                    expected_control.candidate_span,
+                );
+            }
+            delta_cv.push(cv);
+            delta_corr.push(corr);
+            delta_tv.push(tv);
+            delta_shift.push(shift);
+            delta_span.push(span);
+            candidate_shift.push(candidate.centroid_shift);
+            candidate_span.push(candidate.centroid_span);
+            log_width.push((expected.width_cells as f64).ln());
+
+            println!(
+                "RAIN_005B2R1_PAIRED_SAMPLE run={} geometry={} seed_slot={} terminal={}x{} seed={} delta_cv={cv:.9} delta_corr={corr:.9} delta_tv={tv:.9} delta_shift={shift:.9} delta_span={span:.9} candidate_shift={:.9} candidate_span={:.9}",
+                expected.run,
+                expected.geometry,
+                expected.seed_slot,
+                expected.width_cells,
+                expected.height_cells,
+                expected.seed,
+                candidate.centroid_shift,
+                candidate.centroid_span,
+            );
+        }
+
+        println!(
+            "RAIN_005B2R1_PROMOTION_CONTROL_REPRODUCTION result=PASS_SAMPLE_LEVEL_9DP runs=64"
+        );
+        print_extended_percentiles("RAIN_005B2R1_DELTA_CV", &delta_cv);
+        print_extended_percentiles("RAIN_005B2R1_DELTA_CORR", &delta_corr);
+        print_extended_percentiles("RAIN_005B2R1_DELTA_TV", &delta_tv);
+        print_extended_percentiles("RAIN_005B2R1_DELTA_SHIFT", &delta_shift);
+        print_extended_percentiles("RAIN_005B2R1_DELTA_SPAN", &delta_span);
+        let shift_vs_log_width = correlation_or_zero(&log_width, &candidate_shift);
+        let span_vs_log_width = correlation_or_zero(&log_width, &candidate_span);
+        let median_cv = percentile(&delta_cv, 0.50);
+        let median_corr = percentile(&delta_corr, 0.50);
+        let median_tv = percentile(&delta_tv, 0.50);
+        let median_shift = percentile(&delta_shift, 0.50);
+        let median_span = percentile(&delta_span, 0.50);
+        println!(
+            "RAIN_005B2R1_GEOMETRY_DEPENDENCE shift_vs_log_width={shift_vs_log_width:.9} span_vs_log_width={span_vs_log_width:.9}"
+        );
+        println!(
+            "RAIN_005B2R1_PARETO_MEDIANS cv={median_cv:.9} corr={median_corr:.9} tv={median_tv:.9} shift={median_shift:.9} span={median_span:.9}"
+        );
+        let pareto_pass = median_cv >= 0.0
+            && median_corr <= 0.0
+            && median_tv >= 0.0
+            && median_shift > 0.0
+            && median_span > 0.0
+            && shift_vs_log_width > -0.412_362;
+        println!(
+            "RAIN_005B2R1_PARETO_GATE pass={pareto_pass} a3_shift_vs_log_width_reference=-0.412362000"
+        );
+    }
+
+    #[test]
     #[ignore = "native RAIN-005B2D1 test-only focus-authority sweep; 64 A3 geometries x one exact seed x five dyadic authority levels"]
     fn rain_005b2d1_focus_authority_sweep_probe() {
         const MAX_GEOMETRY: usize = 64;
         const CATEGORY_COUNT: usize = 5;
         const VARIANTS: [RainBiasScheduleProbe; 5] = [
-            RainBiasScheduleProbe::Runtime,
+            RainBiasScheduleProbe::B2Control,
             RainBiasScheduleProbe::AuthorityTowardOne16,
             RainBiasScheduleProbe::AuthorityTowardOne8,
             RainBiasScheduleProbe::AuthorityTowardOne4,
@@ -1861,7 +2028,7 @@ mod tests {
                 let tv = candidate.total_variation - expected.total_variation;
                 let shift = candidate.centroid_shift - expected.centroid_shift;
                 let span = candidate.centroid_span - expected.centroid_span;
-                if variant == RainBiasScheduleProbe::Runtime {
+                if variant == RainBiasScheduleProbe::B2Control {
                     assert_printed_nine_eq("runtime delta cv", cv, expected_control.delta_cv);
                     assert_printed_nine_eq("runtime delta corr", corr, expected_control.delta_corr);
                     assert_printed_nine_eq("runtime delta tv", tv, expected_control.delta_tv);
@@ -1924,7 +2091,7 @@ mod tests {
                 reference.len(),
             );
 
-            if variant != RainBiasScheduleProbe::Runtime && subset_pass && selected.is_none() {
+            if variant != RainBiasScheduleProbe::B2Control && subset_pass && selected.is_none() {
                 selected = Some((name, requested_probability));
             }
         }
@@ -1945,8 +2112,8 @@ mod tests {
         const MAX_GEOMETRY: usize = 64;
         const CATEGORY_COUNT: usize = 5;
         const VARIANTS: [RainBiasScheduleProbe; 3] = [
+            RainBiasScheduleProbe::B2Control,
             RainBiasScheduleProbe::Runtime,
-            RainBiasScheduleProbe::BoundaryAvulsionGoldenSmall,
             RainBiasScheduleProbe::BoundaryAvulsionTowardOne16,
         ];
 
@@ -2029,7 +2196,7 @@ mod tests {
                 let tv = candidate.total_variation - expected.total_variation;
                 let shift = candidate.centroid_shift - expected.centroid_shift;
                 let span = candidate.centroid_span - expected.centroid_span;
-                if variant == RainBiasScheduleProbe::Runtime {
+                if variant == RainBiasScheduleProbe::B2Control {
                     assert_printed_nine_eq("runtime delta cv", cv, expected_control.delta_cv);
                     assert_printed_nine_eq("runtime delta corr", corr, expected_control.delta_corr);
                     assert_printed_nine_eq("runtime delta tv", tv, expected_control.delta_tv);

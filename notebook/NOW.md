@@ -3,11 +3,17 @@ id: NOW-001
 kind: status
 state: active
 created: 2026-08-01
-updated: 2026-09-07
+updated: 2026-09-08
 authority: working
-summary: RAIN-005B2D1 found no one-dimensional focus-authority frontier: stronger focus raises CV but increasingly correlates adjacent strata. RAIN-005B2D2 now tests test-only focus relocation exactly at actually-entered stratum boundaries, at the original B2 authority and the smallest D1 authority increase.
-next: Natively run the RAIN-005B2D2 three-arm boundary-avulsion factorial. Require exact B2 runtime control reproduction and the unchanged subset Pareto floor. If both avulsion arms pass, select golden-small; if neither passes, close this mechanism without local tuning.
+summary: RAIN-005B2D2 passed and selected the minimum-change subset frontier: original B2 golden-small authority plus positional focus avulsion only at actually-entered stratum boundaries. RAIN-005B2R1 promotes exactly that arm to runtime for full A3 validation.
+next: Natively validate RAIN-005B2R1 over the full 192-run A3 paired ensemble. Require B2 anti-nozzle preservation, runtime boundary-authority proofs, unchanged Classic physics/kernel/authority, and the unchanged Pareto floor. On machine pass, advance this exact candidate to human morphology review; on failure, stop without local semantic tuning.
 ---
+
+## RAIN-005B2R1 runtime boundary avulsion — 2026-09-08
+
+RAIN-005B2D2 completed its 192-run three-arm factorial and selected `boundary-avulsion-golden-small` under the predeclared minimum-change rule. At the original B2 `1/phi^2` authority, the selected arm passed all subset gates with CV `+0.001302657`, corr `-0.315065940`, TV `+0.035007331`, shift `+0.046770031`, span `+0.082278422`, and shift-vs-log-width `-0.026201417`. R1 promotes only that actually-entered category-boundary focus relocation to WanderingFocus runtime; B2 scheduling, authority, kernel, meander-between-boundaries and Classic settlement remain unchanged. Full 192-run A3 machine validation is required before human review, including exact 64-row reproduction of the D2-selected arm. See `notebook/work/RAIN-005B2R1-RUNTIME-BOUNDARY-AVULSION.md`.
+
+
 
 ## RAIN-005B2D2 boundary-avulsion factorial — 2026-09-07
 

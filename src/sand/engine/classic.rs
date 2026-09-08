@@ -58,12 +58,12 @@ pub(crate) enum ClassicRainMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RainBiasScheduleProbe {
     Runtime,
+    B2Control,
     IidRain004,
     AuthorityTowardOne16,
     AuthorityTowardOne8,
     AuthorityTowardOne4,
     AuthorityTowardOne2,
-    BoundaryAvulsionGoldenSmall,
     BoundaryAvulsionTowardOne16,
 }
 
@@ -72,7 +72,7 @@ impl RainBiasScheduleProbe {
     fn focus_probability(self) -> f64 {
         let base = RAIN_FOCUS_BIAS_PROBABILITY;
         match self {
-            Self::Runtime | Self::IidRain004 | Self::BoundaryAvulsionGoldenSmall => base,
+            Self::Runtime | Self::B2Control | Self::IidRain004 => base,
             Self::AuthorityTowardOne16 | Self::BoundaryAvulsionTowardOne16 => {
                 base + (1.0 - base) / 16.0
             }
@@ -85,19 +85,19 @@ impl RainBiasScheduleProbe {
     fn boundary_avulsion(self) -> bool {
         matches!(
             self,
-            Self::BoundaryAvulsionGoldenSmall | Self::BoundaryAvulsionTowardOne16
+            Self::Runtime | Self::BoundaryAvulsionTowardOne16
         )
     }
 
     fn diagnostic_name(self) -> &'static str {
         match self {
-            Self::Runtime => "runtime-golden-small",
+            Self::Runtime => "runtime-boundary-avulsion-golden-small",
+            Self::B2Control => "b2-control-golden-small",
             Self::IidRain004 => "iid-rain004",
             Self::AuthorityTowardOne16 => "toward-one-1of16",
             Self::AuthorityTowardOne8 => "toward-one-1of8",
             Self::AuthorityTowardOne4 => "toward-one-1of4",
             Self::AuthorityTowardOne2 => "toward-one-1of2",
-            Self::BoundaryAvulsionGoldenSmall => "boundary-avulsion-golden-small",
             Self::BoundaryAvulsionTowardOne16 => "boundary-avulsion-toward-one-1of16",
         }
     }
@@ -297,13 +297,11 @@ impl ClassicTextureProfile {
 /// `Uniform` uses full-width random rain. `WanderingFocus` changes only ingress
 /// sampling: the large golden-ratio share remains uniform over the full visible
 /// width and the small golden-ratio share (~38.2%) uses a broad focus bias.
-/// RAIN-005B2 keeps RAIN-004's full-width correlated meander and exact marginal
-/// golden-small bias/kernel, but distributes focused-authority slots with a
-/// seed-phased low-discrepancy rotation instead of IID Bernoulli timing. Thus
-/// every contiguous eligible ingress window has less than one focused-slot count
-/// of discrepancy from N*p, suppressing short airborne-window bursts without an
-/// airborne-count knob. Directional persistence, weak broad terrain steering,
-/// soft real-edge steering and category rephase remain RAIN-004.
+/// RAIN-005B2R1 keeps B2's golden-small low-discrepancy ingress schedule and
+/// RAIN-004's full-width correlated meander/kernel, then relocates only the
+/// invisible WanderingFocus when a different category actually enters. This
+/// decorrelates successive strata without adding a jump-length scale or changing
+/// physical grain ingress/settlement. Uniform rain is unchanged.
 /// New grains are sampled directly from free visible-top sites rather than sampling
 /// an occupied target and relocating it.
 /// Nothing from this sandbox is persisted or becomes production authority.
@@ -336,7 +334,6 @@ pub(crate) struct ClassicSandboxEngine {
     rain_focus_bias_phase: u64,
     #[cfg(test)]
     rain_bias_schedule_probe: RainBiasScheduleProbe,
-    #[cfg(test)]
     rain_boundary_avulsion_index: u64,
     rain_left_padding_targets: usize,
     rain_corridor_targets: usize,
@@ -396,7 +393,6 @@ impl ClassicSandboxEngine {
             rain_focus_bias_phase: initial_rain_focus_bias_phase,
             #[cfg(test)]
             rain_bias_schedule_probe: RainBiasScheduleProbe::Runtime,
-            #[cfg(test)]
             rain_boundary_avulsion_index: 0,
             rain_left_padding_targets: 0,
             rain_corridor_targets: 0,
@@ -482,10 +478,7 @@ impl ClassicSandboxEngine {
         self.rain_focus_rephase_remaining = 0;
         self.rain_last_category_id = None;
         self.rain_focus_bias_phase = self.initial_rain_focus_bias_phase;
-        #[cfg(test)]
-        {
-            self.rain_boundary_avulsion_index = 0;
-        }
+        self.rain_boundary_avulsion_index = 0;
         self.rain_left_padding_targets = 0;
         self.rain_corridor_targets = 0;
         self.rain_right_padding_targets = 0;
@@ -767,26 +760,26 @@ impl ClassicSandboxEngine {
             .rain_last_category_id
             .is_some_and(|previous| previous != category_id)
         {
+            let boundary_avulsion = self.mode == ClassicRainMode::WanderingFocus;
             #[cfg(test)]
-            if self.rain_bias_schedule_probe.boundary_avulsion()
-                && let Some(bounds) = self.surface.viewport_bounds()
-            {
-                self.probe_boundary_focus_avulsion(bounds);
+            let boundary_avulsion =
+                boundary_avulsion && self.rain_bias_schedule_probe.boundary_avulsion();
+            if boundary_avulsion && let Some(bounds) = self.surface.viewport_bounds() {
+                self.boundary_focus_avulsion(bounds);
             }
 
-            // A category boundary is a depositional rephase. RAIN-004/B2
-            // production preserves the exact focus and its current heading;
-            // RAIN-005B2D2 may additionally relocate the invisible focus under
-            // an explicit test-only boundary-avulsion probe. In every case the
-            // next heading decision is immediate and temporarily less inertial.
+            // RAIN-005B2R1 treats an actually-entered category boundary as both
+            // a directional rephase and a positional decorrelation event for
+            // WanderingFocus. Only the invisible statistical focus relocates;
+            // physical grains remain ordinary Classic ingress and settlement.
+            // Uniform mode keeps the pre-R1 category semantics.
             self.rain_focus_rephase_remaining = RAIN_FOCUS_REPHASE_INGRESSES;
             self.rain_focus_heading_counter = RAIN_FOCUS_REPHASE_HEADING_INGRESSES;
         }
         self.rain_last_category_id = Some(category_id);
     }
 
-    #[cfg(test)]
-    fn probe_boundary_focus_avulsion(&mut self, bounds: ViewportBounds) {
+    fn boundary_focus_avulsion(&mut self, bounds: ViewportBounds) {
         let (start, end) = Self::rain_focus_bounds(bounds);
         let width = end.saturating_sub(start);
         let Some(current) = self.rain_focus_x else {
@@ -796,12 +789,11 @@ impl ClassicSandboxEngine {
             return;
         }
 
-        // Counter-based probe entropy deliberately does not consume the rain RNG
-        // stream. The factorial therefore isolates positional boundary authority
-        // instead of confounding it with downstream random-stream drift. The
-        // offset ranges over every other active-width locus: no jump length,
-        // corridor fraction, edge preference, or viewport-scale coefficient is
-        // introduced.
+        // Counter-based boundary entropy deliberately does not consume the rain
+        // RNG stream. The offset ranges over every other active-width locus: no
+        // jump length, corridor fraction, edge preference, or viewport-scale
+        // coefficient is introduced. This preserves B2's rain sequence while
+        // decorrelating successive actually-entered strata.
         self.rain_boundary_avulsion_index = self.rain_boundary_avulsion_index.wrapping_add(1);
         let mut entropy = self.rain_rng_state
             ^ self.initial_rain_focus_bias_phase.rotate_left(17)
@@ -2469,8 +2461,9 @@ mod tests {
     }
 
     #[test]
-    fn category_change_rephases_heading_without_teleporting_focus() {
+    fn b2_control_category_change_rephases_heading_without_teleporting_focus() {
         let mut engine = ClassicSandboxEngine::new(80, 20, 31, ClassicRainMode::WanderingFocus);
+        engine.rain_bias_schedule_probe = RainBiasScheduleProbe::B2Control;
         let bounds = engine.surface.viewport_bounds().expect("visible basin");
         for _ in 0..2_000 {
             engine.advance_rain_focus(bounds);
@@ -2499,14 +2492,13 @@ mod tests {
     }
 
     #[test]
-    fn boundary_avulsion_probe_relocates_focus_without_rain_rng_stream_drift() {
+    fn runtime_boundary_avulsion_relocates_focus_without_rain_rng_stream_drift() {
         let mut engine = ClassicSandboxEngine::new(80, 20, 0xB2D2, ClassicRainMode::WanderingFocus);
         let bounds = engine.surface.viewport_bounds().expect("visible basin");
         for _ in 0..2_000 {
             engine.advance_rain_focus(bounds);
         }
         engine.note_ingress_category(CategoryId(1));
-        engine.rain_bias_schedule_probe = RainBiasScheduleProbe::BoundaryAvulsionGoldenSmall;
         let focus_before = engine.rain_focus_x.expect("focus initialized");
         let rng_before = engine.rain_rng_state;
         engine.note_ingress_category(CategoryId(2));
@@ -2518,7 +2510,7 @@ mod tests {
     }
 
     #[test]
-    fn boundary_avulsion_probe_explores_full_width_aperiodically() {
+    fn runtime_boundary_avulsion_explores_full_width_aperiodically() {
         let mut engine =
             ClassicSandboxEngine::new(96, 20, 0xB2D2_0001, ClassicRainMode::WanderingFocus);
         let bounds = engine.surface.viewport_bounds().expect("visible basin");
@@ -2526,7 +2518,6 @@ mod tests {
             engine.advance_rain_focus(bounds);
         }
         engine.note_ingress_category(CategoryId(1));
-        engine.rain_bias_schedule_probe = RainBiasScheduleProbe::BoundaryAvulsionGoldenSmall;
 
         let width = bounds.x_end - bounds.x_start;
         let bin_count = 12usize;
@@ -2556,10 +2547,9 @@ mod tests {
     }
 
     #[test]
-    fn boundary_avulsion_probe_waits_for_actual_fifo_category_entry() {
+    fn runtime_boundary_avulsion_waits_for_actual_fifo_category_entry() {
         let mut engine =
             ClassicSandboxEngine::new(8, 6, 0xB2D2_0002, ClassicRainMode::WanderingFocus);
-        engine.rain_bias_schedule_probe = RainBiasScheduleProbe::BoundaryAvulsionGoldenSmall;
         let bounds = engine.surface.viewport_bounds().expect("visible basin");
         let ingress_y = bounds.y_start;
 
@@ -2581,6 +2571,15 @@ mod tests {
         assert_eq!(engine.pending_count(), 0);
         assert_eq!(engine.rain_boundary_avulsion_index, 1);
         assert_ne!(engine.rain_focus_x, focus_before);
+    }
+
+    #[test]
+    fn uniform_category_change_does_not_create_focus_or_boundary_avulsion() {
+        let mut engine = ClassicSandboxEngine::new(40, 15, 0xB2D2_0003, ClassicRainMode::Uniform);
+        engine.note_ingress_category(CategoryId(1));
+        engine.note_ingress_category(CategoryId(2));
+        assert_eq!(engine.rain_focus_x, None);
+        assert_eq!(engine.rain_boundary_avulsion_index, 0);
     }
 
     #[test]
