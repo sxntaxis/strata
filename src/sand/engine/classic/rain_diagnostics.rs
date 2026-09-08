@@ -360,7 +360,7 @@ impl ClassicSandboxEngine {
 
     fn category_profiles(
         &self,
-        bounds: super::ViewportBounds,
+        bounds: super::super::ViewportBounds,
         categories: &[Category],
     ) -> Vec<CategoryProfile> {
         let width = bounds.x_end.saturating_sub(bounds.x_start);
