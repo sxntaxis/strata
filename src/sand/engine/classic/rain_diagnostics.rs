@@ -2023,7 +2023,7 @@ mod tests {
 
     fn supported_height_profile_for_bounds(
         engine: &ClassicSandboxEngine,
-        bounds: super::ViewportBounds,
+        bounds: super::super::ViewportBounds,
     ) -> Vec<f64> {
         (bounds.x_start..bounds.x_end)
             .map(|x| engine.supported_column_height(x) as f64)
