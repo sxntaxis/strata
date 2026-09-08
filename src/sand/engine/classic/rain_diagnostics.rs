@@ -2121,7 +2121,13 @@ mod tests {
         seed: u64,
         categories: &[Category],
     ) -> MacroreliefSample {
-        macrorelief_sample_for_geometry_with_probe(width_cells, height_cells, seed, categories, None)
+        macrorelief_sample_for_geometry_with_probe(
+            width_cells,
+            height_cells,
+            seed,
+            categories,
+            None,
+        )
     }
 
     fn macrorelief_sample_for_geometry_with_probe(
@@ -2663,7 +2669,11 @@ mod tests {
             .iter()
             .filter(|expected| (expected.geometry - 1) % GEOMETRY_STRIDE == 0)
             .collect::<Vec<_>>();
-        assert_eq!(selected.len(), 24, "12 spread geometries x both exact seeds");
+        assert_eq!(
+            selected.len(),
+            24,
+            "12 spread geometries x both exact seeds"
+        );
 
         for expected in selected {
             let sample = macrorelief_runtime_sample_for_geometry(
@@ -2776,11 +2786,7 @@ mod tests {
                 expected.curvature_d8,
             );
             assert_printed_nine_eq("C1R1 thickness cv", sample.legacy.cv, expected.thickness_cv);
-            assert_printed_nine_eq(
-                "C1R1 pinchout",
-                sample.pinchout_fraction,
-                expected.pinchout,
-            );
+            assert_printed_nine_eq("C1R1 pinchout", sample.pinchout_fraction, expected.pinchout);
             assert_printed_nine_eq(
                 "C1R1 continuity",
                 sample.continuity_fraction,
