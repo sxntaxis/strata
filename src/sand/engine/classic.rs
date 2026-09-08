@@ -768,10 +768,10 @@ impl ClassicSandboxEngine {
             .is_some_and(|previous| previous != category_id)
         {
             #[cfg(test)]
-            if self.rain_bias_schedule_probe.boundary_avulsion() {
-                if let Some(bounds) = self.surface.viewport_bounds() {
-                    self.probe_boundary_focus_avulsion(bounds);
-                }
+            if self.rain_bias_schedule_probe.boundary_avulsion()
+                && let Some(bounds) = self.surface.viewport_bounds()
+            {
+                self.probe_boundary_focus_avulsion(bounds);
             }
 
             // A category boundary is a depositional rephase. RAIN-004/B2
