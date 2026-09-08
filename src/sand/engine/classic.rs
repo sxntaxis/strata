@@ -353,8 +353,7 @@ impl ClassicSandboxEngine {
             repose_rng_state = CLASSIC_REPOSE_RNG_XOR;
         }
         let initial_rain_focus_bias_phase =
-            (rain_rng_state >> (64 - RAIN_FOCUS_BIAS_PHASE_BITS))
-                % RAIN_FOCUS_BIAS_PHASE_MODULUS;
+            (rain_rng_state >> (64 - RAIN_FOCUS_BIAS_PHASE_BITS)) % RAIN_FOCUS_BIAS_PHASE_MODULUS;
         let surface = SandEngine::new(width, height);
         let local_repose = vec![CLASSIC_REPOSE_LOW; surface.grid_width_dots];
         let repose_memory_remaining = vec![0; surface.grid_width_dots];
@@ -2201,7 +2200,8 @@ mod tests {
     fn golden_bias_scheduler_has_subunit_prefix_and_window_discrepancy() {
         let probability = ClassicSandboxEngine::rain_focus_bias_effective_probability();
         for seed in [1u64, 19, 23, 0xA11C_005B_2000_0001, u64::MAX - 1] {
-            let mut engine = ClassicSandboxEngine::new(20, 8, seed, ClassicRainMode::WanderingFocus);
+            let mut engine =
+                ClassicSandboxEngine::new(20, 8, seed, ClassicRainMode::WanderingFocus);
             let samples = 16_384usize;
             let slots = (0..samples)
                 .map(|_| engine.next_focus_bias_slot())
@@ -2248,8 +2248,12 @@ mod tests {
             let requested = probe.focus_probability();
             let probability =
                 ClassicSandboxEngine::rain_focus_bias_effective_probability_for(requested);
-            let mut engine =
-                ClassicSandboxEngine::new(20, 8, 0xA11C_005B_2D10_0001, ClassicRainMode::WanderingFocus);
+            let mut engine = ClassicSandboxEngine::new(
+                20,
+                8,
+                0xA11C_005B_2D10_0001,
+                ClassicRainMode::WanderingFocus,
+            );
             engine.rain_bias_schedule_probe = probe;
             let slots = (0..8_192)
                 .map(|_| engine.next_focus_bias_slot())
@@ -2274,7 +2278,12 @@ mod tests {
 
     #[test]
     fn golden_bias_scheduler_has_no_short_period() {
-        let mut engine = ClassicSandboxEngine::new(20, 8, 0xA11C_005B_2000_0002, ClassicRainMode::WanderingFocus);
+        let mut engine = ClassicSandboxEngine::new(
+            20,
+            8,
+            0xA11C_005B_2000_0002,
+            ClassicRainMode::WanderingFocus,
+        );
         let slots = (0..8_192)
             .map(|_| engine.next_focus_bias_slot())
             .collect::<Vec<_>>();
@@ -2293,8 +2302,18 @@ mod tests {
         // runtime scheduler has no airborne-count or window-size parameter.
         let samples = 100_000usize;
         for window in [4usize, 20] {
-            let mut runtime = ClassicSandboxEngine::new(20, 8, 0xA11C_005B_2000_0003, ClassicRainMode::WanderingFocus);
-            let mut iid = ClassicSandboxEngine::new(20, 8, 0xA11C_005B_2000_0003, ClassicRainMode::WanderingFocus);
+            let mut runtime = ClassicSandboxEngine::new(
+                20,
+                8,
+                0xA11C_005B_2000_0003,
+                ClassicRainMode::WanderingFocus,
+            );
+            let mut iid = ClassicSandboxEngine::new(
+                20,
+                8,
+                0xA11C_005B_2000_0003,
+                ClassicRainMode::WanderingFocus,
+            );
             iid.rain_bias_schedule_probe = RainBiasScheduleProbe::IidRain004;
             let runtime_slots = (0..samples)
                 .map(|_| runtime.next_focus_bias_slot())

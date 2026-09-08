@@ -4,9 +4,9 @@ use std::fmt::Write as _;
 use crate::constants::TIME_SETTINGS;
 use crate::domain::{Category, CategoryId};
 
-use super::{ClassicRainMode, ClassicSandboxEngine, RAIN_FOCUS_BIAS_PROBABILITY};
 #[cfg(test)]
 use super::RainBiasScheduleProbe;
+use super::{ClassicRainMode, ClassicSandboxEngine, RAIN_FOCUS_BIAS_PROBABILITY};
 
 const MILLIS_PER_SECOND: f64 = 1_000.0;
 const SECONDS_PER_HOUR: f64 = 3_600.0;
@@ -1681,16 +1681,8 @@ mod tests {
             assert_printed_nine_eq("mound_el", control.mound_el, expected.mound_el);
             assert_printed_nine_eq("cv", control.cv, expected.cv);
             assert_printed_nine_eq("corr", control.correlation, expected.correlation);
-            assert_printed_nine_eq(
-                "tv",
-                control.total_variation,
-                expected.total_variation,
-            );
-            assert_printed_nine_eq(
-                "shift",
-                control.centroid_shift,
-                expected.centroid_shift,
-            );
+            assert_printed_nine_eq("tv", control.total_variation, expected.total_variation);
+            assert_printed_nine_eq("shift", control.centroid_shift, expected.centroid_shift);
             assert_printed_nine_eq("span", control.centroid_span, expected.centroid_span);
         }
         println!("RAIN_005B2_CONTROL_REPRODUCTION runs=12 result=PASS_SAMPLE_LEVEL_9DP");
@@ -1777,7 +1769,6 @@ mod tests {
         );
     }
 
-
     #[test]
     #[ignore = "native RAIN-005B2D1 test-only focus-authority sweep; 64 A3 geometries x one exact seed x five dyadic authority levels"]
     fn rain_005b2d1_focus_authority_sweep_probe() {
@@ -1814,8 +1805,7 @@ mod tests {
             .iter()
             .map(|sample| sample.centroid_span)
             .collect::<Vec<_>>();
-        let baseline_shift_vs_log_width =
-            correlation_or_zero(&baseline_log_width, &baseline_shift);
+        let baseline_shift_vs_log_width = correlation_or_zero(&baseline_log_width, &baseline_shift);
         println!(
             "RAIN_005B2D1_BASELINE runs={} shift_vs_log_width={:.9} span_vs_log_width={:.9}",
             reference.len(),
@@ -1873,22 +1863,14 @@ mod tests {
                 let span = candidate.centroid_span - expected.centroid_span;
                 if variant == RainBiasScheduleProbe::Runtime {
                     assert_printed_nine_eq("runtime delta cv", cv, expected_control.delta_cv);
-                    assert_printed_nine_eq(
-                        "runtime delta corr",
-                        corr,
-                        expected_control.delta_corr,
-                    );
+                    assert_printed_nine_eq("runtime delta corr", corr, expected_control.delta_corr);
                     assert_printed_nine_eq("runtime delta tv", tv, expected_control.delta_tv);
                     assert_printed_nine_eq(
                         "runtime delta shift",
                         shift,
                         expected_control.delta_shift,
                     );
-                    assert_printed_nine_eq(
-                        "runtime delta span",
-                        span,
-                        expected_control.delta_span,
-                    );
+                    assert_printed_nine_eq("runtime delta span", span, expected_control.delta_span);
                     assert_printed_nine_eq(
                         "runtime candidate shift",
                         candidate.centroid_shift,
@@ -1956,5 +1938,4 @@ mod tests {
             ),
         }
     }
-
 }
