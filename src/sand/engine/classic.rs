@@ -1611,14 +1611,23 @@ impl ClassicSandboxEngine {
     }
 
     fn effective_local_repose(&self, x: usize) -> u8 {
+        #[cfg(not(test))]
+        if self.local_repose.get(x).copied() == Some(CLASSIC_REPOSE_ANCHOR)
+            && self.is_strict_one_column_apex(x)
+        {
+            // RAIN-005C2R2 owner A/B candidate: keep the exact routed anchor state,
+            // but withhold only its fourth repose unit while it is the unsupported
+            // winner of a strict one-column apex. Full anchor authority returns
+            // automatically as soon as later accretion broadens/buries the apex.
+            return CLASSIC_REPOSE_HIGH;
+        }
         #[cfg(test)]
         if self.repose_stability_probe == ReposeStabilityProbe::ConvexityAnchorApexLatent
             && self.local_repose.get(x).copied() == Some(CLASSIC_REPOSE_ANCHOR)
             && self.is_strict_one_column_apex(x)
         {
-            // C2R1 diagnostic semantics: an anchor sitting on a strict one-column
-            // apex keeps its state but its final repose unit is latent until the
-            // surface broadens/buries that apex. No timer or extra state exists.
+            // C2R1 diagnostic semantics mirrored by the RAIN-005C2R2 runtime
+            // candidate. No timer, latent-state vector, or extra RNG exists.
             return CLASSIC_REPOSE_HIGH;
         }
         #[cfg(test)]
@@ -1996,7 +2005,6 @@ impl ClassicSandboxEngine {
             .saturating_sub(right)
     }
 
-    #[cfg(test)]
     fn is_strict_one_column_apex(&self, x: usize) -> bool {
         let Some(bounds) = self.surface.viewport_bounds() else {
             return false;

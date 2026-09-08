@@ -5,9 +5,13 @@ state: active
 created: 2026-08-01
 updated: 2026-09-08
 authority: working
-summary: RAIN-005C2 showed that broad shoulder-routing strongly reduces the new one-to-three-dot pikes but gives back too much accepted thickness/pinch-out variation. RAIN-005C2R1 now tests three narrower anchor/apex mechanisms under an exact no-regression floor for every owner macrorelief target; C1R1 remains runtime unchanged.
-next: Run RAIN-005C2R1: 32 spread A3 geometries x both exact seeds x four internally parallel arms. Return at most one pike-improving candidate only if relief d2/d4/d8, curvature d4/d8, thickness CV and pinch-out all remain >= exact C1R1 and avalanche safety passes. Otherwise keep C1R1.
+summary: C2R1 found no pike fix that preserved the exact mathematical macro floor, but the owner explicitly allows a tiny metric trade when visual macro-topography is preserved. RAIN-005C2R2 therefore promotes only the already-measured anchor-apex-latent arm to a bounded human A/B against accepted C1R1; no new search is authorized.
+next: Build the exact RAIN-005C2R2 runtime candidate and compare it visually against the accepted C1R1 binary under separate disposable profiles. If R2 wins by eye, perform final unified promotion plus full 192-row certification; otherwise keep C1R1 and close pike work.
 ---
+
+## RAIN-005C2R2 bounded human A/B — 2026-09-08
+
+C2R1 completed 256 runs and returned `NO_PIKE_FIX_PRESERVES_OWNER_MACRO_FLOOR`. The owner then clarified that the exact mathematical floor is stricter than the product criterion: a tiny thickness-CV loss is acceptable if the visual macro-topography is unchanged, and narrow pikes may themselves overstate that metric. R2 therefore performs no new search and promotes only the already-measured `anchor-apex-latent` near-miss to a runtime human A/B candidate. Full certification remains deferred until an owner visual preference exists. See `notebook/work/RAIN-005C2R2-HUMAN-AB-APEX-LATENT.md`.
 
 ## RAIN-005C2R1 surgical pike refinement — 2026-09-08
 
