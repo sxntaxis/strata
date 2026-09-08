@@ -4,9 +4,9 @@ use std::fmt::Write as _;
 use crate::constants::TIME_SETTINGS;
 use crate::domain::{Category, CategoryId};
 
+use super::{ClassicRainMode, ClassicSandboxEngine, RAIN_FOCUS_BIAS_PROBABILITY};
 #[cfg(test)]
 use super::{RainBiasScheduleProbe, ReposeStabilityProbe};
-use super::{ClassicRainMode, ClassicSandboxEngine, RAIN_FOCUS_BIAS_PROBABILITY};
 
 const MILLIS_PER_SECOND: f64 = 1_000.0;
 const SECONDS_PER_HOUR: f64 = 3_600.0;
@@ -1936,7 +1936,6 @@ mod tests {
         );
     }
 
-
     #[derive(Debug, Clone, Copy)]
     struct MacroreliefSample {
         legacy: MorphologySample,
@@ -2176,12 +2175,15 @@ mod tests {
             .fold(f64::NEG_INFINITY, f64::max);
 
         let heights = supported_height_profile_for_bounds(&engine, bounds);
-        let (pinchout_fraction, continuity_fraction) =
-            profile_pinchout_and_continuity(&profiles);
+        let (pinchout_fraction, continuity_fraction) = profile_pinchout_and_continuity(&profiles);
         let cascade_fraction = if observation.moves.is_empty() {
             0.0
         } else {
-            observation.moves.iter().filter(|moves| **moves > 1.0).count() as f64
+            observation
+                .moves
+                .iter()
+                .filter(|moves| **moves > 1.0)
+                .count() as f64
                 / observation.moves.len() as f64
         };
         let multicolumn_fraction = if observation.spans.is_empty() {
@@ -2283,8 +2285,7 @@ mod tests {
             !(self.avalanche_p95_moves < control.avalanche_p95_moves
                 && self.avalanche_p95_span < control.avalanche_p95_span
                 && self.avalanche_cascade_fraction < control.avalanche_cascade_fraction
-                && self.avalanche_multicolumn_fraction
-                    < control.avalanche_multicolumn_fraction)
+                && self.avalanche_multicolumn_fraction < control.avalanche_multicolumn_fraction)
         }
 
         fn avalanche_safe(self, control: Self) -> bool {
@@ -2322,9 +2323,7 @@ mod tests {
             avalanche_cascade_fraction: med(|sample| sample.avalanche_cascade_fraction),
             avalanche_p95_span: med(|sample| sample.avalanche_p95_span),
             avalanche_max_span: med(|sample| sample.avalanche_max_span),
-            avalanche_multicolumn_fraction: med(|sample| {
-                sample.avalanche_multicolumn_fraction
-            }),
+            avalanche_multicolumn_fraction: med(|sample| sample.avalanche_multicolumn_fraction),
             pending_fraction: med(|sample| sample.pending_fraction),
         }
     }
@@ -2332,8 +2331,7 @@ mod tests {
     fn macrorelief_dominates(left: MacroreliefSummary, right: MacroreliefSummary) -> bool {
         let left = left.morphology_objectives();
         let right = right.morphology_objectives();
-        left.iter().zip(right).all(|(l, r)| *l >= r)
-            && left.iter().zip(right).any(|(l, r)| *l > r)
+        left.iter().zip(right).all(|(l, r)| *l >= r) && left.iter().zip(right).any(|(l, r)| *l > r)
     }
 
     fn rank_for_metric(
@@ -2430,7 +2428,10 @@ mod tests {
         let safe = summaries
             .iter()
             .copied()
-            .filter(|summary| summary.probe == ReposeStabilityProbe::RuntimeControl || summary.avalanche_safe(control))
+            .filter(|summary| {
+                summary.probe == ReposeStabilityProbe::RuntimeControl
+                    || summary.avalanche_safe(control)
+            })
             .collect::<Vec<_>>();
         let frontier = safe
             .iter()
@@ -2477,7 +2478,13 @@ mod tests {
         let macro_best = non_control
             .iter()
             .copied()
-            .min_by_key(|summary| (worst_rank(&safe, *summary, true), mechanism_count(summary.probe), summary.probe.name()))
+            .min_by_key(|summary| {
+                (
+                    worst_rank(&safe, *summary, true),
+                    mechanism_count(summary.probe),
+                    summary.probe.name(),
+                )
+            })
             .expect("non-control frontier");
 
         let mut selected = vec![simple.probe];
@@ -2513,7 +2520,11 @@ mod tests {
             &categories,
             ReposeStabilityProbe::RuntimeControl,
         );
-        assert_printed_nine_eq("C1 control mound", sample.legacy.mound_el, expected.mound_el);
+        assert_printed_nine_eq(
+            "C1 control mound",
+            sample.legacy.mound_el,
+            expected.mound_el,
+        );
         assert_printed_nine_eq(
             "C1 control delta cv",
             sample.legacy.cv - expected.cv,
@@ -2634,9 +2645,7 @@ mod tests {
             }
             stage1_summaries.push(summarize_macrorelief(probe, &samples));
         }
-        println!(
-            "RAIN_005C1_STAGE1_CONTROL_REPRODUCTION result=PASS_SAMPLE_LEVEL_9DP runs=64"
-        );
+        println!("RAIN_005C1_STAGE1_CONTROL_REPRODUCTION result=PASS_SAMPLE_LEVEL_9DP runs=64");
         let stage1_control = stage1_summaries
             .iter()
             .copied()

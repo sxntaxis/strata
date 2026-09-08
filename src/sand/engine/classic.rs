@@ -87,8 +87,9 @@ impl ReposeStabilityProbe {
     fn maps_sample(self, repose: u8) -> u8 {
         match self {
             Self::NoAnchor if repose == CLASSIC_REPOSE_ANCHOR => CLASSIC_REPOSE_HIGH,
-            Self::StrongTail | Self::ConvexityStrongTail
-                if repose >= CLASSIC_REPOSE_HIGH => CLASSIC_REPOSE_ANCHOR,
+            Self::StrongTail | Self::ConvexityStrongTail if repose >= CLASSIC_REPOSE_HIGH => {
+                CLASSIC_REPOSE_ANCHOR
+            }
             _ => repose,
         }
     }
@@ -1612,8 +1613,7 @@ impl ClassicSandboxEngine {
             } else {
                 let repose = if self.texture_patch_continues() {
                     let left = x.checked_sub(1).map(|index| self.local_repose[index]);
-                    let right =
-                        (x + 1 < self.local_repose.len()).then(|| self.local_repose[x + 1]);
+                    let right = (x + 1 < self.local_repose.len()).then(|| self.local_repose[x + 1]);
                     match (left, right) {
                         (Some(left), Some(right)) => {
                             if self.next_repose_random_u64() & 1 == 0 {
@@ -1661,7 +1661,12 @@ impl ClassicSandboxEngine {
         }
 
         let mut states = (start..end)
-            .map(|index| (self.local_repose[index], self.repose_memory_remaining[index]))
+            .map(|index| {
+                (
+                    self.local_repose[index],
+                    self.repose_memory_remaining[index],
+                )
+            })
             .collect::<Vec<_>>();
         states.sort_by_key(|state| (state.0, state.1));
         for (index, state) in positions.into_iter().zip(states) {
