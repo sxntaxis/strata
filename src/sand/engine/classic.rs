@@ -70,6 +70,9 @@ enum ReposeStabilityProbe {
     ConvexityAnchorStationary,
     ConvexityDeferred,
     ShoulderRoute,
+    ConvexityAnchorShoulder,
+    ConvexityAnchorApexLatent,
+    ConvexityStrongShoulder,
 }
 
 #[cfg(test)]
@@ -89,6 +92,9 @@ impl ReposeStabilityProbe {
             Self::ConvexityAnchorStationary => "convexity-anchor-stationary",
             Self::ConvexityDeferred => "convexity-deferred",
             Self::ShoulderRoute => "shoulder-route",
+            Self::ConvexityAnchorShoulder => "convexity-anchor-shoulder",
+            Self::ConvexityAnchorApexLatent => "convexity-anchor-apex-latent",
+            Self::ConvexityStrongShoulder => "convexity-strong-shoulder",
         }
     }
 
@@ -1606,6 +1612,16 @@ impl ClassicSandboxEngine {
 
     fn effective_local_repose(&self, x: usize) -> u8 {
         #[cfg(test)]
+        if self.repose_stability_probe == ReposeStabilityProbe::ConvexityAnchorApexLatent
+            && self.local_repose.get(x).copied() == Some(CLASSIC_REPOSE_ANCHOR)
+            && self.is_strict_one_column_apex(x)
+        {
+            // C2R1 diagnostic semantics: an anchor sitting on a strict one-column
+            // apex keeps its state but its final repose unit is latent until the
+            // surface broadens/buries that apex. No timer or extra state exists.
+            return CLASSIC_REPOSE_HIGH;
+        }
+        #[cfg(test)]
         if self.repose_stability_probe == ReposeStabilityProbe::ConvexityAnchorBuried
             && self
                 .repose_anchor_latent_height
@@ -1768,6 +1784,21 @@ impl ClassicSandboxEngine {
                 ReposeStabilityProbe::ShoulderRoute => {
                     self.route_local_repose_by_shoulder(x);
                 }
+                ReposeStabilityProbe::ConvexityAnchorShoulder => {
+                    self.route_local_repose_by_convexity_with_apex_guard(
+                        x,
+                        CLASSIC_REPOSE_ANCHOR,
+                    );
+                }
+                ReposeStabilityProbe::ConvexityStrongShoulder => {
+                    self.route_local_repose_by_convexity_with_apex_guard(
+                        x,
+                        CLASSIC_REPOSE_HIGH,
+                    );
+                }
+                ReposeStabilityProbe::ConvexityAnchorApexLatent => {
+                    self.route_local_repose_by_convexity(x);
+                }
                 ReposeStabilityProbe::ConvexityAnchorBuried => {
                     self.route_local_repose_by_convexity_with_buried_anchor(x);
                 }
@@ -1873,6 +1904,40 @@ impl ClassicSandboxEngine {
         for (index, state) in positions.into_iter().zip(states) {
             self.local_repose[index] = state.0;
             self.repose_memory_remaining[index] = state.1;
+        }
+    }
+
+    #[cfg(test)]
+    fn route_local_repose_by_convexity_with_apex_guard(&mut self, x: usize, guarded_min: u8) {
+        self.route_local_repose_by_convexity(x);
+
+        let Some(bounds) = self.surface.viewport_bounds() else {
+            return;
+        };
+        let start = x.saturating_sub(1).max(bounds.x_start);
+        let end = (x + 2).min(bounds.x_end);
+        if end.saturating_sub(start) < 2 {
+            return;
+        }
+
+        let guarded_apices = (start..end)
+            .filter(|index| {
+                self.local_repose[*index] >= guarded_min && self.is_strict_one_column_apex(*index)
+            })
+            .collect::<Vec<_>>();
+        for apex in guarded_apices {
+            let replacement = (start..end)
+                .filter(|index| {
+                    *index != apex
+                        && !self.is_strict_one_column_apex(*index)
+                        && self.local_repose[*index] < guarded_min
+                })
+                .max_by_key(|index| (self.local_convexity_score(*index), *index));
+            let Some(replacement) = replacement else {
+                continue;
+            };
+            self.local_repose.swap(apex, replacement);
+            self.repose_memory_remaining.swap(apex, replacement);
         }
     }
 

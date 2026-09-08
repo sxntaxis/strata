@@ -2877,6 +2877,9 @@ mod tests {
         AnchorStationary,
         DeferredRouting,
         ShoulderRoute,
+        AnchorShoulder,
+        AnchorApexLatent,
+        StrongShoulder,
     }
 
     impl Rain005C2Variant {
@@ -2887,6 +2890,9 @@ mod tests {
                 Self::AnchorStationary => "anchor-stationary",
                 Self::DeferredRouting => "deferred-routing",
                 Self::ShoulderRoute => "shoulder-route",
+                Self::AnchorShoulder => "anchor-shoulder-route",
+                Self::AnchorApexLatent => "anchor-apex-latent",
+                Self::StrongShoulder => "strong-shoulder-route",
             }
         }
 
@@ -2901,6 +2907,11 @@ mod tests {
                 }
                 Self::DeferredRouting => Some(ReposeStabilityProbe::ConvexityDeferred),
                 Self::ShoulderRoute => Some(ReposeStabilityProbe::ShoulderRoute),
+                Self::AnchorShoulder => Some(ReposeStabilityProbe::ConvexityAnchorShoulder),
+                Self::AnchorApexLatent => {
+                    Some(ReposeStabilityProbe::ConvexityAnchorApexLatent)
+                }
+                Self::StrongShoulder => Some(ReposeStabilityProbe::ConvexityStrongShoulder),
             }
         }
 
@@ -2946,6 +2957,18 @@ mod tests {
         fn pike_improves(self) -> bool {
             self.paired_delta_pike_density_le3 < 0.0
                 || self.paired_delta_pike_excess_le3 < 0.0
+        }
+
+        fn preserves_owner_macro_floor(self, control: Self) -> bool {
+            let candidate = self.macro_summary;
+            let baseline = control.macro_summary;
+            candidate.relief_d2 >= baseline.relief_d2
+                && candidate.relief_d4 >= baseline.relief_d4
+                && candidate.relief_d8 >= baseline.relief_d8
+                && candidate.curvature_d4 >= baseline.curvature_d4
+                && candidate.curvature_d8 >= baseline.curvature_d8
+                && candidate.thickness_cv >= baseline.thickness_cv
+                && candidate.pinchout_fraction >= baseline.pinchout_fraction
         }
     }
 
@@ -3144,6 +3167,27 @@ mod tests {
         shoulder.local_repose[x + 1] = CLASSIC_REPOSE_MID;
         shoulder.route_local_repose_probe(x);
         assert_ne!(shoulder.local_repose[x], CLASSIC_REPOSE_ANCHOR);
+
+        let mut anchor_shoulder = shoulder;
+        anchor_shoulder.repose_stability_probe = ReposeStabilityProbe::ConvexityAnchorShoulder;
+        anchor_shoulder.local_repose[x - 1] = CLASSIC_REPOSE_ANCHOR;
+        anchor_shoulder.local_repose[x] = CLASSIC_REPOSE_LOW;
+        anchor_shoulder.local_repose[x + 1] = CLASSIC_REPOSE_MID;
+        anchor_shoulder.route_local_repose_probe(x);
+        assert_ne!(anchor_shoulder.local_repose[x], CLASSIC_REPOSE_ANCHOR);
+
+        let mut apex_latent = buried;
+        apex_latent.repose_stability_probe = ReposeStabilityProbe::ConvexityAnchorApexLatent;
+        apex_latent.local_repose[x] = CLASSIC_REPOSE_ANCHOR;
+        assert_eq!(apex_latent.effective_local_repose(x), CLASSIC_REPOSE_HIGH);
+        let center_height = apex_latent.supported_column_height(x);
+        for y in bounds.y_end - center_height..bounds.y_end {
+            apex_latent.surface.grid[y][x - 1] = Some(CategoryId::new(1));
+        }
+        assert_eq!(
+            apex_latent.effective_local_repose(x),
+            CLASSIC_REPOSE_ANCHOR
+        );
     }
 
     #[test]
@@ -3315,6 +3359,133 @@ mod tests {
                 .map(|variant| variant.name())
                 .collect::<Vec<_>>()
                 .join(",")
+        );
+    }
+
+    #[test]
+    #[ignore = "native RAIN-005C2R1 surgical pike refinement: 32 spread A3 geometries x both exact seeds x four arms, internally parallel"]
+    fn rain_005c2r1_surgical_pike_refinement_probe() {
+        const CATEGORY_COUNT: usize = 5;
+        const GEOMETRY_STRIDE: usize = 3;
+        const VARIANTS: [Rain005C2Variant; 4] = [
+            Rain005C2Variant::RuntimeC1R1,
+            Rain005C2Variant::AnchorShoulder,
+            Rain005C2Variant::AnchorApexLatent,
+            Rain005C2Variant::StrongShoulder,
+        ];
+
+        let categories = (1..=CATEGORY_COUNT)
+            .map(|id| category(id as u64, &format!("C2R1 {id}")))
+            .collect::<Vec<_>>();
+        let reference = rain_005c1_convexity_full_reference()
+            .into_iter()
+            .filter(|expected| (expected.geometry - 1) % GEOMETRY_STRIDE == 0)
+            .collect::<Vec<_>>();
+        assert_eq!(reference.len(), 64, "32 spread geometries x both exact seeds");
+
+        let mut results = std::thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for variant in VARIANTS {
+                let categories = categories.clone();
+                let reference = reference.clone();
+                handles.push(scope.spawn(move || {
+                    rain_005c2_run_arm(variant, &reference, &categories)
+                }));
+            }
+            handles
+                .into_iter()
+                .map(|handle| handle.join().expect("C2R1 arm worker"))
+                .collect::<Vec<_>>()
+        });
+        results.sort_by_key(|result| {
+            VARIANTS
+                .iter()
+                .position(|variant| *variant == result.variant)
+                .expect("known C2R1 variant")
+        });
+
+        let baseline = results
+            .iter()
+            .find(|result| result.variant == Rain005C2Variant::RuntimeC1R1)
+            .expect("C2R1 baseline");
+        let summaries = results
+            .iter()
+            .map(|result| rain_005c2_summary(result, baseline))
+            .collect::<Vec<_>>();
+        let control = summaries
+            .iter()
+            .copied()
+            .find(|summary| summary.variant == Rain005C2Variant::RuntimeC1R1)
+            .expect("C2R1 baseline summary");
+
+        println!(
+            "RAIN_005C2R1_CONTROL_REPRODUCTION result=PASS_SAMPLE_LEVEL_9DP runs=64 geometries=32 seeds_per_geometry=2 stride=3 fixture_sha256=138c979e64e046bcdb5597d2eed71b468257635a53d7caef838d21899132c6f1"
+        );
+        for summary in &summaries {
+            let m = summary.macro_summary;
+            let avalanche_safe = summary.variant == Rain005C2Variant::RuntimeC1R1
+                || m.avalanche_safe(control.macro_summary);
+            let owner_floor = summary.variant == Rain005C2Variant::RuntimeC1R1
+                || summary.preserves_owner_macro_floor(control);
+            println!(
+                "RAIN_005C2R1_SUMMARY variant={} runs={} pike_density_le3={:.9} pike_excess_le3={:.9} delta_pike_density_le3={:+.9} delta_pike_excess_le3={:+.9} relief_d2={:.9} delta_relief_d2={:+.9} relief_d4={:.9} delta_relief_d4={:+.9} relief_d8={:.9} delta_relief_d8={:+.9} curvature_d4={:.9} delta_curvature_d4={:+.9} curvature_d8={:.9} delta_curvature_d8={:+.9} thickness_cv={:.9} delta_thickness_cv={:+.9} pinchout={:.9} delta_pinchout={:+.9} continuity={:.9} delta_continuity={:+.9} avalanche_safe={} owner_macro_floor={}",
+                summary.variant.name(),
+                m.runs,
+                summary.pike_density_le3,
+                summary.pike_excess_le3,
+                summary.paired_delta_pike_density_le3,
+                summary.paired_delta_pike_excess_le3,
+                m.relief_d2,
+                m.relief_d2 - control.macro_summary.relief_d2,
+                m.relief_d4,
+                m.relief_d4 - control.macro_summary.relief_d4,
+                m.relief_d8,
+                m.relief_d8 - control.macro_summary.relief_d8,
+                m.curvature_d4,
+                m.curvature_d4 - control.macro_summary.curvature_d4,
+                m.curvature_d8,
+                m.curvature_d8 - control.macro_summary.curvature_d8,
+                m.thickness_cv,
+                m.thickness_cv - control.macro_summary.thickness_cv,
+                m.pinchout_fraction,
+                m.pinchout_fraction - control.macro_summary.pinchout_fraction,
+                m.continuity_fraction,
+                m.continuity_fraction - control.macro_summary.continuity_fraction,
+                avalanche_safe,
+                owner_floor,
+            );
+        }
+
+        let mut eligible = summaries
+            .iter()
+            .copied()
+            .filter(|summary| {
+                summary.variant != Rain005C2Variant::RuntimeC1R1
+                    && summary.macro_summary.avalanche_safe(control.macro_summary)
+                    && summary.preserves_owner_macro_floor(control)
+                    && summary.pike_improves()
+            })
+            .collect::<Vec<_>>();
+        eligible.sort_by(|left, right| {
+            left.pike_excess_le3
+                .partial_cmp(&right.pike_excess_le3)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    left.pike_density_le3
+                        .partial_cmp(&right.pike_density_le3)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+        });
+        let selected = eligible.first().map(|summary| summary.variant);
+        println!(
+            "RAIN_005C2R1_FINAL classification={} human_candidates={} variants={}",
+            if selected.is_some() {
+                "SURGICAL_PIKE_HUMAN_CANDIDATE_READY"
+            } else {
+                "NO_PIKE_FIX_PRESERVES_OWNER_MACRO_FLOOR"
+            },
+            usize::from(selected.is_some()),
+            selected.map(|variant| variant.name()).unwrap_or("")
         );
     }
 

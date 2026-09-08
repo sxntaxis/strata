@@ -5,9 +5,13 @@ state: active
 created: 2026-08-01
 updated: 2026-09-08
 authority: working
-summary: RAIN-005C1R1 convexity-route passed the bounded promotion smoke and the owner accepted its small but clearly visible macrorelief gain as the new preferred Classic morphology baseline. RAIN-005C2 now tests four bounded explanations for the newly noticed one-to-three-dot pike artifact without changing the accepted rain, avalanche, repose-budget, or macrorelief baseline.
-next: Run the internally parallel RAIN-005C2 pike-artifact factorial: 32 systematically spread A3 geometries x both exact seeds x five arms. Exact C1R1 control must reproduce its frozen fixture; return at most two avalanche-safe Pareto candidates that reduce the pike diagnostic without semantic tuning. Human-review any candidate before final 192-row baseline certification.
+summary: RAIN-005C2 showed that broad shoulder-routing strongly reduces the new one-to-three-dot pikes but gives back too much accepted thickness/pinch-out variation. RAIN-005C2R1 now tests three narrower anchor/apex mechanisms under an exact no-regression floor for every owner macrorelief target; C1R1 remains runtime unchanged.
+next: Run RAIN-005C2R1: 32 spread A3 geometries x both exact seeds x four internally parallel arms. Return at most one pike-improving candidate only if relief d2/d4/d8, curvature d4/d8, thickness CV and pinch-out all remain >= exact C1R1 and avalanche safety passes. Otherwise keep C1R1.
 ---
+
+## RAIN-005C2R1 surgical pike refinement — 2026-09-08
+
+C2 completed 320 runs. Broad `shoulder-route` clearly suppressed the pike diagnostic but reduced thickness CV and pinch-out, so it is not eligible to replace the owner-accepted C1R1 baseline. R1 tests only anchor-specific shoulder routing, geometry-driven apex-latent anchor authority, and a strong-tail shoulder guard. The selection rule now makes the owner's full target set an exact hard floor rather than allowing a Pareto trade. C2 also exposed an obsolete ordinary unit-test assumption: C1R1 intentionally transports `(repose,memory)` tuples, so three-refresh memory follows the routed state rather than a fixed column coordinate. The test is corrected without changing runtime. See `notebook/work/RAIN-005C2R1-SURGICAL-PIKE-REFINEMENT.md`.
 
 ## RAIN-005C2 pike-artifact factorial — 2026-09-08
 
