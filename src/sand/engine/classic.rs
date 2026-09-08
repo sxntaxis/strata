@@ -83,10 +83,7 @@ impl RainBiasScheduleProbe {
     }
 
     fn boundary_avulsion(self) -> bool {
-        matches!(
-            self,
-            Self::Runtime | Self::BoundaryAvulsionTowardOne16
-        )
+        matches!(self, Self::Runtime | Self::BoundaryAvulsionTowardOne16)
     }
 
     fn diagnostic_name(self) -> &'static str {
