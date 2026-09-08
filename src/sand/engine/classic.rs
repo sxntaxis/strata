@@ -59,6 +59,35 @@ pub(crate) enum ClassicRainMode {
 enum RainBiasScheduleProbe {
     Runtime,
     IidRain004,
+    AuthorityTowardOne16,
+    AuthorityTowardOne8,
+    AuthorityTowardOne4,
+    AuthorityTowardOne2,
+}
+
+#[cfg(test)]
+impl RainBiasScheduleProbe {
+    fn focus_probability(self) -> f64 {
+        let base = RAIN_FOCUS_BIAS_PROBABILITY;
+        match self {
+            Self::Runtime | Self::IidRain004 => base,
+            Self::AuthorityTowardOne16 => base + (1.0 - base) / 16.0,
+            Self::AuthorityTowardOne8 => base + (1.0 - base) / 8.0,
+            Self::AuthorityTowardOne4 => base + (1.0 - base) / 4.0,
+            Self::AuthorityTowardOne2 => base + (1.0 - base) / 2.0,
+        }
+    }
+
+    fn diagnostic_name(self) -> &'static str {
+        match self {
+            Self::Runtime => "runtime-golden-small",
+            Self::IidRain004 => "iid-rain004",
+            Self::AuthorityTowardOne16 => "toward-one-1of16",
+            Self::AuthorityTowardOne8 => "toward-one-1of8",
+            Self::AuthorityTowardOne4 => "toward-one-1of4",
+            Self::AuthorityTowardOne2 => "toward-one-1of2",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1662,12 +1691,22 @@ impl ClassicSandboxEngine {
         self.next_rain_random_u64() & 1 == 0
     }
 
+    fn rain_focus_bias_phase_step_for(probability: f64) -> u64 {
+        debug_assert!((0.0..=1.0).contains(&probability));
+        (probability * RAIN_FOCUS_BIAS_PHASE_MODULUS as f64).round() as u64
+    }
+
     fn rain_focus_bias_phase_step() -> u64 {
-        (RAIN_FOCUS_BIAS_PROBABILITY * RAIN_FOCUS_BIAS_PHASE_MODULUS as f64).round() as u64
+        Self::rain_focus_bias_phase_step_for(RAIN_FOCUS_BIAS_PROBABILITY)
+    }
+
+    fn rain_focus_bias_effective_probability_for(probability: f64) -> f64 {
+        Self::rain_focus_bias_phase_step_for(probability) as f64
+            / RAIN_FOCUS_BIAS_PHASE_MODULUS as f64
     }
 
     fn rain_focus_bias_effective_probability() -> f64 {
-        Self::rain_focus_bias_phase_step() as f64 / RAIN_FOCUS_BIAS_PHASE_MODULUS as f64
+        Self::rain_focus_bias_effective_probability_for(RAIN_FOCUS_BIAS_PROBABILITY)
     }
 
     fn next_focus_bias_slot(&mut self) -> bool {
@@ -1676,12 +1715,17 @@ impl ClassicSandboxEngine {
             return self.rain_random_probability(RAIN_FOCUS_BIAS_PROBABILITY);
         }
 
+        #[cfg(test)]
+        let probability = self.rain_bias_schedule_probe.focus_probability();
+        #[cfg(not(test))]
+        let probability = RAIN_FOCUS_BIAS_PROBABILITY;
+
         // Consume the same one rain-RNG draw that RAIN-004 used for its IID
         // focus/uniform decision. The draw is intentionally not the decision
         // authority in B2; preserving it limits unrelated RNG-stream drift.
         let _ = self.next_rain_random_u64();
 
-        let step = Self::rain_focus_bias_phase_step();
+        let step = Self::rain_focus_bias_phase_step_for(probability);
         let next = self.rain_focus_bias_phase + step;
         if next >= RAIN_FOCUS_BIAS_PHASE_MODULUS {
             self.rain_focus_bias_phase = next - RAIN_FOCUS_BIAS_PHASE_MODULUS;
@@ -2099,8 +2143,8 @@ mod tests {
         let mut current = values[..window].iter().filter(|value| **value).count();
         let mut maximum = current;
         for index in window..values.len() {
-            current += values[index] as usize
-            current -= values[index - window] as usize
+            current += values[index] as usize;
+            current -= values[index - window] as usize;
             maximum = maximum.max(current);
         }
         maximum
@@ -2117,6 +2161,43 @@ mod tests {
     }
 
     #[test]
+    fn focus_authority_probe_levels_are_exact_dyadic_brackets() {
+        let base = RAIN_FOCUS_BIAS_PROBABILITY;
+        let quantum = 1.0 / RAIN_FOCUS_BIAS_PHASE_MODULUS as f64;
+        let probes = [
+            (RainBiasScheduleProbe::Runtime, base),
+            (
+                RainBiasScheduleProbe::AuthorityTowardOne16,
+                base + (1.0 - base) / 16.0,
+            ),
+            (
+                RainBiasScheduleProbe::AuthorityTowardOne8,
+                base + (1.0 - base) / 8.0,
+            ),
+            (
+                RainBiasScheduleProbe::AuthorityTowardOne4,
+                base + (1.0 - base) / 4.0,
+            ),
+            (
+                RainBiasScheduleProbe::AuthorityTowardOne2,
+                base + (1.0 - base) / 2.0,
+            ),
+        ];
+
+        let mut previous = 0.0;
+        for (probe, expected) in probes {
+            let requested = probe.focus_probability();
+            let effective =
+                ClassicSandboxEngine::rain_focus_bias_effective_probability_for(requested);
+            assert!((requested - expected).abs() < f64::EPSILON);
+            assert!((effective - requested).abs() <= quantum);
+            assert!(requested > previous);
+            assert!(requested < 1.0);
+            previous = requested;
+        }
+    }
+
+    #[test]
     fn golden_bias_scheduler_has_subunit_prefix_and_window_discrepancy() {
         let probability = ClassicSandboxEngine::rain_focus_bias_effective_probability();
         for seed in [1u64, 19, 23, 0xA11C_005B_2000_0001, u64::MAX - 1] {
@@ -2128,7 +2209,7 @@ mod tests {
 
             let mut focused = 0usize;
             for (index, slot) in slots.iter().copied().enumerate() {
-                focused += slot as usize
+                focused += slot as usize;
                 let expected = (index + 1) as f64 * probability;
                 assert!(
                     (focused as f64 - expected).abs() < 1.0 + 1e-9,
@@ -2142,11 +2223,49 @@ mod tests {
                 let mut count = slots[..window].iter().filter(|value| **value).count();
                 assert!((count as f64 - expected).abs() < 1.0 + 1e-9);
                 for index in window..slots.len() {
-                    count += slots[index] as usize
-                    count -= slots[index - window] as usize
+                    count += slots[index] as usize;
+                    count -= slots[index - window] as usize;
                     assert!(
                         (count as f64 - expected).abs() < 1.0 + 1e-9,
                         "seed={seed} window={window} ending_at={index} count={count} expected={expected}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn focus_authority_probe_levels_preserve_subunit_window_discrepancy() {
+        let probes = [
+            RainBiasScheduleProbe::Runtime,
+            RainBiasScheduleProbe::AuthorityTowardOne16,
+            RainBiasScheduleProbe::AuthorityTowardOne8,
+            RainBiasScheduleProbe::AuthorityTowardOne4,
+            RainBiasScheduleProbe::AuthorityTowardOne2,
+        ];
+
+        for probe in probes {
+            let requested = probe.focus_probability();
+            let probability =
+                ClassicSandboxEngine::rain_focus_bias_effective_probability_for(requested);
+            let mut engine =
+                ClassicSandboxEngine::new(20, 8, 0xA11C_005B_2D10_0001, ClassicRainMode::WanderingFocus);
+            engine.rain_bias_schedule_probe = probe;
+            let slots = (0..8_192)
+                .map(|_| engine.next_focus_bias_slot())
+                .collect::<Vec<_>>();
+
+            for window in 1..=64usize {
+                let expected = window as f64 * probability;
+                let mut count = slots[..window].iter().filter(|value| **value).count();
+                assert!((count as f64 - expected).abs() < 1.0 + 1e-9);
+                for index in window..slots.len() {
+                    count += slots[index] as usize;
+                    count -= slots[index - window] as usize;
+                    assert!(
+                        (count as f64 - expected).abs() < 1.0 + 1e-9,
+                        "probe={} window={window} ending_at={index} count={count} expected={expected}",
+                        probe.diagnostic_name(),
                     );
                 }
             }

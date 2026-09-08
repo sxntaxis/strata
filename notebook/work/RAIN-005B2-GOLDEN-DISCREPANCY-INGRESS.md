@@ -1,7 +1,7 @@
 ---
 id: RAIN-005B2
 kind: work
-state: candidate
+state: blocked
 created: 2026-09-07
 updated: 2026-09-07
 authority: working
@@ -117,3 +117,8 @@ Desired result:
 - settlement/avalanche character remains `momentum-grounded-contact`.
 
 No human review is requested before machine PASS.
+
+
+## Native B2 result — blocked Pareto
+
+Native validation completed the exact 192-run paired ensemble. The low-discrepancy scheduler passed its focused/nozzle gates and strongly suppressed short focused bursts (`N=4`: 2 vs IID 4; `N=20`: 8 vs IID 18). RAIN-004 IID control reproduction passed at sample-level nine-decimal precision. Morphology was nearly neutral: median `delta_cv=+0.000731718`, `delta_corr=-0.009411262`, `delta_tv=+0.001898856`, `delta_shift=-0.000010301`, `delta_span=-0.003061554`. The unchanged Pareto gate therefore blocked B2 only on shift and span. No local semantic tuning was authorized. RAIN-005B2D1 now tests focused-authority probability itself while holding the B2 scheduler and all other runtime semantics fixed.

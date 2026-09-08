@@ -5,9 +5,13 @@ state: active
 created: 2026-08-01
 updated: 2026-09-07
 authority: working
-summary: RAIN-005B1 is exhausted after D2 found no derived mobility point that preserves RAIN-004 thickness CV while retaining its lateral gains; RAIN-005B2 returns runtime morphology to exact RAIN-004/A3 and changes only focused-authority timing from IID Bernoulli draws to the same-p low-discrepancy golden schedule to suppress short airborne-window bursts.
-next: Natively validate RAIN-005B2 focused discrepancy/nozzle controls, exact RAIN-004 IID control reproduction, the full 192-run paired morphology Pareto ensemble, PERF exactness, fmt/clippy/full tests and help smoke; human rain/morphology review only after machine PASS.
+summary: RAIN-005B2 passed its anti-nozzle scheduling controls but missed the unchanged morphology Pareto floor only on near-zero lateral shift/span; RAIN-005B2D1 is a test-only dyadic sweep of focused-authority probability, keeping B2 scheduling and RAIN-004 morphology mechanisms otherwise fixed.
+next: Natively run RAIN-005B2D1: prove exact B2 runtime control reproduction, all-probability discrepancy invariants, and the 64-geometry x five-level authority factorial. Select at most the smallest authority increase that passes every subset morphology gate; otherwise close this authority direction without interpolation.
 ---
+
+## RAIN-005B2D1 focus-authority sweep — 2026-09-07
+
+RAIN-005B2 blocked only on tiny negative median shift/span while its CV/corr/TV medians passed and its low-discrepancy scheduler strongly suppressed short focused bursts. The owner explicitly reopened the RAIN-004 `1/phi^2` focus share as an experimental variable rather than a frozen golden constant. B2D1 leaves production runtime at exact B2 and sweeps only test-time focus authority along a dyadic bracket from `p0` toward the physical `p=1` limit. The first 64 A3 geometries/seed-slot 1 are run at five levels (320 physical morphology runs), with exact nine-decimal reproduction of a 64-row native B2 control fixture. If multiple levels pass CV/corr/TV/shift/span plus width-dependence gates, only the smallest authority increase is eligible for a later full candidate. See `notebook/work/RAIN-005B2D1-FOCUS-AUTHORITY-SWEEP.md`.
 
 
 ## RAIN-005B2 golden low-discrepancy ingress — 2026-09-07
