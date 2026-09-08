@@ -2519,7 +2519,8 @@ mod tests {
 
     #[test]
     fn boundary_avulsion_probe_explores_full_width_aperiodically() {
-        let mut engine = ClassicSandboxEngine::new(96, 20, 0xB2D2_0001, ClassicRainMode::WanderingFocus);
+        let mut engine =
+            ClassicSandboxEngine::new(96, 20, 0xB2D2_0001, ClassicRainMode::WanderingFocus);
         let bounds = engine.surface.viewport_bounds().expect("visible basin");
         for _ in 0..1_000 {
             engine.advance_rain_focus(bounds);
@@ -2556,7 +2557,8 @@ mod tests {
 
     #[test]
     fn boundary_avulsion_probe_waits_for_actual_fifo_category_entry() {
-        let mut engine = ClassicSandboxEngine::new(8, 6, 0xB2D2_0002, ClassicRainMode::WanderingFocus);
+        let mut engine =
+            ClassicSandboxEngine::new(8, 6, 0xB2D2_0002, ClassicRainMode::WanderingFocus);
         engine.rain_bias_schedule_probe = RainBiasScheduleProbe::BoundaryAvulsionGoldenSmall;
         let bounds = engine.surface.viewport_bounds().expect("visible basin");
         let ingress_y = bounds.y_start;

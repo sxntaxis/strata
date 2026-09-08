@@ -1939,7 +1939,6 @@ mod tests {
         }
     }
 
-
     #[test]
     #[ignore = "native RAIN-005B2D2 test-only boundary-avulsion factorial; 64 A3 geometries x one exact seed x three variants"]
     fn rain_005b2d2_boundary_avulsion_factorial_probe() {
@@ -2107,5 +2106,4 @@ mod tests {
             ),
         }
     }
-
 }
