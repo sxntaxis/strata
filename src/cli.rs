@@ -20,6 +20,7 @@ use crate::{
 
 #[derive(Parser, Debug)]
 #[command(name = "strata")]
+#[command(version = env!("STRATA_BUILD_VERSION"))]
 #[command(about = "Time tracking with falling sand", long_about = None)]
 pub struct Invocation {
     #[arg(
