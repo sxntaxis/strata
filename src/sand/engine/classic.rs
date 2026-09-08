@@ -1695,10 +1695,6 @@ impl ClassicSandboxEngine {
         (probability * RAIN_FOCUS_BIAS_PHASE_MODULUS as f64).round() as u64
     }
 
-    fn rain_focus_bias_phase_step() -> u64 {
-        Self::rain_focus_bias_phase_step_for(RAIN_FOCUS_BIAS_PROBABILITY)
-    }
-
     fn rain_focus_bias_effective_probability_for(probability: f64) -> f64 {
         Self::rain_focus_bias_phase_step_for(probability) as f64
             / RAIN_FOCUS_BIAS_PHASE_MODULUS as f64
