@@ -405,25 +405,51 @@ fn grounded_contact_is_the_owner_selected_default_classic_experiment() {
 }
 
 #[test]
-fn memory_profile_holds_local_repose_for_three_surface_refreshes() {
+fn memory_profile_holds_routed_repose_state_for_three_surface_refreshes() {
     let mut engine = ClassicSandboxEngine::new(30, 10, 103, ClassicRainMode::Uniform);
     engine.set_experiment_profile_name("memory").unwrap();
     engine.clear();
+    engine.repose_stability_probe = ReposeStabilityProbe::ConvexityRoute;
+    engine.local_repose.fill(CLASSIC_REPOSE_LOW);
+    engine.repose_memory_remaining.fill(0);
+
     let x = engine.local_repose.len() / 2;
     engine.local_repose[x] = CLASSIC_REPOSE_HIGH;
     engine.repose_memory_remaining[x] = 3;
     let rng_before = engine.repose_rng_state;
 
     for expected_remaining in [2, 1, 0] {
-        engine.refresh_local_repose(x);
-        assert_eq!(engine.local_repose[x], CLASSIC_REPOSE_HIGH);
-        assert_eq!(engine.repose_memory_remaining[x], expected_remaining);
+        let state_x = engine
+            .local_repose
+            .iter()
+            .position(|repose| *repose == CLASSIC_REPOSE_HIGH)
+            .expect("unique routed high-repose state");
+        engine.refresh_local_repose(state_x);
+        let routed_x = engine
+            .local_repose
+            .iter()
+            .position(|repose| *repose == CLASSIC_REPOSE_HIGH)
+            .expect("high-repose state survives its memory lifetime");
+        assert_eq!(engine.repose_memory_remaining[routed_x], expected_remaining);
         assert_eq!(engine.repose_rng_state, rng_before);
     }
 
-    engine.refresh_local_repose(x);
+    let state_x = engine
+        .local_repose
+        .iter()
+        .position(|repose| *repose == CLASSIC_REPOSE_HIGH)
+        .expect("high-repose state before expiry");
+    engine.refresh_local_repose(state_x);
     assert_ne!(engine.repose_rng_state, rng_before);
-    assert_eq!(engine.repose_memory_remaining[x], 3);
+    assert_eq!(
+        engine
+            .repose_memory_remaining
+            .iter()
+            .filter(|remaining| **remaining == 3)
+            .count(),
+        1,
+        "the expired routed state must begin exactly one fresh three-refresh lifetime"
+    );
 }
 
 #[test]

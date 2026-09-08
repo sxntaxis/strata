@@ -118,3 +118,9 @@ No runtime arm is promoted automatically. Human review decides whether the visib
 - No C1R1 full 192-row certification during this diagnostic pass.
 - If no pike-improving avalanche-safe frontier exists, stop and report the negative result.
 - If a candidate exists, return it for owner review before authoring runtime promotion.
+
+## Native result and closure correction — 2026-09-08
+
+C2 completed all `320` physical runs in `591.89 s`; exact C1R1 control reproduced the frozen fixture. `shoulder-route` was the only robust paired pike suppressor, reducing aggregate median pike density/excess to `0.107142857 / 0.113095238` from `0.136904762 / 0.160377358`, with paired median deltas `-0.029411765 / -0.048780488` and avalanche safety preserved. However it also reduced thickness CV by `-0.010366352` and pinch-out by `-0.000402576`. Those are owner-target properties, so the original broad Pareto selector was too permissive for an already human-accepted quality floor. `shoulder-route` is retained as causal evidence, not promoted.
+
+Ordinary full-test closure also stopped on `memory_profile_holds_local_repose_for_three_surface_refreshes`. This is an obsolete fixed-column assertion under C1R1, whose frozen runtime semantics intentionally permute `(repose,memory_remaining)` tuples spatially. RAIN-005C2R1 authors the semantic test correction and a narrower follow-up; the local validator was correct not to repair it autonomously.
