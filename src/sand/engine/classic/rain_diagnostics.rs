@@ -1938,4 +1938,174 @@ mod tests {
             ),
         }
     }
+
+
+    #[test]
+    #[ignore = "native RAIN-005B2D2 test-only boundary-avulsion factorial; 64 A3 geometries x one exact seed x three variants"]
+    fn rain_005b2d2_boundary_avulsion_factorial_probe() {
+        const MAX_GEOMETRY: usize = 64;
+        const CATEGORY_COUNT: usize = 5;
+        const VARIANTS: [RainBiasScheduleProbe; 3] = [
+            RainBiasScheduleProbe::Runtime,
+            RainBiasScheduleProbe::BoundaryAvulsionGoldenSmall,
+            RainBiasScheduleProbe::BoundaryAvulsionTowardOne16,
+        ];
+
+        let categories = (1..=CATEGORY_COUNT)
+            .map(|id| category(id as u64, &format!("B2D2 {id}")))
+            .collect::<Vec<_>>();
+        let reference = rain_005a3_rain004_reference_samples()
+            .into_iter()
+            .filter(|sample| sample.geometry <= MAX_GEOMETRY && sample.seed_slot == 1)
+            .collect::<Vec<_>>();
+        let control = rain_005b2_seed1_runtime_control();
+        assert_eq!(reference.len(), MAX_GEOMETRY);
+        assert_eq!(control.len(), MAX_GEOMETRY);
+
+        let baseline_log_width = reference
+            .iter()
+            .map(|sample| (sample.width_cells as f64).ln())
+            .collect::<Vec<_>>();
+        let baseline_shift = reference
+            .iter()
+            .map(|sample| sample.centroid_shift)
+            .collect::<Vec<_>>();
+        let baseline_span = reference
+            .iter()
+            .map(|sample| sample.centroid_span)
+            .collect::<Vec<_>>();
+        let baseline_shift_vs_log_width = correlation_or_zero(&baseline_log_width, &baseline_shift);
+        println!(
+            "RAIN_005B2D2_BASELINE runs={} shift_vs_log_width={:.9} span_vs_log_width={:.9}",
+            reference.len(),
+            baseline_shift_vs_log_width,
+            correlation_or_zero(&baseline_log_width, &baseline_span),
+        );
+
+        let mut selected: Option<(&'static str, f64)> = None;
+        for variant in VARIANTS {
+            let name = variant.diagnostic_name();
+            let requested_probability = variant.focus_probability();
+            let effective_probability =
+                ClassicSandboxEngine::rain_focus_bias_effective_probability_for(
+                    requested_probability,
+                );
+            let n4_max = (4.0 * effective_probability).ceil() as usize;
+            let n20_max = (20.0 * effective_probability).ceil() as usize;
+
+            let mut delta_cv = Vec::with_capacity(reference.len());
+            let mut delta_corr = Vec::with_capacity(reference.len());
+            let mut delta_tv = Vec::with_capacity(reference.len());
+            let mut delta_shift = Vec::with_capacity(reference.len());
+            let mut delta_span = Vec::with_capacity(reference.len());
+            let mut candidate_shift = Vec::with_capacity(reference.len());
+            let mut candidate_span = Vec::with_capacity(reference.len());
+            let mut log_width = Vec::with_capacity(reference.len());
+
+            for (expected, expected_control) in reference.iter().zip(&control) {
+                assert_eq!(expected.run, expected_control.run);
+                assert_eq!(expected.geometry, expected_control.geometry);
+                assert_eq!(expected.seed_slot, expected_control.seed_slot);
+                assert_eq!(expected.width_cells, expected_control.width_cells);
+                assert_eq!(expected.height_cells, expected_control.height_cells);
+                assert_eq!(expected.seed, expected_control.seed);
+
+                let candidate = morphology_sample_for_geometry_with_bias_schedule(
+                    expected.width_cells,
+                    expected.height_cells,
+                    expected.seed,
+                    &categories,
+                    variant,
+                );
+                assert!(
+                    (candidate.mound_el - expected.mound_el).abs() < 1e-6,
+                    "variant={name} run={} candidate_mound_el={} reference_mound_el={}",
+                    expected.run,
+                    candidate.mound_el,
+                    expected.mound_el
+                );
+
+                let cv = candidate.cv - expected.cv;
+                let corr = candidate.correlation - expected.correlation;
+                let tv = candidate.total_variation - expected.total_variation;
+                let shift = candidate.centroid_shift - expected.centroid_shift;
+                let span = candidate.centroid_span - expected.centroid_span;
+                if variant == RainBiasScheduleProbe::Runtime {
+                    assert_printed_nine_eq("runtime delta cv", cv, expected_control.delta_cv);
+                    assert_printed_nine_eq("runtime delta corr", corr, expected_control.delta_corr);
+                    assert_printed_nine_eq("runtime delta tv", tv, expected_control.delta_tv);
+                    assert_printed_nine_eq(
+                        "runtime delta shift",
+                        shift,
+                        expected_control.delta_shift,
+                    );
+                    assert_printed_nine_eq("runtime delta span", span, expected_control.delta_span);
+                    assert_printed_nine_eq(
+                        "runtime candidate shift",
+                        candidate.centroid_shift,
+                        expected_control.candidate_shift,
+                    );
+                    assert_printed_nine_eq(
+                        "runtime candidate span",
+                        candidate.centroid_span,
+                        expected_control.candidate_span,
+                    );
+                }
+
+                delta_cv.push(cv);
+                delta_corr.push(corr);
+                delta_tv.push(tv);
+                delta_shift.push(shift);
+                delta_span.push(span);
+                candidate_shift.push(candidate.centroid_shift);
+                candidate_span.push(candidate.centroid_span);
+                log_width.push((expected.width_cells as f64).ln());
+
+                println!(
+                    "RAIN_005B2D2_BOUNDARY_SAMPLE variant={name} p_requested={requested_probability:.12} p_effective={effective_probability:.12} run={} geometry={} seed_slot={} terminal={}x{} seed={} delta_cv={cv:.9} delta_corr={corr:.9} delta_tv={tv:.9} delta_shift={shift:.9} delta_span={span:.9} candidate_shift={:.9} candidate_span={:.9}",
+                    expected.run,
+                    expected.geometry,
+                    expected.seed_slot,
+                    expected.width_cells,
+                    expected.height_cells,
+                    expected.seed,
+                    candidate.centroid_shift,
+                    candidate.centroid_span,
+                );
+            }
+
+            let median_cv = percentile(&delta_cv, 0.50);
+            let median_corr = percentile(&delta_corr, 0.50);
+            let median_tv = percentile(&delta_tv, 0.50);
+            let median_shift = percentile(&delta_shift, 0.50);
+            let median_span = percentile(&delta_span, 0.50);
+            let shift_vs_log_width = correlation_or_zero(&log_width, &candidate_shift);
+            let span_vs_log_width = correlation_or_zero(&log_width, &candidate_span);
+            let subset_pass = median_cv >= 0.0
+                && median_corr <= 0.0
+                && median_tv >= 0.0
+                && median_shift > 0.0
+                && median_span > 0.0
+                && shift_vs_log_width > baseline_shift_vs_log_width;
+
+            println!(
+                "RAIN_005B2D2_BOUNDARY_SUMMARY variant={name} runs={} p_requested={requested_probability:.12} p_effective={effective_probability:.12} n4_max={n4_max} n20_max={n20_max} median_delta_cv={median_cv:.9} median_delta_corr={median_corr:.9} median_delta_tv={median_tv:.9} median_delta_shift={median_shift:.9} median_delta_span={median_span:.9} shift_vs_log_width={shift_vs_log_width:.9} span_vs_log_width={span_vs_log_width:.9} subset_pass={subset_pass}",
+                reference.len(),
+            );
+
+            if variant.boundary_avulsion() && subset_pass && selected.is_none() {
+                selected = Some((name, requested_probability));
+            }
+        }
+
+        match selected {
+            Some((name, probability)) => println!(
+                "RAIN_005B2D2_SELECTION classification=BOUNDARY_AVULSION_SUBSET_FRONTIER selected_variant={name} selected_p={probability:.12} rule=smallest_focus_authority_passing_all_subset_gates"
+            ),
+            None => println!(
+                "RAIN_005B2D2_SELECTION classification=NO_BOUNDARY_AVULSION_SUBSET_FRONTIER rule=no_runtime_candidate_authored"
+            ),
+        }
+    }
+
 }

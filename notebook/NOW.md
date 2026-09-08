@@ -5,9 +5,14 @@ state: active
 created: 2026-08-01
 updated: 2026-09-07
 authority: working
-summary: RAIN-005B2 passed its anti-nozzle scheduling controls but missed the unchanged morphology Pareto floor only on near-zero lateral shift/span; RAIN-005B2D1 is a test-only dyadic sweep of focused-authority probability, keeping B2 scheduling and RAIN-004 morphology mechanisms otherwise fixed.
-next: Natively run RAIN-005B2D1: prove exact B2 runtime control reproduction, all-probability discrepancy invariants, and the 64-geometry x five-level authority factorial. Select at most the smallest authority increase that passes every subset morphology gate; otherwise close this authority direction without interpolation.
+summary: RAIN-005B2D1 found no one-dimensional focus-authority frontier: stronger focus raises CV but increasingly correlates adjacent strata. RAIN-005B2D2 now tests test-only focus relocation exactly at actually-entered stratum boundaries, at the original B2 authority and the smallest D1 authority increase.
+next: Natively run the RAIN-005B2D2 three-arm boundary-avulsion factorial. Require exact B2 runtime control reproduction and the unchanged subset Pareto floor. If both avulsion arms pass, select golden-small; if neither passes, close this mechanism without local tuning.
 ---
+
+## RAIN-005B2D2 boundary-avulsion factorial — 2026-09-07
+
+RAIN-005B2D1 completed 320 physical morphology runs and classified `NO_DYADIC_SUBSET_FRONTIER`. Increasing focused authority strongly raised thickness CV, but adjacent-stratum correlation became progressively positive; at the smallest increase, CV and shift were already positive while corr and span failed. D2 therefore does not interpolate another probability. Production remains exact B2 while a test-only 3-arm factorial asks whether relocating only the invisible focus at an actually-entered category boundary can decorrelate successive strata without sacrificing within-layer concentration. It tests B2 control, golden-small + boundary avulsion, and the smallest D1 authority increase + boundary avulsion over the first 64 A3 geometries / seed-slot 1. See `notebook/work/RAIN-005B2D2-BOUNDARY-AVULSION-FACTORIAL.md`.
+
 
 ## RAIN-005B2D1 focus-authority sweep — 2026-09-07
 

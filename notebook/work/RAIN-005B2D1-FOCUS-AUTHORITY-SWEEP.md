@@ -108,3 +108,19 @@ smallest authority increase above p0 that passes every subset gate
 This is a diagnostic selection only. It does not mutate production runtime and does not authorize human review. The selected level, if any, becomes the sole candidate for a later full 192-run B2 repair pass.
 
 If no level passes, classify `NO_DYADIC_SUBSET_FRONTIER`; do not interpolate or tune another percentage locally.
+
+## Native outcome
+
+Native validation completed the full 320-run test-only sweep with exact B2 control reproduction, all focused discrepancy invariants, fmt/clippy/full tests/help/PERF preservation green.
+
+No tested authority level formed a valid subset frontier:
+
+- runtime `p=0.381966011250`: `delta_cv=+0.001049189`, `delta_corr=-0.011020778`, `delta_tv=+0.001974393`, `delta_shift=-0.002472747`, `delta_span=-0.006201151`;
+- `p0+(1-p0)/16 = 0.420593135547`: `delta_cv=+0.016667215`, `delta_corr=+0.074632316`, `delta_tv=+0.000629622`, `delta_shift=+0.000658997`, `delta_span=-0.002880155`;
+- `p0+(1-p0)/8 = 0.459220259844`: `delta_cv=+0.028029527`, `delta_corr=+0.120250413`, `delta_tv=-0.000300172`, `delta_shift=-0.001093282`, `delta_span=+0.000656831`;
+- `p0+(1-p0)/4 = 0.536474508438`: `delta_cv=+0.060831885`, `delta_corr=+0.248841722`, `delta_tv=+0.000601510`, `delta_shift=-0.000609977`, `delta_span=+0.000850420`;
+- `p0+(1-p0)/2 = 0.690983005625`: `delta_cv=+0.127155625`, `delta_corr=+0.393787863`, `delta_tv=+0.000350142`, `delta_shift=+0.000338781`, `delta_span=+0.004581047`.
+
+Classification: `NO_DYADIC_SUBSET_FRONTIER`.
+
+The causal interpretation is sharper than merely "authority does not work": increasing focused authority strongly increases within-stratum thickness CV, and at the smallest increase already turns median shift positive, but it also makes adjacent strata increasingly positively correlated. The failure therefore points to excessive cross-stratum inheritance of the same focus locus, not insufficient within-stratum focus strength. Do not interpolate another probability. RAIN-005B2D2 tests whether a focus relocation exactly at an actually-entered stratum boundary can separate those two effects.
