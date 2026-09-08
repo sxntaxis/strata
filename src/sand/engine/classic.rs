@@ -2023,12 +2023,10 @@ impl ClassicSandboxEngine {
     fn probe_after_grain_move(&mut self, bounds: ViewportBounds, x: usize, y: usize) {
         if self.repose_stability_probe == ReposeStabilityProbe::ConvexityAnchorBuried
             && x < self.repose_anchor_latent_height.len()
+            && let Some(marker) = self.repose_anchor_latent_height[x]
+            && self.supported_column_height(x) > marker
         {
-            if let Some(marker) = self.repose_anchor_latent_height[x]
-                && self.supported_column_height(x) > marker
-            {
-                self.repose_anchor_latent_height[x] = None;
-            }
+            self.repose_anchor_latent_height[x] = None;
         }
 
         if self.repose_stability_probe != ReposeStabilityProbe::ConvexityDeferred

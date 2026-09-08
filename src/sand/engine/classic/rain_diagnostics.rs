@@ -3332,10 +3332,9 @@ mod tests {
                         .partial_cmp(&right.pike_excess_le3)
                         .unwrap_or(std::cmp::Ordering::Equal)
                 })
-        }) {
-            if !selected.contains(&density.variant) {
-                selected.push(density.variant);
-            }
+        }) && !selected.contains(&density.variant)
+        {
+            selected.push(density.variant);
         }
 
         println!(
