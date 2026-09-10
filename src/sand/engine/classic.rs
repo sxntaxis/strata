@@ -55,8 +55,7 @@ pub(crate) enum ClassicRainMode {
     WanderingFocus,
 }
 
-pub(crate) const CLASSIC_PRODUCTION_AUTHORITY: &str =
-    "classic-c2r2-anchor-apex-latent";
+pub(crate) const CLASSIC_PRODUCTION_AUTHORITY: &str = "classic-c2r2-anchor-apex-latent";
 
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -612,7 +611,9 @@ impl ClassicSandboxEngine {
             .surface
             .physical_grain_count()
             .checked_add(self.pending_drive.len())
-            .ok_or_else(|| "Classic logical sediment count exceeds the supported range".to_string())?;
+            .ok_or_else(|| {
+                "Classic logical sediment count exceeds the supported range".to_string()
+            })?;
         self.sync_surface_metadata();
         Ok(())
     }
@@ -725,7 +726,10 @@ impl ClassicSandboxEngine {
             for raw in &state.pending_grains {
                 let id = CategoryId::new(*raw);
                 if !valid_category_ids.contains(&id) {
-                    return Err(format!("sand state references unknown pending category ID {}", id.0));
+                    return Err(format!(
+                        "sand state references unknown pending category ID {}",
+                        id.0
+                    ));
                 }
                 pending.push_back(id);
             }
@@ -739,7 +743,10 @@ impl ClassicSandboxEngine {
                 }
                 let id = CategoryId::new(run.category_id);
                 if !valid_category_ids.contains(&id) {
-                    return Err(format!("sand state references unknown pending category ID {}", id.0));
+                    return Err(format!(
+                        "sand state references unknown pending category ID {}",
+                        id.0
+                    ));
                 }
                 pending.extend(std::iter::repeat(id).take(run.count));
             }
@@ -766,9 +773,9 @@ impl ClassicSandboxEngine {
             self.repose_rng_state = CLASSIC_REPOSE_RNG_XOR;
         }
         self.initial_repose_rng_state = self.repose_rng_state;
-        self.initial_rain_focus_bias_phase =
-            (self.rain_rng_state >> (64 - RAIN_FOCUS_BIAS_PHASE_BITS))
-                % RAIN_FOCUS_BIAS_PHASE_MODULUS;
+        self.initial_rain_focus_bias_phase = (self.rain_rng_state
+            >> (64 - RAIN_FOCUS_BIAS_PHASE_BITS))
+            % RAIN_FOCUS_BIAS_PHASE_MODULUS;
         self.rain_focus_bias_phase = self.initial_rain_focus_bias_phase;
         self.rain_focus_x = None;
         self.rain_focus_direction = 0;
@@ -805,7 +812,9 @@ impl ClassicSandboxEngine {
         if runtime.local_repose.len() != state.grid_width
             || runtime.repose_memory_remaining.len() != state.grid_width
         {
-            return Err("Classic runtime stability field does not match canonical width".to_string());
+            return Err(
+                "Classic runtime stability field does not match canonical width".to_string(),
+            );
         }
         if runtime
             .local_repose
@@ -877,7 +886,9 @@ impl ClassicSandboxEngine {
         if runtime.local_repose.len() != state.grid_width
             || runtime.repose_memory_remaining.len() != state.grid_width
         {
-            return Err("Classic runtime stability field does not match canonical width".to_string());
+            return Err(
+                "Classic runtime stability field does not match canonical width".to_string(),
+            );
         }
         if runtime
             .local_repose
@@ -931,8 +942,7 @@ impl ClassicSandboxEngine {
             self.rain_focus_x = runtime.rain_focus_x;
         } else {
             self.local_repose = vec![CLASSIC_REPOSE_LOW; expanded_width];
-            self.repose_memory_remaining =
-                vec![self.experiment_memory_refreshes(); expanded_width];
+            self.repose_memory_remaining = vec![self.experiment_memory_refreshes(); expanded_width];
             for x in 0..expanded_width {
                 self.local_repose[x] = self.sample_base_local_repose();
             }
@@ -3924,13 +3934,24 @@ mod perf_001_tests {
         assert_eq!(migrated.sweep_left_to_right, input.sweep_left_to_right);
         assert_eq!(
             migrated.grains.len()
-                + migrated.pending_runs.iter().map(|run| run.count).sum::<usize>(),
+                + migrated
+                    .pending_runs
+                    .iter()
+                    .map(|run| run.count)
+                    .sum::<usize>(),
             input.grains.len()
-                + input.pending_runs.iter().map(|run| run.count).sum::<usize>()
+                + input
+                    .pending_runs
+                    .iter()
+                    .map(|run| run.count)
+                    .sum::<usize>()
         );
         assert!(migrated.mobilized_grains.is_empty());
         assert!(migrated.classic_runtime.is_some());
-        assert_eq!(engine.production_authority_name(), CLASSIC_PRODUCTION_AUTHORITY);
+        assert_eq!(
+            engine.production_authority_name(),
+            CLASSIC_PRODUCTION_AUTHORITY
+        );
 
         let mut replay = ClassicSandboxEngine::new_production(4, 1);
         replay
@@ -3946,16 +3967,16 @@ mod perf_001_tests {
     #[test]
     fn production_classic_snapshot_round_trip_preserves_hidden_state_exactly() {
         let valid = HashSet::from([CategoryId::new(1), CategoryId::new(2)]);
-        let mut source = ClassicSandboxEngine::new(
-            20,
-            10,
-            0xA11C_C2A2_u64,
-            ClassicRainMode::WanderingFocus,
-        );
+        let mut source =
+            ClassicSandboxEngine::new(20, 10, 0xA11C_C2A2_u64, ClassicRainMode::WanderingFocus);
         source.force_reference_gravity = false;
         source.repose_stability_probe = ReposeStabilityProbe::ConvexityAnchorApexLatent;
         for i in 0..240 {
-            source.spawn(if i < 120 { CategoryId::new(1) } else { CategoryId::new(2) });
+            source.spawn(if i < 120 {
+                CategoryId::new(1)
+            } else {
+                CategoryId::new(2)
+            });
             source.update();
         }
         let persisted = source.snapshot_state();
@@ -3988,12 +4009,8 @@ mod perf_001_tests {
     #[test]
     fn malformed_classic_runtime_is_rejected_before_target_mutation() {
         let valid = HashSet::from([CategoryId::new(1)]);
-        let mut source = ClassicSandboxEngine::new(
-            12,
-            6,
-            0xA11C_C2F1_u64,
-            ClassicRainMode::WanderingFocus,
-        );
+        let mut source =
+            ClassicSandboxEngine::new(12, 6, 0xA11C_C2F1_u64, ClassicRainMode::WanderingFocus);
         source.force_reference_gravity = false;
         source.repose_stability_probe = ReposeStabilityProbe::ConvexityAnchorApexLatent;
         for _ in 0..40 {
