@@ -138,6 +138,7 @@ fn sand_state(frame_count: usize) -> SandState {
         pending_runs: Vec::new(),
         active_avalanche_columns: Vec::new(),
         mobilized_grains: Vec::new(),
+        classic_runtime: None,
     }
 }
 

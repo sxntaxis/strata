@@ -92,6 +92,17 @@ fn stderr(output: &Output) -> String {
 }
 
 #[test]
+fn physics_command_reports_classic_c2r2_production_authority() {
+    let profile = TestProfile::new("physics-authority");
+    let output = profile.run(&["physics"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "Physics: classic-c2r2-anchor-apex-latent"
+    );
+}
+
+#[test]
 fn fresh_profile_creates_only_sqlite_runtime_authority() {
     let profile = TestProfile::new("fresh");
     profile.initialize();

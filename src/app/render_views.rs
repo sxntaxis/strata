@@ -19,9 +19,7 @@ impl App {
         let inner_width = size.width.saturating_sub(2);
         let inner_height = size.height.saturating_sub(2);
 
-        if self.sand_engine.cell_width != inner_width
-            || self.sand_engine.cell_height != inner_height
-        {
+        if self.sand_engine.dimensions() != (inner_width, inner_height) {
             self.sand_engine.resize(inner_width, inner_height);
         }
 

@@ -3,11 +3,15 @@ id: NOW-001
 kind: status
 state: active
 created: 2026-08-01
-updated: 2026-09-09
+updated: 2026-09-10
 authority: working
-summary: RAIN-005 morphology is closed. The owner selected C2R2 `anchor-apex-latent` as the new Classic default: C1R1 convexity routing plus apex-latent anchor authority, with B2 low-discrepancy rain, boundary avulsion, and modern momentum-grounded-contact avalanches preserved.
-next: Integrate and publish the exact C2R2 default, then resume non-morphology work. Do not reopen rain/geography/repose tuning unless the owner explicitly asks.
+summary: RAIN-005 morphology remains closed on owner-selected C2R2 `anchor-apex-latent`. A closure error was discovered after installation: `ef46772d...` documented/froze C2R2 but left the normal TUI wired to legacy H4 `SandEngine`. The real production-engine cutover is now authored on a dedicated branch and must pass native validation plus a copied-profile migration smoke before publication.
+next: Native-validate the C2R2 production-engine cutover, prove H4 v5 topology/mass survives migration and Classic hidden state survives SQLite/restart, then run the candidate only against a disposable clone of the owner's current profile. Publish/install only after that gate. Do not clear or mutate the owner's live sediment for validation.
 ---
+
+## RAIN-005 production cutover correction — 2026-09-10
+
+**AUTHORED / NATIVE VALIDATION PENDING:** the installed `ef46772d...` closure correctly records the owner-selected C2R2 morphology but does **not** make it the normal TUI physics authority. Source inspection after the owner's frozen-state report showed `App.sand_engine` still used legacy H4 `SandEngine`; Classic remained a development engine. The corrective cutover changes `App.sand_engine` to the exact C2R2 Classic production engine, preserves existing v5 grain coordinates/category mass on H4→Classic restore (ordinary canonical viewport-growth semantics remain unchanged), persists Classic RNG/repose/focus state additively inside SandState v5, and exposes a `strata physics` provenance command. No morphology tuning is reopened. See `notebook/work/RAIN-005-PRODUCTION-CUTOVER.md`.
 
 ## RAIN-005 final morphology closure — 2026-09-09
 

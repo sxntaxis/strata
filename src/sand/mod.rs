@@ -2,12 +2,16 @@ mod engine;
 mod recovery;
 mod snapshot;
 
+pub(crate) use engine::classic::{CLASSIC_PRODUCTION_AUTHORITY, ClassicSandboxEngine};
+pub(crate) type ClassicProductionEngine = ClassicSandboxEngine;
 #[cfg(debug_assertions)]
-pub(crate) use engine::classic::{ClassicRainMode, ClassicSandboxEngine};
+pub(crate) use engine::classic::ClassicRainMode;
 #[cfg(debug_assertions)]
 pub(crate) use engine::oslo_sandbox::{OsloBoundaryMode, OsloSandboxEngine};
 pub(crate) use engine::recolor_state_category_mass;
 #[allow(unused_imports)]
+#[doc(hidden)]
+pub use engine::ClassicRuntimeState;
 pub use engine::{PendingGrainRun, SandEngine, SandState, SandStateCoordinate, SandStateGrain};
 pub(crate) use recovery::{RecoveryTiming, recover_detached_sediment, settle_transition_sediment};
 pub(crate) use snapshot::{

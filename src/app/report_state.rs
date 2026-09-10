@@ -836,12 +836,8 @@ impl App {
     fn synthetic_snapshot_from_time_log(&self, day: NaiveDate) -> Option<SedimentSnapshot> {
         let slices = self.daily_sediment_slices(day);
         let day_key = day.format("%Y-%m-%d").to_string();
-        derived_preview_from_slices(
-            &day_key,
-            self.sand_engine.grid_width_dots,
-            self.sand_engine.grid_height_dots,
-            &slices,
-        )
+        let (grid_width_dots, grid_height_dots) = self.sand_engine.canonical_dimensions();
+        derived_preview_from_slices(&day_key, grid_width_dots, grid_height_dots, &slices)
     }
 
     fn daily_sediment_slices(&self, day: NaiveDate) -> Vec<DailySedimentSlice> {

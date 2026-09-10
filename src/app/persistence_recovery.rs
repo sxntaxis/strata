@@ -913,6 +913,7 @@ mod tests {
                 pending_runs: Vec::new(),
                 active_avalanche_columns: Vec::new(),
                 mobilized_grains: Vec::new(),
+                classic_runtime: None,
             },
             simulation_time_utc: captured.to_rfc3339(),
             pending_mutations: Vec::new(),

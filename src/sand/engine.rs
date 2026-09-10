@@ -1,9 +1,7 @@
-#[cfg(debug_assertions)]
 pub(crate) mod classic;
 #[cfg(debug_assertions)]
 pub(crate) mod oslo_sandbox;
 
-#[cfg(debug_assertions)]
 pub(super) fn centered_half_open_interval(start: usize, end: usize) -> (usize, usize) {
     if start >= end {
         return (start, start);
@@ -51,6 +49,39 @@ pub struct PendingGrainRun {
     pub count: usize,
 }
 
+/// Persisted hidden state for the production Classic C2R2 engine.
+///
+/// The visible sediment topology remains in `SandState`; this payload carries
+/// only the stochastic/stability state required to continue the accepted
+/// Classic morphology across process restarts without resampling it. Older H4
+/// v5 states omit this field and are migrated in-place by the Classic engine
+/// without moving, deleting, or recoloring any placed grain.
+#[doc(hidden)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ClassicRuntimeState {
+    pub schema_version: u8,
+    pub physics_rng_state: u64,
+    pub rain_rng_state: u64,
+    pub initial_repose_rng_state: u64,
+    pub repose_rng_state: u64,
+    pub local_repose: Vec<u8>,
+    pub repose_memory_remaining: Vec<u8>,
+    pub rain_focus_x: Option<usize>,
+    pub rain_focus_direction: i8,
+    pub rain_focus_move_counter: usize,
+    pub rain_focus_heading_counter: usize,
+    pub rain_focus_rephase_remaining: usize,
+    pub rain_last_category_id: Option<u64>,
+    pub initial_rain_focus_bias_phase: u64,
+    pub rain_focus_bias_phase: u64,
+    pub rain_boundary_avulsion_index: u64,
+    pub frame_count: usize,
+}
+
+impl ClassicRuntimeState {
+    pub const VERSION: u8 = 1;
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SandState {
     pub version: u8,
@@ -79,6 +110,12 @@ pub struct SandState {
     /// are canonical, row-major sorted, unique, and must reference placed grains.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mobilized_grains: Vec<SandStateCoordinate>,
+    /// Present only for snapshots authored by the production Classic C2R2
+    /// engine. Additive to the v5 topology schema so existing H4 state remains
+    /// readable and can be cut over without a destructive migration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[doc(hidden)]
+    pub classic_runtime: Option<ClassicRuntimeState>,
 }
 
 impl SandState {
@@ -1117,6 +1154,7 @@ impl SandEngine {
                 .collect(),
             active_avalanche_columns: Vec::new(),
             mobilized_grains,
+            classic_runtime: None,
         }
     }
 
@@ -1447,6 +1485,7 @@ mod tests {
             ],
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            classic_runtime: None,
         };
         let before_coordinates = state
             .grains
@@ -1531,6 +1570,7 @@ mod tests {
             }],
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            classic_runtime: None,
         };
 
         let recolored =
@@ -2193,6 +2233,7 @@ mod tests {
             pending_runs: Vec::new(),
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            classic_runtime: None,
         };
 
         let mut restored = SandEngine::new(20, 20);
@@ -3167,6 +3208,7 @@ mod conservation_tests {
                 pending_runs: Vec::new(),
                 active_avalanche_columns: Vec::new(),
                 mobilized_grains: Vec::new(),
+                classic_runtime: None,
             };
             let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1), CategoryId::new(2)]);
             let mut engine = SandEngine::new(1, 1);

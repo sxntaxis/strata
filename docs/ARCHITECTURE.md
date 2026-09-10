@@ -108,6 +108,10 @@ See `docs/RECOVERY_AUTHORITY.md`.
 ## Sediment authority and resize
 
 - Every logical grain is either placed or pending; mass/category identity are conserved.
+- The normal TUI physics authority is Classic C2R2 `anchor-apex-latent`, not the legacy H4 `SandEngine`: momentum-grounded-contact avalanches, rugged local-repose texture, convexity routing, apex-latent anchors, golden-small low-discrepancy rain, and physical stratum-boundary avulsion form one production engine.
+- H4 SandState v5 remains readable at the cutover boundary. Restore preserves its placed grain coordinates, category/color meaning, pending FIFO mass, and canonical canvas except for the already-authoritative viewport-growth rule; H4 mobilization metadata is intentionally retired because Classic does not share that dynamic state.
+- Production Classic snapshots retain the visible SandState v5 topology plus additive hidden Classic continuation state (separate physics/rain/repose RNG streams, local-repose memory, focus/meander phase, and boundary-avulsion state). Restart therefore rebuilds indexes but does not resample the accepted morphology state.
+- Legacy H4 `SandEngine` remains available for compatibility normalization and non-authoritative projection/testing paths; it is not normal live sediment physics after the cutover.
 - The logical sand canvas is persisted independently from terminal dimensions.
 - Shrinking a terminal changes only the viewport/projection.
 - Growing beyond the current logical canvas expands it monotonically, preserving existing cells around the horizontal center and bottom baseline and filling new space with emptiness.
