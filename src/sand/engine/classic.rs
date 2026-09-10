@@ -1615,7 +1615,7 @@ impl ClassicSandboxEngine {
         if self.local_repose.get(x).copied() == Some(CLASSIC_REPOSE_ANCHOR)
             && self.is_strict_one_column_apex(x)
         {
-            // RAIN-005C2R2 owner A/B candidate: keep the exact routed anchor state,
+            // RAIN-005C2R2 accepted default: keep the exact routed anchor state,
             // but withhold only its fourth repose unit while it is the unsupported
             // winner of a strict one-column apex. Full anchor authority returns
             // automatically as soon as later accretion broadens/buries the apex.
@@ -1627,7 +1627,7 @@ impl ClassicSandboxEngine {
             && self.is_strict_one_column_apex(x)
         {
             // C2R1 diagnostic semantics mirrored by the RAIN-005C2R2 runtime
-            // candidate. No timer, latent-state vector, or extra RNG exists.
+            // default. No timer, latent-state vector, or extra RNG exists.
             return CLASSIC_REPOSE_HIGH;
         }
         #[cfg(test)]

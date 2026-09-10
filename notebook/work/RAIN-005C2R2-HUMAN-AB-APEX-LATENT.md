@@ -1,11 +1,11 @@
 ---
 id: RAIN-005C2R2
 kind: work
-state: candidate
+state: complete
 created: 2026-09-08
-updated: 2026-09-08
+updated: 2026-09-09
 authority: working
-summary: Owner explicitly allows a small machine-measured thickness trade if the visible one-to-three-dot pikes improve without perceptible loss of the accepted C1R1 macro-topography. R2 therefore promotes only the already-measured anchor-apex-latent arm to a bounded human A/B candidate; it performs no new search.
+summary: Owner selected anchor-apex-latent over C1R1 by eye: the narrow one-to-three-dot pikes are cleaner while the accepted large-scale relief, crests/valleys, lateral thickening/thinning, pinch-outs, and avalanche behavior remain compelling. RAIN-005 is closed with C2R2 as the Classic default.
 ---
 
 # RAIN-005C2R2 — human A/B for apex-latent anchors
@@ -56,3 +56,26 @@ Compare the exact accepted C1R1 binary against the exact R2 candidate under sepa
 3. whether avalanches remain natural.
 
 If the owner prefers R2, author a final unified runtime/test promotion and perform the full 192-row certification plus ordinary closure. If not, retain exact C1R1 and stop pike work.
+
+
+## Final owner decision — 2026-09-09
+
+The owner selected **B / `anchor-apex-latent`** over C1R1 in the bounded A/B. The improvement is deliberately small: narrow one-to-three-dot pikes read cleaner, while the large-scale relief, crests/valleys, lateral stratal variation, and natural avalanche behavior remain visually preserved. The tiny machine-side thickness-CV loss is therefore accepted as a measurement trade rather than a product regression.
+
+Subsequent geography work did not supersede this result:
+
+- RAIN-005G1 exhausted additional repose/geography routing; no candidate survived the full ensemble.
+- RAIN-005G2 `heritage-walk-golden-small` produced a large relief gain but collapsed stratal span and read as a monomountain in the square viewport; the owner preferred C2R2.
+- RAIN-005G2R1 combined the heritage walk with C2R2 boundary avulsion. It recovered `98.1055278%` of the lost A-side stratal span but captured only `2.9324118%` of B's d8 relief gain and slightly worsened several crest/pike metrics. It was rejected machine-side with no human candidate.
+
+### Frozen default
+
+Classic morphology is now frozen on the C2R2 semantics:
+
+- RAIN-005B2 low-discrepancy focused/uniform scheduling with the retained golden-small authority;
+- RAIN-005B2R1 stratum-boundary focus avulsion;
+- C1R1 convexity routing of the existing local-repose budget;
+- C2R2 apex-latent anchor authority on strict one-column apices;
+- the accepted modern `momentum-grounded-contact` avalanche behavior.
+
+No additional rain/geography/repose morphology search is authorized by this closure. Reopen RAIN-005 only on an explicit owner request.

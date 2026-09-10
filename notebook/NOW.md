@@ -3,11 +3,15 @@ id: NOW-001
 kind: status
 state: active
 created: 2026-08-01
-updated: 2026-09-08
+updated: 2026-09-09
 authority: working
-summary: C2R1 found no pike fix that preserved the exact mathematical macro floor, but the owner explicitly allows a tiny metric trade when visual macro-topography is preserved. RAIN-005C2R2 therefore promotes only the already-measured anchor-apex-latent arm to a bounded human A/B against accepted C1R1; no new search is authorized.
-next: Build the exact RAIN-005C2R2 runtime candidate and compare it visually against the accepted C1R1 binary under separate disposable profiles. If R2 wins by eye, perform final unified promotion plus full 192-row certification; otherwise keep C1R1 and close pike work.
+summary: RAIN-005 morphology is closed. The owner selected C2R2 `anchor-apex-latent` as the new Classic default: C1R1 convexity routing plus apex-latent anchor authority, with B2 low-discrepancy rain, boundary avulsion, and modern momentum-grounded-contact avalanches preserved.
+next: Integrate and publish the exact C2R2 default, then resume non-morphology work. Do not reopen rain/geography/repose tuning unless the owner explicitly asks.
 ---
+
+## RAIN-005 final morphology closure — 2026-09-09
+
+**CLOSED / OWNER-ACCEPTED DEFAULT:** C2R2 `anchor-apex-latent`. The owner preferred it over C1R1 because it cleans the narrow 1–3-dot apex artifact without a perceptible loss of the large-scale relief, crests/valleys, lateral thickening/thinning, pinch-outs, or avalanche behavior that define the accepted morphology. Later G1/G2/G2R1 geography experiments did not supersede it: the strongest heritage-walk arm became an undesirable monomountain, while the final heritage-walk + boundary-avulsion hybrid recovered ~98.1% of C2R2 stratal span but only ~2.93% of the heritage arm's d8 relief gain. Morphology search is closed; treat C2R2 as the runtime default and move on. See `notebook/work/RAIN-005C2R2-HUMAN-AB-APEX-LATENT.md`.
 
 ## RAIN-005C2R2 bounded human A/B — 2026-09-08
 
