@@ -3,11 +3,15 @@ id: NOW-001
 kind: status
 state: active
 created: 2026-08-01
-updated: 2026-09-09
+updated: 2026-09-10
 authority: working
-summary: RAIN-005 morphology is closed. The owner selected C2R2 `anchor-apex-latent` as the new Classic default: C1R1 convexity routing plus apex-latent anchor authority, with B2 low-discrepancy rain, boundary avulsion, and modern momentum-grounded-contact avalanches preserved.
-next: Integrate and publish the exact C2R2 default, then resume non-morphology work. Do not reopen rain/geography/repose tuning unless the owner explicitly asks.
+summary: "RAIN-005 morphology remains closed on owner-selected C2R2 `anchor-apex-latent`. The corrective production-engine cutover is now natively certified: normal `App.sand_engine`, real spawn/update routing, H4-v5 migration, Classic restart custody, SQLite persistence, malformed-state refusal, focused morphology regressions, anti-nozzle behavior, PERF-001, release provenance, and a disposable copied-profile smoke all passed. Publication/install remains the only open rollout step; the live profile was not mutated during certification."
+next: Publish the exact certified C2R2 cutover lineage through the repository's branch/PR workflow, build/install from the resulting published main, and run a bounded post-install smoke (`--version`, `physics`, profile doctor, normal TUI startup/quit/reopen). Do not reopen morphology or alter migration semantics during rollout.
 ---
+
+## RAIN-005 production cutover correction — 2026-09-10
+
+**NATIVELY CERTIFIED / PUBLICATION PENDING:** the corrective branch closes the `ef46772d...` integration error by making the exact accepted C2R2 Classic engine the real normal-TUI authority. Native Rust 1.98.0 validation passed formatting, strict Clippy, 512 library + 24 integration tests, explicit `App.sand_engine`/`new_production`/spawn/update routing proof, H4-v5 zero-pre-tick topology/category drift with exact FIFO and mass preservation, deterministic hidden-state initialization, Classic restart/future-continuation equality, SQLite round-trip, malformed/fail-closed recovery gates, B2/B2R1/C1/C2R2 regressions, anti-nozzle gates, PERF-001 at 8.31x, release provenance, and a disposable copy of the live profile through startup/update/exit/reopen/doctor. Certified source head: `9c2e7b213316a74e312b1a6bf8c051404b2ae7b2`; release SHA256: `11feeca34e71b12e886e349314f9a28c094f73bcfe6800e22b006db5ff4a9080`. The live profile was backed up and not mutated. No morphology tuning is reopened. See `notebook/work/RAIN-005-PRODUCTION-CUTOVER.md`.
 
 ## RAIN-005 final morphology closure — 2026-09-09
 

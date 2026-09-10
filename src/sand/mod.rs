@@ -2,8 +2,13 @@ mod engine;
 mod recovery;
 mod snapshot;
 
+pub(crate) use engine::classic::{CLASSIC_PRODUCTION_AUTHORITY, ClassicSandboxEngine};
+pub(crate) type ClassicProductionEngine = ClassicSandboxEngine;
+#[allow(unused_imports)]
+#[doc(hidden)]
+pub use engine::ClassicRuntimeState;
 #[cfg(debug_assertions)]
-pub(crate) use engine::classic::{ClassicRainMode, ClassicSandboxEngine};
+pub(crate) use engine::classic::ClassicRainMode;
 #[cfg(debug_assertions)]
 pub(crate) use engine::oslo_sandbox::{OsloBoundaryMode, OsloSandboxEngine};
 pub(crate) use engine::recolor_state_category_mass;

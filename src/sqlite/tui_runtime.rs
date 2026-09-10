@@ -83,6 +83,7 @@ pub(crate) struct HistoricalActivityReceipt {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum HistoricalActivityOutcome {
     NeedsConfirmation {
         plan_token: String,
@@ -2979,6 +2980,51 @@ mod tests {
     }
 
     #[test]
+    fn classic_runtime_state_round_trips_through_sqlite_sand_authority() {
+        let path = repository_file("classic-runtime-state");
+        let state = SandState {
+            version: SandState::VERSION,
+            grid_width: 4,
+            grid_height: 3,
+            grains: Vec::new(),
+            frame_count: 17,
+            sweep_left_to_right: false,
+            rng_state: 11,
+            ingress_focus_x: Some(2),
+            pending_grains: Vec::new(),
+            pending_runs: vec![crate::sand::PendingGrainRun {
+                category_id: 0,
+                count: 5,
+            }],
+            active_avalanche_columns: Vec::new(),
+            mobilized_grains: Vec::new(),
+            classic_runtime: Some(crate::sand::ClassicRuntimeState {
+                schema_version: crate::sand::ClassicRuntimeState::VERSION,
+                physics_rng_state: 11,
+                rain_rng_state: 13,
+                initial_repose_rng_state: 17,
+                repose_rng_state: 19,
+                local_repose: vec![1, 2, 3, 4],
+                repose_memory_remaining: vec![0, 1, 2, 3],
+                rain_focus_x: Some(2),
+                rain_focus_direction: -1,
+                rain_focus_move_counter: 23,
+                rain_focus_heading_counter: 29,
+                rain_focus_rephase_remaining: 31,
+                rain_last_category_id: Some(0),
+                initial_rain_focus_bias_phase: 37,
+                rain_focus_bias_phase: 41,
+                rain_boundary_avulsion_index: 43,
+                frame_count: 17,
+            }),
+        };
+
+        save_sand_state(&path, &state).unwrap();
+        assert_eq!(load_sand_state(&path).unwrap(), Some(state));
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
     fn sand_and_checkpoint_round_trip() {
         let path = repository_file("runtime-state");
         let mut repository = SqliteRepository::open(&path).unwrap();
@@ -3005,6 +3051,7 @@ mod tests {
             pending_runs: Vec::new(),
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            classic_runtime: None,
         };
         save_sand_state(&path, &state).unwrap();
         let daily = SedimentSnapshot::daily_contribution(
@@ -3200,6 +3247,7 @@ mod clear_all_transaction_tests {
             pending_runs: Vec::new(),
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            classic_runtime: None,
         }
     }
 
@@ -3265,6 +3313,7 @@ mod clear_all_transaction_tests {
             pending_runs: Vec::new(),
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            classic_runtime: None,
         };
         let snapshot =
             SedimentSnapshot::day_end_checkpoint("2026-08-01".to_string(), state.clone());
@@ -3307,6 +3356,7 @@ mod clear_all_transaction_tests {
             pending_runs: Vec::new(),
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            classic_runtime: None,
         };
         let payload = serde_json::to_string(&state).unwrap();
         let repository = open_cli_repository(&path).unwrap();
@@ -3474,6 +3524,7 @@ mod clear_all_additional_transaction_tests {
             pending_runs: Vec::new(),
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            classic_runtime: None,
         }
     }
 
@@ -3787,6 +3838,7 @@ mod clear_all_additional_transaction_tests {
                 .collect(),
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            classic_runtime: None,
         }
     }
 

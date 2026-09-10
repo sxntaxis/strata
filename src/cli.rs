@@ -15,7 +15,9 @@ use crate::{
         build_report_for_window, civil_time_for_utc, day_boundary_config,
         operational_day_key_for_utc,
     },
-    profile, sqlite, storage,
+    profile,
+    sand::CLASSIC_PRODUCTION_AUTHORITY,
+    sqlite, storage,
 };
 
 #[derive(Parser, Debug)]
@@ -52,6 +54,9 @@ pub enum Cli {
 
     #[command(about = "Show the active runtime status")]
     Status,
+
+    #[command(about = "Show the production sand-physics authority")]
+    Physics,
 
     #[command(about = "Start or switch to a tracking layer")]
     Start {
@@ -832,6 +837,9 @@ pub fn run_command(cli: Cli) {
                 eprintln!("Error: {error}");
                 std::process::exit(1);
             }
+        }
+        Cli::Physics => {
+            println!("Physics: {CLASSIC_PRODUCTION_AUTHORITY}");
         }
         Cli::Start { layer, desc } => {
             if let Err(e) = start_session(layer, desc) {

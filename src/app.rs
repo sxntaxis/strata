@@ -21,8 +21,8 @@ use crate::{
     keybindings::{self, Action, ActionBindingState, KeyBinding},
     runtime_identity::transition_identity,
     sand::{
-        RecoveryTiming, SandEngine, SandState, SandStateGrain, SedimentSnapshot,
-        recover_detached_sediment, settle_transition_sediment,
+        ClassicProductionEngine, RecoveryTiming, SandEngine, SandState, SandStateGrain,
+        SedimentSnapshot, recover_detached_sediment, settle_transition_sediment,
     },
     sqlite, storage, temporal,
 };
@@ -1112,7 +1112,7 @@ impl TestingCheatsState {
 struct App {
     time_tracker: TimeTracker,
     appearance: AppearanceState,
-    sand_engine: SandEngine,
+    sand_engine: ClassicProductionEngine,
     session: SessionState,
     ui_mode: UiMode,
     selected_index: usize,
@@ -1209,7 +1209,7 @@ impl App {
         let mut app = Self {
             time_tracker: tracker,
             appearance,
-            sand_engine: SandEngine::new(width, height),
+            sand_engine: ClassicProductionEngine::new_production(width, height),
             session: SessionState {
                 active_session_stable_id: None,
                 active_session_started_at_utc: None,
@@ -2574,6 +2574,7 @@ impl App {
             pending_runs: state.pending_runs.clone(),
             active_avalanche_columns: state.active_avalanche_columns.clone(),
             mobilized_grains: Vec::new(),
+            classic_runtime: None,
             sweep_left_to_right: state.sweep_left_to_right,
             rng_state: state.rng_state,
             ingress_focus_x: state.ingress_focus_x,
@@ -2734,7 +2735,8 @@ impl App {
     fn testing_h4_clone(&self) -> Result<SandEngine, String> {
         let state = self.sand_engine.snapshot_state();
         let valid_category_ids = self.testing_cheats_valid_category_ids();
-        let mut engine = SandEngine::new(self.sand_engine.cell_width, self.sand_engine.cell_height);
+        let (cell_width, cell_height) = self.sand_engine.dimensions();
+        let mut engine = SandEngine::new(cell_width, cell_height);
         engine.restore_state(&state, &valid_category_ids)?;
         Ok(engine)
     }
@@ -2749,9 +2751,10 @@ impl App {
                 } else {
                     ClassicRainMode::WanderingFocus
                 };
+                let (cell_width, cell_height) = self.sand_engine.dimensions();
                 Ok(TestingSandEngine::Classic(ClassicSandboxEngine::new(
-                    self.sand_engine.cell_width,
-                    self.sand_engine.cell_height,
+                    cell_width,
+                    cell_height,
                     self.sand_engine.snapshot_state().rng_state,
                     mode,
                 )))
@@ -2764,51 +2767,51 @@ impl App {
                     _ => unreachable!("matched Oslo sandbox model"),
                 };
                 Ok(TestingSandEngine::Oslo(Box::new(OsloSandboxEngine::new(
-                    self.sand_engine.cell_width,
-                    self.sand_engine.cell_height,
+                    self.sand_engine.dimensions().0,
+                    self.sand_engine.dimensions().1,
                     self.sand_engine.snapshot_state().rng_state,
                     boundary,
                 ))))
             }
             "oslo-vessel-momentum" => Ok(TestingSandEngine::Oslo(Box::new(
                 OsloSandboxEngine::new_momentum_vessel(
-                    self.sand_engine.cell_width,
-                    self.sand_engine.cell_height,
+                    self.sand_engine.dimensions().0,
+                    self.sand_engine.dimensions().1,
                     self.sand_engine.snapshot_state().rng_state,
                 ),
             ))),
             "oslo-vessel-front" => Ok(TestingSandEngine::Oslo(Box::new(
                 OsloSandboxEngine::new_front_vessel(
-                    self.sand_engine.cell_width,
-                    self.sand_engine.cell_height,
+                    self.sand_engine.dimensions().0,
+                    self.sand_engine.dimensions().1,
                     self.sand_engine.snapshot_state().rng_state,
                 ),
             ))),
             "oslo-vessel-front-flowviz" => Ok(TestingSandEngine::Oslo(Box::new(
                 OsloSandboxEngine::new_front_flowviz_vessel(
-                    self.sand_engine.cell_width,
-                    self.sand_engine.cell_height,
+                    self.sand_engine.dimensions().0,
+                    self.sand_engine.dimensions().1,
                     self.sand_engine.snapshot_state().rng_state,
                 ),
             ))),
             "oslo-vessel-front-parcels" => Ok(TestingSandEngine::Oslo(Box::new(
                 OsloSandboxEngine::new_front_conservative_flowviz_vessel(
-                    self.sand_engine.cell_width,
-                    self.sand_engine.cell_height,
+                    self.sand_engine.dimensions().0,
+                    self.sand_engine.dimensions().1,
                     self.sand_engine.snapshot_state().rng_state,
                 ),
             ))),
             "oslo-vessel-front-grains" => Ok(TestingSandEngine::Oslo(Box::new(
                 OsloSandboxEngine::new_front_unit_distance_aware_flowviz_vessel(
-                    self.sand_engine.cell_width,
-                    self.sand_engine.cell_height,
+                    self.sand_engine.dimensions().0,
+                    self.sand_engine.dimensions().1,
                     self.sand_engine.snapshot_state().rng_state,
                 ),
             ))),
             "oslo-vessel-fluid" => Ok(TestingSandEngine::Oslo(Box::new(
                 OsloSandboxEngine::new_fluid_vessel(
-                    self.sand_engine.cell_width,
-                    self.sand_engine.cell_height,
+                    self.sand_engine.dimensions().0,
+                    self.sand_engine.dimensions().1,
                     self.sand_engine.snapshot_state().rng_state,
                 ),
             ))),
@@ -3784,6 +3787,7 @@ mod recovery_statement_tests {
                 pending_runs: Vec::new(),
                 active_avalanche_columns: Vec::new(),
                 mobilized_grains: Vec::new(),
+                classic_runtime: None,
             },
             pending_mutations: Vec::new(),
             recovery_target_utc: None,
@@ -3924,6 +3928,7 @@ mod transition_edge_tests {
             pending_runs: Vec::new(),
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            classic_runtime: None,
         }
     }
 
@@ -4130,6 +4135,7 @@ mod day_end_snapshot_tests {
             }],
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            classic_runtime: None,
         }
     }
 
@@ -4154,6 +4160,30 @@ mod day_end_snapshot_tests {
             stage_pending_day_end_snapshot(&mut pending, day, boundary, state(5)).unwrap_err();
         assert!(error.contains("conflicting in-memory day-end snapshots"));
         assert_eq!(pending[0].snapshot.state, state(4));
+    }
+}
+
+#[cfg(test)]
+mod production_engine_cutover_tests {
+    use super::App;
+    use crate::{
+        domain::CategoryId,
+        sand::{CLASSIC_PRODUCTION_AUTHORITY, ClassicProductionEngine},
+    };
+
+    #[test]
+    fn production_app_field_is_classic_c2r2_engine() {
+        fn require_classic(app: &App) {
+            let _: &ClassicProductionEngine = &app.sand_engine;
+        }
+        let _compile_time_wiring_proof: fn(&App) = require_classic;
+        let _spawn_path: fn(&mut ClassicProductionEngine, CategoryId) =
+            ClassicProductionEngine::spawn;
+        let _update_path: fn(&mut ClassicProductionEngine) = ClassicProductionEngine::update;
+        assert_eq!(
+            CLASSIC_PRODUCTION_AUTHORITY,
+            "classic-c2r2-anchor-apex-latent"
+        );
     }
 }
 

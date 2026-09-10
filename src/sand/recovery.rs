@@ -2,7 +2,7 @@ use std::{collections::HashSet, time::Duration};
 
 use crate::domain::CategoryId;
 
-use super::{PendingGrainRun, SandEngine, SandState};
+use super::{ClassicProductionEngine, PendingGrainRun, SandEngine, SandState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PeriodicAdvance {
@@ -123,9 +123,16 @@ fn recover_sediment(
 
     let mut state = if base_state.grid_width == 0 && base_state.grid_height == 0 {
         migrate_uninitialized_state(base_state)?
+    } else if base_state.classic_runtime.is_some() {
+        // Classic hidden state is production authority after the C2R2 cutover.
+        // Recovery only accumulates due ingress; it intentionally skips physics,
+        // so preserve the exact Classic state instead of normalizing it through
+        // the legacy H4 surface engine (which would discard that metadata).
+        base_state.clone()
     } else {
-        // Recovery must restore canonical coordinates without projecting them into a
-        // display viewport. The live renderer expands to its terminal separately.
+        // Pre-cutover H4 recovery still normalizes canonical coordinates without
+        // projecting them into a display viewport. The production Classic engine
+        // performs the topology-preserving authority migration when it restores.
         let mut engine = SandEngine::new(0, 0);
         engine.restore_state(base_state, valid_category_ids)?;
         engine.snapshot_state()
@@ -242,6 +249,12 @@ fn validate_sediment_state(
     if state.version == SandState::LEGACY_VERSION && !state.pending_runs.is_empty() {
         return Err("version 1 sediment state contains compressed pending runs".to_string());
     }
+    if state.version != SandState::VERSION && state.classic_runtime.is_some() {
+        return Err("pre-v5 sediment state contains Classic runtime metadata".to_string());
+    }
+    if let Some(runtime) = state.classic_runtime.as_ref() {
+        ClassicProductionEngine::validate_classic_runtime(runtime, state, valid_category_ids)?;
+    }
     if state.version != SandState::VERSION
         && state.version != SandState::REGIONAL_AVALANCHE_VERSION
         && state.version != SandState::ORGANIC_VERSION
@@ -335,6 +348,12 @@ fn validate_sediment_state(
         }
     }
     for run in &state.pending_runs {
+        if run.count == 0 {
+            return Err(format!(
+                "recovery pending run for category {} has zero count",
+                run.category_id
+            ));
+        }
         if !valid_category_ids.contains(&CategoryId::new(run.category_id)) {
             return Err(format!(
                 "recovery pending run references unavailable category {}",
@@ -353,7 +372,7 @@ mod tests {
     };
     use crate::{
         domain::CategoryId,
-        sand::{PendingGrainRun, SandState, SandStateGrain},
+        sand::{ClassicRuntimeState, PendingGrainRun, SandState, SandStateGrain},
     };
     use std::{collections::HashSet, time::Duration};
 
@@ -389,6 +408,7 @@ mod tests {
             }],
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            classic_runtime: None,
         }
     }
 
@@ -477,6 +497,102 @@ mod tests {
                 .map(|run| run.count)
                 .sum::<usize>();
         assert_eq!(after_mass, before_mass + 3);
+    }
+
+    #[test]
+    fn recovery_preserves_classic_hidden_authority_while_only_appending_due_ingress() {
+        let mut base = base_state();
+        base.classic_runtime = Some(ClassicRuntimeState {
+            schema_version: ClassicRuntimeState::VERSION,
+            physics_rng_state: base.rng_state,
+            rain_rng_state: 13,
+            initial_repose_rng_state: 17,
+            repose_rng_state: 19,
+            local_repose: vec![1, 2, 3, 4],
+            repose_memory_remaining: vec![0, 1, 2, 3],
+            rain_focus_x: Some(1),
+            rain_focus_direction: 1,
+            rain_focus_move_counter: 5,
+            rain_focus_heading_counter: 7,
+            rain_focus_rephase_remaining: 2,
+            rain_last_category_id: Some(1),
+            initial_rain_focus_bias_phase: 0,
+            rain_focus_bias_phase: 0,
+            rain_boundary_avulsion_index: 9,
+            frame_count: base.frame_count,
+        });
+        let original_runtime = base.classic_runtime.clone();
+
+        let recovered = recover_detached_sediment(
+            &base,
+            &categories(),
+            CategoryId::new(2),
+            RecoveryTiming {
+                elapsed: Duration::from_millis(2_500),
+                spawn_accumulator: Duration::from_millis(750),
+                physics_accumulator: Duration::from_millis(20),
+                spawn_period: Duration::from_secs(1),
+                physics_period: Duration::from_millis(50),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(recovered.added_grains, 3);
+        assert_eq!(recovered.state.grains, base.grains);
+        assert_eq!(recovered.state.classic_runtime, original_runtime);
+        assert_eq!(
+            recovered.state.pending_runs,
+            vec![
+                PendingGrainRun {
+                    category_id: 1,
+                    count: 3,
+                },
+                PendingGrainRun {
+                    category_id: 2,
+                    count: 3,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn recovery_rejects_inconsistent_classic_hidden_authority() {
+        let mut base = base_state();
+        base.classic_runtime = Some(ClassicRuntimeState {
+            schema_version: ClassicRuntimeState::VERSION,
+            physics_rng_state: base.rng_state.wrapping_add(1),
+            rain_rng_state: 13,
+            initial_repose_rng_state: 17,
+            repose_rng_state: 19,
+            local_repose: vec![1, 2, 3, 4],
+            repose_memory_remaining: vec![0, 1, 2, 3],
+            rain_focus_x: base.ingress_focus_x,
+            rain_focus_direction: 1,
+            rain_focus_move_counter: 5,
+            rain_focus_heading_counter: 7,
+            rain_focus_rephase_remaining: 2,
+            rain_last_category_id: Some(1),
+            initial_rain_focus_bias_phase: 0,
+            rain_focus_bias_phase: 0,
+            rain_boundary_avulsion_index: 9,
+            frame_count: base.frame_count,
+        });
+
+        let error = recover_detached_sediment(
+            &base,
+            &categories(),
+            CategoryId::new(2),
+            RecoveryTiming {
+                elapsed: Duration::from_millis(2_500),
+                spawn_accumulator: Duration::from_millis(750),
+                physics_accumulator: Duration::from_millis(20),
+                spawn_period: Duration::from_secs(1),
+                physics_period: Duration::from_millis(50),
+            },
+        )
+        .expect_err("detached recovery must fail closed on contradictory Classic metadata");
+
+        assert!(error.contains("physics RNG metadata disagree"));
     }
 
     #[test]
@@ -620,6 +736,7 @@ mod tests {
             pending_runs: Vec::new(),
             active_avalanche_columns: Vec::new(),
             mobilized_grains: Vec::new(),
+            classic_runtime: None,
         };
         let timing = RecoveryTiming {
             elapsed: Duration::from_millis(100),
