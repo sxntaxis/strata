@@ -87,3 +87,14 @@ Required before human copied-profile smoke:
 - release build plus `--version`, `physics`, and help smoke.
 
 If compilation exposes only unequivocal formatting/import/type fallout, the local validator may repair it in a separate mechanical commit. Any change to physics, migration semantics, persistence meaning, RNG, morphology, timing, or profile behavior is a semantic blocker and returns to the author.
+
+## Static handoff hardening — 2026-09-10
+
+A post-interruption source audit found two certification defects in the original WIP handoff and corrected them without changing C2R2 physics:
+
+- the H4-v5 migration fixture listed placed grains in non-canonical order while asserting exact equality against the row-major canonical snapshot writer; the fixture now represents real persisted H4 ordering and also proves multi-category FIFO pending-run preservation, frame/sweep preservation, mass conservation, and deterministic hidden-state initialization;
+- detached/transition recovery previously preserved `classic_runtime` without validating its cross-field authority invariants first. Recovery now reuses the Classic runtime validator and rejects contradictory Classic metadata (including top-level/runtime RNG disagreement) before arithmetic catch-up. Zero-count pending runs are likewise rejected instead of bypassing the stricter live restore path; unknown fields inside the versioned Classic runtime payload are rejected rather than silently ignored.
+
+The Classic restart gate now continues both the pre-restart and restored engines through the same subsequent category-boundary/spawn/update sequence and requires exact resulting state equality. The App wiring test also type-checks the production `spawn` and `update` method paths on `ClassicProductionEngine`.
+
+These changes remain **AUTHORED / NATIVE VALIDATION PENDING** because the authoring container still has no Rust toolchain. They do not authorize publication, installation, or live-profile mutation.

@@ -788,7 +788,7 @@ impl ClassicSandboxEngine {
         self.resample_all_local_repose();
     }
 
-    fn validate_classic_runtime(
+    pub(crate) fn validate_classic_runtime(
         runtime: &ClassicRuntimeState,
         state: &SandState,
         valid_category_ids: &HashSet<CategoryId>,
@@ -3865,6 +3865,11 @@ mod perf_001_tests {
             grid_height: 6,
             grains: vec![
                 super::super::SandStateGrain {
+                    x: 2,
+                    y: 4,
+                    category_id: 2,
+                },
+                super::super::SandStateGrain {
                     x: 1,
                     y: 5,
                     category_id: 1,
@@ -3872,11 +3877,6 @@ mod perf_001_tests {
                 super::super::SandStateGrain {
                     x: 2,
                     y: 5,
-                    category_id: 2,
-                },
-                super::super::SandStateGrain {
-                    x: 2,
-                    y: 4,
                     category_id: 2,
                 },
                 super::super::SandStateGrain {
@@ -3890,10 +3890,20 @@ mod perf_001_tests {
             rng_state: 0xC2C2_0055,
             ingress_focus_x: Some(3),
             pending_grains: Vec::new(),
-            pending_runs: vec![PendingGrainRun {
-                category_id: 2,
-                count: 3,
-            }],
+            pending_runs: vec![
+                PendingGrainRun {
+                    category_id: 1,
+                    count: 2,
+                },
+                PendingGrainRun {
+                    category_id: 2,
+                    count: 3,
+                },
+                PendingGrainRun {
+                    category_id: 1,
+                    count: 1,
+                },
+            ],
             active_avalanche_columns: Vec::new(),
             mobilized_grains: vec![super::super::SandStateCoordinate { x: 2, y: 4 }],
             classic_runtime: None,
@@ -3910,6 +3920,8 @@ mod perf_001_tests {
         assert_eq!(migrated.grid_height, input.grid_height);
         assert_eq!(migrated.grains, input.grains);
         assert_eq!(migrated.pending_runs, input.pending_runs);
+        assert_eq!(migrated.frame_count, input.frame_count);
+        assert_eq!(migrated.sweep_left_to_right, input.sweep_left_to_right);
         assert_eq!(
             migrated.grains.len()
                 + migrated.pending_runs.iter().map(|run| run.count).sum::<usize>(),
@@ -3919,6 +3931,16 @@ mod perf_001_tests {
         assert!(migrated.mobilized_grains.is_empty());
         assert!(migrated.classic_runtime.is_some());
         assert_eq!(engine.production_authority_name(), CLASSIC_PRODUCTION_AUTHORITY);
+
+        let mut replay = ClassicSandboxEngine::new_production(4, 1);
+        replay
+            .restore_state(&input, &valid)
+            .expect("the same H4 authority must migrate deterministically");
+        assert_eq!(
+            replay.snapshot_state().classic_runtime,
+            migrated.classic_runtime,
+            "H4-to-Classic hidden-state initialization must depend only on persisted authority"
+        );
     }
 
     #[test]
@@ -3944,6 +3966,23 @@ mod perf_001_tests {
             .expect("production Classic state must restore");
 
         assert_eq!(restored.snapshot_state(), persisted);
+
+        for i in 0..96 {
+            let category_id = if i < 32 || i >= 64 {
+                CategoryId::new(1)
+            } else {
+                CategoryId::new(2)
+            };
+            source.spawn(category_id);
+            restored.spawn(category_id);
+            source.update();
+            restored.update();
+        }
+        assert_eq!(
+            restored.snapshot_state(),
+            source.snapshot_state(),
+            "restored Classic authority must produce the same future continuation"
+        );
     }
 
     #[test]

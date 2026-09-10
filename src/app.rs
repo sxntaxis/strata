@@ -4166,7 +4166,10 @@ mod day_end_snapshot_tests {
 #[cfg(test)]
 mod production_engine_cutover_tests {
     use super::App;
-    use crate::sand::{CLASSIC_PRODUCTION_AUTHORITY, ClassicProductionEngine};
+    use crate::{
+        domain::CategoryId,
+        sand::{CLASSIC_PRODUCTION_AUTHORITY, ClassicProductionEngine},
+    };
 
     #[test]
     fn production_app_field_is_classic_c2r2_engine() {
@@ -4174,6 +4177,9 @@ mod production_engine_cutover_tests {
             let _: &ClassicProductionEngine = &app.sand_engine;
         }
         let _compile_time_wiring_proof: fn(&App) = require_classic;
+        let _spawn_path: fn(&mut ClassicProductionEngine, CategoryId) =
+            ClassicProductionEngine::spawn;
+        let _update_path: fn(&mut ClassicProductionEngine) = ClassicProductionEngine::update;
         assert_eq!(
             CLASSIC_PRODUCTION_AUTHORITY,
             "classic-c2r2-anchor-apex-latent"

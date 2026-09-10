@@ -58,6 +58,7 @@ pub struct PendingGrainRun {
 /// without moving, deleting, or recoloring any placed grain.
 #[doc(hidden)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct ClassicRuntimeState {
     pub schema_version: u8,
     pub physics_rng_state: u64,
