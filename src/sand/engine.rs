@@ -410,6 +410,7 @@ impl SandEngine {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn pending_grain_count(&self) -> usize {
         self.pending_runs.iter().map(|run| run.count).sum()
     }
@@ -427,6 +428,7 @@ impl SandEngine {
             .count()
     }
 
+    #[allow(dead_code)]
     fn refresh_logical_grain_count(&mut self) {
         self.grain_count = self
             .physical_grain_count()
@@ -1027,6 +1029,7 @@ impl SandEngine {
         self.grain_count = 0;
     }
 
+    #[allow(dead_code)]
     pub fn clear_category(&mut self, category_id: CategoryId) {
         let mut removed = Vec::new();
         for (y, row) in self.grid.iter_mut().enumerate() {
@@ -1050,6 +1053,7 @@ impl SandEngine {
         self.refresh_logical_grain_count();
     }
 
+    #[allow(dead_code)]
     pub fn remove_category_grains(&mut self, category_id: CategoryId, count: usize) -> usize {
         if count == 0 || self.grain_count == 0 {
             return 0;

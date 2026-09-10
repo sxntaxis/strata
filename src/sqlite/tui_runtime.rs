@@ -83,6 +83,7 @@ pub(crate) struct HistoricalActivityReceipt {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum HistoricalActivityOutcome {
     NeedsConfirmation {
         plan_token: String,

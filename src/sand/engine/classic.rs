@@ -748,7 +748,7 @@ impl ClassicSandboxEngine {
                         id.0
                     ));
                 }
-                pending.extend(std::iter::repeat(id).take(run.count));
+                pending.extend(std::iter::repeat_n(id, run.count));
             }
         }
         Ok(pending)
@@ -3989,7 +3989,7 @@ mod perf_001_tests {
         assert_eq!(restored.snapshot_state(), persisted);
 
         for i in 0..96 {
-            let category_id = if i < 32 || i >= 64 {
+            let category_id = if !(32..64).contains(&i) {
                 CategoryId::new(1)
             } else {
                 CategoryId::new(2)
