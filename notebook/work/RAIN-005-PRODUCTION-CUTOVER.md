@@ -1,11 +1,11 @@
 ---
 id: RAIN-005-PRODUCTION-CUTOVER
 kind: work
-state: active
+state: complete
 created: 2026-09-10
 updated: 2026-09-10
 authority: working
-summary: Correct the RAIN-005 closure error by making owner-selected Classic C2R2 the actual normal TUI physics authority while preserving the owner's existing H4 v5 sediment and restart custody.
+summary: C2R2 is natively certified as the actual normal-TUI physics authority, with H4-v5 migration and Classic restart custody proven before publication/install.
 ---
 
 # RAIN-005 — production Classic C2R2 cutover
@@ -97,4 +97,40 @@ A post-interruption source audit found two certification defects in the original
 
 The Classic restart gate now continues both the pre-restart and restored engines through the same subsequent category-boundary/spawn/update sequence and requires exact resulting state equality. The App wiring test also type-checks the production `spawn` and `update` method paths on `ClassicProductionEngine`.
 
-These changes remain **AUTHORED / NATIVE VALIDATION PENDING** because the authoring container still has no Rust toolchain. They do not authorize publication, installation, or live-profile mutation.
+## Native certification closure — 2026-09-10
+
+The local native gate consumed the exact author-hardened complete-history bundle (`SHA256 942b6a5d87040a5f523b7e87940160409d555030587de4aec6104c2bb13a7077`) and returned **PASS_STRATA_C2R2_PRODUCTION_CUTOVER_NATIVE**. Native validation used Rust/Cargo 1.98.0 on x86_64 Linux.
+
+Certified source lineage before this Notebook-only closure:
+
+- HEAD `9c2e7b213316a74e312b1a6bf8c051404b2ae7b2`;
+- tree `617e3830dd2c730b757bd9a84c9edf1f2bc39a81`;
+- parent `3391a907f0062c86653d2c4233b764101e0496d1`;
+- published RAIN-005 closure `ef46772d33ad46845b338fd7f020b3866db96a6b` confirmed as ancestor;
+- final worktree clean.
+
+Native evidence:
+
+- `cargo fmt --all -- --check`: PASS;
+- strict Clippy: PASS;
+- full tests: 512 library + 24 integration passed, 20 ignored, 0 failed;
+- production routing: `App.sand_engine` is `ClassicProductionEngine`, constructed with `new_production`; real spawn/update paths use that engine; authority string is `classic-c2r2-anchor-apex-latent`;
+- H4-v5 migration: 8x6 fixture, 4 placed grains, 6 pending mass, total mass 10, FIFO `[1,1,2,2,2,1]`, frame 41, sweep false; zero pre-first-tick topology/category drift and H4 mobilization discarded;
+- deterministic H4-derived Classic hidden-state initialization: PASS;
+- Classic snapshot/restart plus future-continuation equality: PASS;
+- SQLite Classic runtime round-trip: PASS;
+- malformed/fail-closed and detached-recovery gates: PASS;
+- B2/B2R1/C1/C2R2 focused regressions: PASS;
+- anti-nozzle: N=4 max 2, N=20 max 8;
+- PERF-001: PASS at 8.31x;
+- release `physics`: `Physics: classic-c2r2-anchor-apex-latent`;
+- certified release version: `strata 0.7.7 (9c2e7b213316)`;
+- certified release SHA256: `11feeca34e71b12e886e349314f9a28c094f73bcfe6800e22b006db5ff4a9080`.
+
+The validator created and verified a backup of the live SQLite/profile, did **not** mutate the live profile, and ran the candidate against a disposable copied profile. TUI startup, update, exit, reopen, persistence, doctor, version, and physics smoke all passed.
+
+Three native fallout commits were reviewed as mechanical and behavior-preserving only: rustfmt formatting (`7824a9b`), strict-Clippy compatibility (`3391a90`), and restoration of a test-only coordinate re-export with scoped unused-import allowance (`9c2e7b2`). No physics, migration, persistence, RNG, morphology, timing, or profile semantics changed in those fixes.
+
+## Closure and rollout boundary
+
+RAIN-005 morphology and the corrective production cutover are now technically closed. Publication/install is a rollout operation, not another semantic gate. Publish the exact certified lineage through the repository branch/PR workflow, rebuild from the resulting published `main` (the commit/version hash will necessarily differ if this Notebook-only closure is included), then run a bounded post-install smoke for version, `physics`, profile doctor, and ordinary TUI startup/quit/reopen. Do not reopen morphology or change migration semantics during rollout.
