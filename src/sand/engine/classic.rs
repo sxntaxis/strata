@@ -893,6 +893,7 @@ impl ClassicSandboxEngine {
         canonical.repose_memory_remaining =
             runtime.repose_memory_remaining[offset..offset + state.grid_width].to_vec();
         canonical.rain_focus_x = match runtime.rain_focus_x {
+            Some(focus) if focus < state.grid_width => Some(focus),
             Some(focus) if focus >= offset && focus - offset < state.grid_width => {
                 Some(focus - offset)
             }
@@ -4069,7 +4070,13 @@ mod perf_001_tests {
             ClassicSandboxEngine::new(12, 6, 0xA11C_C2F2_u64, ClassicRainMode::WanderingFocus);
         source.force_reference_gravity = false;
         source.repose_stability_probe = ReposeStabilityProbe::ConvexityAnchorApexLatent;
-        let expected = source.snapshot_state();
+        let mut expected = source.snapshot_state();
+        expected.ingress_focus_x = Some(3);
+        expected
+            .classic_runtime
+            .as_mut()
+            .expect("Classic snapshot metadata")
+            .rain_focus_x = Some(3);
         let mut oversized = expected.clone();
         let runtime = oversized
             .classic_runtime
