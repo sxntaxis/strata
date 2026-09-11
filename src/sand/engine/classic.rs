@@ -800,6 +800,7 @@ impl ClassicSandboxEngine {
         state: &SandState,
         valid_category_ids: &HashSet<CategoryId>,
     ) -> Result<(), String> {
+        let runtime = Self::canonical_runtime_for_state(runtime, state)?;
         if state.version != SandState::VERSION {
             return Err("Classic runtime metadata requires current v5 sand state".to_string());
         }
@@ -808,13 +809,6 @@ impl ClassicSandboxEngine {
                 "unsupported Classic runtime state schema {}",
                 runtime.schema_version
             ));
-        }
-        if runtime.local_repose.len() != state.grid_width
-            || runtime.repose_memory_remaining.len() != state.grid_width
-        {
-            return Err(
-                "Classic runtime stability field does not match canonical width".to_string(),
-            );
         }
         if runtime
             .local_repose
@@ -871,24 +865,57 @@ impl ClassicSandboxEngine {
         Ok(())
     }
 
+    fn canonical_runtime_for_state(
+        runtime: &ClassicRuntimeState,
+        state: &SandState,
+    ) -> Result<ClassicRuntimeState, String> {
+        if runtime.local_repose.len() != runtime.repose_memory_remaining.len() {
+            return Err("Classic runtime stability fields do not have matching widths".to_string());
+        }
+        if runtime.local_repose.len() < state.grid_width {
+            return Err(
+                "Classic runtime stability field does not match canonical width".to_string(),
+            );
+        }
+        if runtime.local_repose.len() == state.grid_width {
+            return Ok(runtime.clone());
+        }
+
+        let extra_width = runtime.local_repose.len() - state.grid_width;
+        if !extra_width.is_multiple_of(2) {
+            return Err(
+                "Classic runtime stability field cannot be centered on canonical width".to_string(),
+            );
+        }
+        let offset = extra_width / 2;
+        let mut canonical = runtime.clone();
+        canonical.local_repose = runtime.local_repose[offset..offset + state.grid_width].to_vec();
+        canonical.repose_memory_remaining =
+            runtime.repose_memory_remaining[offset..offset + state.grid_width].to_vec();
+        canonical.rain_focus_x = match runtime.rain_focus_x {
+            Some(focus) if focus >= offset && focus - offset < state.grid_width => {
+                Some(focus - offset)
+            }
+            Some(_) => {
+                return Err("Classic runtime rain focus is outside the canonical width".to_string());
+            }
+            None => None,
+        };
+        Ok(canonical)
+    }
+
     fn restore_classic_runtime(
         &mut self,
         runtime: ClassicRuntimeState,
         state: &SandState,
         valid_category_ids: &HashSet<CategoryId>,
     ) -> Result<(), String> {
+        let runtime = Self::canonical_runtime_for_state(&runtime, state)?;
         if runtime.schema_version != ClassicRuntimeState::VERSION {
             return Err(format!(
                 "unsupported Classic runtime state schema {}",
                 runtime.schema_version
             ));
-        }
-        if runtime.local_repose.len() != state.grid_width
-            || runtime.repose_memory_remaining.len() != state.grid_width
-        {
-            return Err(
-                "Classic runtime stability field does not match canonical width".to_string(),
-            );
         }
         if runtime
             .local_repose
@@ -4033,6 +4060,32 @@ mod perf_001_tests {
 
         assert!(error.contains("frame counters disagree"));
         assert_eq!(target.snapshot_state(), before);
+    }
+
+    #[test]
+    fn oversized_classic_runtime_is_center_cropped_to_canonical_width() {
+        let valid = HashSet::from([CategoryId::new(1)]);
+        let mut source =
+            ClassicSandboxEngine::new(12, 6, 0xA11C_C2F2_u64, ClassicRainMode::WanderingFocus);
+        source.force_reference_gravity = false;
+        source.repose_stability_probe = ReposeStabilityProbe::ConvexityAnchorApexLatent;
+        let expected = source.snapshot_state();
+        let mut oversized = expected.clone();
+        let runtime = oversized
+            .classic_runtime
+            .as_mut()
+            .expect("Classic snapshot metadata");
+        runtime.local_repose.splice(0..0, [1, 1]);
+        runtime.local_repose.extend([1, 1]);
+        runtime.repose_memory_remaining.splice(0..0, [0, 0]);
+        runtime.repose_memory_remaining.extend([0, 0]);
+
+        let mut restored = ClassicSandboxEngine::new_production(12, 6);
+        restored
+            .restore_state(&oversized, &valid)
+            .expect("centered oversized Classic metadata should recover");
+
+        assert_eq!(restored.snapshot_state(), expected);
     }
 
     #[test]
