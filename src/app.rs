@@ -4151,7 +4151,11 @@ mod day_end_snapshot_tests {
         assert_eq!(pending[0].operational_day, day);
         assert_eq!(pending[0].captured_at_utc, boundary);
         assert_eq!(pending[0].snapshot.state, original);
-        assert!(pending[0].snapshot.is_authentic_day_end_for("2026-08-01"));
+        assert!(
+            pending[0]
+                .snapshot
+                .is_authentic_daily_visual_for("2026-08-01")
+        );
 
         stage_pending_day_end_snapshot(&mut pending, day, boundary, state(4)).unwrap();
         assert_eq!(pending.len(), 1);

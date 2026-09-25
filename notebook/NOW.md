@@ -3,10 +3,10 @@ id: NOW-001
 kind: status
 state: active
 created: 2026-08-01
-updated: 2026-09-10
+updated: 2026-09-25
 authority: working
-summary: "RAIN-005 morphology remains closed on owner-selected C2R2 `anchor-apex-latent`. The corrective production-engine cutover is now natively certified: normal `App.sand_engine`, real spawn/update routing, H4-v5 migration, Classic restart custody, SQLite persistence, malformed-state refusal, focused morphology regressions, anti-nozzle behavior, PERF-001, release provenance, and a disposable copied-profile smoke all passed. Publication/install remains the only open rollout step; the live profile was not mutated during certification."
-next: Publish the exact certified C2R2 cutover lineage through the repository's branch/PR workflow, build/install from the resulting published main, and run a bounded post-install smoke (`--version`, `physics`, profile doctor, normal TUI startup/quit/reopen). Do not reopen morphology or alter migration semantics during rollout.
+summary: "HISTORY-002 is implemented and certified on latest GitHub main: daily historical visuals retain the latest canonical autosave when the 06:00 cutoff is missed."
+next: Publish HISTORY-002 through the repository branch/PR workflow, then resume SEDIMENT-007 from its bounded work record.
 ---
 
 ## RAIN-005 production cutover correction — 2026-09-10
@@ -115,6 +115,8 @@ Manual theme authority is machine-green and the disposable-profile btop-inspired
 
 ## Current phase
 
+**HISTORY-002** is the active correctness fix. Daily autosave must preserve the current day's latest canonical topology as historical visual evidence; a live 06:00 boundary freezes the final image, while a missed boundary retains the last saved image instead of falling back to linear ledger reconstruction.
+
 ARCH-001 has been completed. The post-SQLite issue reconciliation program is complete, and the current runtime is SQLite-only. The v0.7.7 direct interaction model is reconciled onto that authority.
 
 A post-merge bootstrap recovery defect was found on a real profile: first-generation checkpoint creation
@@ -132,12 +134,12 @@ canvas to the current viewport; uppercase `C` preserves extent and non-Idle mass
 SQLite persistence; restore into a larger live viewport expands monotonically; zero-viewport recovery
 restore remains exact; the idle tamagotchi is removed; and zero effective counters are hidden.
 
-The day-end visual-memory behavior is now accepted as working baseline product behavior. A live operational-day
-cutoff stages the exact cumulative canonical `SandState` as a first-write-wins `daily` checkpoint, including its
-original canvas dimensions and topology. Historical Balance prefers that authentic photo for the selected interval
-end day; `DailyContribution` is dimension-independent ledger mass only, and the deterministic row-major
-`DerivedPreview` remains fallback for cutoffs that were not observed by live physics. No historical photo is
-fabricated during bounded recovery.
+The owner clarified daily visual memory: the latest canonical `SandState` saved during an operational day must remain
+that day's historical photo if Strata is not running at the 06:00 cutoff. Autosave photos advance until the live cutoff
+promotes the exact boundary state to an immutable final checkpoint. `DailyContribution` remains ledger-derived
+accounting evidence; `DerivedPreview` is only a visual fallback when no canonical photo was saved for that day.
+HISTORY-002 is certified: formatter, strict Clippy, full tests (515 unit + 24 integration), CLI help smoke, latest-photo
+replacement, day-boundary finalization, and SQLite rollback fault coverage passed.
 
 The certified system includes:
 
