@@ -13,7 +13,10 @@ pub(super) fn centered_half_open_interval(start: usize, end: usize) -> (usize, u
     (fill_start, fill_start + half_width)
 }
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet, VecDeque},
+};
 
 use ratatui::{
     prelude::{Line, Span},
@@ -121,10 +124,25 @@ pub struct SandState {
 
 impl SandState {
     pub const VERSION: u8 = 5;
+    /// Compatibility input from the unmerged v0.7.7 provenance prototype.
+    /// Its extra per-grain timestamps do not participate in current physics;
+    /// parsing that known version preserves topology and Classic continuation
+    /// state, then current writes naturally return to v5.
+    pub const PROVENANCE_COMPATIBILITY_VERSION: u8 = 6;
     pub const REGIONAL_AVALANCHE_VERSION: u8 = 4;
     pub const ORGANIC_VERSION: u8 = 3;
     pub const COMPRESSED_PENDING_VERSION: u8 = 2;
     pub const LEGACY_VERSION: u8 = 1;
+
+    pub(crate) fn compatible_v5_view(&self) -> Cow<'_, Self> {
+        if self.version == Self::PROVENANCE_COMPATIBILITY_VERSION {
+            let mut compatible = self.clone();
+            compatible.version = Self::VERSION;
+            Cow::Owned(compatible)
+        } else {
+            Cow::Borrowed(self)
+        }
+    }
 }
 
 pub(crate) fn recolor_state_category_mass(
@@ -1195,6 +1213,8 @@ impl SandEngine {
         state: &SandState,
         valid_category_ids: &HashSet<CategoryId>,
     ) -> Result<(), String> {
+        let compatible_state = state.compatible_v5_view();
+        let state = compatible_state.as_ref();
         if state.version != SandState::VERSION
             && state.version != SandState::REGIONAL_AVALANCHE_VERSION
             && state.version != SandState::COMPRESSED_PENDING_VERSION
@@ -2217,6 +2237,44 @@ mod tests {
         assert_eq!(restored.grid[3][2], Some(CategoryId::new(1)));
         assert_eq!(restored.grid[10][7], Some(CategoryId::new(2)));
         assert_eq!(restored.grain_count, 2);
+    }
+
+    #[test]
+    fn experimental_v6_provenance_restores_exact_v5_topology() {
+        let mut source = SandEngine::new(20, 20);
+        source.clear();
+        source.grid[3][2] = Some(CategoryId::new(1));
+        source.grid[10][7] = Some(CategoryId::new(2));
+        source.grain_count = 2;
+        let mut expected = source.snapshot_state();
+        expected.pending_runs.push(PendingGrainRun {
+            category_id: 2,
+            count: 3,
+        });
+
+        let mut encoded = serde_json::to_value(&expected).unwrap();
+        encoded["version"] = serde_json::json!(SandState::PROVENANCE_COMPATIBILITY_VERSION);
+        encoded["grains"][0]["spawned_at_utc_nanos"] =
+            serde_json::json!(1_750_000_000_000_000_000i64);
+        encoded["pending_runs"][0]["provenance_start_utc_nanos"] =
+            serde_json::json!(1_750_000_000_000_000_000i64);
+        encoded["pending_runs"][0]["provenance_step_nanos"] = serde_json::json!(1_000_000_000u64);
+        let imported: SandState = serde_json::from_value(encoded).unwrap();
+
+        let mut restored = SandEngine::new(20, 20);
+        let valid = HashSet::from([CategoryId::new(0), CategoryId::new(1), CategoryId::new(2)]);
+        restored.restore_state(&imported, &valid).unwrap();
+
+        assert_eq!(restored.snapshot_state(), expected);
+        assert_eq!(
+            restored.grain_count,
+            expected.grains.len()
+                + expected
+                    .pending_runs
+                    .iter()
+                    .map(|run| run.count)
+                    .sum::<usize>()
+        );
     }
 
     #[test]
