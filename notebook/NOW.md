@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-25
 authority: working
-summary: "RECOVERY-003 adds SandState v6 provenance compatibility to current v5, preserving topology and Classic continuation; the original profile is backed up and verified healthy."
-next: Publish RECOVERY-003 through the branch/PR workflow, reinstall merged main, then verify startup against the preserved v6 profile.
+summary: "RECOVERY-003 is published and installed at main `2031edf`; the known v6 profile shape starts on a disposable copy and retains canonical topology and Classic state."
+next: Verify the real profile's first startup on installed main writes canonical SandState v5, then resume SEDIMENT-007 from its bounded work record.
 ---
 
 ## RAIN-005 production cutover correction — 2026-09-10
