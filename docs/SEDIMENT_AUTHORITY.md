@@ -41,6 +41,9 @@ The current viewport is the active live-physics basin. New live grains enter at 
 
 `SandState` schema version 5 stores ordered pending runs, the optional canonical ingress focus, and exact mobilized grain
 coordinates. Versions 1 through 4 remain readable; the v4 regional activity field is legacy migration input only.
+Version 6 from the unmerged grain-provenance prototype is also accepted as a compatibility input. Current main ignores
+its experimental per-grain spawn-time annotations while preserving every placed coordinate, category, pending mass,
+and Classic continuation field; the next canonical write uses v5. Other unsupported versions still fail closed.
 
 - Version 1 `pending_grains` vectors migrate deterministically into adjacent runs.
 - Version 2 compressed-pending states remain readable and upgrade to version 3 with no invented ingress focus.

@@ -579,6 +579,8 @@ impl ClassicSandboxEngine {
         state: &SandState,
         valid_category_ids: &HashSet<CategoryId>,
     ) -> Result<(), String> {
+        let compatible_state = state.compatible_v5_view();
+        let state = compatible_state.as_ref();
         let pending_drive = Self::expanded_pending_drive(state, valid_category_ids)?;
         let persisted_classic = state.classic_runtime.clone();
         if let Some(runtime) = persisted_classic.as_ref() {
@@ -800,6 +802,8 @@ impl ClassicSandboxEngine {
         state: &SandState,
         valid_category_ids: &HashSet<CategoryId>,
     ) -> Result<(), String> {
+        let compatible_state = state.compatible_v5_view();
+        let state = compatible_state.as_ref();
         let runtime = Self::canonical_runtime_for_state(runtime, state)?;
         if state.version != SandState::VERSION {
             return Err("Classic runtime metadata requires current v5 sand state".to_string());
@@ -4032,6 +4036,45 @@ mod perf_001_tests {
             source.snapshot_state(),
             "restored Classic authority must produce the same future continuation"
         );
+    }
+
+    #[test]
+    fn experimental_v6_provenance_preserves_classic_topology_and_runtime() {
+        let valid = HashSet::from([CategoryId::new(1), CategoryId::new(2)]);
+        let mut source =
+            ClassicSandboxEngine::new(20, 10, 0xA11C_C2A6_u64, ClassicRainMode::WanderingFocus);
+        source.force_reference_gravity = false;
+        source.repose_stability_probe = ReposeStabilityProbe::ConvexityAnchorApexLatent;
+        for _ in 0..180 {
+            source.spawn(CategoryId::new(1));
+            source.update();
+        }
+        let expected = source.snapshot_state();
+        let mut encoded = serde_json::to_value(&expected).unwrap();
+        encoded["version"] = serde_json::json!(SandState::PROVENANCE_COMPATIBILITY_VERSION);
+        for (index, grain) in encoded["grains"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .enumerate()
+        {
+            grain["spawned_at_utc_nanos"] = serde_json::json!(index as i64 * 1_000_000_000);
+        }
+        let imported: SandState = serde_json::from_value(encoded).unwrap();
+
+        let mut restored = ClassicSandboxEngine::new_production(20, 10);
+        restored
+            .restore_state(&imported, &valid)
+            .expect("known provenance-v6 state should retain canonical topology");
+        assert_eq!(restored.snapshot_state(), expected);
+
+        for _ in 0..64 {
+            source.spawn(CategoryId::new(2));
+            restored.spawn(CategoryId::new(2));
+            source.update();
+            restored.update();
+        }
+        assert_eq!(restored.snapshot_state(), source.snapshot_state());
     }
 
     #[test]

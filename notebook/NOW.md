@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-25
 authority: working
-summary: "HISTORY-002 is implemented and certified on latest GitHub main: daily historical visuals retain the latest canonical autosave when the 06:00 cutoff is missed."
-next: Publish HISTORY-002 through the repository branch/PR workflow, then resume SEDIMENT-007 from its bounded work record.
+summary: "RECOVERY-003 adds SandState v6 provenance compatibility to current v5, preserving topology and Classic continuation; the original profile is backed up and verified healthy."
+next: Publish RECOVERY-003 through the branch/PR workflow, reinstall merged main, then verify startup against the preserved v6 profile.
 ---
 
 ## RAIN-005 production cutover correction — 2026-09-10
@@ -115,7 +115,9 @@ Manual theme authority is machine-green and the disposable-profile btop-inspired
 
 ## Current phase
 
-**HISTORY-002** is the active correctness fix. Daily autosave must preserve the current day's latest canonical topology as historical visual evidence; a live 06:00 boundary freezes the final image, while a missed boundary retains the last saved image instead of falling back to linear ledger reconstruction.
+**RECOVERY-003** is the active compatibility fix. The installed pre-main v0.7.7 prototype wrote SandState v6 with optional grain-time provenance; current main is v5 and must open that known input without losing canonical topology or Classic continuation.
+
+Native compatibility proof passes: v6 payloads containing per-grain timestamps and pending-run provenance restore to exact v5 topology and Classic state; bounded recovery normalizes known v6 inputs to v5; unknown future versions remain fail-closed. Formatting, strict Clippy, all tests, and CLI help smoke pass. A verified copy of the affected SQLite profile is retained outside the repository.
 
 ARCH-001 has been completed. The post-SQLite issue reconciliation program is complete, and the current runtime is SQLite-only. The v0.7.7 direct interaction model is reconciled onto that authority.
 

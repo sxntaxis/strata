@@ -137,6 +137,9 @@ fn recover_sediment(
         engine.restore_state(base_state, valid_category_ids)?;
         engine.snapshot_state()
     };
+    if state.version == SandState::PROVENANCE_COMPATIBILITY_VERSION {
+        state.version = SandState::VERSION;
+    }
     let pending_mass = state
         .pending_runs
         .iter()
@@ -217,6 +220,8 @@ fn validate_sediment_state(
     valid_category_ids: &HashSet<CategoryId>,
     canvas_policy: CanvasPolicy,
 ) -> Result<(), String> {
+    let compatible_state = state.compatible_v5_view();
+    let state = compatible_state.as_ref();
     if state.version != SandState::VERSION
         && state.version != SandState::REGIONAL_AVALANCHE_VERSION
         && state.version != SandState::COMPRESSED_PENDING_VERSION
@@ -502,6 +507,7 @@ mod tests {
     #[test]
     fn recovery_preserves_classic_hidden_authority_while_only_appending_due_ingress() {
         let mut base = base_state();
+        base.version = SandState::PROVENANCE_COMPATIBILITY_VERSION;
         base.classic_runtime = Some(ClassicRuntimeState {
             schema_version: ClassicRuntimeState::VERSION,
             physics_rng_state: base.rng_state,
@@ -538,6 +544,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(recovered.added_grains, 3);
+        assert_eq!(recovered.state.version, SandState::VERSION);
         assert_eq!(recovered.state.grains, base.grains);
         assert_eq!(recovered.state.classic_runtime, original_runtime);
         assert_eq!(
