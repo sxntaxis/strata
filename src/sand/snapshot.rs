@@ -19,6 +19,7 @@ pub enum SedimentSnapshotKind {
 #[serde(rename_all = "kebab-case")]
 pub enum SedimentSnapshotProvenance {
     RuntimeCanonical,
+    RuntimeAutosave,
     LegacyDailyRow,
     SessionLedger,
 }
@@ -83,6 +84,17 @@ impl SedimentSnapshot {
         )
     }
 
+    pub(crate) fn latest_daily_checkpoint(operational_day: String, state: SandState) -> Self {
+        let mut source = format!("latest-daily-v1|{operational_day}|").into_bytes();
+        source.extend(serde_json::to_vec(&state).unwrap_or_default());
+        Self::cumulative_checkpoint(
+            Some(operational_day),
+            stable_source_revision(&source),
+            SedimentSnapshotProvenance::RuntimeAutosave,
+            state,
+        )
+    }
+
     pub fn daily_contribution(
         operational_day: String,
         source_revision: String,
@@ -127,7 +139,7 @@ impl SedimentSnapshot {
         )
     }
 
-    pub(crate) fn is_authentic_day_end_for(&self, operational_day: &str) -> bool {
+    pub(crate) fn is_authentic_daily_visual_for(&self, operational_day: &str) -> bool {
         self.schema_version == Self::VERSION
             && self.kind == SedimentSnapshotKind::CumulativeCheckpoint
             && self.operational_day.as_deref() == Some(operational_day)
@@ -135,6 +147,7 @@ impl SedimentSnapshot {
             && matches!(
                 self.provenance,
                 SedimentSnapshotProvenance::RuntimeCanonical
+                    | SedimentSnapshotProvenance::RuntimeAutosave
                     | SedimentSnapshotProvenance::LegacyDailyRow
             )
     }
@@ -166,7 +179,9 @@ impl SedimentSnapshot {
     pub fn display_label(&self) -> String {
         let kind = match self.kind {
             SedimentSnapshotKind::CumulativeCheckpoint => {
-                if self.operational_day.is_some() && !self.reconstructed {
+                if self.provenance == SedimentSnapshotProvenance::RuntimeAutosave {
+                    "latest saved checkpoint"
+                } else if self.operational_day.is_some() && !self.reconstructed {
                     "day-end checkpoint"
                 } else {
                     "cumulative checkpoint"
@@ -360,7 +375,7 @@ pub(crate) fn select_historical_visual_artifact(
     derived: Option<SedimentSnapshot>,
 ) -> Option<SedimentSnapshot> {
     authentic
-        .filter(|snapshot| snapshot.is_authentic_day_end_for(operational_day))
+        .filter(|snapshot| snapshot.is_authentic_daily_visual_for(operational_day))
         .or(derived)
 }
 
@@ -509,13 +524,32 @@ mod tests {
         let original = state();
         let snapshot =
             SedimentSnapshot::day_end_checkpoint("2026-08-01".to_string(), original.clone());
-        assert!(snapshot.is_authentic_day_end_for("2026-08-01"));
+        assert!(snapshot.is_authentic_daily_visual_for("2026-08-01"));
         assert_eq!(snapshot.state, original);
         assert_eq!(snapshot.state.grid_width, 4);
         assert_eq!(snapshot.state.grid_height, 4);
         assert_eq!(
             snapshot.display_label(),
             "day-end checkpoint · idle included"
+        );
+    }
+
+    #[test]
+    fn latest_daily_checkpoint_preserves_topology_and_labels_its_capture_kind() {
+        let original = state();
+        let snapshot =
+            SedimentSnapshot::latest_daily_checkpoint("2026-08-01".to_string(), original.clone());
+        assert!(snapshot.is_authentic_daily_visual_for("2026-08-01"));
+        assert_eq!(snapshot.state, original);
+        assert_eq!(
+            snapshot.display_label(),
+            "latest saved checkpoint · idle included"
+        );
+        assert!(!snapshot.is_authentic_daily_visual_for("2026-08-02"));
+        let derived = derived_preview_from_slices("2026-08-01", 2, 2, &slices()).unwrap();
+        assert_eq!(
+            select_historical_visual_artifact("2026-08-01", Some(snapshot.clone()), Some(derived),),
+            Some(snapshot)
         );
     }
 

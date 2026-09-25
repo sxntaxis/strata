@@ -82,6 +82,29 @@ impl App {
         {
             return;
         }
+        let day = crate::domain::operational_day_key_now();
+        let day_key = day.format("%Y-%m-%d").to_string();
+        let latest = crate::sand::SedimentSnapshot::latest_daily_checkpoint(
+            day_key.clone(),
+            self.sand_engine.snapshot_state(),
+        );
+        let latest_result = self
+            .sqlite_database_path
+            .as_deref()
+            .ok_or_else(|| "SQLite authority is unavailable".to_string())
+            .and_then(|path| {
+                sqlite::save_tui_latest_day_checkpoint(path, &day_key, &latest, chrono::Utc::now())
+            });
+        if self
+            .record_storage_result_for(
+                PersistenceOperation::DailySnapshotSave,
+                RecoveryAction::FlushCurrentState,
+                latest_result,
+            )
+            .is_none()
+        {
+            return;
+        }
         self.reconcile_all_daily_contributions();
     }
 

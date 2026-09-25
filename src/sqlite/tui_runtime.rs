@@ -2000,7 +2000,7 @@ fn decode_day_end_snapshot(
     payload_json: &str,
 ) -> Result<SedimentSnapshot, String> {
     if let Ok(snapshot) = serde_json::from_str::<SedimentSnapshot>(payload_json) {
-        if snapshot.is_authentic_day_end_for(operational_day) {
+        if snapshot.is_authentic_daily_visual_for(operational_day) {
             return Ok(snapshot);
         }
         return Err(format!(
@@ -2022,7 +2022,9 @@ pub(crate) fn save_day_end_snapshot(
     snapshot: &SedimentSnapshot,
     captured_at_utc: DateTime<Utc>,
 ) -> Result<(), String> {
-    if !snapshot.is_authentic_day_end_for(operational_day) {
+    if !snapshot.is_authentic_daily_visual_for(operational_day)
+        || snapshot.provenance != crate::sand::SedimentSnapshotProvenance::RuntimeCanonical
+    {
         return Err(format!(
             "refusing non-authentic day-end snapshot for {operational_day}"
         ));
@@ -2044,19 +2046,31 @@ pub(crate) fn save_day_end_snapshot(
         .connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|error| error.to_string())?;
-    let existing_payload: Option<String> = transaction
+    let existing: Option<(i64, String)> = transaction
         .query_row(
-            "SELECT payload_json FROM sand_snapshots
+            "SELECT id, payload_json FROM sand_snapshots
              WHERE snapshot_kind = 'daily' AND operational_day = ?1
              ORDER BY id ASC LIMIT 1",
             params![operational_day],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
         .map_err(|error| error.to_string())?;
-    if let Some(existing_payload) = existing_payload {
-        decode_day_end_snapshot(operational_day, &existing_payload)?;
-        return Ok(());
+    if let Some((existing_id, existing_payload)) = existing {
+        let existing = decode_day_end_snapshot(operational_day, &existing_payload)?;
+        if existing.provenance != crate::sand::SedimentSnapshotProvenance::RuntimeAutosave {
+            return Ok(());
+        }
+        transaction
+            .execute(
+                "UPDATE sand_snapshots SET payload_json = ?1, captured_at_utc = ?2
+                 WHERE id = ?3",
+                params![payload_json, timestamp(captured_at_utc), existing_id],
+            )
+            .map_err(|error| error.to_string())?;
+        runtime_coordination::maybe_inject_test_fault("day-end-snapshot", "commit")
+            .map_err(|error| error.to_string())?;
+        return transaction.commit().map_err(|error| error.to_string());
     }
     transaction
         .execute(
@@ -2074,6 +2088,80 @@ pub(crate) fn save_day_end_snapshot(
         )
         .map_err(|error| error.to_string())?;
     runtime_coordination::maybe_inject_test_fault("day-end-snapshot", "commit")
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
+}
+
+pub(crate) fn save_latest_day_checkpoint(
+    database_path: &Path,
+    operational_day: &str,
+    snapshot: &SedimentSnapshot,
+    captured_at_utc: DateTime<Utc>,
+) -> Result<(), String> {
+    if !snapshot.is_authentic_daily_visual_for(operational_day)
+        || snapshot.provenance != crate::sand::SedimentSnapshotProvenance::RuntimeAutosave
+    {
+        return Err(format!(
+            "refusing invalid latest daily checkpoint for {operational_day}"
+        ));
+    }
+    runtime_coordination::maybe_inject_test_fault("latest-day-checkpoint", "before-write")
+        .map_err(|error| error.to_string())?;
+    let mut repository = open_cli_repository(database_path)?;
+    let existing_sand = repository.sand_state().map_err(|error| error.to_string())?;
+    let formation_id = existing_sand
+        .as_ref()
+        .map(|record| record.formation_id.as_str())
+        .unwrap_or("default");
+    let quantum_seconds = existing_sand
+        .as_ref()
+        .map(|record| record.quantum_seconds)
+        .unwrap_or(1);
+    let payload_json = serde_json::to_string(snapshot).map_err(|error| error.to_string())?;
+    let transaction = repository
+        .connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let existing: Option<(i64, String)> = transaction
+        .query_row(
+            "SELECT id, payload_json FROM sand_snapshots
+             WHERE snapshot_kind = 'daily' AND operational_day = ?1
+             ORDER BY id ASC LIMIT 1",
+            params![operational_day],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    if let Some((existing_id, existing_payload)) = existing {
+        let existing = decode_day_end_snapshot(operational_day, &existing_payload)?;
+        if existing.provenance != crate::sand::SedimentSnapshotProvenance::RuntimeAutosave {
+            return Ok(());
+        }
+        transaction
+            .execute(
+                "UPDATE sand_snapshots SET payload_json = ?1, captured_at_utc = ?2
+                 WHERE id = ?3",
+                params![payload_json, timestamp(captured_at_utc), existing_id],
+            )
+            .map_err(|error| error.to_string())?;
+    } else {
+        transaction
+            .execute(
+                "INSERT INTO sand_snapshots (
+                    formation_id, snapshot_kind, operational_day, quantum_seconds,
+                    payload_json, captured_at_utc
+                 ) VALUES (?1, 'daily', ?2, ?3, ?4, ?5)",
+                params![
+                    formation_id,
+                    operational_day,
+                    quantum_seconds,
+                    payload_json,
+                    timestamp(captured_at_utc),
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    runtime_coordination::maybe_inject_test_fault("latest-day-checkpoint", "commit")
         .map_err(|error| error.to_string())?;
     transaction.commit().map_err(|error| error.to_string())
 }
@@ -3341,6 +3429,56 @@ mod clear_all_transaction_tests {
     }
 
     #[test]
+    fn latest_daily_checkpoint_updates_until_boundary_then_day_end_is_immutable() {
+        let path = database_path("latest-daily-checkpoint");
+        let captured_first = DateTime::parse_from_rfc3339("2026-08-01T18:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let captured_later = DateTime::parse_from_rfc3339("2026-08-01T23:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let capture =
+            |state| SedimentSnapshot::latest_daily_checkpoint("2026-08-01".to_string(), state);
+
+        save_latest_day_checkpoint(&path, "2026-08-01", &capture(state(false)), captured_first)
+            .unwrap();
+        let failed_update =
+            runtime_coordination::with_test_fault("latest-day-checkpoint", "commit", "io", || {
+                save_latest_day_checkpoint(
+                    &path,
+                    "2026-08-01",
+                    &capture(state(true)),
+                    captured_later,
+                )
+            });
+        assert!(failed_update.is_err());
+        assert_eq!(
+            load_day_end_snapshot(&path, "2026-08-01").unwrap(),
+            Some(capture(state(false)))
+        );
+        let latest = capture(state(true));
+        save_latest_day_checkpoint(&path, "2026-08-01", &latest, captured_later).unwrap();
+        assert_eq!(
+            load_day_end_snapshot(&path, "2026-08-01").unwrap(),
+            Some(latest)
+        );
+
+        let boundary = DateTime::parse_from_rfc3339("2026-08-02T06:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let final_snapshot =
+            SedimentSnapshot::day_end_checkpoint("2026-08-01".to_string(), state(false));
+        save_day_end_snapshot(&path, "2026-08-01", &final_snapshot, boundary).unwrap();
+        save_latest_day_checkpoint(&path, "2026-08-01", &capture(state(true)), captured_later)
+            .unwrap();
+        assert_eq!(
+            load_day_end_snapshot(&path, "2026-08-01").unwrap(),
+            Some(final_snapshot)
+        );
+        remove_database(&path);
+    }
+
+    #[test]
     fn bare_daily_state_loads_as_legacy_authentic_visual_checkpoint() {
         let path = database_path("legacy-day-end-snapshot");
         let state = SandState {
@@ -3375,7 +3513,7 @@ mod clear_all_transaction_tests {
         let loaded = load_day_end_snapshot(&path, "2026-08-01")
             .unwrap()
             .expect("legacy day-end state should load");
-        assert!(loaded.is_authentic_day_end_for("2026-08-01"));
+        assert!(loaded.is_authentic_daily_visual_for("2026-08-01"));
         assert_eq!(loaded.state, state);
         assert_eq!(
             loaded.provenance,

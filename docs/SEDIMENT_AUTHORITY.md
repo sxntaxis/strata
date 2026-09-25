@@ -158,24 +158,24 @@ Accepted kinds are:
 
 These kinds are not interchangeable. Historical bare daily payloads are cumulative artifacts, not daily contributions.
 
-## Authentic day-end visual memory
+## Daily visual memory and crash custody
 
-Balance historical background is visual memory, not a synthetic chart. While the live simulation crosses an operational-day cutoff, Strata captures the exact cumulative canonical `SandState` after processing events due through that boundary. For a fixed 06:00 day start, the artifact for a day is therefore the canonical canvas photo taken at the following 06:00 cutoff.
+Balance historical background is visual memory, not a synthetic chart. While Strata is running, each autosave publishes the exact cumulative canonical `SandState` for the current operational day as its latest available visual checkpoint. The checkpoint preserves exact grain coordinates, category identity, pending mass, frame/sweep/RNG metadata, and canonical grid dimensions; SQLite retains its capture timestamp.
 
-The day-end artifact is first-write-wins evidence:
+When live simulation crosses an operational-day cutoff, Strata captures the exact canonical `SandState` after processing events due through that boundary and promotes it to the final day-end checkpoint. For a fixed 06:00 day start, this is the canvas at the following 06:00 cutoff. A final day-end checkpoint is immutable; earlier autosave checkpoints for that day may be replaced by newer autosave captures until the boundary is observed.
 
-- it preserves exact grain coordinates, category identity, pending mass, frame/sweep/RNG metadata, and canonical grid dimensions;
-- later terminal resize, ledger reconciliation, report viewing, or category/session editing does not rewrite it;
-- each operational day may therefore own a different canonical canvas size;
-- `snapshot_kind = 'daily'` stores this cumulative visual checkpoint, while `daily-contribution` remains a separate accounting artifact.
+- `snapshot_kind = 'daily'` stores the latest canonical visual checkpoint, then the final day-end checkpoint when the cutoff is observed;
+- `daily-contribution` remains separate ledger-derived accounting evidence;
+- terminal resize, ledger reconciliation, report viewing, or category/session editing never rewrites a stored canonical photo;
+- each operational day may own a different canonical canvas size.
 
-If Strata did not observe a boundary through the ordinary live simulation path—for example because it was closed, detached through the cutoff, or bounded recovery deliberately skipped historical physics—it does not fabricate an authentic photo. Balance may then show a `DerivedPreview`, explicitly marked reconstructed.
+If Strata is not running at the cutoff, historical Balance uses the most recent canonical checkpoint already saved for that day, explicitly labeled `latest saved checkpoint`; it does not substitute a ledger-derived preview when such a checkpoint exists. A `DerivedPreview` is used only when no authentic canonical checkpoint exists for the day, and remains explicitly marked reconstructed.
 
 ## Immutable historical viewing
 
 Historical viewing is projection-only:
 
-- Balance prefers the authentic day-end checkpoint for the selected interval end day;
+- Balance prefers the latest canonical visual checkpoint for the selected interval end day, including an authentic day-end capture or the last autosaved capture when the cutoff was missed;
 - the snapshot envelope and `SandState` remain immutable;
 - rendering restores a clone into a fresh viewport engine;
 - a smaller current viewport crops the historical canvas around horizontal center and bottom baseline;
@@ -186,7 +186,7 @@ Historical viewing is projection-only:
 - the report UI exposes kind, reconstruction status, and idle policy;
 - viewing never writes or deletes persistence.
 
-Day, week, and month Balance use the visual artifact for the selected interval's end day. The numerical report rows remain ledger-derived for the selected period. If no authentic photo exists, an in-memory `DerivedPreview` is the visual fallback and never becomes authority merely by being viewed.
+Day, week, and month Balance use the visual artifact for the selected interval's end day. The numerical report rows remain ledger-derived for the selected period. If no canonical photo exists for that day, an in-memory `DerivedPreview` is the visual fallback and never becomes authority merely by being viewed.
 
 ## Authoritative daily contributions
 
@@ -201,7 +201,7 @@ The builder:
 - is independent of terminal and canonical-canvas dimensions;
 - calculates a source revision from day, quantum, idle policy, category identity, elapsed seconds, slice endpoints, and session identity.
 
-Description text and canvas dimensions are deliberately absent from the contribution revision because neither changes sediment mass or chronology. Consequently, resizing or clearing the visual canvas today cannot make an old accounting contribution stale. Persisted contribution reconciliation remains ledger-driven and separate from the immutable day-end visual artifact.
+Description text and canvas dimensions are deliberately absent from the contribution revision because neither changes sediment mass or chronology. Consequently, resizing or clearing the visual canvas today cannot make an old accounting contribution stale. Persisted contribution reconciliation remains ledger-driven and separate from immutable canonical daily visual artifacts.
 
 ## Historical correction and retained current sediment
 
@@ -218,7 +218,7 @@ When a historical assignment changes already-classified canonical seconds from o
 
 The resulting current `SandState`, runtime checkpoint, canonical history rewrite, and affected `DailyContribution` rows publish coherently in one SQLite transaction. The application installs that exact committed `SandState` after the receipt returns. This operation adds no per-grain timestamp or session identity.
 
-Authentic first-write day-end `daily` checkpoints remain immutable visual evidence and are never recolored by later history correction. Ledger-derived `DailyContribution` and in-memory `DerivedPreview` continue to reflect corrected chronology under their existing authority.
+Canonical `daily` checkpoints remain immutable visual evidence after capture and are never recolored by later history correction. The current day's latest autosave checkpoint may be replaced only by a newer canonical autosave or promoted to its final day-end capture. Ledger-derived `DailyContribution` and in-memory `DerivedPreview` continue to reflect corrected chronology under their existing authority.
 
 ## Mutation and recovery reconciliation
 
@@ -231,7 +231,7 @@ Daily contribution reconciliation occurs at autosave, full-state flush, checkpoi
 
 ## Historical evidence disposition
 
-The current SQLite schema already distinguishes `daily` from `daily-contribution`. `daily` is cumulative visual evidence; `daily-contribution` is ledger-derived accounting evidence. New authentic day-end captures use `daily` with a typed `CumulativeCheckpoint` envelope and are never overwritten by later reconciliation.
+The current SQLite schema already distinguishes `daily` from `daily-contribution`. `daily` is cumulative visual evidence; `daily-contribution` is ledger-derived accounting evidence. Latest autosave and final day-end captures use `daily` with a typed `CumulativeCheckpoint` envelope. The autosave row advances until a final day-end capture freezes that day's visual evidence; daily-contribution reconciliation never overwrites it.
 
 A historical bare `daily` payload that is a valid `SandState` remains cumulative visual evidence and is wrapped as `LegacyDailyRow` when viewed. It is never reinterpreted as a daily contribution. Portable exports preserve both artifact classes but are not runtime authority.
 
