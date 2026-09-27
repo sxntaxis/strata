@@ -56,8 +56,7 @@ pub(super) fn responsive_content_rect(
         .unwrap_or(0);
 
     let vertical = if vertical_padding {
-        (area.height.saturating_sub(minimum_content_height) / 2)
-            .min(MAX_VERTICAL_CONTENT_INSET)
+        (area.height.saturating_sub(minimum_content_height) / 2).min(MAX_VERTICAL_CONTENT_INSET)
     } else {
         0
     };

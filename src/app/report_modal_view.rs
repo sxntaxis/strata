@@ -61,7 +61,9 @@ impl App {
             });
 
         let summary_content_width = preferred_inner_width
-            .max(usize::from(balance_instrument::preferred_summary_inner_width()))
+            .max(usize::from(
+                balance_instrument::preferred_summary_inner_width(),
+            ))
             .min(u16::MAX as usize) as u16;
         let summary_content_height =
             balance_instrument::preferred_summary_inner_height(body_row_count);

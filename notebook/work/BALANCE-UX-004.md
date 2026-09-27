@@ -39,6 +39,13 @@ Layer/Strata uses the same horizontal inset and may consume spare height as one 
 
 Balance keeps the totals, meter, and category rows responsive across the available inset width; it does **not** adopt a fixed-width centered information card. Its vertical rhythm remains compact inside groups while explicitly preserving breathing rows around groups: one row before the instrument, one between meter and category list, and one reserved below the list when height permits. Those rows collapse before content on constrained terminals.
 
+## Local verification facts — 2026-09-27
+
+- Formatter, strict Clippy, all-feature tests (542 unit + 24 integration; 20 ignored), and CLI help smoke pass.
+- An isolated debug TUI profile with the `testingcheats fill` fixture was exercised at 200×60, 80×24, and 40×14. Balance and Layer stayed centered and readable; roomy panes showed the responsive inset, while the constrained pane collapsed it and retained visible rows.
+- The command palette remained reachable at 40×14 and opened Layer; the TUI exited normally and the profile passed `sqlite-doctor`.
+- `docs/INTERACTION_AUTHORITY.md` records the accepted visual contract. SEDIMENT-016's separate exact persisted-mass/restart promotion proof remains open.
+
 ## Non-goals
 
 This unit does not change:

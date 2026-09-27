@@ -5,13 +5,13 @@ state: active
 created: 2026-08-01
 updated: 2026-09-27
 authority: working
-summary: "BALANCE-UX-004 is the active presentation slice on top of the owner-accepted SEDIMENT-016 visual candidate; responsive interior modal spacing is under test while SEDIMENT-016 still awaits its exact resize/restart mass promotion proof."
-next: Validate BALANCE-UX-004 at wide, normal, and constrained terminal sizes; separately close SEDIMENT-016 exact persisted-mass/restart proof before promoting its resize doctrine.
+summary: "BALANCE-UX-004 responsive interior spacing passed isolated wide, normal, and constrained TUI checks; SEDIMENT-016 visual behavior is owner-accepted while its exact resize/restart mass proof remains open."
+next: Close SEDIMENT-016 exact persisted-mass comparison across resize and restart, then explicitly promote or revise the accepted resize doctrine.
 ---
 
 ## BALANCE-UX-004 responsive modal inset — 2026-09-27
 
-**OWNER-AUTHORIZED CANDIDATE:** keep the existing responsive modal geometry, add surplus-driven 1/2/4/6-cell horizontal content inset, give Layer up to two rows of vertical inset when spare height exists, and make Balance's group breathing explicit without converting it into a fixed-width centered content card. Settings, Command Palette, range gestures, report semantics, and sediment are out of scope. See `notebook/work/BALANCE-UX-004.md`.
+**TUI-VERIFIED PRESENTATION SLICE:** keep the existing responsive modal geometry, add surplus-driven 1/2/4/6-cell horizontal content inset, give Layer up to two rows of vertical inset when spare height exists, and make Balance's group breathing explicit without converting it into a fixed-width centered content card. Isolated screens at 200×60, 80×24, and 40×14 passed, as did the command-palette route and post-exit SQLite doctor. Settings, range gestures, report semantics, and sediment are unchanged. See `notebook/work/BALANCE-UX-004.md`.
 
 ## SEDIMENT-016 vertical physics corridor — 2026-09-27
 
