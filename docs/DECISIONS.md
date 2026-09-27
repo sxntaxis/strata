@@ -78,6 +78,7 @@ Detailed rationale and unresolved implications live in `notebook/decisions/DECIS
 
 | STRATA-D067 | Historical daily visual memory uses the latest persisted canonical sand checkpoint for that operational day. Autosave checkpoints advance until the observed day boundary promotes the exact boundary state to an immutable day-end checkpoint; if Strata is off at the boundary, the latest available canonical checkpoint remains the day's visual artifact. Ledger-derived previews are fallback only when no canonical photo exists. | implemented and certified |
 | STRATA-D068 | The known SandState v6 provenance-prototype payload is a compatibility input to current v5. Restore ignores its unsupported temporal provenance annotations while preserving canonical topology, category identity, pending mass, and Classic continuation; subsequent canonical writes use v5. Other unsupported versions still fail closed. | implemented and certified |
+| STRATA-D069 | Balance's default summary is a bipolar presentation instrument: signed totals derive from existing report rows, net uses the authoritative summary total, and its meter normalizes over positive plus absolute negative balance time with exact center at zero polarized time. The selected interval remains navigable in the bottom border; report rows, presets, edits, and action routing retain their existing semantics. | implemented; UX-CONTRAST-001 shared contrast authority required |
 
 ## Explicitly unresolved
 

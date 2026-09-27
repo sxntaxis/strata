@@ -1,7 +1,7 @@
 ---
 id: BALANCE-UX-001
 kind: work
-state: active
+state: completed
 authority: working
 created: 2026-09-27
 updated: 2026-09-27
@@ -91,6 +91,8 @@ Existing keyboard authority is unchanged: `d/t`, `w`, `m`, `r`, `l`, left/right,
 
 This unit does not redesign category detail/log view, range editing, historical activity editing, collision confirmation, report arithmetic, temporal boundaries, persistence, theme schema, category semantics, or sand physics. Those surfaces retain current safety guidance until separately reviewed.
 
-## Candidate status
+## Result
 
-The code candidate is intended for owner runtime review before promotion into accepted interaction documentation. ChatGPT's execution environment does not provide the Rust toolchain, so native formatter/Clippy/test certification must be performed locally before this work can be marked complete.
+The instrument is implemented on the contrast-authority branch lineage. It retains the domain's authoritative net, derives polarized sides from existing category rows, and renders a symmetric bipolar meter with responsive Ratatui layout. The only visible interaction change is the default summary hierarchy and interval control placement; detail/edit/history behavior remains as before.
+
+Native verification passes `cargo fmt --all -- --check`, strict Clippy, `cargo test --all-features` (519 unit and 24 integration tests; 20 ignored), `cargo run -- --help`, and `git diff --check`. A PTY smoke on disposable profile `/mnt/Tokyo/Lab/.tmp/opencode/strata-contrast-001-smoke` opened Balance with Idle selected and observed black foreground on the white selection; navigating Balance exercised black and white contrast choices; Layer, Settings, and Command Palette selected views rendered and exited normally. No render-unit scaffold was needed because the contrast resolver tests plus this direct screen-output proof covered the selected-idle regression.

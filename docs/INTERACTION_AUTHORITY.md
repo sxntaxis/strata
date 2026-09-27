@@ -165,16 +165,17 @@ The current HISTORY-001D editor does not expose a historical Tag field. Newly in
 use an empty description instead of borrowing the current live tag. If the active generation is rebased, its
 persisted live description is preserved.
 
-### Balance footer hardening
+### Balance summary instrument
 
-Daily-use proof showed that the original Balance bottom border exposed too many simultaneous implementation hints: current-sediment status, period choices, a bare `l`, and editor controls could all compete on one line. PLATEAU-001H therefore makes the footer contextual rather than encyclopedic.
+The default Balance summary presents a bipolar instrument above the unchanged category rows:
 
-- The default summary keeps the period choices centered and exposes the retroactive action as a legible key hint plus **Log past** rather than a bare letter or the ambiguous phrase `log activity`.
-- The non-informative `live sediment` status is omitted for the current live interval; historical sediment provenance remains visible when Balance is actually showing a historical artifact.
-- Detail and edit modes show only controls relevant to that mode. Period selectors are not repeated while a detail/editor owns the footer.
-- The user-facing action name is **Log past activity…**; the stable configuration/API action remains `balance_log_activity`.
+- The left total sums negative `balance_seconds`, the centered value is the authoritative report net, and the right total sums positive `balance_seconds`.
+- The meter normalizes net displacement over polarized time only. Idle remains a normal row and contributes zero to both signed sides. With no polarized time, the marker rests at the center; all-negative/all-positive inputs reach the respective usable meter ends.
+- The instrument uses responsive Ratatui geometry, with independently aligned totals and a meter sharing one exact centered width. Narrow terminals degrade to a centered net and bounded meter without overlap.
+- The selected report interval is the centered bottom-border object with left/right navigation chevrons. Visible Day/Week/Month/Range labels, side-border arrows, and ordinary action hints are removed from the default summary; configured actions remain reachable through their existing routes, Settings, and the command palette.
+- Historical visual provenance remains visible when Balance displays a historical artifact. Detail, range-edit, activity-edit, and collision-confirmation modes keep their existing interaction guidance.
 
-This is presentation hardening only. It does not alter historical-assignment semantics, collision confirmation, keymap authority, or command-palette reachability.
+This is presentation-only. Report arithmetic, interval semantics, historical-assignment behavior, collision confirmation, keymap authority, and command-palette reachability remain unchanged.
 
 ## Settings and palette truth
 

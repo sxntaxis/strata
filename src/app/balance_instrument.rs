@@ -97,11 +97,7 @@ fn instrument_width(available: u16) -> u16 {
     }
 
     if cap >= 5 {
-        if cap % 2 == 0 {
-            cap - 1
-        } else {
-            cap
-        }
+        if cap.is_multiple_of(2) { cap - 1 } else { cap }
     } else {
         cap
     }
@@ -217,7 +213,7 @@ impl App {
             self.theme_status(),
         ));
 
-        if width >= MIN_THREE_COLUMN_WIDTH && width % 3 == 0 {
+        if width >= MIN_THREE_COLUMN_WIDTH && width.is_multiple_of(3) {
             let columns = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([
@@ -294,7 +290,7 @@ mod tests {
     use crate::domain::{BalanceReportEntry, BalanceReportSummary, CategoryId, DRIFT_CATEGORY_ID};
 
     use super::{
-        MIN_THREE_COLUMN_WIDTH, InstrumentTotals, MeterRole, format_negative_total,
+        InstrumentTotals, MIN_THREE_COLUMN_WIDTH, MeterRole, format_negative_total,
         format_net_total, format_positive_total, instrument_totals, instrument_width, meter_cells,
     };
 
@@ -431,9 +427,11 @@ mod tests {
             .iter()
             .position(|cell| cell.role == MeterRole::DotNegative)
             .expect("negative dot");
-        assert!(negative[negative_dot + 1..center]
-            .iter()
-            .all(|cell| cell.glyph == '━' && cell.role == MeterRole::Negative));
+        assert!(
+            negative[negative_dot + 1..center]
+                .iter()
+                .all(|cell| cell.glyph == '━' && cell.role == MeterRole::Negative)
+        );
 
         let positive = meter_cells(width, totals(-25, 75));
         assert_eq!(positive[0].glyph, '└');
@@ -443,8 +441,10 @@ mod tests {
             .iter()
             .position(|cell| cell.role == MeterRole::DotPositive)
             .expect("positive dot");
-        assert!(positive[center + 1..positive_dot]
-            .iter()
-            .all(|cell| cell.glyph == '━' && cell.role == MeterRole::Positive));
+        assert!(
+            positive[center + 1..positive_dot]
+                .iter()
+                .all(|cell| cell.glyph == '━' && cell.role == MeterRole::Positive)
+        );
     }
 }
