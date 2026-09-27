@@ -3290,7 +3290,10 @@ mod tests {
         let physics = engine.surface.physics_bounds().expect("physics corridor");
         let x = (physics.x_start + physics.x_end) / 2;
         let y = 1;
-        assert_eq!((physics.x_start, physics.x_end), (viewport.x_start, viewport.x_end));
+        assert_eq!(
+            (physics.x_start, physics.x_end),
+            (viewport.x_start, viewport.x_end)
+        );
         assert_eq!(physics.y_start, 0);
         assert!(y < viewport.y_start);
 

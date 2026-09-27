@@ -2216,7 +2216,10 @@ mod tests {
         let viewport = engine.viewport_bounds().expect("visible viewport");
         let physics = engine.physics_bounds().expect("physics corridor");
 
-        assert_eq!((physics.x_start, physics.x_end), (viewport.x_start, viewport.x_end));
+        assert_eq!(
+            (physics.x_start, physics.x_end),
+            (viewport.x_start, viewport.x_end)
+        );
         assert_eq!(physics.y_start, 0);
         assert_eq!(physics.y_end, engine.grid_height_dots);
         assert!(viewport.y_start > physics.y_start);

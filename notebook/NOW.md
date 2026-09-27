@@ -3,11 +3,15 @@ id: NOW-001
 kind: status
 state: active
 created: 2026-08-01
-updated: 2026-09-25
+updated: 2026-09-27
 authority: working
-summary: "RECOVERY-003 is published and installed at main `2031edf`; the known v6 profile shape starts on a disposable copy and retains canonical topology and Classic state."
-next: Verify the real profile's first startup on installed main writes canonical SandState v5, then resume SEDIMENT-007 from its bounded work record.
+summary: "SEDIMENT-016 is the active owner-authorized vertical physics corridor experiment; machine gates and isolated resize/CPU checks pass while accepted viewport-bounded resize doctrine remains unchanged."
+next: Complete owner visual review of live, resize, historical-preview, restart/mass, and tall-canvas behavior; then explicitly promote or reject SEDIMENT-016 before another resize/physics unit.
 ---
+
+## SEDIMENT-016 vertical physics corridor — 2026-09-27
+
+**EXPERIMENTAL CANDIDATE / OWNER REVIEW REMAINS:** isolated PTY checks covered height and width changes, repeated resize oscillation, a prior-day Balance view, and a 320-dot canonical height viewed in a 10×80 pane (4.0% of one CPU core over five seconds). The historical fixture was settled, so no visible-motion claim is made. Formatting, strict Clippy, all tests, and CLI help pass. Exact persistent mass comparison across resize/restart, broader normal-live visual review, and owner qualitative acceptance remain open. `docs/SEDIMENT_AUTHORITY.md` remains unchanged. See `notebook/work/SEDIMENT-016-VERTICAL-PHYSICS-CORRIDOR.md`.
 
 ## RAIN-005 production cutover correction — 2026-09-10
 

@@ -5,7 +5,7 @@ state: candidate
 authority: working
 created: 2026-09-27
 updated: 2026-09-27
-summary: Test one simpler resize invariant: visible side edges remain physical walls, while terminal height becomes a render crop and already-placed sediment above it keeps settling through the canonical vertical corridor.
+summary: "Test one simpler resize invariant: visible side edges remain physical walls, while terminal height becomes a render crop and already-placed sediment above it keeps settling through the canonical vertical corridor."
 ---
 
 # SEDIMENT-016 — vertical physics corridor experiment
@@ -59,6 +59,16 @@ Before promotion, test at least:
 7. CPU behavior after a very tall canonical canvas is later viewed in a short pane.
 
 If this single invariant produces a new unintuitive edge case, reject the candidate rather than layering compensating special cases on top.
+
+## Local validation facts — 2026-09-27
+
+- Formatter, strict Clippy, all-feature tests (539 unit + 24 integration; 20 ignored), and CLI help smoke pass.
+- An isolated debug profile was filled, resized vertically between 24, 10, and 160 terminal rows, resized horizontally between 80 and 40 columns, and oscillated seven times. Height growth/shrink and width crop/re-expansion completed without a runtime error.
+- With a canonical canvas of at least 320 dot rows while viewing a 10×80 pane, a five-second process sample measured 4.0% of one CPU core and about 14.1 MiB RSS.
+- A separate historical Balance profile opened a prior day and completed four 40×10/80×24 resize oscillations without a runtime error. That saved artifact appeared settled in this capture, so this confirms the route/resizing but not visible grain motion.
+- Both disposable profiles passed `sqlite-doctor` after normal exit; the fresh profile also reopened with no active session.
+
+Exact persistent mass comparison across a resize-and-restart cycle, broader normal-live visual use, and owner qualitative acceptance remain open gates. The accepted resize doctrine has not been changed.
 
 ## Promotion boundary
 
