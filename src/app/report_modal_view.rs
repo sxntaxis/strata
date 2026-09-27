@@ -2,7 +2,7 @@ use chrono::NaiveDate;
 use ratatui::prelude::{Line, Span};
 use ratatui::{
     Frame,
-    layout::{Alignment, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
     widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
 };
@@ -56,6 +56,9 @@ impl App {
         } else {
             Some(self.report_selected_index.min(summary.entries.len() - 1))
         };
+        let default_summary = self.report_logs_category_id.is_none()
+            && self.historical_activity_edit.is_none()
+            && self.report_range_edit.is_none();
         let interval_label = ui_helpers::format_report_interval_label(&summary.date);
 
         let border_color = if let Some(category_id) = self.report_logs_category_id {
@@ -68,7 +71,7 @@ impl App {
         };
 
         let interval_title = Line::from(Span::styled(
-            interval_label,
+            interval_label.clone(),
             Style::default().fg(self.theme_foreground()),
         ))
         .alignment(Alignment::Left);
@@ -92,35 +95,20 @@ impl App {
         ))
         .alignment(Alignment::Right);
 
-        let custom_range_active = self.report_range_is_custom() || self.report_range_edit.is_some();
+        let newer_chevron_style = if self.can_shift_report_interval_newer() {
+            Style::default().fg(self.theme_status())
+        } else {
+            Style::default()
+                .fg(self.theme_status())
+                .add_modifier(Modifier::DIM)
+        };
         let period_bottom_title = Line::from(vec![
-            view_style::report_period_label_span(
-                "Day",
-                !custom_range_active && self.report_period == ReportPeriod::Today,
-                self.theme_foreground(),
-                self.theme_status(),
+            Span::styled("< ", Style::default().fg(self.theme_status())),
+            Span::styled(
+                interval_label.clone(),
+                Style::default().fg(self.theme_foreground()),
             ),
-            Span::styled("  ", Style::default().fg(self.theme_status())),
-            view_style::report_period_label_span(
-                "Week",
-                !custom_range_active && self.report_period == ReportPeriod::Week,
-                self.theme_foreground(),
-                self.theme_status(),
-            ),
-            Span::styled("  ", Style::default().fg(self.theme_status())),
-            view_style::report_period_label_span(
-                "Month",
-                !custom_range_active && self.report_period == ReportPeriod::Month,
-                self.theme_foreground(),
-                self.theme_status(),
-            ),
-            Span::styled("  ", Style::default().fg(self.theme_status())),
-            view_style::report_period_label_span(
-                "Range",
-                custom_range_active,
-                self.theme_foreground(),
-                self.theme_status(),
-            ),
+            Span::styled(" >", newer_chevron_style),
         ])
         .alignment(Alignment::Center);
         let snapshot_bottom_title = self.should_use_report_snapshot().then(|| {
@@ -285,30 +273,27 @@ impl App {
                 .alignment(Alignment::Right),
             )
         } else {
-            self.keymap
-                .keys_for_action(Action::LogActivity)
-                .first()
-                .map(|key| {
-                    Line::from(Span::styled(
-                        format!("{} Log past", balance_key_hint(key)),
-                        Style::default().fg(self.theme_status()),
-                    ))
-                    .alignment(Alignment::Right)
-                })
+            None
         };
 
-        let mut frame_block = Block::default()
-            .style(Style::default().bg(self.theme_background()))
-            .title(interval_title)
-            .title(center_title)
-            .title(total_title)
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(border_color));
+        let mut frame_block = if default_summary {
+            Block::default()
+                .style(Style::default().bg(self.theme_background()))
+                .title(center_title)
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(self.theme_border()))
+        } else {
+            Block::default()
+                .style(Style::default().bg(self.theme_background()))
+                .title(interval_title)
+                .title(center_title)
+                .title(total_title)
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(border_color))
+        };
 
-        let default_summary = self.report_logs_category_id.is_none()
-            && self.historical_activity_edit.is_none()
-            && self.report_range_edit.is_none();
         if default_summary {
             if let Some(snapshot_bottom_title) = snapshot_bottom_title {
                 frame_block = frame_block.title_bottom(snapshot_bottom_title);
@@ -321,7 +306,9 @@ impl App {
 
         f.render_widget(ratatui::widgets::Clear, modal_rect);
         f.render_widget(frame_block.clone(), modal_rect);
-        self.render_report_navigation_arrows(f, modal_rect);
+        if !default_summary {
+            self.render_report_navigation_arrows(f, modal_rect);
+        }
 
         let list_area = frame_block.inner(modal_rect);
 
@@ -333,6 +320,13 @@ impl App {
                 logs_for_view.as_deref().unwrap_or(&empty_logs),
                 category_id,
                 border_color,
+            );
+        } else if default_summary {
+            self.render_report_summary_with_instrument(
+                f,
+                list_area,
+                &summary,
+                selected_summary_index,
             );
         } else {
             self.render_report_summary_view(f, list_area, &summary, selected_summary_index);
@@ -566,6 +560,46 @@ impl App {
         };
 
         f.render_stateful_widget(list, list_area, &mut list_state);
+    }
+
+    fn render_report_summary_with_instrument(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        summary: &BalanceReportSummary,
+        selected_summary_index: Option<usize>,
+    ) {
+        let (totals_area, meter_area, list_area) = if area.height >= 5 {
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Min(0),
+                ])
+                .split(area);
+            (Some(rows[1]), Some(rows[2]), rows[4])
+        } else if area.height >= 3 {
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Min(0),
+                ])
+                .split(area);
+            (Some(rows[0]), Some(rows[1]), rows[2])
+        } else {
+            (None, None, area)
+        };
+
+        if let (Some(totals_area), Some(meter_area)) = (totals_area, meter_area) {
+            self.render_balance_instrument(f, totals_area, meter_area, summary);
+        }
+
+        self.render_report_summary_view(f, list_area, summary, selected_summary_index);
     }
 
     fn render_report_summary_view(

@@ -27,6 +27,7 @@ use crate::{
     sqlite, storage, temporal,
 };
 
+mod balance_instrument;
 mod category_modal_view;
 mod category_state;
 mod command_palette_view;
