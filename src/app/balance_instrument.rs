@@ -11,6 +11,8 @@ use crate::domain::BalanceReportSummary;
 use super::{App, view_style};
 
 const PREFERRED_WIDTH: u16 = 45;
+const INSTRUMENT_SIDE_PADDING: u16 = 2;
+const SUMMARY_VERTICAL_CHROME_ROWS: u16 = 5;
 const MIN_THREE_COLUMN_WIDTH: u16 = 27;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,6 +86,16 @@ fn format_net_total(seconds: isize) -> String {
     } else {
         format_hms_magnitude(seconds)
     }
+}
+
+pub(super) fn preferred_summary_inner_width() -> u16 {
+    PREFERRED_WIDTH.saturating_add(INSTRUMENT_SIDE_PADDING)
+}
+
+pub(super) fn preferred_summary_inner_height(row_count: usize, show_provenance: bool) -> u16 {
+    let rows = row_count.min(u16::MAX as usize) as u16;
+    rows.saturating_add(SUMMARY_VERTICAL_CHROME_ROWS)
+        .saturating_add(u16::from(show_provenance))
 }
 
 fn instrument_width(available: u16) -> u16 {
@@ -272,7 +284,7 @@ impl App {
                     MeterRole::Positive | MeterRole::DotPositive => {
                         Style::default().fg(self.theme_success())
                     }
-                    MeterRole::Equilibrium => Style::default().fg(self.theme_foreground()),
+                    MeterRole::Equilibrium => inactive_style,
                     MeterRole::DotNeutral => Style::default().fg(self.theme_status()),
                 };
                 Span::styled(cell.glyph.to_string(), style)
@@ -292,6 +304,7 @@ mod tests {
     use super::{
         InstrumentTotals, MIN_THREE_COLUMN_WIDTH, MeterRole, format_negative_total,
         format_net_total, format_positive_total, instrument_totals, instrument_width, meter_cells,
+        preferred_summary_inner_height, preferred_summary_inner_width,
     };
 
     fn entry(
@@ -309,6 +322,13 @@ mod tests {
             balance_effect,
             balance_seconds,
         }
+    }
+
+    #[test]
+    fn preferred_summary_geometry_reserves_instrument_spacing_and_content_height() {
+        assert_eq!(preferred_summary_inner_width(), 47);
+        assert_eq!(preferred_summary_inner_height(8, false), 13);
+        assert_eq!(preferred_summary_inner_height(8, true), 14);
     }
 
     fn totals(negative: isize, positive: isize) -> InstrumentTotals {
