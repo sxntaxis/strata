@@ -370,6 +370,8 @@ impl SandEngine {
         }
     }
 
+    /// Current terminal projection and live-ingress basin. Gravity uses
+    /// `physics_bounds` so terminal height does not freeze canonical sand above it.
     fn viewport_bounds(&self) -> Option<ViewportBounds> {
         let grid_height = self.grid.len();
         let grid_width = self.grid.first().map_or(0, Vec::len);
@@ -387,6 +389,26 @@ impl SandEngine {
             x_end: x_start + visible_width,
             y_start,
             y_end: y_start + visible_height,
+        })
+    }
+
+    /// Active physics corridor: current visible width with closed side walls,
+    /// but the full canonical vertical extent. Terminal height is therefore a
+    /// render crop rather than a ceiling for already-placed sediment.
+    fn physics_bounds(&self) -> Option<ViewportBounds> {
+        let grid_height = self.grid.len();
+        let grid_width = self.grid.first().map_or(0, Vec::len);
+        let active_width =
+            grid_width.min((self.cell_width as usize).saturating_mul(SAND_ENGINE.dot_width));
+        if active_width == 0 || grid_height == 0 {
+            return None;
+        }
+        let x_start = grid_width.saturating_sub(active_width) / 2;
+        Some(ViewportBounds {
+            x_start,
+            x_end: x_start + active_width,
+            y_start: 0,
+            y_end: grid_height,
         })
     }
 
@@ -880,7 +902,7 @@ impl SandEngine {
             self.last_mobilized_vertical_moves = 0;
             self.last_mobilized_diagonal_moves = 0;
         }
-        let Some(bounds) = self.viewport_bounds() else {
+        let Some(bounds) = self.physics_bounds() else {
             return;
         };
         if bounds.y_end.saturating_sub(bounds.y_start) < 2 {
@@ -2186,7 +2208,41 @@ mod tests {
     }
 
     #[test]
-    fn hidden_grains_freeze_and_fall_after_reexpansion() {
+    fn physics_corridor_keeps_side_walls_but_opens_the_canonical_top() {
+        let mut engine = SandEngine::new(8, 4);
+        engine.resize(12, 6);
+        engine.resize(4, 2);
+
+        let viewport = engine.viewport_bounds().expect("visible viewport");
+        let physics = engine.physics_bounds().expect("physics corridor");
+
+        assert_eq!((physics.x_start, physics.x_end), (viewport.x_start, viewport.x_end));
+        assert_eq!(physics.y_start, 0);
+        assert_eq!(physics.y_end, engine.grid_height_dots);
+        assert!(viewport.y_start > physics.y_start);
+    }
+
+    #[test]
+    fn vertically_hidden_grain_keeps_falling_inside_active_width() {
+        let mut engine = SandEngine::new(8, 4);
+        engine.resize(8, 8);
+        engine.resize(8, 2);
+        let viewport = engine.viewport_bounds().expect("visible viewport");
+        let x = (viewport.x_start + viewport.x_end) / 2;
+        let y = 1;
+        assert!(y < viewport.y_start);
+        engine.grid[y][x] = Some(CategoryId::new(1));
+        engine.grain_count = 1;
+
+        engine.update();
+        engine.update();
+
+        assert_eq!(engine.grid[y][x], None);
+        assert_eq!(engine.grid[y + 1][x], Some(CategoryId::new(1)));
+    }
+
+    #[test]
+    fn horizontally_hidden_grains_freeze_and_fall_after_reexpansion() {
         let mut engine = SandEngine::new(8, 4);
         engine.resize(12, 6);
         let x = 4;

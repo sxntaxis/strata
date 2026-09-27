@@ -1672,7 +1672,7 @@ impl ClassicSandboxEngine {
     }
 
     fn apply_gravity_optimized(&mut self) {
-        let Some(bounds) = self.surface.viewport_bounds() else {
+        let Some(bounds) = self.surface.physics_bounds() else {
             return;
         };
         if bounds.y_end.saturating_sub(bounds.y_start) < 2 {
@@ -1764,7 +1764,7 @@ impl ClassicSandboxEngine {
 
     #[cfg(test)]
     fn apply_gravity_reference(&mut self, use_grounded_index: bool) {
-        let Some(bounds) = self.surface.viewport_bounds() else {
+        let Some(bounds) = self.surface.physics_bounds() else {
             return;
         };
         if bounds.y_end.saturating_sub(bounds.y_start) < 2 {
@@ -2475,7 +2475,7 @@ impl ClassicSandboxEngine {
     }
 
     fn supported_column_height(&self, x: usize) -> usize {
-        let Some(bounds) = self.surface.viewport_bounds() else {
+        let Some(bounds) = self.surface.physics_bounds() else {
             return 0;
         };
         if x < bounds.x_start || x >= bounds.x_end {
@@ -3235,7 +3235,7 @@ mod tests {
     }
 
     #[test]
-    fn classic_shrink_freezes_hidden_canonical_terrain_and_reexpand_restores_it() {
+    fn classic_width_shrink_freezes_horizontally_hidden_terrain_and_reexpand_restores_it() {
         let mut engine = ClassicSandboxEngine::new(20, 8, 7, ClassicRainMode::Uniform);
         let bounds = engine.surface.viewport_bounds().expect("visible basin");
         let hidden_x = bounds.x_start;
@@ -3254,6 +3254,54 @@ mod tests {
 
         engine.resize(20, 8);
         assert_eq!(engine.surface.grid[floor][hidden_x], Some(CategoryId(1)));
+    }
+
+    #[test]
+    fn classic_height_shrink_keeps_new_ingress_on_the_visible_top() {
+        let mut engine = ClassicSandboxEngine::new(8, 4, 16, ClassicRainMode::Uniform);
+        engine.resize(8, 8);
+        engine.resize(8, 2);
+        let viewport = engine.surface.viewport_bounds().expect("visible basin");
+        assert!(viewport.y_start > 0);
+
+        engine.spawn(CategoryId(1));
+
+        assert!(
+            engine.surface.grid[..viewport.y_start]
+                .iter()
+                .flatten()
+                .all(Option::is_none)
+        );
+        assert_eq!(
+            engine.surface.grid[viewport.y_start][viewport.x_start..viewport.x_end]
+                .iter()
+                .filter(|cell| cell.is_some())
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn classic_height_shrink_keeps_upper_corridor_physically_active() {
+        let mut engine = ClassicSandboxEngine::new(8, 4, 17, ClassicRainMode::Uniform);
+        engine.resize(8, 8);
+        engine.resize(8, 2);
+        let viewport = engine.surface.viewport_bounds().expect("visible basin");
+        let physics = engine.surface.physics_bounds().expect("physics corridor");
+        let x = (physics.x_start + physics.x_end) / 2;
+        let y = 1;
+        assert_eq!((physics.x_start, physics.x_end), (viewport.x_start, viewport.x_end));
+        assert_eq!(physics.y_start, 0);
+        assert!(y < viewport.y_start);
+
+        engine.surface.grid[y][x] = Some(CategoryId(1));
+        engine.total_generated = 1;
+        engine.update_physics_only();
+        engine.update_physics_only();
+
+        assert_eq!(engine.surface.grid[y][x], None);
+        assert_eq!(engine.surface.grid[y + 1][x], Some(CategoryId(1)));
+        assert_eq!(engine.grain_count(), 1);
     }
 
     #[test]
