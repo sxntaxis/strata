@@ -13,10 +13,7 @@ use super::{App, overlay_layout};
 impl App {
     pub(super) fn render_modal(&self, f: &mut Frame, terminal_size: Rect) {
         let categories = self.categories_for_render();
-        let minimum_inner_height = categories
-            .len()
-            .saturating_add(1)
-            .min(u16::MAX as usize) as u16;
+        let minimum_inner_height = categories.len().saturating_add(1).min(u16::MAX as usize) as u16;
         let category_width = categories
             .iter()
             .map(|category| self.display_layer_name(&category.name).chars().count())

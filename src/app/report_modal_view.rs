@@ -763,8 +763,17 @@ mod hardening_tests {
             total_balance_seconds: 1,
         };
 
-        assert_eq!(summary_border_color(&summary, Some(0), Color::Blue), Color::Green);
-        assert_eq!(summary_border_color(&summary, Some(1), Color::Blue), Color::White);
-        assert_eq!(summary_border_color(&summary, None, Color::Blue), Color::Blue);
+        assert_eq!(
+            summary_border_color(&summary, Some(0), Color::Blue),
+            Color::Green
+        );
+        assert_eq!(
+            summary_border_color(&summary, Some(1), Color::Blue),
+            Color::White
+        );
+        assert_eq!(
+            summary_border_color(&summary, None, Color::Blue),
+            Color::Blue
+        );
     }
 }

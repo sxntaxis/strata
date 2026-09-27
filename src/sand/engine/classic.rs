@@ -2895,7 +2895,9 @@ mod tests {
         let source_before = source.clone();
 
         let mut preview = ClassicSandboxEngine::new_production(2, 2);
-        preview.restore_state(&source, &valid).expect("restore preview source");
+        preview
+            .restore_state(&source, &valid)
+            .expect("restore preview source");
         let initial_physical = preview.physical_grain_count();
         let initial_pending = preview.pending_count();
         let initial_mass = mass(&preview);
@@ -2939,7 +2941,9 @@ mod tests {
         };
 
         let mut preview = ClassicSandboxEngine::new_production(2, 2);
-        preview.restore_state(&source, &valid).expect("restore preview source");
+        preview
+            .restore_state(&source, &valid)
+            .expect("restore preview source");
         let physical = preview.physical_grain_count();
         let pending = preview.pending_count();
         let total = mass(&preview);
