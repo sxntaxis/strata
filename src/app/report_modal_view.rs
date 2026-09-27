@@ -60,14 +60,17 @@ impl App {
                 0
             });
 
+        let summary_content_width = preferred_inner_width
+            .max(usize::from(balance_instrument::preferred_summary_inner_width()))
+            .min(u16::MAX as usize) as u16;
+        let summary_content_height =
+            balance_instrument::preferred_summary_inner_height(body_row_count);
+
         let modal_rect = if default_summary {
-            let desired_inner_width = preferred_inner_width.max(usize::from(
-                balance_instrument::preferred_summary_inner_width(),
-            ));
             overlay_layout::centered_overlay_rect(
                 terminal_size,
-                desired_inner_width.min(u16::MAX as usize) as u16,
-                balance_instrument::preferred_summary_inner_height(body_row_count),
+                summary_content_width.saturating_add(2),
+                summary_content_height,
                 1,
                 3,
                 crate::constants::APP_LAYOUT_SETTINGS.frame_margin,
@@ -322,7 +325,17 @@ impl App {
             self.render_report_navigation_arrows(f, modal_rect);
         }
 
-        let list_area = frame_block.inner(modal_rect);
+        let frame_inner = frame_block.inner(modal_rect);
+        let list_area = if default_summary {
+            overlay_layout::responsive_content_rect(
+                frame_inner,
+                summary_content_width,
+                summary_content_height,
+                false,
+            )
+        } else {
+            frame_inner
+        };
 
         if let Some(category_id) = self.report_logs_category_id {
             let empty_logs = Vec::new();
@@ -581,17 +594,29 @@ impl App {
         summary: &BalanceReportSummary,
         selected_summary_index: Option<usize>,
     ) {
-        let (totals_area, meter_area, list_area) = if area.height >= 5 {
-            let constraints = vec![
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Min(0),
-            ];
+        let (totals_area, meter_area, list_area) = if area.height >= 6 {
             let rows = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints(constraints)
+                .constraints([
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Min(0),
+                    Constraint::Length(1),
+                ])
+                .split(area);
+            (Some(rows[1]), Some(rows[2]), rows[4])
+        } else if area.height >= 5 {
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Min(0),
+                ])
                 .split(area);
             (Some(rows[1]), Some(rows[2]), rows[4])
         } else if area.height >= 3 {

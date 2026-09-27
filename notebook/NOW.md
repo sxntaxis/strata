@@ -5,13 +5,17 @@ state: active
 created: 2026-08-01
 updated: 2026-09-27
 authority: working
-summary: "SEDIMENT-016 is the active owner-authorized vertical physics corridor experiment; machine gates and isolated resize/CPU checks pass while accepted viewport-bounded resize doctrine remains unchanged."
-next: Complete owner visual review of live, resize, historical-preview, restart/mass, and tall-canvas behavior; then explicitly promote or reject SEDIMENT-016 before another resize/physics unit.
+summary: "BALANCE-UX-004 is the active presentation slice on top of the owner-accepted SEDIMENT-016 visual candidate; responsive interior modal spacing is under test while SEDIMENT-016 still awaits its exact resize/restart mass promotion proof."
+next: Validate BALANCE-UX-004 at wide, normal, and constrained terminal sizes; separately close SEDIMENT-016 exact persisted-mass/restart proof before promoting its resize doctrine.
 ---
+
+## BALANCE-UX-004 responsive modal inset — 2026-09-27
+
+**OWNER-AUTHORIZED CANDIDATE:** keep the existing responsive modal geometry, add surplus-driven 1/2/4/6-cell horizontal content inset, give Layer up to two rows of vertical inset when spare height exists, and make Balance's group breathing explicit without converting it into a fixed-width centered content card. Settings, Command Palette, range gestures, report semantics, and sediment are out of scope. See `notebook/work/BALANCE-UX-004.md`.
 
 ## SEDIMENT-016 vertical physics corridor — 2026-09-27
 
-**EXPERIMENTAL CANDIDATE / OWNER REVIEW REMAINS:** isolated PTY checks covered height and width changes, repeated resize oscillation, a prior-day Balance view, and a 320-dot canonical height viewed in a 10×80 pane (4.0% of one CPU core over five seconds). The historical fixture was settled, so no visible-motion claim is made. Formatting, strict Clippy, all tests, and CLI help pass. Exact persistent mass comparison across resize/restart, broader normal-live visual review, and owner qualitative acceptance remain open. `docs/SEDIMENT_AUTHORITY.md` remains unchanged. See `notebook/work/SEDIMENT-016-VERTICAL-PHYSICS-CORRIDOR.md`.
+**VISUALLY ACCEPTED / PROMOTION PROOF REMAINS:** owner review accepts the vertical-corridor behavior. Isolated PTY checks covered height and width changes, repeated resize oscillation, a prior-day Balance view, and a 320-dot canonical height viewed in a 10×80 pane (4.0% of one CPU core over five seconds). Formatting, strict Clippy, all tests, and CLI help pass. Exact persisted-mass comparison across resize/restart remains open before accepted resize doctrine is rewritten. `docs/SEDIMENT_AUTHORITY.md` remains unchanged. See `notebook/work/SEDIMENT-016-VERTICAL-PHYSICS-CORRIDOR.md`.
 
 ## RAIN-005 production cutover correction — 2026-09-10
 

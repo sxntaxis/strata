@@ -13,7 +13,8 @@ use super::{App, overlay_layout};
 impl App {
     pub(super) fn render_modal(&self, f: &mut Frame, terminal_size: Rect) {
         let categories = self.categories_for_render();
-        let minimum_inner_height = categories.len().saturating_add(1).min(u16::MAX as usize) as u16;
+        let minimum_content_height =
+            categories.len().saturating_add(1).min(u16::MAX as usize) as u16;
         let category_width = categories
             .iter()
             .map(|category| self.display_layer_name(&category.name).chars().count())
@@ -25,10 +26,12 @@ impl App {
         } else {
             0
         };
-        let minimum_inner_width = 2usize
+        let minimum_content_width = 2usize
             .saturating_add(category_width.max(insert_width))
             .saturating_add(description_width)
             .min(u16::MAX as usize) as u16;
+        let minimum_inner_width = minimum_content_width.saturating_add(2);
+        let minimum_inner_height = minimum_content_height.saturating_add(2);
         let modal_rect = overlay_layout::centered_overlay_rect(
             terminal_size,
             minimum_inner_width,
@@ -123,25 +126,31 @@ impl App {
 
         let list = List::new(items)
             .style(Style::default().bg(self.theme_background()))
-            .block(
-                Block::default()
-                    .style(Style::default().bg(self.theme_background()))
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .title(Line::from(Span::styled(
-                        if self.modal_editing_category_metadata {
-                            "Strata · layer metadata"
-                        } else {
-                            "Strata"
-                        },
-                        Style::default().fg(self.theme_foreground()),
-                    )))
-                    .title_alignment(ratatui::layout::Alignment::Center)
-                    .border_style(Style::default().fg(border_color)),
-            )
             .highlight_style(Style::default());
+        let frame_block = Block::default()
+            .style(Style::default().bg(self.theme_background()))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(Line::from(Span::styled(
+                if self.modal_editing_category_metadata {
+                    "Strata · layer metadata"
+                } else {
+                    "Strata"
+                },
+                Style::default().fg(self.theme_foreground()),
+            )))
+            .title_alignment(ratatui::layout::Alignment::Center)
+            .border_style(Style::default().fg(border_color));
+        let inner = frame_block.inner(modal_rect);
+        let list_area = overlay_layout::responsive_content_rect(
+            inner,
+            minimum_content_width,
+            minimum_content_height,
+            true,
+        );
 
         f.render_widget(ratatui::widgets::Clear, modal_rect);
-        f.render_stateful_widget(list, modal_rect, &mut list_state);
+        f.render_widget(frame_block, modal_rect);
+        f.render_stateful_widget(list, list_area, &mut list_state);
     }
 }
