@@ -50,8 +50,9 @@ impl App {
             });
 
         let modal_rect = if default_summary {
-            let desired_inner_width = preferred_inner_width
-                .max(usize::from(balance_instrument::preferred_summary_inner_width()));
+            let desired_inner_width = preferred_inner_width.max(usize::from(
+                balance_instrument::preferred_summary_inner_width(),
+            ));
             overlay_layout::centered_content_rect(
                 terminal_size,
                 desired_inner_width.min(u16::MAX as usize) as u16,
@@ -65,8 +66,7 @@ impl App {
             self.report_modal_rect(
                 terminal_size,
                 body_row_count,
-                preferred_inner_width
-                    .saturating_add(REPORT_MODAL_SETTINGS.expanded_inner_padding),
+                preferred_inner_width.saturating_add(REPORT_MODAL_SETTINGS.expanded_inner_padding),
             )
         };
         let selected_summary_index = if summary.entries.is_empty() {

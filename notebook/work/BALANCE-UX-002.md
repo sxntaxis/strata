@@ -1,7 +1,7 @@
 ---
 id: BALANCE-UX-002
 kind: work
-state: candidate
+state: completed
 authority: working
 created: 2026-09-27
 updated: 2026-09-27
@@ -35,6 +35,8 @@ The equilibrium `┼` uses the same dim `theme_status` style as the inactive axi
 
 The new centered-content helper is deliberately generic so Layer, Settings, command palette, and future overlays can migrate to one content-driven sizing authority after separate runtime review. This slice does **not** silently change their established geometry.
 
-## Validation state
+## Result
 
-Source-side diff and bundle construction can be verified in the handoff environment, but Rust toolchain and TUI runtime validation are required on the local Strata machine before this candidate can be certified or merged.
+The default Balance overlay now sizes from its instrument and category content, and keeps historical provenance visible in the summary body. The generic centered-content helper is only used by Balance in this unit; neighboring overlays retain their previous geometry. The equilibrium `┼` shares the dim axis styling.
+
+Native formatter, strict Clippy, full tests (524 unit + 24 integration; 20 ignored), CLI help smoke, and diff check pass. A disposable-profile PTY smoke passed at 80×24 and 40×14, covering current and historical Balance, Idle contrast, interval navigation, Layer, Settings, and Command Palette. The real profile was not used for the smoke.
