@@ -130,6 +130,70 @@ fn built_in_ui_palette_preserves_pre_theme_runtime_colors() {
 }
 
 #[test]
+fn shared_foreground_contrast_resolves_named_and_rgb_colors_consistently() {
+    assert_eq!(
+        contrasting_text_color(Color::White, Color::Magenta),
+        Color::Black
+    );
+    assert_eq!(
+        contrasting_text_color(Color::Rgb(255, 255, 255), Color::Magenta),
+        Color::Black
+    );
+    assert_eq!(
+        contrasting_text_color(Color::Black, Color::Magenta),
+        Color::White
+    );
+    assert_eq!(
+        contrasting_text_color(Color::Rgb(0, 0, 0), Color::Magenta),
+        Color::White
+    );
+    assert_eq!(
+        contrasting_text_color(Color::Rgb(128, 128, 128), Color::Magenta),
+        Color::White
+    );
+    assert_eq!(
+        contrasting_text_color(Color::Rgb(129, 129, 129), Color::Magenta),
+        Color::Black
+    );
+
+    let named_and_rgb = [
+        (Color::Black, Color::Rgb(0, 0, 0)),
+        (Color::Red, Color::Rgb(255, 0, 0)),
+        (Color::Green, Color::Rgb(0, 128, 0)),
+        (Color::Yellow, Color::Rgb(255, 255, 0)),
+        (Color::Blue, Color::Rgb(0, 0, 255)),
+        (Color::Magenta, Color::Rgb(255, 0, 255)),
+        (Color::Cyan, Color::Rgb(0, 255, 255)),
+        (Color::Gray, Color::Rgb(128, 128, 128)),
+        (Color::DarkGray, Color::Rgb(85, 85, 85)),
+        (Color::LightRed, Color::Rgb(255, 85, 85)),
+        (Color::LightGreen, Color::Rgb(85, 255, 85)),
+        (Color::LightYellow, Color::Rgb(255, 255, 85)),
+        (Color::LightBlue, Color::Rgb(85, 85, 255)),
+        (Color::LightMagenta, Color::Rgb(255, 85, 255)),
+        (Color::LightCyan, Color::Rgb(85, 255, 255)),
+        (Color::White, Color::Rgb(255, 255, 255)),
+    ];
+    for (named, rgb) in named_and_rgb {
+        assert_eq!(
+            contrasting_text_color(named, Color::Magenta),
+            contrasting_text_color(rgb, Color::Magenta),
+            "named {named:?} and RGB {rgb:?} must have the same contrast decision"
+        );
+    }
+}
+
+#[test]
+fn shared_foreground_contrast_uses_theme_fallback_for_terminal_authority_colors() {
+    let fallback = Color::Rgb(19, 37, 83);
+    assert_eq!(contrasting_text_color(Color::Reset, fallback), fallback);
+    assert_eq!(
+        contrasting_text_color(Color::Indexed(42), fallback),
+        fallback
+    );
+}
+
+#[test]
 fn built_in_hue_wheel_runs_red_through_violet_perceptually() {
     let theme = Theme::parse(BUILTIN_THEME_ID, BUILTIN_THEME_SOURCE).unwrap();
     let expected = [

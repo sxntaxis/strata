@@ -519,7 +519,10 @@ impl App {
                 };
 
                 if is_selected {
-                    let text_color = view_style::text_color_for_bg(border_color);
+                    let text_color = crate::appearance::contrasting_text_color(
+                        border_color,
+                        self.theme_foreground(),
+                    );
                     let mut spans = Vec::new();
                     if show_date_column {
                         spans.push(Span::raw(date_cell.clone()).fg(text_color));
@@ -623,7 +626,10 @@ impl App {
                 };
 
                 if is_selected {
-                    let text_color = view_style::text_color_for_bg(entry.color);
+                    let text_color = crate::appearance::contrasting_text_color(
+                        entry.color,
+                        self.theme_foreground(),
+                    );
                     ListItem::new(Line::from(vec![
                         Span::raw(dot).fg(text_color),
                         Span::raw(name).fg(text_color),

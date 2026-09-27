@@ -12,7 +12,7 @@ use crate::{
     keybindings::{Action, ActionBindingState},
 };
 
-use super::{App, PaletteCommand, PaletteEntry, view_style};
+use super::{App, PaletteCommand, PaletteEntry};
 
 impl App {
     pub(super) fn render_command_palette(&mut self, f: &mut Frame, terminal_size: Rect) {
@@ -348,7 +348,8 @@ impl App {
         };
 
         if is_selected {
-            let text_color = view_style::text_color_for_bg(accent);
+            let text_color =
+                crate::appearance::contrasting_text_color(accent, self.theme_foreground());
             Line::from(vec![
                 Span::styled(title, Style::default().fg(text_color).bg(accent)),
                 Span::styled(

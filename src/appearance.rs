@@ -182,6 +182,18 @@ impl AppearanceState {
     }
 }
 
+pub(crate) fn contrasting_text_color(background: Color, fallback: Color) -> Color {
+    let Some((r, g, b)) = color::rgb_tuple(background) else {
+        return fallback;
+    };
+    let brightness = (299 * u32::from(r) + 587 * u32::from(g) + 114 * u32::from(b)) / 1000;
+    if brightness > 128 {
+        Color::Black
+    } else {
+        Color::White
+    }
+}
+
 fn load_config(path: &Path) -> Result<AppearanceConfig, String> {
     if !path.exists() {
         return Ok(AppearanceConfig::default());
