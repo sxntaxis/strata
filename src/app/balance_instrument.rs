@@ -2,7 +2,7 @@ use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     prelude::{Line, Span},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     widgets::Paragraph,
 };
 
@@ -70,10 +70,12 @@ fn format_hms_magnitude(seconds: isize) -> String {
     )
 }
 
+#[cfg(test)]
 fn format_negative_total(seconds: isize) -> String {
     format!("-{}", format_hms_magnitude(seconds))
 }
 
+#[cfg(test)]
 fn format_positive_total(seconds: isize) -> String {
     format!("+{}", format_hms_magnitude(seconds))
 }
@@ -92,10 +94,24 @@ pub(super) fn preferred_summary_inner_width() -> u16 {
     PREFERRED_WIDTH.saturating_add(INSTRUMENT_SIDE_PADDING)
 }
 
-pub(super) fn preferred_summary_inner_height(row_count: usize, show_provenance: bool) -> u16 {
+pub(super) fn preferred_summary_inner_height(row_count: usize) -> u16 {
     let rows = row_count.min(u16::MAX as usize) as u16;
     rows.saturating_add(SUMMARY_VERTICAL_CHROME_ROWS)
-        .saturating_add(u16::from(show_provenance))
+}
+
+fn side_total_line(
+    seconds: isize,
+    sign: char,
+    sign_color: Color,
+    digits_color: Color,
+) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(sign.to_string(), Style::default().fg(sign_color)),
+        Span::styled(
+            format_hms_magnitude(seconds),
+            Style::default().fg(digits_color),
+        ),
+    ])
 }
 
 fn instrument_width(available: u16) -> u16 {
@@ -236,10 +252,12 @@ impl App {
                 .split(totals_rect);
 
             f.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    format_negative_total(totals.negative),
-                    Style::default().fg(self.theme_status()),
-                )))
+                Paragraph::new(side_total_line(
+                    totals.negative,
+                    '-',
+                    self.theme_error(),
+                    self.theme_status(),
+                ))
                 .alignment(Alignment::Left),
                 columns[0],
             );
@@ -252,10 +270,12 @@ impl App {
                 columns[1],
             );
             f.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    format_positive_total(totals.positive),
-                    Style::default().fg(self.theme_status()),
-                )))
+                Paragraph::new(side_total_line(
+                    totals.positive,
+                    '+',
+                    self.theme_success(),
+                    self.theme_status(),
+                ))
                 .alignment(Alignment::Right),
                 columns[2],
             );
@@ -304,7 +324,7 @@ mod tests {
     use super::{
         InstrumentTotals, MIN_THREE_COLUMN_WIDTH, MeterRole, format_negative_total,
         format_net_total, format_positive_total, instrument_totals, instrument_width, meter_cells,
-        preferred_summary_inner_height, preferred_summary_inner_width,
+        preferred_summary_inner_height, preferred_summary_inner_width, side_total_line,
     };
 
     fn entry(
@@ -327,8 +347,24 @@ mod tests {
     #[test]
     fn preferred_summary_geometry_reserves_instrument_spacing_and_content_height() {
         assert_eq!(preferred_summary_inner_width(), 47);
-        assert_eq!(preferred_summary_inner_height(8, false), 13);
-        assert_eq!(preferred_summary_inner_height(8, true), 14);
+        assert_eq!(preferred_summary_inner_height(8), 13);
+    }
+
+    #[test]
+    fn side_total_styles_only_the_sign_with_polarity() {
+        let negative = side_total_line(-3665, '-', Color::Red, Color::Gray);
+        assert_eq!(negative.spans.len(), 2);
+        assert_eq!(negative.spans[0].content.as_ref(), "-");
+        assert_eq!(negative.spans[0].style.fg, Some(Color::Red));
+        assert_eq!(negative.spans[1].content.as_ref(), "01:01:05");
+        assert_eq!(negative.spans[1].style.fg, Some(Color::Gray));
+
+        let positive = side_total_line(861, '+', Color::Green, Color::Gray);
+        assert_eq!(positive.spans.len(), 2);
+        assert_eq!(positive.spans[0].content.as_ref(), "+");
+        assert_eq!(positive.spans[0].style.fg, Some(Color::Green));
+        assert_eq!(positive.spans[1].content.as_ref(), "00:14:21");
+        assert_eq!(positive.spans[1].style.fg, Some(Color::Gray));
     }
 
     fn totals(negative: isize, positive: isize) -> InstrumentTotals {

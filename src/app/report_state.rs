@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 use chrono::{
     DateTime, Duration as ChronoDuration, FixedOffset, NaiveDate, NaiveDateTime, TimeZone,
@@ -13,12 +13,33 @@ use crate::domain::{
     operational_day_key_now, report_period_window_with_offset, session_slices,
 };
 use crate::sand::{
-    DailySedimentSlice, SedimentSnapshot, daily_contribution_from_slices,
+    ClassicProductionEngine, DailySedimentSlice, SedimentSnapshot, daily_contribution_from_slices,
     derived_preview_from_slices, select_historical_visual_artifact,
 };
 use crate::temporal;
 
-use super::{App, PersistenceOperation, RecoveryAction};
+use super::{App, HistoricalPreviewState, PersistenceOperation, RecoveryAction};
+
+fn build_historical_preview(
+    snapshot: &SedimentSnapshot,
+    width: u16,
+    height: u16,
+    categories: &[Category],
+) -> Result<HistoricalPreviewState, String> {
+    let mut valid_category_ids = categories
+        .iter()
+        .map(|category| category.id)
+        .collect::<HashSet<CategoryId>>();
+    valid_category_ids.insert(DRIFT_CATEGORY_ID);
+
+    let mut engine = ClassicProductionEngine::new_production(width, height);
+    engine.restore_state(&snapshot.state, &valid_category_ids)?;
+    Ok(HistoricalPreviewState {
+        source_key: snapshot.source_revision.clone(),
+        engine,
+        physics_accumulator: std::time::Duration::ZERO,
+    })
+}
 
 fn parse_report_range(from: &str, to: &str) -> Result<ReportWindow, String> {
     let parse = |label: &str, value: &str| {
@@ -619,34 +640,39 @@ impl App {
     ) -> Option<Vec<Line<'static>>> {
         self.refresh_report_snapshot_cache();
         let snapshot = self.report_snapshot_artifact.clone()?;
-        let cache_key = snapshot.render_cache_key(width, height);
+        let categories = self.report_categories();
+        let source_key = snapshot.source_revision.clone();
+        let should_rebuild_physics_preview = self
+            .report_snapshot_physics_preview
+            .as_ref()
+            .map(|preview| preview.source_key != source_key)
+            .unwrap_or(true);
 
-        let should_rebuild_preview = self
+        if should_rebuild_physics_preview {
+            self.report_snapshot_physics_preview =
+                build_historical_preview(&snapshot, width, height, &categories).ok();
+        }
+
+        if let Some(preview) = self.report_snapshot_physics_preview.as_mut() {
+            if preview.engine.dimensions() != (width, height) {
+                preview.engine.resize_physics_preview(width, height);
+            }
+            return Some(preview.engine.render(&categories));
+        }
+
+        let cache_key = snapshot.render_cache_key(width, height);
+        let should_rebuild_fallback = self
             .report_snapshot_preview_key
             .as_deref()
             .map(|key| key != cache_key.as_str())
             .unwrap_or(true)
             || self.report_snapshot_preview_lines.is_none();
-
-        if should_rebuild_preview {
-            let categories = self.report_categories();
+        if should_rebuild_fallback {
             self.report_snapshot_preview_lines =
                 Some(snapshot.render_immutable(width, height, &categories));
             self.report_snapshot_preview_key = Some(cache_key);
         }
-
         self.report_snapshot_preview_lines.clone()
-    }
-
-    pub(super) fn report_snapshot_status_label(&self) -> String {
-        if !self.should_use_report_snapshot() {
-            return "live sediment".to_string();
-        }
-
-        self.report_snapshot_artifact
-            .as_ref()
-            .map(SedimentSnapshot::display_label)
-            .unwrap_or_else(|| "historical sediment unavailable".to_string())
     }
 
     pub(super) fn clear_report_snapshot_cache(&mut self) {
@@ -654,6 +680,7 @@ impl App {
         self.report_snapshot_artifact = None;
         self.report_snapshot_preview_key = None;
         self.report_snapshot_preview_lines = None;
+        self.report_snapshot_physics_preview = None;
     }
 
     pub(super) fn report_interval_end_day(&self) -> NaiveDate {
@@ -822,6 +849,7 @@ impl App {
         self.report_snapshot_artifact = select_historical_visual_artifact(&key, authentic, derived);
         self.report_snapshot_preview_key = None;
         self.report_snapshot_preview_lines = None;
+        self.report_snapshot_physics_preview = None;
     }
 
     pub(super) fn daily_contribution_from_time_log(
@@ -959,15 +987,27 @@ fn retain_report_edit_after_commit(edit: &mut Option<super::ReportLogEditState>,
 #[cfg(test)]
 mod report_edit_state_tests {
     use chrono::NaiveDate;
+    use ratatui::style::Color;
 
     use super::{
-        parse_historical_activity_timestamp, parse_report_range, retain_report_edit_after_commit,
-        shifted_custom_window_newer, shifted_custom_window_older,
+        build_historical_preview, parse_historical_activity_timestamp, parse_report_range,
+        retain_report_edit_after_commit, shifted_custom_window_newer, shifted_custom_window_older,
     };
     use crate::{
         app::ReportLogEditState,
-        domain::{OperationalDayPolicy, ReportWindow},
+        domain::{Category, CategoryId, OperationalDayPolicy, ReportWindow},
+        sand::{SandState, SandStateGrain, SedimentSnapshot},
     };
+
+    fn preview_category(id: CategoryId) -> Category {
+        Category {
+            id,
+            name: "preview".to_string(),
+            color: Color::White,
+            description: String::new(),
+            balance_effect: 0,
+        }
+    }
 
     #[test]
     fn failed_commit_retains_complete_draft() {
@@ -1024,5 +1064,48 @@ mod report_edit_state_tests {
         assert_eq!(newer.start, NaiveDate::from_ymd_opt(2026, 8, 13).unwrap());
         assert_eq!(newer.end, today);
         assert!(shifted_custom_window_newer(&newer, today).is_none());
+    }
+
+    #[test]
+    fn historical_preview_build_does_not_mutate_source_and_rebuilds_from_original_topology() {
+        let category_id = CategoryId::new(1);
+        let state = SandState {
+            version: SandState::VERSION,
+            grid_width: 4,
+            grid_height: 8,
+            grains: vec![SandStateGrain {
+                x: 1,
+                y: 1,
+                category_id: category_id.0,
+            }],
+            frame_count: 0,
+            sweep_left_to_right: true,
+            rng_state: 7,
+            ingress_focus_x: None,
+            pending_grains: Vec::new(),
+            pending_runs: Vec::new(),
+            active_avalanche_columns: Vec::new(),
+            mobilized_grains: Vec::new(),
+            classic_runtime: None,
+        };
+        let snapshot = SedimentSnapshot::derived_preview(
+            "2026-09-22".to_string(),
+            "source-preview".to_string(),
+            state.clone(),
+        );
+        let original = snapshot.clone();
+        let categories = vec![preview_category(category_id)];
+
+        let mut first = build_historical_preview(&snapshot, 2, 2, &categories)
+            .expect("build first historical preview");
+        first.engine.update_physics_only();
+        first.engine.update_physics_only();
+
+        let second = build_historical_preview(&snapshot, 2, 2, &categories)
+            .expect("rebuild historical preview");
+
+        assert_eq!(snapshot, original);
+        assert_eq!(second.source_key, snapshot.source_revision);
+        assert_eq!(second.engine.snapshot_state().grains, state.grains);
     }
 }

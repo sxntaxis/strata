@@ -25,6 +25,17 @@ fn balance_key_hint(key: impl ToString) -> String {
     format!("[{label}]")
 }
 
+fn summary_border_color(
+    summary: &BalanceReportSummary,
+    selected_summary_index: Option<usize>,
+    fallback: Color,
+) -> Color {
+    selected_summary_index
+        .and_then(|idx| summary.entries.get(idx))
+        .map(|entry| entry.color)
+        .unwrap_or(fallback)
+}
+
 impl App {
     pub(super) fn render_report_modal(&self, f: &mut Frame, terminal_size: Rect) {
         let summary = self.report_rows();
@@ -53,13 +64,12 @@ impl App {
             let desired_inner_width = preferred_inner_width.max(usize::from(
                 balance_instrument::preferred_summary_inner_width(),
             ));
-            overlay_layout::centered_content_rect(
+            overlay_layout::centered_overlay_rect(
                 terminal_size,
                 desired_inner_width.min(u16::MAX as usize) as u16,
-                balance_instrument::preferred_summary_inner_height(
-                    body_row_count,
-                    self.should_use_report_snapshot(),
-                ),
+                balance_instrument::preferred_summary_inner_height(body_row_count),
+                1,
+                3,
                 crate::constants::APP_LAYOUT_SETTINGS.frame_margin,
             )
         } else {
@@ -79,10 +89,7 @@ impl App {
         let border_color = if let Some(category_id) = self.report_logs_category_id {
             self.category_color_for_id(category_id)
         } else {
-            selected_summary_index
-                .and_then(|idx| summary.entries.get(idx))
-                .map(|entry| entry.color)
-                .unwrap_or(self.theme_foreground())
+            summary_border_color(&summary, selected_summary_index, self.theme_foreground())
         };
 
         let interval_title = Line::from(Span::styled(
@@ -290,7 +297,7 @@ impl App {
                 .title(center_title)
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(self.theme_border()))
+                .border_style(Style::default().fg(border_color))
         } else {
             Block::default()
                 .style(Style::default().bg(self.theme_background()))
@@ -574,58 +581,38 @@ impl App {
         summary: &BalanceReportSummary,
         selected_summary_index: Option<usize>,
     ) {
-        let show_provenance = self.should_use_report_snapshot();
-        let (totals_area, meter_area, list_area, provenance_area) =
-            if area.height >= 5 + u16::from(show_provenance) {
-                let mut constraints = vec![
-                    Constraint::Length(1),
-                    Constraint::Length(1),
+        let (totals_area, meter_area, list_area) = if area.height >= 5 {
+            let constraints = vec![
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(0),
+            ];
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints(constraints)
+                .split(area);
+            (Some(rows[1]), Some(rows[2]), rows[4])
+        } else if area.height >= 3 {
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
                     Constraint::Length(1),
                     Constraint::Length(1),
                     Constraint::Min(0),
-                ];
-                if show_provenance {
-                    constraints.push(Constraint::Length(1));
-                }
-                let rows = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints(constraints)
-                    .split(area);
-                (
-                    Some(rows[1]),
-                    Some(rows[2]),
-                    rows[4],
-                    show_provenance.then(|| rows[5]),
-                )
-            } else if area.height >= 3 {
-                let rows = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([
-                        Constraint::Length(1),
-                        Constraint::Length(1),
-                        Constraint::Min(0),
-                    ])
-                    .split(area);
-                (Some(rows[0]), Some(rows[1]), rows[2], None)
-            } else {
-                (None, None, area, None)
-            };
+                ])
+                .split(area);
+            (Some(rows[0]), Some(rows[1]), rows[2])
+        } else {
+            (None, None, area)
+        };
 
         if let (Some(totals_area), Some(meter_area)) = (totals_area, meter_area) {
             self.render_balance_instrument(f, totals_area, meter_area, summary);
         }
 
         self.render_report_summary_view(f, list_area, summary, selected_summary_index);
-
-        if let Some(provenance_area) = provenance_area {
-            let provenance = Line::from(Span::styled(
-                self.report_snapshot_status_label(),
-                Style::default()
-                    .fg(self.theme_status())
-                    .add_modifier(Modifier::DIM),
-            ));
-            f.render_widget(Paragraph::new(provenance), provenance_area);
-        }
     }
 
     fn render_report_summary_view(
@@ -739,11 +726,45 @@ impl App {
 
 #[cfg(test)]
 mod hardening_tests {
-    use super::balance_key_hint;
+    use ratatui::style::Color;
+
+    use super::{balance_key_hint, summary_border_color};
+    use crate::domain::{BalanceReportEntry, BalanceReportSummary, CategoryId};
 
     #[test]
     fn balance_key_hint_makes_single_letter_actions_legible() {
         assert_eq!(balance_key_hint("l"), "[L]");
         assert_eq!(balance_key_hint("Ctrl+L"), "[Ctrl+L]");
+    }
+
+    #[test]
+    fn summary_frame_follows_selected_layer_color_with_safe_fallback() {
+        let summary = BalanceReportSummary {
+            date: "2026-09-27".to_string(),
+            entries: vec![
+                BalanceReportEntry {
+                    category_id: CategoryId::new(1),
+                    category_name: "first".to_string(),
+                    color: Color::Green,
+                    elapsed_seconds: 1,
+                    balance_effect: 1,
+                    balance_seconds: 1,
+                },
+                BalanceReportEntry {
+                    category_id: CategoryId::new(2),
+                    category_name: "idle".to_string(),
+                    color: Color::White,
+                    elapsed_seconds: 1,
+                    balance_effect: 0,
+                    balance_seconds: 0,
+                },
+            ],
+            total_seconds: 2,
+            total_balance_seconds: 1,
+        };
+
+        assert_eq!(summary_border_color(&summary, Some(0), Color::Blue), Color::Green);
+        assert_eq!(summary_border_color(&summary, Some(1), Color::Blue), Color::White);
+        assert_eq!(summary_border_color(&summary, None, Color::Blue), Color::Blue);
     }
 }

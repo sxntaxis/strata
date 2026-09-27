@@ -172,22 +172,22 @@ When live simulation crosses an operational-day cutoff, Strata captures the exac
 - terminal resize, ledger reconciliation, report viewing, or category/session editing never rewrites a stored canonical photo;
 - each operational day may own a different canonical canvas size.
 
-If Strata is not running at the cutoff, historical Balance uses the most recent canonical checkpoint already saved for that day, explicitly labeled `latest saved checkpoint`; it does not substitute a ledger-derived preview when such a checkpoint exists. A `DerivedPreview` is used only when no authentic canonical checkpoint exists for the day, and remains explicitly marked reconstructed.
+If Strata is not running at the cutoff, historical Balance uses the most recent canonical checkpoint already saved for that day; provenance still identifies it internally as the latest saved checkpoint, but normal Balance chrome does not need to print that label. It does not substitute a ledger-derived preview when such a checkpoint exists. A `DerivedPreview` is used only when no authentic canonical checkpoint exists for the day, and its reconstructed status remains explicit model authority.
 
-## Immutable historical viewing
+## Disposable historical viewing
 
-Historical viewing is projection-only:
+Historical viewing preserves immutable source authority while allowing a temporary visual simulation:
 
 - Balance prefers the latest canonical visual checkpoint for the selected interval end day, including an authentic day-end capture or the last autosaved capture when the cutoff was missed;
-- the snapshot envelope and `SandState` remain immutable;
-- rendering restores a clone into a fresh viewport engine;
+- the snapshot envelope and source `SandState` remain immutable;
+- entering a historical visualization restores a clone into a fresh production-Classic preview engine;
+- the preview may advance gravity/settling for already placed grains, but it never generates rain, calls ingress, or materializes pending logical sediment;
 - a smaller current viewport crops the historical canvas around horizontal center and bottom baseline;
-- a larger current viewport expands only the temporary rendering clone, leaving the stored dimensions and topology unchanged;
-- physics `update()` is never called;
-- repeated rendering at the same viewport is deterministic;
-- cache identity includes the serialized artifact and viewport;
-- the report UI exposes kind, reconstruction status, and idle policy;
-- viewing never writes or deletes persistence.
+- a larger current viewport expands only the temporary preview, leaving stored dimensions and topology unchanged;
+- navigating to another interval, returning to the current interval, or closing Balance discards the preview; revisiting the same historical interval recreates it from the original source rather than the previously evolved preview;
+- the preview never replaces the live sand engine and its evolved state is never used as checkpoint, snapshot, SQLite, or other persistence input;
+- if the animated preview cannot be constructed, immutable snapshot rendering remains a safe presentation fallback;
+- provenance, reconstruction status, source revision, and idle policy remain explicit model authority even though normal-summary UI does not print a provenance sentence.
 
 Day, week, and month Balance use the visual artifact for the selected interval's end day. The numerical report rows remain ledger-derived for the selected period. If no canonical photo exists for that day, an in-memory `DerivedPreview` is the visual fallback and never becomes authority merely by being viewed.
 

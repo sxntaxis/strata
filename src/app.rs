@@ -545,6 +545,12 @@ struct SimulationState {
     catchup_was_active: bool,
 }
 
+struct HistoricalPreviewState {
+    source_key: String,
+    engine: ClassicProductionEngine,
+    physics_accumulator: Duration,
+}
+
 #[cfg(debug_assertions)]
 const TESTING_CHEATS_DEFAULT_MODEL: &str = "classic";
 
@@ -1138,6 +1144,7 @@ struct App {
     report_snapshot_artifact: Option<SedimentSnapshot>,
     report_snapshot_preview_key: Option<String>,
     report_snapshot_preview_lines: Option<Vec<ratatui::text::Line<'static>>>,
+    report_snapshot_physics_preview: Option<HistoricalPreviewState>,
     pending_day_end_snapshots: Vec<PendingDayEndSnapshot>,
     simulation: SimulationState,
     #[cfg(debug_assertions)]
@@ -1238,6 +1245,7 @@ impl App {
             report_snapshot_artifact: None,
             report_snapshot_preview_key: None,
             report_snapshot_preview_lines: None,
+            report_snapshot_physics_preview: None,
             pending_day_end_snapshots: Vec::new(),
             simulation: SimulationState {
                 simulation_time_utc: Utc::now(),
@@ -1467,6 +1475,7 @@ impl App {
         self.report_snapshot_artifact = None;
         self.report_snapshot_preview_key = None;
         self.report_snapshot_preview_lines = None;
+        self.report_snapshot_physics_preview = None;
         self.focus_none_report_row();
         self.render_needed = true;
     }
@@ -1482,6 +1491,7 @@ impl App {
         self.report_snapshot_artifact = None;
         self.report_snapshot_preview_key = None;
         self.report_snapshot_preview_lines = None;
+        self.report_snapshot_physics_preview = None;
         self.render_needed = true;
     }
 
@@ -1822,33 +1832,25 @@ impl App {
     }
 
     fn modal_rect(&self, terminal_size: Rect) -> Rect {
-        self.modal_rect_ratio(terminal_size, 1, 3)
+        overlay_layout::centered_overlay_rect(
+            terminal_size,
+            0,
+            APP_LAYOUT_SETTINGS.modal_min_height.saturating_sub(2),
+            1,
+            3,
+            APP_LAYOUT_SETTINGS.frame_margin,
+        )
     }
 
     fn modal_rect_ratio(&self, terminal_size: Rect, numerator: u16, denominator: u16) -> Rect {
-        let target_width = terminal_size.width.saturating_mul(numerator) / denominator;
-        let target_height = (terminal_size.height.saturating_mul(numerator) / denominator)
-            .max(APP_LAYOUT_SETTINGS.modal_min_height);
-
-        let frame_padding = APP_LAYOUT_SETTINGS.frame_margin;
-        let max_width = terminal_size
-            .width
-            .saturating_sub(frame_padding)
-            .saturating_sub(frame_padding)
-            .max(1);
-        let max_height = terminal_size
-            .height
-            .saturating_sub(frame_padding)
-            .saturating_sub(frame_padding)
-            .max(1);
-
-        let modal_width = target_width.clamp(1, max_width);
-        let modal_height = target_height.clamp(1, max_height);
-
-        let modal_x = (terminal_size.width.saturating_sub(modal_width)) / 2;
-        let modal_y = (terminal_size.height.saturating_sub(modal_height)) / 2;
-
-        Rect::new(modal_x, modal_y, modal_width, modal_height)
+        overlay_layout::centered_overlay_rect(
+            terminal_size,
+            0,
+            APP_LAYOUT_SETTINGS.modal_min_height.saturating_sub(2),
+            numerator,
+            denominator,
+            APP_LAYOUT_SETTINGS.frame_margin,
+        )
     }
 
     fn report_modal_rect(
@@ -2482,6 +2484,34 @@ impl App {
 
         #[cfg(debug_assertions)]
         self.process_testing_cheats_budget();
+
+        self.advance_historical_preview(wall_delta, physics_rate);
+    }
+
+    fn advance_historical_preview(&mut self, wall_delta: Duration, physics_rate: Duration) {
+        if !self.in_balance_modal() || !self.should_use_report_snapshot() {
+            self.report_snapshot_physics_preview = None;
+            return;
+        }
+        if physics_rate.is_zero() {
+            return;
+        }
+        let Some(preview) = self.report_snapshot_physics_preview.as_mut() else {
+            return;
+        };
+
+        // Historical animation is disposable view state, not elapsed-time replay.
+        // Keep at most one physics step of debt so suspend/resume cannot trigger
+        // a large catch-up loop for a purely visual projection.
+        preview.physics_accumulator = preview
+            .physics_accumulator
+            .saturating_add(wall_delta)
+            .min(physics_rate);
+        if preview.physics_accumulator >= physics_rate {
+            preview.physics_accumulator = preview.physics_accumulator.saturating_sub(physics_rate);
+            preview.engine.update_physics_only();
+            self.render_needed = true;
+        }
     }
 
     fn finalize_catchup_transition(&mut self) {
