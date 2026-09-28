@@ -13,6 +13,10 @@ next: Capture raw Shift/Ctrl/Alt arrow and Caps Lock key events through the real
 
 **ONE-CELL HORIZONTAL AND VERTICAL INSETS VERIFIED:** keep the existing responsive modal geometry, use exactly one horizontal content cell per side at ordinary modal sizes, and give Layer exactly one top/bottom content cell whenever two spare rows exist. The validated 1/2/4/6-cell candidate was rejected in runtime review because wide panes accumulated too much side padding; a large Balance name-to-metric gap is explicitly acceptable in preference to that padding. The correction passes formatter, strict Clippy, all tests, and isolated wide/normal/constrained TUI checks. No fixed-width Balance card or secondary content-width system is introduced. Settings, range gestures, report semantics, and sediment remain unchanged. See `notebook/work/BALANCE-UX-004.md`.
 
+## BALANCE-RANGE-UX-001 modifier-input probe — 2026-09-27
+
+**RAW INPUT MEASUREMENT ONLY:** `examples/key_event_probe.rs` records the exact Crossterm key event delivered by the owner's real terminal + tmux path for Shift/Ctrl/Alt arrows plus lowercase/Caps Lock/Shift letter cases. No production range gesture or keybinding changes in this unit. See `notebook/work/BALANCE-RANGE-UX-001.md`.
+
 ## SEDIMENT-016 vertical physics corridor — 2026-09-27
 
 **MACHINE PROOF PASSED / PROMOTION STILL EXPLICIT:** owner review accepts the vertical-corridor behavior. Isolated PTY checks covered height and width changes, repeated resize oscillation, historical Balance, and a 320-dot canonical height viewed in a 10×80 pane (4.0% of one CPU core over five seconds). The all-feature suite also passes the exact per-category placed-plus-pending mass proof across vertical-corridor updates, SQLite persistence, restart, and re-expansion. `docs/SEDIMENT_AUTHORITY.md` remains unchanged pending explicit promotion. See `notebook/work/SEDIMENT-016-VERTICAL-PHYSICS-CORRIDOR.md`.
