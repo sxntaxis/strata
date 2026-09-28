@@ -120,6 +120,7 @@ pub struct BalanceReportSummary {
 pub struct CategoryLogEntry {
     pub session_id: Option<usize>,
     pub date: String,
+    pub end_date: String,
     pub start_time: String,
     pub end_time: String,
     pub description: String,
@@ -1227,47 +1228,62 @@ pub fn build_category_logs_for_window(
     let mut logs: Vec<CategoryLogEntry> = sessions
         .iter()
         .filter(|session| session.category_id == category_id)
-        .flat_map(|session| {
-            session_slices(session)
+        .filter_map(|session| {
+            let slices = session_slices(session)
                 .into_iter()
-                .filter(move |slice| slice.operational_day >= start && slice.operational_day <= end)
-                .map(move |slice| CategoryLogEntry {
-                    session_id: Some(session.id),
-                    date: slice.operational_day.format("%Y-%m-%d").to_string(),
-                    start_time: slice.start_time,
-                    end_time: slice.end_time,
-                    description: session.description.clone(),
-                    elapsed_seconds: slice.elapsed_seconds,
-                    balance_effect,
-                    balance_seconds: slice.elapsed_seconds as isize * balance_effect as isize,
-                })
+                .filter(|slice| slice.operational_day >= start && slice.operational_day <= end)
+                .collect::<Vec<_>>();
+            let first = slices.first()?;
+            let last = slices.last()?;
+            let elapsed_seconds = slices
+                .iter()
+                .map(|slice| slice.elapsed_seconds)
+                .sum::<usize>();
+            Some(CategoryLogEntry {
+                session_id: Some(session.id),
+                date: first.operational_day.format("%Y-%m-%d").to_string(),
+                end_date: last.operational_day.format("%Y-%m-%d").to_string(),
+                start_time: first.start_time.clone(),
+                end_time: last.end_time.clone(),
+                description: session.description.clone(),
+                elapsed_seconds,
+                balance_effect,
+                balance_seconds: elapsed_seconds as isize * balance_effect as isize,
+            })
         })
         .collect();
 
     if let Some(live) = live_session
         && live.category_id == category_id
     {
-        logs.extend(
-            live_session_slices(live)
-                .into_iter()
-                .filter(|slice| slice.operational_day >= start && slice.operational_day <= end)
-                .map(|slice| CategoryLogEntry {
-                    session_id: None,
-                    date: slice.operational_day.format("%Y-%m-%d").to_string(),
-                    start_time: slice.start_time,
-                    end_time: slice.end_time,
-                    description: live.description.clone(),
-                    elapsed_seconds: slice.elapsed_seconds,
-                    balance_effect,
-                    balance_seconds: slice.elapsed_seconds as isize * balance_effect as isize,
-                }),
-        );
+        let slices = live_session_slices(live)
+            .into_iter()
+            .filter(|slice| slice.operational_day >= start && slice.operational_day <= end)
+            .collect::<Vec<_>>();
+        if let (Some(first), Some(last)) = (slices.first(), slices.last()) {
+            let elapsed_seconds = slices
+                .iter()
+                .map(|slice| slice.elapsed_seconds)
+                .sum::<usize>();
+            logs.push(CategoryLogEntry {
+                session_id: None,
+                date: first.operational_day.format("%Y-%m-%d").to_string(),
+                end_date: last.operational_day.format("%Y-%m-%d").to_string(),
+                start_time: first.start_time.clone(),
+                end_time: last.end_time.clone(),
+                description: live.description.clone(),
+                elapsed_seconds,
+                balance_effect,
+                balance_seconds: elapsed_seconds as isize * balance_effect as isize,
+            });
+        }
     }
 
     logs.sort_by(|a, b| {
         a.date
             .cmp(&b.date)
             .then(a.start_time.cmp(&b.start_time))
+            .then(a.end_date.cmp(&b.end_date))
             .then(a.end_time.cmp(&b.end_time))
             .then(a.session_id.cmp(&b.session_id))
     });
@@ -2202,6 +2218,52 @@ mod tests {
         assert_eq!(logs[1].description, "review");
         assert_eq!(logs[0].session_id, Some(1));
         assert_eq!(logs[1].session_id, Some(2));
+    }
+
+    #[test]
+    fn category_ledger_aggregates_cross_day_session_into_one_row() {
+        let categories = vec![Category {
+            id: CategoryId::new(1),
+            name: "Work".to_string(),
+            color: COLORS[0],
+            description: String::new(),
+            balance_effect: 1,
+        }];
+        let policy = OperationalDayPolicy {
+            utc_offset_seconds: 0,
+            start_minutes: 0,
+        };
+        let start = Utc.with_ymd_and_hms(2026, 9, 27, 23, 30, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2026, 9, 28, 0, 30, 0).unwrap();
+        let sessions = vec![Session {
+            id: 7,
+            date: "2026-09-28".to_string(),
+            category_id: CategoryId::new(1),
+            description: "overnight".to_string(),
+            start_time: "23:30:00".to_string(),
+            end_time: "00:30:00".to_string(),
+            elapsed_seconds: 3600,
+            started_at_utc: Some(start),
+            ended_at_utc: Some(end),
+            operational_day_policy: Some(policy),
+        }];
+        let window = ReportWindow::new(
+            NaiveDate::from_ymd_opt(2026, 9, 27).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 9, 28).unwrap(),
+        )
+        .unwrap();
+        let logs = build_category_logs_for_window(
+            &sessions,
+            &categories,
+            CategoryId::new(1),
+            &window,
+            None,
+        );
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].session_id, Some(7));
+        assert_eq!(logs[0].date, "2026-09-27");
+        assert_eq!(logs[0].end_date, "2026-09-28");
+        assert_eq!(logs[0].elapsed_seconds, 3600);
     }
 
     #[test]
