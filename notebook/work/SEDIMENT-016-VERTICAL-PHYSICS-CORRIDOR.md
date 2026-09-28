@@ -68,7 +68,7 @@ If this single invariant produces a new unintuitive edge case, reject the candid
 - A separate historical Balance profile opened a prior day and completed four 40×10/80×24 resize oscillations without a runtime error. That saved artifact appeared settled in this capture, so this confirms the route/resizing but not visible grain motion.
 - Both disposable profiles passed `sqlite-doctor` after normal exit; the fresh profile also reopened with no active session.
 
-Owner qualitative review now accepts the resulting live/resize experience. Exact persistent mass comparison across a resize-and-restart cycle remains the final promotion gate. The accepted resize doctrine has not yet been changed.
+Owner qualitative review now accepts the resulting live/resize experience. The final promotion gate now has a deterministic repository proof candidate: `vertical_corridor_resize_persist_restart_preserves_exact_category_mass` exercises canonical grow/shrink, vertical-corridor physics, SQLite save/load, exact restored state, per-category placed+pending mass, and re-expansion. That proof still requires the native Rust gate before promotion. The accepted resize doctrine has not yet been changed.
 
 ## Promotion boundary
 

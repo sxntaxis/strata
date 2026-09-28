@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-27
 authority: working
-summary: "BALANCE-UX-004 one-cell horizontal and exact Layer vertical insets passed isolated wide/normal/constrained TUI checks; the separate SEDIMENT-016 resize/restart mass proof remains open."
-next: Close SEDIMENT-016 exact persisted-mass comparison across resize and restart, then explicitly promote or revise the accepted resize doctrine.
+summary: "BALANCE-UX-004 spacing is verified; SEDIMENT-016 has an authored deterministic resize/persist/restart mass proof awaiting native execution, and BALANCE-RANGE-UX-001 begins with raw terminal/tmux modifier observation only."
+next: Run the SEDIMENT-016 proof natively, then capture raw Shift/Ctrl/Alt arrow and Caps Lock key events through the real terminal+tmux path before choosing custom-range gestures.
 ---
 
 ## BALANCE-UX-004 one-cell modal inset — 2026-09-27
