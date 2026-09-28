@@ -272,7 +272,7 @@ impl App {
                     ReportTagFacet::Untagged => "untagged".to_string(),
                 })
                 .collect::<Vec<_>>()
-                .join(" ∨ "),
+                .join("; "),
         )
     }
 
@@ -523,16 +523,23 @@ impl App {
     }
 
     pub(super) fn move_report_range_boundary(&mut self, direction: i8) -> bool {
+        self.move_report_range_boundary_steps(direction, 1)
+    }
+
+    pub(super) fn move_report_range_boundary_steps(&mut self, direction: i8, steps: usize) -> bool {
         let Some(boundary) = self.report_range_boundary else {
             return false;
         };
-        let current = self.current_report_window();
-        let Some(shifted) =
-            shifted_report_boundary(&current, boundary, direction, operational_day_key_now())
-        else {
-            return false;
-        };
-        if shifted == current {
+        let original = self.current_report_window();
+        let mut shifted = original.clone();
+        let today = operational_day_key_now();
+        for _ in 0..steps.max(1) {
+            let Some(next) = shifted_report_boundary(&shifted, boundary, direction, today) else {
+                break;
+            };
+            shifted = next;
+        }
+        if shifted == original {
             return false;
         }
 
@@ -875,28 +882,37 @@ impl App {
         Ok((from, to))
     }
 
-    pub(super) fn ledger_tag_completion(&self) -> Option<super::tagging::TagCompletion> {
-        let edit = self.ledger_entry_edit.as_ref()?;
+    pub(super) fn cycle_ledger_tag(&mut self, direction: isize) -> bool {
+        let Some(edit) = self.ledger_entry_edit.as_ref() else {
+            return false;
+        };
         if edit.active_field != super::LedgerEntryField::Description {
-            return None;
+            return false;
         }
-        self.tag_completion_for_category(edit.category_id, &edit.description)
-    }
-
-    pub(super) fn accept_ledger_tag_completion(&mut self) -> bool {
-        let Some(completion) = self.ledger_tag_completion() else {
+        let category_id = edit.category_id;
+        let description = edit.description.clone();
+        let retained_prefix = edit.tag_cycle_prefix.clone();
+        let known_tags = self.known_tags_for_category(category_id);
+        let Some(cycle) = tagging::cycle_tag(
+            &description,
+            &known_tags,
+            retained_prefix.as_deref(),
+            direction,
+        ) else {
             return false;
         };
         let Some(edit) = self.ledger_entry_edit.as_mut() else {
             return false;
         };
-        edit.description = super::tagging::accept_tag_completion(&edit.description, &completion);
+        edit.description = cycle.value;
+        edit.tag_cycle_prefix = Some(cycle.prefix);
         edit.select_all = false;
         edit.error = None;
         edit.confirmation = None;
         self.render_needed = true;
         true
     }
+
 
     pub(super) fn cancel_ledger_entry_edit(&mut self) {
         self.ledger_entry_edit = None;
@@ -917,12 +933,12 @@ impl App {
     ) -> Result<(DateTime<Utc>, DateTime<Utc>), String> {
         let start_date = NaiveDate::parse_from_str(edit.start_date.trim(), "%Y-%m-%d")
             .map_err(|_| "date must use YYYY-MM-DD".to_string())?;
-        let start_time = NaiveTime::parse_from_str(edit.start_time.trim(), "%H:%M:%S")
-            .map_err(|_| "start time must use HH:MM:SS".to_string())?;
+        let start_time = super::ledger_state::parse_ledger_time_input(edit.start_time.trim())
+            .ok_or_else(|| "start time must be a valid time".to_string())?;
         let mut end_date = NaiveDate::parse_from_str(edit.end_date.trim(), "%Y-%m-%d")
             .map_err(|_| "end date must use YYYY-MM-DD".to_string())?;
-        let end_time = NaiveTime::parse_from_str(edit.end_time.trim(), "%H:%M:%S")
-            .map_err(|_| "end time must use HH:MM:SS".to_string())?;
+        let end_time = super::ledger_state::parse_ledger_time_input(edit.end_time.trim())
+            .ok_or_else(|| "end time must be a valid time".to_string())?;
         if edit.dates_linked && end_time < start_time {
             end_date = start_date
                 .checked_add_signed(ChronoDuration::days(1))

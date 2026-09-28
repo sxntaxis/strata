@@ -1,6 +1,6 @@
 # Interaction authority
 
-Status: accepted authority; STRATA-D071 meter parity and STRATA-D072 multi-tag/filter semantics are implemented and natively certified
+Status: accepted authority; STRATA-D071/D072 are natively certified; STRATA-D073 input-coherence semantics are accepted with implementation candidate
 Program: INTERACTION-001 + INTERACTION-002 convergence
 Current completed unit: INTERACTION-002; PLATEAU-001H H1 presentation hardening certified
 Issues completed: #19, #20, #24
@@ -21,11 +21,14 @@ Confirm on a completed persisted entry opens an in-row ledger editor owned by th
 The active ledger field exclusively owns ordinary text input:
 
 - Tag accepts unmodified character input and `;` separates independent attribution tags;
-- known tags may appear as a dim completion suffix; accepting a completion materializes canonical spelling rather than persisting the dim suggestion;
+- an empty current Tag segment has no completion; after its first typed character, a known tag may appear as a dim completion suffix without becoming stored text;
+- Left/Right in Tag cycles known tags for only the current semicolon segment. If that segment began as a typed prefix, cycling is restricted to known tags matching that prefix until ordinary typing/backspace starts a new cycle. An exact known tag has no retained prefix and therefore cycles the available known-tag set. Tags already used in prior segments are excluded;
 - date fields accept `YYYY-MM-DD` characters;
-- time fields accept `HH:MM:SS` characters;
+- time fields accept forgiving hour/minute/optional-second forms, including compact input such as `6`, `650`, `1530`, or `65030` and colon input such as `6:50` or `6:50:30`; valid minute-only values normalize without requiring visible `:00` seconds;
 - Backspace/Delete edits the active field;
-- Tab accepts a visible Tag completion first; otherwise Tab/BackTab moves between fields and selects the destination value;
+- Tab always moves to the next field and Shift+Tab/BackTab always moves to the previous field; completion never intercepts field navigation;
+- Left/Right in a Date field changes the selected civil date by one day, while Shift+Left/Right changes it by seven days. Left/Right in a Time field changes that boundary by one minute, while Shift+Left/Right changes it by sixty minutes. These are timestamp arithmetic, so hour/day carry and borrow are preserved and existing seconds are not discarded;
+- Up/Down have no ledger-edit meaning;
 - Enter validates and commits;
 - Esc cancels the draft, or dismisses an add-collision confirmation back to editing;
 - only mandatory `Ctrl-C` may escape as an application-level command.
@@ -102,6 +105,8 @@ The configurable `balance_range_start` and `balance_range_end` actions default t
 
 Without an active boundary handle, Left/Right keeps its existing whole-window older/newer navigation. Day/week/month selection, period cycling, entering detail, opening another Balance editor, Settings/palette takeover, or closing Balance clears the transient handle.
 
+STRATA-D073 extends the same small/large adjustment grammar to an active boundary handle: plain Left/Right still moves the selected boundary by one operational day, while Shift+Left/Right moves that same boundary by up to seven operational days subject to the same one-day minimum and present-day cap. With no active boundary handle, the established Shift+Left/Right period-cycling behavior is unchanged.
+
 The default `balance_range` action remains bound to `r` for direct distant jumps. It opens the existing inline From/To editor, but those visible values use the same boundary convention: `From 2026-09-21` / `To 2026-09-22` means exactly the single included operational day Sep 21. The editor converts the exclusive visible `To` boundary back to the inclusive internal `ReportWindow.end` on commit rather than creating a second report-domain interval type.
 
 While the range editor is active:
@@ -162,7 +167,11 @@ instrument width.
 Below the hero, the body is the editable layer ledger described above. Multiple operational-day slices belonging to
 one canonical completed session project as one ledger row within the selected window, so cross-day sessions are not
 presented as unrelated editable records. The synthetic `+ Add entry…` row is the final ordinary row for active layer
-identities; archived layers remain browse/edit-only.
+identities; archived layers remain browse/edit-only. When room permits, one noninteractive blank row separates the final
+chronological entry from `+ Add entry…`; constrained panes collapse that presentation-only spacer before hiding data.
+Layer Detail keeps its compact ordinary footprint but may widen responsively when a visible cross-day boundary or long
+Tag needs more horizontal space, always within the existing terminal-margin clamps. Temporal boundaries have priority
+over preserving an arbitrarily long Tag when the terminal itself is the limiting width.
 
 `balance_filter`, default `f`, enters/toggles tag filtering on the selected ledger row. The filter is an explicit OR-set
 of individual tags rather than a generated combination cycle. A matching row remains normal; a nonmatching row remains
@@ -174,7 +183,10 @@ selected filter survives period navigation inside the same layer.
 
 When a filter is active, the hero subtotal and marker use the union of matching ledger rows, counting each row once even
 if it matches multiple selected tags. Only the numerator changes; STRATA-D071's full selected-period
-`summary.total_seconds` remains the denominator.
+`summary.total_seconds` remains the denominator. Filter state is presented on its own line below the meter using the
+canonical `; ` tag separator rather than being appended to the subtotal. Nonmatching chronology uses theme-derived
+secondary/de-emphasized presentation plus terminal dimming; filtering never introduces a hardcoded gray color or a
+filter-specific appearance-schema field.
 
 ### Balance summary instrument
 

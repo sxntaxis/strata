@@ -70,7 +70,8 @@ pub const COMMAND_PALETTE_SETTINGS: CommandPaletteSettings = CommandPaletteSetti
 
 pub const REPORT_MODAL_SETTINGS: ReportModalSettings = ReportModalSettings {
     log_detail_fallback_width: 16,
-    log_detail_max_width: 40,
+    log_detail_compact_max_width: 40,
+    log_detail_max_width: 72,
     summary_name_fallback_width: 12,
     summary_name_max_width: 28,
     expanded_inner_padding: 4,
@@ -147,6 +148,7 @@ pub struct CommandPaletteSettings {
 
 pub struct ReportModalSettings {
     pub log_detail_fallback_width: usize,
+    pub log_detail_compact_max_width: usize,
     pub log_detail_max_width: usize,
     pub summary_name_fallback_width: usize,
     pub summary_name_max_width: usize,

@@ -4,6 +4,12 @@ pub(super) struct TagCompletion {
     pub(super) typed_chars: usize,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct TagCycle {
+    pub(super) value: String,
+    pub(super) prefix: String,
+}
+
 pub(super) fn parse_tags(value: &str) -> Vec<String> {
     let mut tags = Vec::new();
     for part in value.split(';') {
@@ -49,6 +55,9 @@ pub(super) fn contains_all_tags(value: &str, filter: &str) -> bool {
 
 pub(super) fn tag_completion(value: &str, known_tags: &[String]) -> Option<TagCompletion> {
     let token = value.rsplit(';').next().unwrap_or(value).trim();
+    if token.is_empty() {
+        return None;
+    }
     let used = if let Some(separator) = value.rfind(';') {
         parse_tags(&value[..separator])
     } else {
@@ -71,14 +80,60 @@ pub(super) fn tag_completion(value: &str, known_tags: &[String]) -> Option<TagCo
         })
 }
 
-pub(super) fn accept_tag_completion(value: &str, completion: &TagCompletion) -> String {
-    let prefix = value
+pub(super) fn cycle_tag(
+    value: &str,
+    known_tags: &[String],
+    retained_prefix: Option<&str>,
+    direction: isize,
+) -> Option<TagCycle> {
+    let current = value.rsplit(';').next().unwrap_or(value).trim();
+    let used = value
         .rfind(';')
         .map(|separator| parse_tags(&value[..separator]))
         .unwrap_or_default();
-    let mut tags = prefix;
-    tags.push(completion.tag.clone());
-    tags.join("; ")
+    let prefix = retained_prefix.map(str::to_string).unwrap_or_else(|| {
+        if known_tags
+            .iter()
+            .any(|known| known.eq_ignore_ascii_case(current))
+        {
+            String::new()
+        } else {
+            current.to_string()
+        }
+    });
+    let prefix_lower = prefix.to_lowercase();
+    let candidates = known_tags
+        .iter()
+        .filter(|known| {
+            !used
+                .iter()
+                .any(|used_tag| used_tag.eq_ignore_ascii_case(known))
+                && (prefix.is_empty() || known.to_lowercase().starts_with(&prefix_lower))
+        })
+        .collect::<Vec<_>>();
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let next = if let Some(current_index) = candidates
+        .iter()
+        .position(|candidate| candidate.eq_ignore_ascii_case(current))
+    {
+        if direction < 0 {
+            (current_index + candidates.len() - 1) % candidates.len()
+        } else {
+            (current_index + 1) % candidates.len()
+        }
+    } else if direction < 0 {
+        candidates.len() - 1
+    } else {
+        0
+    };
+    let replacement = candidates[next];
+    Some(TagCycle {
+        value: replace_current_tag(value, replacement),
+        prefix,
+    })
 }
 
 pub(super) fn replace_current_tag(value: &str, replacement: &str) -> String {
@@ -97,8 +152,8 @@ pub(super) fn replace_current_tag(value: &str, replacement: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        accept_tag_completion, canonicalize_description, contains_all_tags, contains_tag,
-        parse_tags, replace_current_tag, tag_completion,
+        canonicalize_description, contains_all_tags, contains_tag, cycle_tag, parse_tags,
+        replace_current_tag, tag_completion,
     };
 
     #[test]
@@ -133,10 +188,47 @@ mod tests {
         let completion = tag_completion("Renzo; Ani", &known).unwrap();
         assert_eq!(completion.tag, "Anibal");
         assert_eq!(completion.typed_chars, 3);
-        assert_eq!(
-            accept_tag_completion("Renzo; Ani", &completion),
-            "Renzo; Anibal"
-        );
         assert_eq!(replace_current_tag("Renzo; A", "Anibal"), "Renzo; Anibal");
     }
+    #[test]
+    fn completion_waits_for_the_first_character() {
+        let known = vec!["Renzo".to_string(), "Research".to_string()];
+        assert_eq!(tag_completion("", &known), None);
+        assert_eq!(tag_completion("Anibal; ", &known), None);
+        assert_eq!(tag_completion("R", &known).unwrap().tag, "Renzo");
+    }
+
+    #[test]
+    fn cycling_preserves_the_typed_prefix_until_typing_resumes() {
+        let known = vec![
+            "Anibal".to_string(),
+            "Renzo".to_string(),
+            "Research".to_string(),
+        ];
+        let first = cycle_tag("R", &known, None, 1).unwrap();
+        assert_eq!(first.value, "Renzo");
+        assert_eq!(first.prefix, "R");
+        let second = cycle_tag(&first.value, &known, Some(&first.prefix), 1).unwrap();
+        assert_eq!(second.value, "Research");
+        assert_eq!(second.prefix, "R");
+
+        let all = cycle_tag("Renzo", &known, None, 1).unwrap();
+        assert_eq!(all.value, "Research");
+        assert!(all.prefix.is_empty());
+    }
+
+    #[test]
+    fn cycling_targets_only_the_current_multi_tag_segment() {
+        let known = vec![
+            "Anibal".to_string(),
+            "Renzo".to_string(),
+            "Research".to_string(),
+        ];
+        let cycled = cycle_tag("Anibal; R", &known, None, 1).unwrap();
+        assert_eq!(cycled.value, "Anibal; Renzo");
+        assert_eq!(cycled.prefix, "R");
+        let cycled = cycle_tag(&cycled.value, &known, Some(&cycled.prefix), 1).unwrap();
+        assert_eq!(cycled.value, "Anibal; Research");
+    }
+
 }

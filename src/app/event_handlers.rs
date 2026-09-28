@@ -53,6 +53,10 @@ enum LedgerEntryEditKeyIntent {
     Backspace,
     NextField,
     PreviousField,
+    Left,
+    Right,
+    ShiftLeft,
+    ShiftRight,
     Commit,
     Cancel,
     EmergencyQuit,
@@ -110,6 +114,14 @@ fn resolve_ledger_entry_edit_key(
             LedgerEntryEditKeyIntent::PreviousField
         }
         KeyCode::Tab => LedgerEntryEditKeyIntent::NextField,
+        KeyCode::Left if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            LedgerEntryEditKeyIntent::ShiftLeft
+        }
+        KeyCode::Right if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            LedgerEntryEditKeyIntent::ShiftRight
+        }
+        KeyCode::Left => LedgerEntryEditKeyIntent::Left,
+        KeyCode::Right => LedgerEntryEditKeyIntent::Right,
         KeyCode::Char(character) => LedgerEntryEditKeyIntent::Append(character),
         _ => LedgerEntryEditKeyIntent::Ignore,
     }
@@ -1490,6 +1502,7 @@ impl App {
                     self.new_category_name.pop();
                 } else if self.selected_index < self.time_tracker.category_count() {
                     self.modal_tag_index = None;
+                    self.modal_tag_cycle_prefix = None;
                     self.modal_description.pop();
                     self.preview_active_description_from_modal();
                 }
@@ -1518,6 +1531,7 @@ impl App {
                 self.render_needed = true;
             } else if self.selected_index < self.time_tracker.category_count() {
                 self.modal_tag_index = None;
+                self.modal_tag_cycle_prefix = None;
                 self.modal_description.push(c);
                 self.preview_active_description_from_modal();
                 self.render_needed = true;
@@ -1615,14 +1629,18 @@ impl App {
                 }
             }
             Action::ShiftLeft => {
-                if self.report_range_is_custom() {
+                if self.report_range_boundary.is_some() {
+                    self.move_report_range_boundary_steps(-1, 7);
+                } else if self.report_range_is_custom() {
                     self.set_report_period(ReportPeriod::Month);
                 } else {
                     self.set_report_period(ui_helpers::report_period_prev(self.report_period));
                 }
             }
             Action::ShiftRight => {
-                if self.report_range_is_custom() {
+                if self.report_range_boundary.is_some() {
+                    self.move_report_range_boundary_steps(1, 7);
+                } else if self.report_range_is_custom() {
                     self.set_report_period(ReportPeriod::Today);
                 } else {
                     self.set_report_period(ui_helpers::report_period_next(self.report_period));
@@ -1764,9 +1782,7 @@ impl App {
                 }
             }
             LedgerEntryEditKeyIntent::NextField => {
-                if !self.accept_ledger_tag_completion()
-                    && let Some(edit) = self.ledger_entry_edit.as_mut()
-                {
+                if let Some(edit) = self.ledger_entry_edit.as_mut() {
                     edit.next_field();
                     self.render_needed = true;
                 }
@@ -1774,6 +1790,42 @@ impl App {
             LedgerEntryEditKeyIntent::PreviousField => {
                 if let Some(edit) = self.ledger_entry_edit.as_mut() {
                     edit.previous_field();
+                    self.render_needed = true;
+                }
+            }
+            LedgerEntryEditKeyIntent::Left | LedgerEntryEditKeyIntent::Right => {
+                let direction: i64 = if matches!(intent, LedgerEntryEditKeyIntent::Left) {
+                    -1
+                } else {
+                    1
+                };
+                let description_active = self
+                    .ledger_entry_edit
+                    .as_ref()
+                    .is_some_and(|edit| edit.active_field == super::LedgerEntryField::Description);
+                if description_active {
+                    self.cycle_ledger_tag(direction as isize);
+                } else if let Some(edit) = self.ledger_entry_edit.as_mut()
+                    && edit.adjust_active_temporal(direction, false)
+                {
+                    self.render_needed = true;
+                }
+            }
+            LedgerEntryEditKeyIntent::ShiftLeft | LedgerEntryEditKeyIntent::ShiftRight => {
+                let direction: i64 = if matches!(intent, LedgerEntryEditKeyIntent::ShiftLeft) {
+                    -1
+                } else {
+                    1
+                };
+                let description_active = self
+                    .ledger_entry_edit
+                    .as_ref()
+                    .is_some_and(|edit| edit.active_field == super::LedgerEntryField::Description);
+                if description_active {
+                    self.cycle_ledger_tag(direction as isize);
+                } else if let Some(edit) = self.ledger_entry_edit.as_mut()
+                    && edit.adjust_active_temporal(direction, true)
+                {
                     self.render_needed = true;
                 }
             }
@@ -1911,6 +1963,29 @@ mod report_edit_tests {
                 &keymap,
             ),
             LedgerEntryEditKeyIntent::PreviousField
+        );
+    }
+
+    #[test]
+    fn ledger_entry_editor_owns_temporal_arrow_adjustments() {
+        let keymap = default_keymap();
+        assert_eq!(
+            resolve_ledger_entry_edit_key(
+                KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
+                &keymap,
+            ),
+            LedgerEntryEditKeyIntent::Left
+        );
+        assert_eq!(
+            resolve_ledger_entry_edit_key(
+                KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT),
+                &keymap,
+            ),
+            LedgerEntryEditKeyIntent::ShiftRight
+        );
+        assert_eq!(
+            resolve_ledger_entry_edit_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), &keymap,),
+            LedgerEntryEditKeyIntent::Ignore
         );
     }
 

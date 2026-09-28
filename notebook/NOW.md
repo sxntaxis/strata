@@ -5,9 +5,13 @@ state: active
 created: 2026-08-01
 updated: 2026-09-28
 authority: working
-summary: "BALANCE-TAG-FILTER-UX-001 is native-green for semicolon multi-tag attribution, dim canonical completion, and Layer Detail OR filtering with dimmed chronology on the D071 meter scale; draft PR #110 is stacked on #109."
-next: Owner-review PR #110's loaded-profile multi-tag attribution and OR-filter flow; keep SEDIMENT-016 separate.
+summary: "BALANCE-BEHAVIOR-COHERENCE-001 is authored on exact PR #110 head f8c397e: Tab-only field navigation, prefix-aware tag arrow cycling, forgiving temporal entry/adjustment, accelerated range boundaries, and filter/layout presentation cleanup."
+next: Native-validate BALANCE-BEHAVIOR-COHERENCE-001 on PR #110 lineage; keep SEDIMENT-016 separate.
 ---
+
+## BALANCE-BEHAVIOR-COHERENCE-001 input/presentation coherence — 2026-09-28
+
+**AUTHORED CANDIDATE / D073 ACCEPTED / NATIVE GATE PENDING:** on exact natively certified PR #110 head `f8c397e71f3633c2e952be6c63c94902a6e6ecc4`, owner review makes Tab/Shift+Tab exclusively field navigation, aligns Layer and ledger tag arrows around prefix-restricted known-tag cycling, adds forgiving time input plus timestamp-safe Left/Right adjustment with Shift acceleration, extends the same one/seven-day grammar to active Balance range handles, and cleans up Layer Detail filtering/layout without changing D071/D072 semantics. Filter state moves below the meter, nonmatches use theme-derived de-emphasis, Add receives a collapsible separator, and cross-day/long-tag rows may request more width. No schema change. Native Rust tooling is unavailable in this authoring environment. See `notebook/work/BALANCE-BEHAVIOR-COHERENCE-001.md`.
 
 ## BALANCE-TAG-FILTER-UX-001 multi-tag attribution and contextual filtering — 2026-09-28
 

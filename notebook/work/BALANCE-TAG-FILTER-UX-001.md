@@ -83,3 +83,7 @@ The owner accepted STRATA-D072, and it is now implemented and natively certified
 
 - Published as draft PR [#110](https://github.com/sxntaxis/strata/pull/110), stacked on PR #109 (`work/balance-meter-layer-parity-001`).
 - STRATA-D072 remains accepted; its implementation status is natively certified. SEDIMENT-016 remains separate.
+
+## Owner-review follow-up
+
+The native-green PR #110 behavior above is the historical validation baseline for D072. Subsequent owner review accepted STRATA-D073 in `BALANCE-BEHAVIOR-COHERENCE-001`: Tab no longer accepts completion, empty Tag segments no longer show a ghost suggestion, and ledger/Layer tag cycling now uses prefix-aware Left/Right semantics. D072's multi-tag attribution and OR-filter semantics themselves are unchanged.
