@@ -150,12 +150,8 @@ fn meter_offset(width: u16, signed_seconds: isize, total_seconds: usize) -> i128
     }
     let center = width / 2;
     let radius = center.saturating_sub(1) as i128;
-    rounded_meter_offset(
-        signed_seconds as i128,
-        total_seconds as i128,
-        radius,
-    )
-    .clamp(-radius, radius)
+    rounded_meter_offset(signed_seconds as i128, total_seconds as i128, radius)
+        .clamp(-radius, radius)
 }
 
 fn meter_cells_for_offset(width: u16, offset: i128) -> Vec<MeterCell> {
@@ -400,8 +396,8 @@ mod tests {
 
     use super::{
         InstrumentTotals, MIN_THREE_COLUMN_WIDTH, MeterRole, format_negative_total,
-        format_net_total, format_positive_total, instrument_totals, instrument_width,
-        meter_cells, meter_offset, preferred_summary_inner_height, preferred_summary_inner_width,
+        format_net_total, format_positive_total, instrument_totals, instrument_width, meter_cells,
+        meter_offset, preferred_summary_inner_height, preferred_summary_inner_width,
         side_total_line,
     };
 
@@ -608,7 +604,11 @@ mod tests {
         let explicit_positive = 100;
         let idle = 100;
         let without_idle = meter_offset(width, explicit_positive, explicit_positive as usize);
-        let with_idle = meter_offset(width, explicit_positive, (explicit_positive + idle) as usize);
+        let with_idle = meter_offset(
+            width,
+            explicit_positive,
+            (explicit_positive + idle) as usize,
+        );
         assert!(with_idle > 0);
         assert!(with_idle < without_idle);
     }

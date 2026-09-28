@@ -109,7 +109,13 @@ impl App {
         let preferred_inner_width = self
             .preferred_report_inner_width(&summary, logs_for_view.as_deref())
             .max(if self.report_range_edit.is_some() {
-                REPORT_MODAL_SETTINGS.range_editor_min_width
+                if self.report_logs_category_id.is_some() {
+                    REPORT_MODAL_SETTINGS
+                        .range_editor_min_width
+                        .saturating_add(12)
+                } else {
+                    REPORT_MODAL_SETTINGS.range_editor_min_width
+                }
             } else if self
                 .ledger_entry_edit
                 .as_ref()
@@ -291,7 +297,7 @@ impl App {
                 .border_style(Style::default().fg(border_color))
         };
 
-        if default_summary || layer_detail {
+        if default_summary || (layer_detail && self.report_range_edit.is_none()) {
             frame_block = frame_block.title_bottom(period_bottom_title);
         }
         if let Some(interaction_bottom_title) = interaction_bottom_title {
@@ -790,9 +796,9 @@ impl App {
         show_date_column: bool,
         selected_text: Option<Color>,
         is_none_category: bool,
-        balance_effect: i8,
-        marker_color: Color,
+        marker: (i8, Color),
     ) -> Line<'static> {
+        let (balance_effect, marker_color) = marker;
         let tag = if row.description.trim().is_empty() {
             String::new()
         } else {
@@ -926,8 +932,7 @@ impl App {
                         show_date_column,
                         is_selected.then_some(text_color),
                         is_none_category,
-                        balance_effect,
-                        border_color,
+                        (balance_effect, border_color),
                     ))
                 };
                 if is_selected {

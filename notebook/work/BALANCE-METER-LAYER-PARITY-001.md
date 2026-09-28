@@ -22,6 +22,10 @@ Balance and Layer Detail are two views of the same instrument. Their horizontal 
 
 The Balance side totals remain the negative aggregate, net, and positive aggregate; Idle is neutral there but remains part of the meter's recorded-time denominator.
 
+## Accepted-authority gate
+
+This supplied owner candidate explicitly conflicts with accepted STRATA-D069 and `docs/REPORT_AUTHORITY.md` lines 40–46: accepted behavior divides the global meter by polarized time and derives Layer Detail from the rounded parent displacement envelope. The candidate instead divides global and layer values directly by all recorded period time, including Idle. Those accepted records remain unchanged in this working candidate. Before promotion, the owner must explicitly adjudicate whether this candidate supersedes D069 and the report-authority meter section.
+
 ## Marker parity
 
 Balance uses the same layer marker grammar as the Strata layer modal:
@@ -51,7 +55,7 @@ The Balance period selector remains active inside Layer Detail without leaving t
 - without a selected boundary, Left/Right shifts the whole interval;
 - Esc clears a selected boundary before leaving Layer Detail;
 - changing the period keeps the same layer and recomputes its sum, marker, and ledger;
-- the bottom `< start – end >` boundary footer remains the shared visible period control.
+- the bottom `< start – end >` boundary footer remains the shared visible period control in ordinary Layer Detail; while the `r` editor is active, its From/To controls temporarily occupy that footer to avoid overlapping titles.
 
 Command-palette start/end boundary actions preserve Layer Detail rather than returning to the Balance summary.
 
@@ -59,6 +63,12 @@ Command-palette start/end boundary actions preserve Layer Detail rather than ret
 
 This pass does not change historical-correction semantics, collateral-confirmation custody, SQLite schema, sediment correction/recolor doctrine, report-window inclusive internal semantics, or SEDIMENT-016 authority.
 
-## Validation
+## Native validation facts — 2026-09-28
 
-Assistant-side environment has no Rust toolchain. Static/Git validation and bundle verification are required here; formatter, strict Clippy, all-feature tests, CLI help, and populated TUI smoke remain for the native local pass.
+- `cargo fmt --all -- --check`, strict Clippy, `cargo test --all-features`, and `cargo run -- --help` pass. The suite reports 564 library tests and 24 integration/process tests passed; 20 ignored; 0 failed.
+- Focused meter tests cover the shared recorded-time denominator, independent opposite-sign layer/global projections, and noncollapsed layer positions when the global net is zero.
+- A freshly rooted imported test profile with eight layers was exercised at 120×40. Balance/month showed the net marker projected against recorded time including Idle; Layer Detail displayed positive/neutral `●` and negative `◯` row markers, aligned the left/right outer ledger cells, and retained the selected layer through Week, Month, `[` + Left boundary movement, Esc boundary clearing, and command-palette range-start selection.
+- Opening `r` inside Layer Detail initially exposed overlapping bottom-border titles. The period footer now yields to the explicit From/To editor while that editor is active, and the modal grants it enough width to keep the full dates and instructions visible; PTY smoke confirmed the layer and ledger remain present.
+- The isolated test profile's SQLite doctor passed after the smoke: schema v1, integrity and foreign-key checks healthy. The source profile used to create the portable test fixture was not mutated.
+
+The implementation is natively validated as a candidate. Owner review must first resolve the accepted D069/report-authority meter conflict; SEDIMENT-016 remains separate.
