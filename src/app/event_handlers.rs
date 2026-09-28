@@ -1093,8 +1093,6 @@ impl App {
                 if !self.in_balance_modal() {
                     self.open_report_modal();
                 } else {
-                    self.report_logs_category_id = None;
-                    self.report_log_selected_index = 0;
                     self.ledger_entry_edit = None;
                 }
                 self.select_report_range_boundary(ReportRangeBoundary::Start);
@@ -1104,8 +1102,6 @@ impl App {
                 if !self.in_balance_modal() {
                     self.open_report_modal();
                 } else {
-                    self.report_logs_category_id = None;
-                    self.report_log_selected_index = 0;
                     self.ledger_entry_edit = None;
                 }
                 self.select_report_range_boundary(ReportRangeBoundary::End);
@@ -1560,7 +1556,7 @@ impl App {
 
         match action {
             Action::Cancel => {
-                if self.report_range_boundary.is_some() && !in_logs_view {
+                if self.report_range_boundary.is_some() {
                     self.clear_report_range_boundary();
                 } else if in_logs_view {
                     self.ledger_entry_edit = None;
@@ -1611,14 +1607,14 @@ impl App {
                 }
             }
             Action::Left => {
-                if self.report_range_boundary.is_some() && !in_logs_view {
+                if self.report_range_boundary.is_some() {
                     self.move_report_range_boundary(-1);
                 } else {
                     self.shift_report_interval_older();
                 }
             }
             Action::Right => {
-                if self.report_range_boundary.is_some() && !in_logs_view {
+                if self.report_range_boundary.is_some() {
                     self.move_report_range_boundary(1);
                 } else {
                     self.shift_report_interval_newer();
@@ -1643,18 +1639,10 @@ impl App {
             Action::ReportMonth => self.set_report_period(ReportPeriod::Month),
             Action::ReportRange => self.begin_report_range_edit(),
             Action::ReportRangeStart => {
-                if in_logs_view {
-                    handled = false;
-                } else {
-                    self.select_report_range_boundary(ReportRangeBoundary::Start);
-                }
+                self.select_report_range_boundary(ReportRangeBoundary::Start);
             }
             Action::ReportRangeEnd => {
-                if in_logs_view {
-                    handled = false;
-                } else {
-                    self.select_report_range_boundary(ReportRangeBoundary::End);
-                }
+                self.select_report_range_boundary(ReportRangeBoundary::End);
             }
             Action::LogActivity => {
                 self.clear_report_range_boundary();

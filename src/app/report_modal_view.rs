@@ -26,6 +26,10 @@ fn summary_border_color(
         .unwrap_or(fallback)
 }
 
+fn balance_marker(balance_effect: i8) -> &'static str {
+    if balance_effect < 0 { "◯" } else { "●" }
+}
+
 fn ledger_edit_display_lines(edit: &LedgerEntryEditState) -> Vec<Line<'static>> {
     let token = |value: String, active: bool| {
         if active { format!("[{value}]") } else { value }
@@ -87,8 +91,7 @@ impl App {
 
         let default_summary =
             self.report_logs_category_id.is_none() && self.report_range_edit.is_none();
-        let layer_detail =
-            self.report_logs_category_id.is_some() && self.report_range_edit.is_none();
+        let layer_detail = self.report_logs_category_id.is_some();
         let mut body_row_count = if layer_detail {
             self.report_ledger_row_count()
         } else {
@@ -536,7 +539,7 @@ impl App {
         let columns_total = usize::from(inner.width);
         let widths = Self::ledger_weighted_widths(columns_total, &[1, 2, 2]);
         let header = Line::from(vec![
-            Span::raw(self.ledger_center_cell("", widths[0])),
+            Span::raw(self.ledger_left_cell("", widths[0])),
             Span::styled(
                 self.ledger_center_cell("BEFORE", widths[1]),
                 Style::default()
@@ -544,7 +547,7 @@ impl App {
                     .add_modifier(Modifier::DIM),
             ),
             Span::styled(
-                self.ledger_center_cell("AFTER", widths[2]),
+                self.ledger_right_cell("AFTER", widths[2]),
                 Style::default()
                     .fg(self.theme_status())
                     .add_modifier(Modifier::DIM),
@@ -586,7 +589,7 @@ impl App {
                 };
                 lines.push(Line::from(vec![
                     Span::styled(
-                        self.ledger_center_cell(name_value, widths[0]),
+                        self.ledger_left_cell(name_value, widths[0]),
                         Style::default().fg(self.category_color_for_id(change.category_id)),
                     ),
                     Span::styled(
@@ -594,7 +597,7 @@ impl App {
                         Style::default().fg(self.theme_foreground()),
                     ),
                     Span::styled(
-                        self.ledger_center_cell(after_value, widths[2]),
+                        self.ledger_right_cell(after_value, widths[2]),
                         Style::default().fg(after_color),
                     ),
                 ]));
@@ -723,6 +726,24 @@ impl App {
         format!("{}{}{}", " ".repeat(left), text, " ".repeat(right))
     }
 
+    fn ledger_left_cell(&self, text: &str, width: usize) -> String {
+        if width == 0 {
+            return String::new();
+        }
+        let text = self.truncate_label(text, width);
+        let remaining = width.saturating_sub(text.chars().count());
+        format!("{}{}", text, " ".repeat(remaining))
+    }
+
+    fn ledger_right_cell(&self, text: &str, width: usize) -> String {
+        if width == 0 {
+            return String::new();
+        }
+        let text = self.truncate_label(text, width);
+        let remaining = width.saturating_sub(text.chars().count());
+        format!("{}{}", " ".repeat(remaining), text)
+    }
+
     fn ledger_date_label(&self, raw: &str) -> String {
         ui_helpers::format_report_interval_label(raw)
     }
@@ -769,6 +790,8 @@ impl App {
         show_date_column: bool,
         selected_text: Option<Color>,
         is_none_category: bool,
+        balance_effect: i8,
+        marker_color: Color,
     ) -> Line<'static> {
         let tag = if row.description.trim().is_empty() {
             String::new()
@@ -781,6 +804,7 @@ impl App {
         let metric_color =
             selected_text.unwrap_or_else(|| self.ledger_metric_color(row, is_none_category));
         let tag_color = selected_text.unwrap_or_else(|| self.theme_foreground());
+        let marker_color = selected_text.unwrap_or(marker_color);
         let temporal_color = selected_text.unwrap_or_else(|| self.theme_status());
         let cross_day = row.date != row.end_date;
 
@@ -824,16 +848,29 @@ impl App {
             )
         };
 
-        let spans = values
-            .into_iter()
-            .zip(widths)
-            .map(|((value, color), width)| {
-                Span::styled(
-                    self.ledger_center_cell(&value, width),
-                    Style::default().fg(color),
-                )
-            })
-            .collect::<Vec<_>>();
+        let last = values.len().saturating_sub(1);
+        let mut spans = Vec::with_capacity(values.len().saturating_add(1));
+        for (idx, ((value, color), width)) in values.into_iter().zip(widths).enumerate() {
+            if idx == 0 {
+                let marker = format!("{} ", balance_marker(balance_effect));
+                let marker_width = marker.chars().count().min(width);
+                spans.push(Span::styled(
+                    self.truncate_label(&marker, marker_width),
+                    Style::default().fg(marker_color),
+                ));
+                spans.push(Span::styled(
+                    self.ledger_left_cell(&value, width.saturating_sub(marker_width)),
+                    Style::default().fg(tag_color),
+                ));
+            } else {
+                let aligned = if idx == last {
+                    self.ledger_right_cell(&value, width)
+                } else {
+                    self.ledger_center_cell(&value, width)
+                };
+                spans.push(Span::styled(aligned, Style::default().fg(color)));
+            }
+        }
         Line::from(spans)
     }
 
@@ -852,6 +889,13 @@ impl App {
                 .min(row_count.saturating_sub(1))
         });
         let is_none_category = category_id == DRIFT_CATEGORY_ID;
+        let balance_effect = self
+            .report_rows()
+            .entries
+            .iter()
+            .find(|entry| entry.category_id == category_id)
+            .map(|entry| entry.balance_effect)
+            .unwrap_or(0);
         let row_width = list_area.width as usize;
         let show_date_column = {
             let window = self.current_report_window();
@@ -882,6 +926,8 @@ impl App {
                         show_date_column,
                         is_selected.then_some(text_color),
                         is_none_category,
+                        balance_effect,
+                        border_color,
                     ))
                 };
                 if is_selected {
@@ -907,10 +953,8 @@ impl App {
                 ))
             } else {
                 let label = "+ Add entry…";
-                let padded = format!(
-                    "{label}{}",
-                    " ".repeat(row_width.saturating_sub(label.chars().count()))
-                );
+                let label = format!("  {label}");
+                let padded = self.ledger_left_cell(&label, row_width);
                 ListItem::new(Line::from(Span::styled(
                     padded,
                     Style::default().fg(if is_selected {
@@ -1012,13 +1056,7 @@ impl App {
             .enumerate()
             .map(|(idx, entry)| {
                 let is_selected = selected_summary_index == Some(idx);
-                let dot = if entry.balance_effect < 0 {
-                    "◯ "
-                } else if entry.balance_effect == 0 {
-                    "· "
-                } else {
-                    "● "
-                };
+                let dot = format!("{} ", balance_marker(entry.balance_effect));
                 let branded_name = self.display_layer_name(&entry.category_name);
                 let name = self.truncate_label(&branded_name, name_width);
                 let pad = name_width.saturating_sub(name.chars().count()) + 1;
@@ -1093,7 +1131,7 @@ mod hardening_tests {
     use ratatui::style::Color;
 
     use super::super::{LedgerEntryEditState, LedgerEntryField};
-    use super::{App, ledger_edit_display_lines, summary_border_color};
+    use super::{App, balance_marker, ledger_edit_display_lines, summary_border_color};
     use crate::domain::{BalanceReportEntry, BalanceReportSummary, CategoryId};
 
     #[test]
@@ -1110,6 +1148,13 @@ mod hardening_tests {
             App::ledger_weighted_widths(60, &[1, 2, 1]),
             vec![15, 30, 15]
         );
+    }
+
+    #[test]
+    fn balance_marker_matches_layer_modal_and_keeps_idle_filled() {
+        assert_eq!(balance_marker(-1), "◯");
+        assert_eq!(balance_marker(0), "●");
+        assert_eq!(balance_marker(1), "●");
     }
 
     #[test]

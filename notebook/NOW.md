@@ -5,9 +5,13 @@ state: active
 created: 2026-08-01
 updated: 2026-09-28
 authority: working
-summary: "BALANCE-LEDGER-CORRECTION-UX-001 unifies Balance Add/Edit through one native-green historical correction transaction with implicit Idle semantics and a centered collateral Before/After card; draft PR #108 is stacked on #107 for owner review."
-next: Owner-review PR #108's loaded-profile correction and collateral confirmation, then decide promote or revise; keep SEDIMENT-016 separate.
+summary: "BALANCE-METER-LAYER-PARITY-001 puts Balance and Layer Detail on one recorded-time meter scale, restores layer-marker/alignment parity, and carries the full period selector into Layer Detail on top of native-green PR #108."
+next: Native-validate and owner-review BALANCE-METER-LAYER-PARITY-001 on top of draft PR #108; keep SEDIMENT-016 separate.
 ---
+
+## BALANCE-METER-LAYER-PARITY-001 shared meter and layer-detail parity — 2026-09-28
+
+**CANDIDATE / NATIVE VALIDATION NEXT:** owner review found the Layer Detail influence meter semantically too coarse because it was normalized inside the already-rounded global displacement. Balance and Layer Detail now project directly onto one meter whose full scale is the period's total recorded time, including Idle; global net and every layer contribution therefore remain comparable even when they point in opposite directions or globally cancel. Idle uses the same filled layer circle as the Strata modal; Layer Detail ledger rows gain layer circles, outer data cells align toward the modal walls while interior cells stay centered, and `+ Add entry…` aligns with the tag column. Layer Detail also keeps the full Balance period selector, including presets, typed range, bracket handles, whole-window navigation, and Esc-handle clearing without leaving the layer. See `notebook/work/BALANCE-METER-LAYER-PARITY-001.md`.
 
 ## BALANCE-LEDGER-CORRECTION-UX-001 unified correction — 2026-09-28
 
