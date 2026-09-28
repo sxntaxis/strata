@@ -300,7 +300,7 @@ impl App {
             .report_filter_tag_index
             .unwrap_or(0)
             .min(facets.len().saturating_sub(1));
-        self.report_filter_tag_index = Some(focus);
+        self.report_filter_tag_index = (facets.len() > 1).then_some(focus);
         let facet = facets[focus].clone();
         if let Some(index) = self
             .report_tag_filter
@@ -325,7 +325,7 @@ impl App {
             return false;
         };
         let facets = self.report_tag_facets_for_log(row);
-        if facets.is_empty() {
+        if facets.len() <= 1 {
             self.report_filter_tag_index = None;
             return false;
         }
@@ -370,7 +370,7 @@ impl App {
             return;
         };
         let facets = self.report_tag_facets_for_log(row);
-        if facets.is_empty() {
+        if facets.len() <= 1 {
             self.report_filter_tag_index = None;
         } else {
             self.report_filter_tag_index = Some(current.min(facets.len() - 1));
