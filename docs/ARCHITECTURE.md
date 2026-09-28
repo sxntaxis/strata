@@ -41,7 +41,7 @@ Core responsibilities:
 ## Session model
 
 - Category/layer is the canonical reportable activity axis.
-- Session description/tag is interval text, separate from durable category metadata.
+- Session description/tag is interval classification text, separate from durable category metadata. When it contains multiple attribution tags, canonical storage remains the existing description field and serializes the ordered set as `Tag A; Tag B`; no parallel tag-time ledger or schema authority is introduced.
 - There is no independent canonical `project` field.
 - Idle is explicit category ID `0` and keeps the continuous ledger running.
 - `stop` transitions to idle rather than leaving time unclassified.

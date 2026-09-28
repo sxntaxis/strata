@@ -25,9 +25,11 @@ There is no independent canonical `project` field. Earlier prerelease CLI syntax
 `strata start <LAYER>` resolves a case-insensitive layer name or numeric category ID. `idle` is the explicit continuous-ledger baseline and canonical category ID `0`.
 
 ```bash
-strata start Work --desc "deep focus"
+strata start Work --desc "Renzo; Anibal"
 strata stop
 ```
+
+The existing description field may represent one or more independent attribution tags. Canonical multi-tag text uses `; ` between tags; each tag attributes the full interval rather than partitioning its elapsed time. The session itself remains one canonical wall-clock row.
 
 `stop` transitions the ledger back to idle. It does not create unclassified wall time.
 

@@ -339,27 +339,109 @@ impl App {
         }
     }
 
-    pub(super) fn remember_selected_tag(&mut self) {
-        let Some(category_id) = self.selected_category_id() else {
-            return;
-        };
+    fn known_tags_for_category(&self, category_id: CategoryId) -> Vec<String> {
+        let mut known = Vec::new();
+        if let Some(stored) = self.category_tags.tags_by_category.get(&category_id.0) {
+            for stored_value in stored {
+                for tag in super::tagging::parse_tags(stored_value) {
+                    if !known
+                        .iter()
+                        .any(|candidate: &String| candidate.eq_ignore_ascii_case(&tag))
+                    {
+                        known.push(tag);
+                    }
+                }
+            }
+        }
+        for session in self
+            .time_tracker
+            .sessions
+            .iter()
+            .filter(|session| session.category_id == category_id)
+        {
+            for tag in super::tagging::parse_tags(&session.description) {
+                if !known
+                    .iter()
+                    .any(|candidate| candidate.eq_ignore_ascii_case(&tag))
+                {
+                    known.push(tag);
+                }
+            }
+        }
+        if self.time_tracker.active_category_id() == category_id {
+            for tag in super::tagging::parse_tags(self.time_tracker.active_description()) {
+                if !known
+                    .iter()
+                    .any(|candidate| candidate.eq_ignore_ascii_case(&tag))
+                {
+                    known.push(tag);
+                }
+            }
+        }
+        known
+    }
 
-        let tag = self.modal_description.trim();
-        if tag.is_empty() {
+    pub(super) fn canonicalize_description_for_category(
+        &self,
+        category_id: CategoryId,
+        description: &str,
+    ) -> String {
+        let known_tags = self.known_tags_for_category(category_id);
+        super::tagging::canonicalize_description(description, &known_tags)
+    }
+
+    pub(super) fn tag_completion_for_category(
+        &self,
+        category_id: CategoryId,
+        description: &str,
+    ) -> Option<super::tagging::TagCompletion> {
+        let known_tags = self.known_tags_for_category(category_id);
+        super::tagging::tag_completion(description, &known_tags)
+    }
+
+    pub(super) fn remember_description_tags_for_category(
+        &mut self,
+        category_id: CategoryId,
+        description: &str,
+    ) {
+        let parsed = super::tagging::parse_tags(description);
+        if parsed.is_empty() {
             return;
         }
-
         let tags = self
             .category_tags
             .tags_by_category
             .entry(category_id.0)
             .or_default();
-        tags.retain(|existing| existing != tag);
-        tags.insert(0, tag.to_string());
-        tags.truncate(CATEGORY_SETTINGS.max_tags_per_category);
-
-        self.modal_tag_index = Some(0);
+        let mut merged = parsed;
+        for existing_value in tags.drain(..) {
+            for existing in super::tagging::parse_tags(&existing_value) {
+                if !merged
+                    .iter()
+                    .any(|candidate| candidate.eq_ignore_ascii_case(&existing))
+                {
+                    merged.push(existing);
+                }
+            }
+        }
+        merged.truncate(CATEGORY_SETTINGS.max_tags_per_category);
+        *tags = merged;
         self.persist_category_tags();
+    }
+
+    pub(super) fn remember_selected_tag(&mut self) {
+        let Some(category_id) = self.selected_category_id() else {
+            return;
+        };
+
+        let canonical =
+            self.canonicalize_description_for_category(category_id, &self.modal_description);
+        if canonical != self.modal_description {
+            self.modal_description = canonical.clone();
+            self.preview_active_description_from_modal();
+        }
+        self.remember_description_tags_for_category(category_id, &canonical);
+        self.modal_tag_index = (!super::tagging::parse_tags(&canonical).is_empty()).then_some(0);
     }
 
     pub(super) fn cycle_selected_tag(&mut self, direction: isize) {
@@ -367,14 +449,17 @@ impl App {
             return;
         };
 
-        let Some(tags) = self.category_tags.tags_by_category.get(&category_id.0) else {
-            return;
-        };
-
+        let tags = self.known_tags_for_category(category_id);
         if tags.is_empty() {
             return;
         }
 
+        let current_token = self
+            .modal_description
+            .rsplit(';')
+            .next()
+            .unwrap_or_default()
+            .trim();
         let len = tags.len();
         let next_index = if let Some(current_index) = self.modal_tag_index {
             if direction < 0 {
@@ -382,29 +467,33 @@ impl App {
             } else {
                 (current_index + 1) % len
             }
-        } else if !self.modal_description.trim().is_empty() {
-            if let Some(existing_index) = tags
-                .iter()
-                .position(|tag| tag == self.modal_description.trim())
+        } else if direction >= 0 {
+            if let Some(completion) =
+                self.tag_completion_for_category(category_id, &self.modal_description)
             {
-                if direction < 0 {
-                    (existing_index + len - 1) % len
-                } else {
-                    (existing_index + 1) % len
-                }
-            } else if direction < 0 {
-                len - 1
+                tags.iter()
+                    .position(|tag| tag.eq_ignore_ascii_case(&completion.tag))
+                    .unwrap_or(0)
+            } else if !current_token.is_empty() {
+                tags.iter()
+                    .position(|tag| tag.eq_ignore_ascii_case(current_token))
+                    .map(|index| (index + 1) % len)
+                    .unwrap_or(0)
             } else {
                 0
             }
-        } else if direction < 0 {
-            len - 1
+        } else if !current_token.is_empty() {
+            tags.iter()
+                .position(|tag| tag.eq_ignore_ascii_case(current_token))
+                .map(|index| (index + len - 1) % len)
+                .unwrap_or(len - 1)
         } else {
-            0
+            len - 1
         };
 
         self.modal_tag_index = Some(next_index);
-        self.modal_description = tags[next_index].clone();
+        self.modal_description =
+            super::tagging::replace_current_tag(&self.modal_description, &tags[next_index]);
         self.preview_active_description_from_modal();
     }
 

@@ -71,6 +71,39 @@ fn ledger_display_tag(description: &str, fallback_tag: &str) -> String {
     }
 }
 
+fn ledger_display_tag_with_focus(
+    description: &str,
+    fallback_tag: &str,
+    focus: Option<usize>,
+) -> String {
+    let Some(focus) = focus else {
+        return ledger_display_tag(description, fallback_tag);
+    };
+    let tags = super::tagging::parse_tags(description);
+    if tags.is_empty() {
+        return format!("[{fallback_tag}]");
+    }
+    tags.into_iter()
+        .enumerate()
+        .map(|(index, tag)| {
+            if index == focus {
+                format!("[{tag}]")
+            } else {
+                tag
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn tag_completion_suffix(completion: &super::tagging::TagCompletion) -> String {
+    completion
+        .tag
+        .chars()
+        .skip(completion.typed_chars)
+        .collect()
+}
+
 impl App {
     pub(super) fn render_report_modal(&self, f: &mut Frame, terminal_size: Rect) {
         let summary = self.report_rows();
@@ -682,7 +715,26 @@ impl App {
         };
 
         if let (Some(total_area), Some(meter_area)) = (total_area, meter_area) {
-            self.render_layer_influence_instrument(f, total_area, meter_area, summary, category_id);
+            let unfiltered_contribution = summary
+                .entries
+                .iter()
+                .find(|entry| entry.category_id == category_id)
+                .map(|entry| entry.balance_seconds)
+                .unwrap_or(0);
+            let contribution = if self.report_tag_filter_active() {
+                self.report_filtered_layer_balance(logs)
+            } else {
+                unfiltered_contribution
+            };
+            let filter_label = self.report_filter_label();
+            self.render_layer_influence_instrument(
+                f,
+                total_area,
+                meter_area,
+                summary,
+                contribution,
+                filter_label.as_deref(),
+            );
         }
 
         self.render_report_logs_view(f, list_area, logs, category_id, border_color);
@@ -780,11 +832,12 @@ impl App {
         row_width: usize,
         show_date_column: bool,
         selected_text: Option<Color>,
+        filter_focus: Option<usize>,
         is_none_category: bool,
         marker: (i8, Color, &str),
     ) -> Line<'static> {
         let (balance_effect, marker_color, fallback_tag) = marker;
-        let tag = ledger_display_tag(&row.description, fallback_tag);
+        let tag = ledger_display_tag_with_focus(&row.description, fallback_tag, filter_focus);
         let start_time = Self::ledger_minute_time(&row.start_time);
         let end_time = Self::ledger_minute_time(&row.end_time);
         let metric = self.ledger_metric_value(row, is_none_category);
@@ -871,6 +924,26 @@ impl App {
     ) -> Line<'static> {
         if row_width < 52 {
             let effective_end_date = ledger_edit_effective_end_date(edit);
+            if edit.active_field == LedgerEntryField::Description
+                && let Some(completion) =
+                    self.tag_completion_for_category(edit.category_id, &edit.description)
+            {
+                let suffix = tag_completion_suffix(&completion);
+                let prefix = format!("{marker} Tag [{}", edit.description.trim());
+                let full_width = prefix
+                    .chars()
+                    .count()
+                    .saturating_add(suffix.chars().count())
+                    .saturating_add(1);
+                if full_width <= row_width {
+                    let padding = row_width.saturating_sub(full_width);
+                    return Line::from(vec![
+                        Span::raw(prefix),
+                        Span::styled(suffix, Style::default().add_modifier(Modifier::DIM)),
+                        Span::raw(format!("]{}", " ".repeat(padding))),
+                    ]);
+                }
+            }
             let active_value = match edit.active_field {
                 LedgerEntryField::Description => {
                     format!("Tag {}", ledger_edit_token(edit.description.trim(), true))
@@ -968,9 +1041,32 @@ impl App {
                 let marker = format!("{marker} ");
                 let marker_width = marker.chars().count().min(width);
                 spans.push(Span::raw(self.truncate_label(&marker, marker_width)));
-                spans.push(Span::raw(
-                    self.ledger_left_cell(&value, width.saturating_sub(marker_width)),
-                ));
+                let value_width = width.saturating_sub(marker_width);
+                if edit.active_field == LedgerEntryField::Description
+                    && let Some(completion) =
+                        self.tag_completion_for_category(edit.category_id, &edit.description)
+                {
+                    let suffix = tag_completion_suffix(&completion);
+                    let prefix = format!("[{}", edit.description.trim());
+                    let autocomplete_width = prefix
+                        .chars()
+                        .count()
+                        .saturating_add(suffix.chars().count())
+                        .saturating_add(1);
+                    if autocomplete_width <= value_width {
+                        spans.push(Span::raw(prefix));
+                        spans.push(Span::styled(
+                            suffix,
+                            Style::default().add_modifier(Modifier::DIM),
+                        ));
+                        spans.push(Span::raw(format!(
+                            "]{}",
+                            " ".repeat(value_width.saturating_sub(autocomplete_width))
+                        )));
+                        continue;
+                    }
+                }
+                spans.push(Span::raw(self.ledger_left_cell(&value, value_width)));
             } else {
                 let aligned = if idx == last {
                     self.ledger_right_cell(&value, width)
@@ -1041,12 +1137,23 @@ impl App {
                         row_width,
                         show_date_column,
                         is_selected.then_some(text_color),
+                        self.report_filter_focus_for_row(idx),
                         is_none_category,
                         (balance_effect, border_color, &layer_display_name),
                     ))
                 };
+                let filtered_out = self.report_tag_filter_active()
+                    && !editing_this_row
+                    && !self.report_log_matches_filter(row);
                 if is_selected {
-                    item.style(Style::default().fg(text_color).bg(border_color))
+                    let style = Style::default().fg(text_color).bg(border_color);
+                    item.style(if filtered_out {
+                        style.add_modifier(Modifier::DIM)
+                    } else {
+                        style
+                    })
+                } else if filtered_out {
+                    item.style(Style::default().add_modifier(Modifier::DIM))
                 } else {
                     item
                 }

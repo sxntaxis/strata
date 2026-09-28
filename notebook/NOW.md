@@ -5,9 +5,13 @@ state: active
 created: 2026-08-01
 updated: 2026-09-28
 authority: working
-summary: "BALANCE-METER-LAYER-PARITY-001 owner review supersedes D069 and is native-green for the wide/nonzero meter and true inline ledger editor; draft PR #109 now includes the amendment."
-next: Owner-review PR #109's loaded-profile wide/normal/constrained editor and meter behavior; keep SEDIMENT-016 separate.
+summary: "BALANCE-TAG-FILTER-UX-001 is authored on the native-green PR #109 base: semicolon multi-tag attribution, dim canonical completion, and Layer Detail OR filtering with dimmed context and D071 meter scale; native validation pending."
+next: Native-validate BALANCE-TAG-FILTER-UX-001 (fmt, strict Clippy, all-feature tests, help, loaded-profile multi-tag/filter/restart smoke); keep SEDIMENT-016 separate.
 ---
+
+## BALANCE-TAG-FILTER-UX-001 multi-tag attribution and contextual filtering — 2026-09-28
+
+**AUTHORED CANDIDATE / NATIVE GATE PENDING:** on exact validated PR #109 head `7f7e56d4e7c6fc34b3438c099b49707c06b2edc4`, the owner accepted STRATA-D072: semicolon-separated tags are independent full-duration attribution facets in the existing session description, Layer Detail `f` builds an explicit OR-set without hiding chronology, nonmatching rows remain visible but dim, multi-tag rows expose temporary Left/Right tag focus, and filtered subtotal/meter projection counts each matching ledger row once while retaining D071's complete selected-period `summary.total_seconds` denominator. Known tag completion is shown as a dim suffix and canonicalized on acceptance/commit. This pass also reconciles stale accepted interaction text that still described superseded D069 and the retired separate historical editor. No schema change. Native Rust tooling is unavailable in the authoring environment, so formatter/Clippy/tests/help and loaded-profile TUI/restart proof remain the next gate. See `notebook/work/BALANCE-TAG-FILTER-UX-001.md`.
 
 ## BALANCE-METER-LAYER-PARITY-001 shared meter and layer-detail parity — 2026-09-28
 

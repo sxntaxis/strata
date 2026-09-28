@@ -20,7 +20,7 @@ use crate::temporal;
 
 use super::{
     App, HistoricalPreviewState, PersistenceOperation, RecoveryAction, ReportRangeBoundary,
-    ui_helpers,
+    ReportTagFacet, tagging, ui_helpers,
 };
 
 fn build_historical_preview(
@@ -124,6 +124,39 @@ fn shifted_custom_window_newer(window: &ReportWindow, today: NaiveDate) -> Optio
     ReportWindow::new(start, end).ok()
 }
 
+fn report_tag_facets(description: &str) -> Vec<ReportTagFacet> {
+    let tags = tagging::parse_tags(description);
+    if tags.is_empty() {
+        vec![ReportTagFacet::Untagged]
+    } else {
+        tags.into_iter().map(ReportTagFacet::Tag).collect()
+    }
+}
+
+fn report_tag_facet_matches(left: &ReportTagFacet, right: &ReportTagFacet) -> bool {
+    match (left, right) {
+        (ReportTagFacet::Untagged, ReportTagFacet::Untagged) => true,
+        (ReportTagFacet::Tag(left), ReportTagFacet::Tag(right)) => left.eq_ignore_ascii_case(right),
+        _ => false,
+    }
+}
+
+fn report_log_matches_tag_filter(row: &CategoryLogEntry, filter: &[ReportTagFacet]) -> bool {
+    filter.is_empty()
+        || report_tag_facets(&row.description).iter().any(|facet| {
+            filter
+                .iter()
+                .any(|selected| report_tag_facet_matches(facet, selected))
+        })
+}
+
+fn filtered_layer_balance(logs: &[CategoryLogEntry], filter: &[ReportTagFacet]) -> isize {
+    logs.iter()
+        .filter(|row| report_log_matches_tag_filter(row, filter))
+        .map(|row| row.balance_seconds)
+        .sum()
+}
+
 impl App {
     pub(super) fn focus_none_report_row(&mut self) {
         let summary = self.report_rows();
@@ -205,6 +238,143 @@ impl App {
             return Vec::new();
         };
         self.report_logs_for_category(category_id)
+    }
+
+    pub(super) fn report_tag_facets_for_log(
+        &self,
+        row: &CategoryLogEntry,
+    ) -> Vec<ReportTagFacet> {
+        report_tag_facets(&row.description)
+    }
+
+    pub(super) fn report_tag_filter_active(&self) -> bool {
+        !self.report_tag_filter.is_empty()
+    }
+
+    pub(super) fn report_filter_focus_active(&self) -> bool {
+        self.report_filter_tag_index.is_some()
+    }
+
+    pub(super) fn report_log_matches_filter(&self, row: &CategoryLogEntry) -> bool {
+        report_log_matches_tag_filter(row, &self.report_tag_filter)
+    }
+
+    pub(super) fn report_filtered_layer_balance(&self, logs: &[CategoryLogEntry]) -> isize {
+        filtered_layer_balance(logs, &self.report_tag_filter)
+    }
+
+    pub(super) fn report_filter_label(&self) -> Option<String> {
+        if self.report_tag_filter.is_empty() {
+            return None;
+        }
+        Some(
+            self.report_tag_filter
+                .iter()
+                .map(|facet| match facet {
+                    ReportTagFacet::Tag(tag) => tag.clone(),
+                    ReportTagFacet::Untagged => "untagged".to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join(" ∨ "),
+        )
+    }
+
+    pub(super) fn report_filter_focus_for_row(&self, row_index: usize) -> Option<usize> {
+        if self.report_log_selected_index == row_index {
+            self.report_filter_tag_index
+        } else {
+            None
+        }
+    }
+
+    pub(super) fn toggle_selected_report_filter(&mut self) -> bool {
+        let logs = self.report_current_logs();
+        let Some(row) = logs.get(self.report_log_selected_index) else {
+            return false;
+        };
+        let facets = self.report_tag_facets_for_log(row);
+        if facets.is_empty() {
+            return false;
+        }
+        let focus = self
+            .report_filter_tag_index
+            .unwrap_or(0)
+            .min(facets.len().saturating_sub(1));
+        self.report_filter_tag_index = Some(focus);
+        let facet = facets[focus].clone();
+        if let Some(index) = self
+            .report_tag_filter
+            .iter()
+            .position(|selected| report_tag_facet_matches(selected, &facet))
+        {
+            self.report_tag_filter.remove(index);
+        } else {
+            self.report_tag_filter.push(facet);
+        }
+        self.render_needed = true;
+        true
+    }
+
+    pub(super) fn move_report_filter_focus(&mut self, delta: isize) -> bool {
+        let Some(current) = self.report_filter_tag_index else {
+            return false;
+        };
+        let logs = self.report_current_logs();
+        let Some(row) = logs.get(self.report_log_selected_index) else {
+            self.report_filter_tag_index = None;
+            return false;
+        };
+        let facets = self.report_tag_facets_for_log(row);
+        if facets.is_empty() {
+            self.report_filter_tag_index = None;
+            return false;
+        }
+        let len = facets.len();
+        let current = current.min(len - 1);
+        let next = if delta < 0 {
+            (current + len - 1) % len
+        } else {
+            (current + 1) % len
+        };
+        self.report_filter_tag_index = Some(next);
+        self.render_needed = true;
+        true
+    }
+
+    pub(super) fn leave_report_filter_focus(&mut self) -> bool {
+        if self.report_filter_tag_index.take().is_some() {
+            self.render_needed = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(super) fn clear_report_tag_filter(&mut self) -> bool {
+        let changed = !self.report_tag_filter.is_empty() || self.report_filter_tag_index.is_some();
+        self.report_tag_filter.clear();
+        self.report_filter_tag_index = None;
+        if changed {
+            self.render_needed = true;
+        }
+        changed
+    }
+
+    pub(super) fn sync_report_filter_focus_for_selection(&mut self) {
+        let Some(current) = self.report_filter_tag_index else {
+            return;
+        };
+        let logs = self.report_current_logs();
+        let Some(row) = logs.get(self.report_log_selected_index) else {
+            self.report_filter_tag_index = None;
+            return;
+        };
+        let facets = self.report_tag_facets_for_log(row);
+        if facets.is_empty() {
+            self.report_filter_tag_index = None;
+        } else {
+            self.report_filter_tag_index = Some(current.min(facets.len() - 1));
+        }
     }
 
     fn live_session_preview(&self) -> Option<LiveSessionPreview> {
@@ -295,6 +465,7 @@ impl App {
     }
 
     pub(super) fn set_report_period(&mut self, period: ReportPeriod) {
+        self.report_filter_tag_index = None;
         self.report_period = period;
         self.report_period_offset = 0;
         self.report_custom_window = None;
@@ -306,6 +477,7 @@ impl App {
     }
 
     pub(super) fn begin_report_range_edit(&mut self) {
+        self.report_filter_tag_index = None;
         let window = self.current_report_window();
         self.report_range_boundary = None;
         self.ledger_entry_edit = None;
@@ -341,6 +513,7 @@ impl App {
     }
 
     pub(super) fn select_report_range_boundary(&mut self, boundary: ReportRangeBoundary) {
+        self.report_filter_tag_index = None;
         self.report_range_boundary = Some(boundary);
         self.render_needed = true;
     }
@@ -594,6 +767,7 @@ impl App {
         let Ok(end) = temporal::civil_from_policy(ended_at_utc, policy) else {
             return false;
         };
+        self.report_filter_tag_index = None;
         self.ledger_entry_edit = Some(super::LedgerEntryEditState::existing(
             session_id,
             category_id,
@@ -623,6 +797,7 @@ impl App {
         if !self.report_layer_can_add(category_id) {
             return false;
         }
+        self.clear_report_tag_filter();
         self.report_logs_category_id = Some(category_id);
         self.report_log_selected_index = 0;
         self.begin_ledger_add_edit(category_id)
@@ -649,6 +824,7 @@ impl App {
         else {
             return false;
         };
+        self.report_filter_tag_index = None;
         self.ledger_entry_edit = Some(super::LedgerEntryEditState::add(
             category_id,
             from_civil.format("%Y-%m-%d").to_string(),
@@ -699,6 +875,29 @@ impl App {
             );
         }
         Ok((from, to))
+    }
+
+    pub(super) fn ledger_tag_completion(&self) -> Option<super::tagging::TagCompletion> {
+        let edit = self.ledger_entry_edit.as_ref()?;
+        if edit.active_field != super::LedgerEntryField::Description {
+            return None;
+        }
+        self.tag_completion_for_category(edit.category_id, &edit.description)
+    }
+
+    pub(super) fn accept_ledger_tag_completion(&mut self) -> bool {
+        let Some(completion) = self.ledger_tag_completion() else {
+            return false;
+        };
+        let Some(edit) = self.ledger_entry_edit.as_mut() else {
+            return false;
+        };
+        edit.description = super::tagging::accept_tag_completion(&edit.description, &completion);
+        edit.select_all = false;
+        edit.error = None;
+        edit.confirmation = None;
+        self.render_needed = true;
+        true
     }
 
     pub(super) fn cancel_ledger_entry_edit(&mut self) {
@@ -770,9 +969,11 @@ impl App {
     }
 
     pub(super) fn commit_ledger_entry_edit(&mut self) -> bool {
-        let Some(edit) = self.ledger_entry_edit.clone() else {
+        let Some(mut edit) = self.ledger_entry_edit.clone() else {
             return false;
         };
+        edit.description =
+            self.canonicalize_description_for_category(edit.category_id, &edit.description);
         if let Err(error) = self.settle_transition_boundary(Utc::now()) {
             if let Some(current) = self.ledger_entry_edit.as_mut() {
                 current.error = Some(error);
@@ -868,6 +1069,7 @@ impl App {
             .confirmation
             .as_ref()
             .map(|confirmation| confirmation.plan_token.clone());
+        let committed_description = edit.description.clone();
         let result = crate::sqlite::apply_tui_historical_correction(
             &database_path,
             crate::sqlite::TuiHistoricalCorrectionRequest {
@@ -913,6 +1115,10 @@ impl App {
                     self.render_needed = true;
                     return false;
                 }
+                self.remember_description_tags_for_category(
+                    edit.category_id,
+                    &committed_description,
+                );
                 self.ledger_entry_edit = None;
                 self.sync_report_selection_for_interval();
                 true
@@ -924,6 +1130,7 @@ impl App {
         if self.report_logs_category_id.is_some() {
             let row_count = self.report_ledger_row_count();
             self.clamp_report_log_selection(row_count);
+            self.sync_report_filter_focus_for_selection();
         } else {
             let row_count = self.report_rows().entries.len();
             self.clamp_report_selection(row_count);
@@ -1081,12 +1288,13 @@ mod report_edit_state_tests {
     use ratatui::style::Color;
 
     use super::{
-        build_historical_preview, parse_report_range, report_range_edit_state,
-        shifted_custom_window_newer, shifted_custom_window_older, shifted_report_boundary,
+        build_historical_preview, filtered_layer_balance, parse_report_range,
+        report_log_matches_tag_filter, report_range_edit_state, shifted_custom_window_newer,
+        shifted_custom_window_older, shifted_report_boundary,
     };
     use crate::{
-        app::{ReportRangeBoundary, ui_helpers},
-        domain::{Category, CategoryId, OperationalDayPolicy, ReportWindow},
+        app::{ReportRangeBoundary, ReportTagFacet, ui_helpers},
+        domain::{Category, CategoryId, CategoryLogEntry, OperationalDayPolicy, ReportWindow},
         sand::{SandState, SandStateGrain, SedimentSnapshot},
     };
 
@@ -1098,6 +1306,50 @@ mod report_edit_state_tests {
             description: String::new(),
             balance_effect: 0,
         }
+    }
+
+    fn tagged_log(description: &str, balance_seconds: isize) -> CategoryLogEntry {
+        CategoryLogEntry {
+            session_id: Some(1),
+            date: "2026-09-28".to_string(),
+            end_date: "2026-09-28".to_string(),
+            start_time: "10:00:00".to_string(),
+            end_time: "11:00:00".to_string(),
+            description: description.to_string(),
+            elapsed_seconds: balance_seconds.unsigned_abs(),
+            balance_effect: balance_seconds.signum() as i8,
+            balance_seconds,
+        }
+    }
+
+    #[test]
+    fn layer_tag_filter_is_or_and_counts_each_matching_row_once() {
+        let logs = vec![
+            tagged_log("Renzo; Anibal", 3600),
+            tagged_log("Personal", 1800),
+        ];
+        let renzo = vec![ReportTagFacet::Tag("Renzo".to_string())];
+        let anibal = vec![ReportTagFacet::Tag("Anibal".to_string())];
+        let both = vec![
+            ReportTagFacet::Tag("Renzo".to_string()),
+            ReportTagFacet::Tag("Anibal".to_string()),
+        ];
+
+        assert_eq!(filtered_layer_balance(&logs, &renzo), 3600);
+        assert_eq!(filtered_layer_balance(&logs, &anibal), 3600);
+        assert_eq!(filtered_layer_balance(&logs, &both), 3600);
+        assert!(report_log_matches_tag_filter(&logs[0], &both));
+        assert!(!report_log_matches_tag_filter(&logs[1], &both));
+    }
+
+    #[test]
+    fn untagged_filter_matches_only_empty_tag_rows() {
+        let untagged = tagged_log("", 1200);
+        let tagged = tagged_log("Renzo", 1200);
+        let filter = vec![ReportTagFacet::Untagged];
+
+        assert!(report_log_matches_tag_filter(&untagged, &filter));
+        assert!(!report_log_matches_tag_filter(&tagged, &filter));
     }
 
     #[test]
