@@ -97,3 +97,8 @@ This pass does not reopen Balance arithmetic, boundary semantics, the nested lay
 - The disposable profile's SQLite doctor passed after apply and restart: schema v1, integrity and foreign keys healthy. The source loaded test profile used to create the portable fixture was not mutated by this smoke.
 
 The candidate is natively validated; owner review of the unified loaded-profile correction flow remains pending. SEDIMENT-016 doctrine promotion remains separate.
+
+## Publication — 2026-09-28
+
+- Published as draft PR [#108](https://github.com/sxntaxis/strata/pull/108), stacked on PR #107 (`work/balance-layer-detail-ux`). Owner review remains pending.
+- The PR covers the unified correction implementation and native validation recorded above. SEDIMENT-016 doctrine promotion remains separate.

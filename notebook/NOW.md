@@ -5,13 +5,13 @@ state: active
 created: 2026-08-01
 updated: 2026-09-28
 authority: working
-summary: "BALANCE-LEDGER-CORRECTION-UX-001 unifies Balance Add/Edit through one native-green historical correction transaction with implicit Idle semantics and a centered collateral Before/After card; PR publication and owner review are next."
-next: Publish BALANCE-LEDGER-CORRECTION-UX-001 as a draft stacked on PR #107, then owner-review its loaded-profile collateral confirmation and commit/revise decision; keep SEDIMENT-016 separate.
+summary: "BALANCE-LEDGER-CORRECTION-UX-001 unifies Balance Add/Edit through one native-green historical correction transaction with implicit Idle semantics and a centered collateral Before/After card; draft PR #108 is stacked on #107 for owner review."
+next: Owner-review PR #108's loaded-profile correction and collateral confirmation, then decide promote or revise; keep SEDIMENT-016 separate.
 ---
 
 ## BALANCE-LEDGER-CORRECTION-UX-001 unified correction — 2026-09-28
 
-**NATIVE-GREEN / DRAFT PUBLICATION NEXT:** owner review of the layer-detail candidate retired the old `Log past activity…` command-strip interface as a separate concept. `+ Add entry…`, existing-row Edit, and `l` now converge on one historical-correction transaction. Unowned time is implicit Idle; source shrink/move can therefore recolor retained source mass to Idle and assignment from Idle can recolor retained Idle mass to the target layer. A warning appears only when another explicit recorded entry/current record is collateral, temporarily replacing the layer hero with a centered BEFORE/AFTER card while leaving the draft row visible. Formatter, strict Clippy, all-feature tests (563 library + 24 integration/process tests; 20 ignored), CLI help, loaded-profile 120×40 TUI confirmation/apply/restart smoke, SQLite doctor, and diff hygiene pass. See `notebook/work/BALANCE-LEDGER-CORRECTION-UX-001.md`.
+**NATIVE-GREEN / DRAFT #108 PUBLISHED / OWNER REVIEW NEXT:** owner review of the layer-detail candidate retired the old `Log past activity…` command-strip interface as a separate concept. `+ Add entry…`, existing-row Edit, and `l` now converge on one historical-correction transaction. Unowned time is implicit Idle; source shrink/move can therefore recolor retained source mass to Idle and assignment from Idle can recolor retained Idle mass to the target layer. A warning appears only when another explicit recorded entry/current record is collateral, temporarily replacing the layer hero with a centered BEFORE/AFTER card while leaving the draft row visible. Formatter, strict Clippy, all-feature tests (563 library + 24 integration/process tests; 20 ignored), CLI help, loaded-profile 120×40 TUI confirmation/apply/restart smoke, SQLite doctor, and diff hygiene pass. Draft PR #108 is stacked on #107. See `notebook/work/BALANCE-LEDGER-CORRECTION-UX-001.md`.
 
 ## BALANCE-LAYER-DETAIL-UX-001 editable layer ledger — 2026-09-27
 
