@@ -202,6 +202,16 @@ impl App {
                 &["range", "from", "to", "dates", "custom"],
             ),
             self.palette_action_entry(
+                Action::ReportRangeStart,
+                "Balance range: edit start boundary",
+                &["range", "start", "boundary", "from", "bracket"],
+            ),
+            self.palette_action_entry(
+                Action::ReportRangeEnd,
+                "Balance range: edit end boundary",
+                &["range", "end", "boundary", "to", "bracket"],
+            ),
+            self.palette_action_entry(
                 Action::LogActivity,
                 "Log past activity…",
                 &[

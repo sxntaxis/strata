@@ -113,6 +113,12 @@ enum ReportRangeField {
     To,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReportRangeBoundary {
+    Start,
+    End,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ReportRangeEditState {
     from: String,
@@ -1135,6 +1141,7 @@ struct App {
     report_period: ReportPeriod,
     report_period_offset: usize,
     report_custom_window: Option<ReportWindow>,
+    report_range_boundary: Option<ReportRangeBoundary>,
     report_range_edit: Option<ReportRangeEditState>,
     historical_activity_edit: Option<HistoricalActivityEditState>,
     report_logs_category_id: Option<CategoryId>,
@@ -1236,6 +1243,7 @@ impl App {
             report_period: ReportPeriod::Today,
             report_period_offset: 0,
             report_custom_window: None,
+            report_range_boundary: None,
             report_range_edit: None,
             historical_activity_edit: None,
             report_logs_category_id: None,
@@ -1466,6 +1474,7 @@ impl App {
         self.report_period = ReportPeriod::Today;
         self.report_period_offset = 0;
         self.report_custom_window = None;
+        self.report_range_boundary = None;
         self.report_range_edit = None;
         self.historical_activity_edit = None;
         self.report_logs_category_id = None;
@@ -1485,6 +1494,7 @@ impl App {
         self.report_logs_category_id = None;
         self.report_log_selected_index = 0;
         self.report_log_edit = None;
+        self.report_range_boundary = None;
         self.report_range_edit = None;
         self.historical_activity_edit = None;
         self.report_snapshot_end_day = None;
@@ -1687,6 +1697,9 @@ impl App {
     fn toggle_settings(&mut self) {
         self.show_settings = !self.show_settings;
         if self.show_settings {
+            if self.in_balance_modal() {
+                self.report_range_boundary = None;
+            }
             self.settings_selected_index = 0;
             self.settings_scroll = 0;
             self.settings_overlay = None;
@@ -1704,6 +1717,9 @@ impl App {
     fn toggle_command_palette(&mut self) {
         self.show_command_palette = !self.show_command_palette;
         if self.show_command_palette {
+            if self.in_balance_modal() {
+                self.report_range_boundary = None;
+            }
             self.command_palette_query.clear();
             self.command_palette_feedback = None;
             self.command_palette_selected_index = 0;

@@ -1,62 +1,92 @@
 ---
 id: BALANCE-RANGE-UX-001
 kind: work
-state: probe
+state: candidate
 authority: working
 created: 2026-09-27
 updated: 2026-09-27
-summary: "Measure raw modifier-key delivery through the owner's real terminal + tmux path before choosing a custom-range gesture."
+summary: "Replace the modifier probe with explicit bracket-selected Balance range boundaries while preserving inclusive ReportWindow authority."
 ---
 
-# BALANCE-RANGE-UX-001 — modifier input probe
+# BALANCE-RANGE-UX-001 — explicit range boundaries
 
-## Owner direction
+## Owner decision
 
-Custom-range interaction remains deliberately unresolved. The owner prefers a seamless modifier-driven gesture over a text-entry/tab gate if the terminal path delivers modifiers reliably, and has observed that Caps Lock can make ordinary letters appear equivalent to Shift-modified input.
+The physical modifier/Caps Lock probe is no longer a product gate. Terminal character bindings may collapse physical Shift and Caps Lock into the same case-bearing character event; Strata accepts that ordinary terminal limitation instead of adding Caps-Lock inversion, terminal-specific keyboard modes, tmux assumptions, or physical-key detection.
 
-Do not redesign production range controls from assumptions. First capture the raw `crossterm::event::KeyEvent` values produced by the real terminal + tmux environment.
+Custom Balance range editing therefore uses explicit punctuation handles rather than modifier-letter gestures:
 
-## Probe
+- `[` selects the start boundary;
+- `]` selects the end boundary;
+- Left/Right moves the selected boundary by exactly one operational day and applies the result live;
+- Esc clears the selected handle before ordinary Balance back/close behavior resumes;
+- selecting the opposite bracket switches handles;
+- without a selected handle, Left/Right retains whole-interval navigation;
+- `r` remains the direct typed range editor for distant jumps.
 
-`examples/key_event_probe.rs` is a standalone diagnostic only. It does not route through Strata actions, modify the keymap, or alter production behavior. Run it from the same shell/tmux context used for Strata:
+The bracket actions are configurable Balance actions, not hardcoded input bypasses. They follow the existing Bound / Unbound / Disabled authority and are available through Settings and the command palette.
 
-```bash
-cargo run --example key_event_probe
-```
+## Boundary presentation
 
-Capture at least:
+Balance chrome always shows the two interval boundaries with a spaced en dash. The domain `ReportWindow` remains inclusive; only its TUI projection uses an exclusive visible end:
 
-1. `Shift+Left`
-2. `Shift+Right`
-3. `Ctrl+Left`
-4. `Ctrl+Right`
-5. `Alt+Left`
-6. `Alt+Right`
-7. lowercase `a`
-8. Caps Lock on + `a`
-9. Caps Lock off + `Shift+a`
+- internal `2026-09-21..2026-09-21` -> `Sep 21 – Sep 22`;
+- internal `2026-09-21..2026-09-27` -> `Sep 21 – Sep 28`;
+- internal `2026-09-01..2026-09-30` -> `Sep 1 – Oct 1`.
 
-Record each emitted `code`, `modifiers`, `kind`, and `state`. Include any extra escape/prefix events if the terminal/tmux path emits them.
+An active handle is bracketed in the footer, e.g. `[Sep 21] – Sep 28` or `Sep 21 – [Sep 28]`. The existing outer whole-period chevrons remain. No Day/Week/Month/Range label or additional key-hint chrome is added.
 
-## Local synthetic tmux observations — 2026-09-28
+Current partial periods remain partial. Their visible end is exactly one day after the last internally included operational day, not a synthesized future calendar boundary.
 
-The probe was exercised through an isolated tmux PTY using `tmux send-keys`, not physical keyboard input. Injected Shift+Left/Right, Ctrl+Left/Right, and Alt+Left/Right were decoded as the corresponding arrow `KeyCode` plus `SHIFT`, `CONTROL`, or `ALT`; each reported `kind=Press` and `state=0x0`, with no extra prefix events. Literal lowercase `a` produced `Char('a')` with no modifiers, and literal uppercase `A` produced `Char('A')` with `SHIFT`. A synthetic `send-keys S-a` produced `Char('a')` with no modifiers, demonstrating that these injected sequences cannot stand in for physical Caps Lock observations.
+## Domain preservation
 
-Physical key capture with Caps Lock on/off remains open. No custom-range gesture decision is made from these synthetic results.
+`ReportWindow.start` and `ReportWindow.end` remain the first and last included operational-day keys. Report filtering, live-session slicing, persistence, historical-sediment selection, and whole-window navigation keep the existing inclusive semantics.
 
-## Decision gate
+The typed `r` editor now presents the same UI boundary convention:
 
-No custom-range gesture is authorized by this unit alone. After the real-path capture, choose the simplest gesture whose modifier identity is stable enough for production and explicitly account for Caps Lock normalization.
+- From = inclusive internal start;
+- To = exclusive visible end;
+- `From < To` is mandatory;
+- commit converts `To` back to inclusive internal end by subtracting one day.
 
-Current `r` range editing remains unchanged until that decision.
+No SQLite/schema migration or second interval type is introduced.
+
+## Boundary movement
+
+Start selected:
+
+- Left expands the start one day earlier;
+- Right contracts the start one day later;
+- start may never move after the internal end.
+
+End selected:
+
+- Left contracts the internal end one day earlier;
+- Right expands the internal end one day later;
+- internal end may never move before start or later than the current operational day.
+
+A one-day range cannot contract further. Failed movements are no-ops and keep the selected handle. Selecting a handle alone does not convert a preset into custom mode; the first successful movement does.
+
+Preset changes, period cycling, entering detail, starting another Balance editor, Settings/palette takeover, and closing Balance clear the transient handle.
+
+## Superseded probe
+
+The earlier standalone Crossterm probe established only synthetic tmux observations. Those observations are no longer required for product acceptance and the probe executable is removed from the candidate. No physical keyboard or Caps Lock capture is required.
+
+## Validation target
+
+The implementation must preserve the existing Balance instrument/layout, historical preview animation, selected-layer frame color, one-cell modal inset, report arithmetic, storage authority, and SEDIMENT-016 behavior. Focused tests cover boundary formatting/conversion, movement limits, typed-editor conversion, configurable bracket bindings, and existing whole-window navigation regressions.
+
+Local native Rust/TUI validation remains required for the authored candidate.
 
 ## Non-goals
 
-This probe does not change:
+This unit does not change:
 
-- Balance keybindings;
-- current `r` editor behavior;
-- report/date semantics;
-- modal layout;
-- sediment behavior;
-- Settings/keymap schema.
+- inclusive `ReportWindow` domain semantics;
+- CLI `report --from/--to` inclusive semantics;
+- SQLite schema or persistence;
+- sediment runtime or accepted sediment doctrine;
+- historical activity correction semantics;
+- Balance arithmetic or meter normalization;
+- modal spacing or theme/color authority.

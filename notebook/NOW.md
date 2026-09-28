@@ -5,17 +5,17 @@ state: active
 created: 2026-08-01
 updated: 2026-09-27
 authority: working
-summary: "SEDIMENT-016 per-category resize/restart mass proof passes with doctrine promotion still explicit; BALANCE-RANGE-UX-001 synthetic tmux observations pass while physical Caps Lock input remains unknown."
-next: Capture physical modifier and Caps Lock key events through the real terminal+tmux path, then choose or reject a custom-range gesture without changing production r until that decision.
+summary: "SEDIMENT-016 per-category resize/restart mass proof passes with doctrine promotion still explicit; BALANCE-RANGE-UX-001 now has an authored bracket-boundary candidate with inclusive ReportWindow authority preserved."
+next: Natively validate BALANCE-RANGE-UX-001 bracket-boundary editing and TUI smoke it across wide/normal/constrained panes; keep SEDIMENT-016 doctrine promotion separate.
 ---
 
 ## BALANCE-UX-004 one-cell modal inset — 2026-09-27
 
 **ONE-CELL HORIZONTAL AND VERTICAL INSETS VERIFIED:** keep the existing responsive modal geometry, use exactly one horizontal content cell per side at ordinary modal sizes, and give Layer exactly one top/bottom content cell whenever two spare rows exist. The validated 1/2/4/6-cell candidate was rejected in runtime review because wide panes accumulated too much side padding; a large Balance name-to-metric gap is explicitly acceptable in preference to that padding. The correction passes formatter, strict Clippy, all tests, and isolated wide/normal/constrained TUI checks. No fixed-width Balance card or secondary content-width system is introduced. Settings, range gestures, report semantics, and sediment remain unchanged. See `notebook/work/BALANCE-UX-004.md`.
 
-## BALANCE-RANGE-UX-001 modifier-input probe — 2026-09-27
+## BALANCE-RANGE-UX-001 bracket boundary editing — 2026-09-27
 
-**SYNTHETIC TMUX MEASUREMENT / PHYSICAL GATE OPEN:** isolated `tmux send-keys` events preserve the injected Shift/Ctrl/Alt arrow modifiers and distinguish literal uppercase from lowercase, but do not establish what the owner's physical Caps Lock path delivers. No production range gesture or keybinding changes in this unit. See `notebook/work/BALANCE-RANGE-UX-001.md`.
+**AUTHORED CANDIDATE / NATIVE VALIDATION PENDING:** Balance keeps inclusive internal `ReportWindow` semantics while presenting explicit start/exclusive-end boundaries. Configurable `[` / `]` actions select the start/end handle; Left/Right moves that handle live, Esc deselects first, and `r` remains the typed distant-range editor using the same exclusive visible `To` boundary. The physical modifier/Caps Lock probe is retired as a product gate; no terminal-specific workaround is introduced. See `notebook/work/BALANCE-RANGE-UX-001.md`.
 
 ## SEDIMENT-016 vertical physics corridor — 2026-09-27
 
