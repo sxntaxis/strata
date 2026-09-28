@@ -957,9 +957,10 @@ impl App {
             if layer_id.is_some_and(|expected| session.category_id != expected) {
                 continue;
             }
-            if canonical_tag.as_ref().is_some_and(|tag| {
-                !super::tagging::contains_all_tags(&session.description, tag)
-            }) {
+            if canonical_tag
+                .as_ref()
+                .is_some_and(|tag| !super::tagging::contains_all_tags(&session.description, tag))
+            {
                 continue;
             }
             let effect = categories
@@ -1045,9 +1046,9 @@ impl App {
             .iter()
             .filter(|session| session.category_id == category.id)
             .filter(|session| {
-                canonical_tag.as_ref().is_none_or(|tag| {
-                    super::tagging::contains_all_tags(&session.description, tag)
-                })
+                canonical_tag
+                    .as_ref()
+                    .is_none_or(|tag| super::tagging::contains_all_tags(&session.description, tag))
             })
             .max_by_key(|session| session.id)
             .map(|session| session.id)

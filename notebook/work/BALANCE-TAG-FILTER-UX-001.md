@@ -70,6 +70,11 @@ The validated PR #109 base already has STRATA-D071 accepted and native-green. `d
 - CLI tag predicates now match individual tags inside a multi-tag description so `--tag Renzo` continues to mean Renzo after multi-tag storage is introduced. A semicolon query means all listed tags for the CLI predicate; this is distinct from the interactive Layer Detail OR-set.
 - No SQLite schema or migration change.
 
-## Validation status
+## Native validation facts — 2026-09-28
 
-Authored in an environment without `cargo`, `rustc`, or `rustfmt`. Static/diff validation and complete-history bundle verification are performed here, but native formatter, strict Clippy, all-feature tests, CLI help, and loaded-profile TUI smoke remain the next local gate. The exact validated base is PR #109 head `7f7e56d4e7c6fc34b3438c099b49707c06b2edc4`.
+- `cargo fmt --all -- --check`, strict Clippy, `cargo test --all-features`, and `cargo run -- --help` pass. The suite reports 573 library tests and 24 integration/process tests passed; 20 ignored; 0 failed.
+- Focused tests cover case-insensitive parse/dedup/canonicalization, current-token completion/acceptance, tag membership and CLI-style all-tag predicates, OR row-union filtering, untagged filtering, and configurable `balance_filter` binding.
+- A freshly imported eight-layer test profile at `/mnt/Tokyo/Lab/.tmp/opencode/strata-balance-tag-filter-ux-001-test-profile` (UUID `8ed894a9-2810-459c-aceb-0ef5ce2961f4`) was used for 120×40 TUI smoke. Known Office tags offered the dim completion; a committed `Renzo; Anibal y Renzo` Add appeared as one 15-minute row. `f` focused Renzo; Left/Right switched the multi-tag row's focused facet and `f` added the second OR facet. The filtered subtotal updated once per matching row, and nonmatching chronology remained visible.
+- The test profile SQLite doctor passed after app exit: schema v1, integrity and foreign-key checks healthy. The loaded source test profile was exported read-only and not modified by the smoke.
+
+The owner accepted STRATA-D072, and it is now implemented and natively certified in the accepted decision index and report/interaction authorities. The exact implementation base was PR #109 head `7f7e56d4e7c6fc34b3438c099b49707c06b2edc4`; no schema change was made.

@@ -240,10 +240,7 @@ impl App {
         self.report_logs_for_category(category_id)
     }
 
-    pub(super) fn report_tag_facets_for_log(
-        &self,
-        row: &CategoryLogEntry,
-    ) -> Vec<ReportTagFacet> {
+    pub(super) fn report_tag_facets_for_log(&self, row: &CategoryLogEntry) -> Vec<ReportTagFacet> {
         report_tag_facets(&row.description)
     }
 
@@ -296,6 +293,7 @@ impl App {
         if facets.is_empty() {
             return false;
         }
+        self.clear_report_range_boundary();
         let focus = self
             .report_filter_tag_index
             .unwrap_or(0)

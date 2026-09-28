@@ -28,6 +28,16 @@ fn summary_border_color(
         .unwrap_or(fallback)
 }
 
+#[derive(Clone, Copy)]
+struct LedgerRowPresentation<'a> {
+    selected_text: Option<Color>,
+    filter_focus: Option<usize>,
+    is_none_category: bool,
+    balance_effect: i8,
+    marker_color: Color,
+    fallback_tag: &'a str,
+}
+
 fn balance_marker(balance_effect: i8) -> &'static str {
     if balance_effect < 0 { "◯" } else { "●" }
 }
@@ -831,21 +841,28 @@ impl App {
         row: &CategoryLogEntry,
         row_width: usize,
         show_date_column: bool,
-        selected_text: Option<Color>,
-        filter_focus: Option<usize>,
-        is_none_category: bool,
-        marker: (i8, Color, &str),
+        presentation: LedgerRowPresentation<'_>,
     ) -> Line<'static> {
-        let (balance_effect, marker_color, fallback_tag) = marker;
-        let tag = ledger_display_tag_with_focus(&row.description, fallback_tag, filter_focus);
+        let tag = ledger_display_tag_with_focus(
+            &row.description,
+            presentation.fallback_tag,
+            presentation.filter_focus,
+        );
         let start_time = Self::ledger_minute_time(&row.start_time);
         let end_time = Self::ledger_minute_time(&row.end_time);
-        let metric = self.ledger_metric_value(row, is_none_category);
-        let metric_color =
-            selected_text.unwrap_or_else(|| self.ledger_metric_color(row, is_none_category));
-        let tag_color = selected_text.unwrap_or_else(|| self.theme_foreground());
-        let marker_color = selected_text.unwrap_or(marker_color);
-        let temporal_color = selected_text.unwrap_or_else(|| self.theme_status());
+        let metric = self.ledger_metric_value(row, presentation.is_none_category);
+        let metric_color = presentation
+            .selected_text
+            .unwrap_or_else(|| self.ledger_metric_color(row, presentation.is_none_category));
+        let tag_color = presentation
+            .selected_text
+            .unwrap_or_else(|| self.theme_foreground());
+        let marker_color = presentation
+            .selected_text
+            .unwrap_or(presentation.marker_color);
+        let temporal_color = presentation
+            .selected_text
+            .unwrap_or_else(|| self.theme_status());
         let cross_day = row.date != row.end_date;
 
         let (widths, values): (Vec<usize>, Vec<(String, Color)>) = if cross_day {
@@ -892,7 +909,7 @@ impl App {
         let mut spans = Vec::with_capacity(values.len().saturating_add(1));
         for (idx, ((value, color), width)) in values.into_iter().zip(widths).enumerate() {
             if idx == 0 {
-                let marker = format!("{} ", balance_marker(balance_effect));
+                let marker = format!("{} ", balance_marker(presentation.balance_effect));
                 let marker_width = marker.chars().count().min(width);
                 spans.push(Span::styled(
                     self.truncate_label(&marker, marker_width),
@@ -1136,10 +1153,14 @@ impl App {
                         row,
                         row_width,
                         show_date_column,
-                        is_selected.then_some(text_color),
-                        self.report_filter_focus_for_row(idx),
-                        is_none_category,
-                        (balance_effect, border_color, &layer_display_name),
+                        LedgerRowPresentation {
+                            selected_text: is_selected.then_some(text_color),
+                            filter_focus: self.report_filter_focus_for_row(idx),
+                            is_none_category,
+                            balance_effect,
+                            marker_color: border_color,
+                            fallback_tag: &layer_display_name,
+                        },
                     ))
                 };
                 let filtered_out = self.report_tag_filter_active()

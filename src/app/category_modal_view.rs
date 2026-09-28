@@ -97,7 +97,7 @@ impl App {
                         ));
                     }
                     ListItem::new(Line::from(line_spans))
-                    .style(Style::default().fg(text_color).bg(cat.color))
+                        .style(Style::default().fg(text_color).bg(cat.color))
                 } else {
                     let layer_name = self.display_layer_name(&cat.name);
                     ListItem::new(Line::from(vec![

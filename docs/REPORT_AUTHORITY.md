@@ -1,6 +1,6 @@
 # Report and export authority
 
-Status: accepted authority; STRATA-D071 is implemented/natively certified; STRATA-D072 tag/filter semantics are accepted with implementation candidate
+Status: accepted authority; STRATA-D071 meter parity and STRATA-D072 multi-tag/filter semantics are implemented/natively certified
 Last reviewed: 2026-09-28
 
 ## Purpose

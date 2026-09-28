@@ -88,11 +88,7 @@ pub(super) fn replace_current_tag(value: &str, replacement: &str) -> String {
         Vec::new()
     };
     let replacement = replacement.trim();
-    if !replacement.is_empty()
-        && !tags
-            .iter()
-            .any(|tag| tag.eq_ignore_ascii_case(replacement))
-    {
+    if !replacement.is_empty() && !tags.iter().any(|tag| tag.eq_ignore_ascii_case(replacement)) {
         tags.push(replacement.to_string());
     }
     tags.join("; ")
