@@ -38,6 +38,12 @@ Capture at least:
 
 Record each emitted `code`, `modifiers`, `kind`, and `state`. Include any extra escape/prefix events if the terminal/tmux path emits them.
 
+## Local synthetic tmux observations — 2026-09-28
+
+The probe was exercised through an isolated tmux PTY using `tmux send-keys`, not physical keyboard input. Injected Shift+Left/Right, Ctrl+Left/Right, and Alt+Left/Right were decoded as the corresponding arrow `KeyCode` plus `SHIFT`, `CONTROL`, or `ALT`; each reported `kind=Press` and `state=0x0`, with no extra prefix events. Literal lowercase `a` produced `Char('a')` with no modifiers, and literal uppercase `A` produced `Char('A')` with `SHIFT`. A synthetic `send-keys S-a` produced `Char('a')` with no modifiers, demonstrating that these injected sequences cannot stand in for physical Caps Lock observations.
+
+Physical key capture with Caps Lock on/off remains open. No custom-range gesture decision is made from these synthetic results.
+
 ## Decision gate
 
 No custom-range gesture is authorized by this unit alone. After the real-path capture, choose the simplest gesture whose modifier identity is stable enough for production and explicitly account for Caps Lock normalization.

@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-27
 authority: working
-summary: "BALANCE-UX-004 spacing is verified; SEDIMENT-016 visual acceptance and exact per-category resize/persist/restart mass proof are recorded, with doctrine promotion still explicit."
-next: Capture raw Shift/Ctrl/Alt arrow and Caps Lock key events through the real terminal+tmux path before choosing any custom-range gesture.
+summary: "SEDIMENT-016 per-category resize/restart mass proof passes with doctrine promotion still explicit; BALANCE-RANGE-UX-001 synthetic tmux observations pass while physical Caps Lock input remains unknown."
+next: Capture physical modifier and Caps Lock key events through the real terminal+tmux path, then choose or reject a custom-range gesture without changing production r until that decision.
 ---
 
 ## BALANCE-UX-004 one-cell modal inset — 2026-09-27
@@ -15,7 +15,7 @@ next: Capture raw Shift/Ctrl/Alt arrow and Caps Lock key events through the real
 
 ## BALANCE-RANGE-UX-001 modifier-input probe — 2026-09-27
 
-**RAW INPUT MEASUREMENT ONLY:** `examples/key_event_probe.rs` records the exact Crossterm key event delivered by the owner's real terminal + tmux path for Shift/Ctrl/Alt arrows plus lowercase/Caps Lock/Shift letter cases. No production range gesture or keybinding changes in this unit. See `notebook/work/BALANCE-RANGE-UX-001.md`.
+**SYNTHETIC TMUX MEASUREMENT / PHYSICAL GATE OPEN:** isolated `tmux send-keys` events preserve the injected Shift/Ctrl/Alt arrow modifiers and distinguish literal uppercase from lowercase, but do not establish what the owner's physical Caps Lock path delivers. No production range gesture or keybinding changes in this unit. See `notebook/work/BALANCE-RANGE-UX-001.md`.
 
 ## SEDIMENT-016 vertical physics corridor — 2026-09-27
 
