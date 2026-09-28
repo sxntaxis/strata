@@ -80,9 +80,9 @@ This pass does not change historical-correction semantics, collateral-confirmati
 
 STRATA-D071 supersedes D069 and is now accepted and natively certified. `docs/DECISIONS.md` and `docs/REPORT_AUTHORITY.md` are updated; SEDIMENT-016 remains separate.
 
-The owner-reviewed amendment is natively validated and is being added as a fast-forward update to the existing draft PR #109. SEDIMENT-016 remains separate.
+The owner-reviewed amendment is natively validated and was fast-forwarded onto the existing draft PR #109. SEDIMENT-016 remains separate.
 
 ## Publication — 2026-09-28
 
 - Published as draft PR [#109](https://github.com/sxntaxis/strata/pull/109), stacked on PR #108 (`work/balance-ledger-correction-ux-001`).
-- Owner-review amendment is based on validated PR #109 head `2919966f3ea245b3c97ce1a38d549d037b875e2e` and is being published as a fast-forward update to that draft PR.
+- Owner-review amendment is based on validated PR #109 head `2919966f3ea245b3c97ce1a38d549d037b875e2e` and fast-forwarded the draft PR to `be03e9023a97c8517a82e5f556156d83c7f0cd29`.
