@@ -39,6 +39,11 @@ STRATA-D073 records the owner-reviewed coherence pass:
 - Layer Detail preferred width distinguishes compact ordinary rows from cross-day/long-tag rows, and Add receives a collapsible separator row.
 - No schema, persistence, D071 meter denominator, D072 OR-filter semantics, historical-correction transaction, or output data shape changes.
 
-## Validation status
+## Native validation facts — 2026-09-28
 
-Authoring environment has no `cargo`, `rustc`, or `rustfmt`. Static diff checks and complete-history bundle verification are performed here; formatter, strict Clippy, all-feature tests, CLI help, and loaded-profile TUI/restart/SQLite-doctor validation remain the next native gate before promotion.
+- `cargo fmt --all -- --check`, strict Clippy, `cargo test --all-features`, and `cargo run -- --help` pass. The suite reports 581 library tests and 24 integration/process tests passed; 20 ignored; 0 failed.
+- Focused tests cover compact/partial time parsing, canonical normalization, minute/hour/day arithmetic with second preservation, prefix-restricted tag cycling, empty-token completion suppression, accelerated boundary movement, and theme-role filter presentation.
+- A freshly imported test profile at `/mnt/Tokyo/Lab/.tmp/opencode/strata-balance-behavior-coherence-001-test-profile-final` (UUID `adc71878-5643-4348-b638-f2e5561547e6`) was manually exercised at 120×40. Empty Tag showed no ghost completion; typing `R` produced a dim known-tag suffix; Left/Right cycled the matching tags; Tab moved to Date without accepting completion. Compact `650` input normalized to `06:50` when leaving the field; minute and Shift-hour adjustments preserved seconds. Shift+Left on a selected start boundary moved it back seven operational days while remaining in Layer Detail.
+- SQLite doctor passed after PTY exit: schema v1, integrity and foreign keys healthy. The source profile used to create the portable test fixture was exported read-only and not mutated.
+
+STRATA-D073 is accepted, implemented, and natively certified in the decision, report, and interaction authorities. This coherence pass changes no schema and leaves D071/D072 semantics and SEDIMENT-016 separate.

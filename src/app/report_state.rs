@@ -913,7 +913,6 @@ impl App {
         true
     }
 
-
     pub(super) fn cancel_ledger_entry_edit(&mut self) {
         self.ledger_entry_edit = None;
         self.render_needed = true;

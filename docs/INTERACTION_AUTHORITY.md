@@ -1,6 +1,6 @@
 # Interaction authority
 
-Status: accepted authority; STRATA-D071/D072 are natively certified; STRATA-D073 input-coherence semantics are accepted with implementation candidate
+Status: accepted authority; STRATA-D071/D072/D073 are implemented and natively certified
 Program: INTERACTION-001 + INTERACTION-002 convergence
 Current completed unit: INTERACTION-002; PLATEAU-001H H1 presentation hardening certified
 Issues completed: #19, #20, #24

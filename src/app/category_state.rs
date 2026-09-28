@@ -341,7 +341,7 @@ impl App {
         }
     }
 
-    fn known_tags_for_category(&self, category_id: CategoryId) -> Vec<String> {
+    pub(super) fn known_tags_for_category(&self, category_id: CategoryId) -> Vec<String> {
         let mut known = Vec::new();
         if let Some(stored) = self.category_tags.tags_by_category.get(&category_id.0) {
             for stored_value in stored {

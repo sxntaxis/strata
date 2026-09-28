@@ -230,5 +230,4 @@ mod tests {
         let cycled = cycle_tag(&cycled.value, &known, Some(&cycled.prefix), 1).unwrap();
         assert_eq!(cycled.value, "Anibal; Research");
     }
-
 }

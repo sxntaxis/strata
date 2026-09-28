@@ -5,13 +5,13 @@ state: active
 created: 2026-08-01
 updated: 2026-09-28
 authority: working
-summary: "BALANCE-BEHAVIOR-COHERENCE-001 is authored on exact PR #110 head f8c397e: Tab-only field navigation, prefix-aware tag arrow cycling, forgiving temporal entry/adjustment, accelerated range boundaries, and filter/layout presentation cleanup."
-next: Native-validate BALANCE-BEHAVIOR-COHERENCE-001 on PR #110 lineage; keep SEDIMENT-016 separate.
+summary: "BALANCE-BEHAVIOR-COHERENCE-001 is native-green on PR #110's lineage for Tab-only field navigation, prefix-aware tag cycling, forgiving time entry/adjustment, accelerated range boundaries, and filter/layout coherence."
+next: Publish and owner-review BALANCE-BEHAVIOR-COHERENCE-001 stacked on PR #110; keep SEDIMENT-016 separate.
 ---
 
 ## BALANCE-BEHAVIOR-COHERENCE-001 input/presentation coherence — 2026-09-28
 
-**AUTHORED CANDIDATE / D073 ACCEPTED / NATIVE GATE PENDING:** on exact natively certified PR #110 head `f8c397e71f3633c2e952be6c63c94902a6e6ecc4`, owner review makes Tab/Shift+Tab exclusively field navigation, aligns Layer and ledger tag arrows around prefix-restricted known-tag cycling, adds forgiving time input plus timestamp-safe Left/Right adjustment with Shift acceleration, extends the same one/seven-day grammar to active Balance range handles, and cleans up Layer Detail filtering/layout without changing D071/D072 semantics. Filter state moves below the meter, nonmatches use theme-derived de-emphasis, Add receives a collapsible separator, and cross-day/long-tag rows may request more width. No schema change. Native Rust tooling is unavailable in this authoring environment. See `notebook/work/BALANCE-BEHAVIOR-COHERENCE-001.md`.
+**NATIVE-GREEN CANDIDATE / D073 CERTIFIED / DRAFT PUBLICATION NEXT:** on exact PR #110 head `f8c397e71f3633c2e952be6c63c94902a6e6ecc4`, owner review makes Tab/Shift+Tab exclusively field navigation, aligns Layer and ledger tag arrows around prefix-restricted known-tag cycling, adds forgiving time input plus timestamp-safe Left/Right adjustment with Shift acceleration, extends the same one/seven-day grammar to active Balance range handles, and cleans up Layer Detail filtering/layout without changing D071/D072 semantics. Filter state moves below the meter, nonmatches use theme-derived de-emphasis, Add receives a collapsible separator, and cross-day/long-tag rows may request more width. Formatter, strict Clippy, all-feature tests (581 library + 24 integration/process; 20 ignored), CLI help, loaded-profile 120×40 tag/time/range smoke, and SQLite doctor pass. No schema change. See `notebook/work/BALANCE-BEHAVIOR-COHERENCE-001.md`.
 
 ## BALANCE-TAG-FILTER-UX-001 multi-tag attribution and contextual filtering — 2026-09-28
 

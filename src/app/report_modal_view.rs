@@ -437,7 +437,12 @@ impl App {
                 .min(detail_max_width);
             let filter_detail = self
                 .report_filter_label()
-                .map(|label| "filter  ".chars().count().saturating_add(label.chars().count()))
+                .map(|label| {
+                    "filter  "
+                        .chars()
+                        .count()
+                        .saturating_add(label.chars().count())
+                })
                 .unwrap_or(0)
                 .min(REPORT_MODAL_SETTINGS.log_detail_max_width);
             let max_detail = max_log_detail.max(filter_detail);
@@ -785,7 +790,6 @@ impl App {
             } else {
                 unfiltered_contribution
             };
-            let filter_label = self.report_filter_label();
             self.render_layer_influence_instrument(
                 f,
                 total_area,
@@ -793,7 +797,6 @@ impl App {
                 filter_area,
                 summary,
                 contribution,
-                filter_label.as_deref(),
             );
         }
 
@@ -1240,9 +1243,8 @@ impl App {
             })
             .collect::<Vec<_>>();
 
-        let add_separator = can_add
-            && !logs.is_empty()
-            && usize::from(list_area.height) > row_count;
+        let add_separator =
+            can_add && !logs.is_empty() && usize::from(list_area.height) > row_count;
         if can_add {
             if add_separator {
                 items.push(ListItem::new(Line::default()));

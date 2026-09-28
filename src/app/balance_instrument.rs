@@ -351,7 +351,6 @@ impl App {
         filter_area: Option<Rect>,
         summary: &BalanceReportSummary,
         contribution: isize,
-        filter_label: Option<&str>,
     ) {
         let available = total_area.width.saturating_sub(2);
         let width = instrument_width(available);
@@ -387,7 +386,7 @@ impl App {
             meter_rect,
         );
 
-        if let (Some(filter_area), Some(filter_label)) = (filter_area, filter_label) {
+        if let (Some(filter_area), Some(filter_label)) = (filter_area, self.report_filter_label()) {
             f.render_widget(
                 Paragraph::new(Line::from(vec![
                     Span::styled(
@@ -396,10 +395,7 @@ impl App {
                             .fg(self.theme_status())
                             .add_modifier(Modifier::DIM),
                     ),
-                    Span::styled(
-                        filter_label.to_string(),
-                        Style::default().fg(self.theme_foreground()),
-                    ),
+                    Span::styled(filter_label, Style::default().fg(self.theme_foreground())),
                 ]))
                 .alignment(Alignment::Center),
                 filter_area,

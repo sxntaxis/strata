@@ -379,7 +379,10 @@ impl LedgerEntryEditState {
         if active == LedgerEntryField::Description {
             self.active_value_mut().push(character);
             self.reset_tag_cycle();
-        } else if matches!(active, LedgerEntryField::StartTime | LedgerEntryField::EndTime) {
+        } else if matches!(
+            active,
+            LedgerEntryField::StartTime | LedgerEntryField::EndTime
+        ) {
             append_time_character(self.active_value_mut(), character);
         } else if self.active_value_mut().len() < 10 {
             self.active_value_mut().push(character);
@@ -469,7 +472,13 @@ mod tests {
         assert_eq!(format_ledger_time_input("650"), "06:50");
         assert_eq!(format_ledger_time_input("6:50"), "06:50");
         assert_eq!(format_ledger_time_input("65030"), "06:50:30");
-        assert_eq!(parse_ledger_time_input("23:59:59").unwrap().format("%H:%M:%S").to_string(), "23:59:59");
+        assert_eq!(
+            parse_ledger_time_input("23:59:59")
+                .unwrap()
+                .format("%H:%M:%S")
+                .to_string(),
+            "23:59:59"
+        );
     }
 
     #[test]
@@ -530,5 +539,4 @@ mod tests {
         assert!(edit.adjust_active_temporal(-1, false));
         assert_eq!(edit.end_time, "11:59:15");
     }
-
 }

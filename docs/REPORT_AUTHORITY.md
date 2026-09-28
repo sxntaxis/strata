@@ -1,6 +1,6 @@
 # Report and export authority
 
-Status: accepted authority; STRATA-D071/D072 are natively certified; STRATA-D073 Balance behavior-coherence presentation is accepted with implementation candidate
+Status: accepted authority; STRATA-D071/D072/D073 Balance behavior is implemented and natively certified
 Last reviewed: 2026-09-28
 
 ## Purpose
