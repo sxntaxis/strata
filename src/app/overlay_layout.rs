@@ -47,11 +47,7 @@ pub(super) fn modal_content_rect(
     minimum_content_height: u16,
     vertical_padding: bool,
 ) -> Rect {
-    let horizontal = if area.width
-        >= HORIZONTAL_CONTENT_INSET
-            .saturating_mul(2)
-            .saturating_add(1)
-    {
+    let horizontal = if area.width >= HORIZONTAL_CONTENT_INSET.saturating_mul(2).saturating_add(1) {
         HORIZONTAL_CONTENT_INSET
     } else {
         0

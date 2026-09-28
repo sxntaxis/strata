@@ -11,7 +11,7 @@ next: Close SEDIMENT-016 exact persisted-mass comparison across resize and resta
 
 ## BALANCE-UX-004 one-cell modal inset — 2026-09-27
 
-**OWNER-CORRECTED PRESENTATION SLICE:** keep the existing responsive modal geometry and vertical calm, but use exactly one horizontal content cell per side at ordinary modal sizes. The validated 1/2/4/6-cell candidate was rejected in runtime review because wide panes accumulated too much side padding; a large Balance name-to-metric gap is explicitly acceptable in preference to that padding. No fixed-width Balance card or secondary content-width system is introduced. Settings, range gestures, report semantics, and sediment remain unchanged. The one-cell correction now needs the ordinary local formatter/Clippy/test/TUI revalidation. See `notebook/work/BALANCE-UX-004.md`.
+**ONE-CELL CORRECTION VERIFIED:** keep the existing responsive modal geometry and vertical calm, but use exactly one horizontal content cell per side at ordinary modal sizes. The validated 1/2/4/6-cell candidate was rejected in runtime review because wide panes accumulated too much side padding; a large Balance name-to-metric gap is explicitly acceptable in preference to that padding. The correction passes formatter, strict Clippy, all tests, and isolated wide/normal/constrained TUI checks. No fixed-width Balance card or secondary content-width system is introduced. Settings, range gestures, report semantics, and sediment remain unchanged. See `notebook/work/BALANCE-UX-004.md`.
 
 ## SEDIMENT-016 vertical physics corridor — 2026-09-27
 

@@ -30,7 +30,9 @@ Balance keeps the totals, meter, and category rows responsive across the full wi
 
 - The superseded 1/2/4/6-cell candidate passed formatter, strict Clippy, all-feature tests (542 unit + 24 integration; 20 ignored), CLI help, isolated TUI checks at 200×60 / 80×24 / 40×14, and SQLite doctor.
 - Owner runtime review rejected only its horizontal inset growth after seeing the wide Layer result; the vertical-calm behavior is retained.
-- This one-cell correction changes only the horizontal content inset helper and its presentation contract. It still requires the ordinary local formatter/Clippy/test/TUI revalidation before publication.
+- The one-cell correction passed formatter, strict Clippy, all-feature tests (542 unit + 24 integration; 20 ignored), and CLI help.
+- An isolated debug TUI profile with the `testingcheats fill` fixture exercised Balance and Layer at 200×60, 80×24, and 40×14. Both retain one content cell per side at ordinary sizes; Layer's selected rows remain inset and its vertical breathing remains available where height permits. The command-palette route opened Layer at 40×14.
+- The profile exited normally and passed `sqlite-doctor`. The wide Balance name-to-metric gap remains intentionally large under the corrected owner preference.
 - SEDIMENT-016's separate exact persisted-mass/restart promotion proof remains open.
 
 ## Non-goals
