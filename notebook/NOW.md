@@ -9,6 +9,10 @@ summary: "BALANCE-LAYER-DETAIL-UX-001 passes native checks and loaded-test-profi
 next: Owner-review the populated layer-ledger edit/add flow, then explicitly promote or revise BALANCE-LAYER-DETAIL-UX-001 without coupling it to SEDIMENT-016 doctrine promotion.
 ---
 
+## BALANCE-LEDGER-CORRECTION-UX-001 unified correction — 2026-09-28
+
+**STAGED / NATIVE VALIDATION PENDING:** owner review of the layer-detail candidate retired the old `Log past activity…` command-strip interface as a separate concept. `+ Add entry…`, existing-row Edit, and `l` now converge on one historical-correction transaction. Unowned time is implicit Idle; source shrink/move can therefore recolor retained source mass to Idle and assignment from Idle can recolor retained Idle mass to the target layer. A warning appears only when another explicit recorded entry/current record is collateral, temporarily replacing the layer hero with a centered BEFORE/AFTER card while leaving the draft row visible. Assistant-side Rust tooling is unavailable, so native formatter/Clippy/tests/runtime proof remain required. See `notebook/work/BALANCE-LEDGER-CORRECTION-UX-001.md`.
+
 ## BALANCE-LAYER-DETAIL-UX-001 editable layer ledger — 2026-09-27
 
 **NATIVELY VALIDATED CANDIDATE / OWNER REVIEW REMAINS:** Balance layer detail uses the layer name as its frame title, retains only the shared bottom interval chrome, and replaces inherited global-net/side-arrow/instruction chrome with a minimal layer hero: centered signed contribution plus a nested influence meter whose marker can never exceed the parent Balance displacement envelope. The ledger uses evenly distributed Tag/Time/Effect rows for single-day windows and Tag/Date/Time/Effect for multi-day windows, with explicit cross-day temporal spans. Existing completed rows edit in place; a synthetic `+ Add entry…` row uses the same inline grammar and scoped historical-assignment transaction. Formatting, strict Clippy, all-feature tests, loaded-profile TUI edit/add/restart smoke, and SQLite doctor pass. See `notebook/work/BALANCE-LAYER-DETAIL-UX-001.md`.

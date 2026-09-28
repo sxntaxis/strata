@@ -1,4 +1,4 @@
-use chrono::{Duration as ChronoDuration, NaiveDate, NaiveTime};
+use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, NaiveTime, Utc};
 use ratatui::prelude::{Line, Span};
 use ratatui::{
     Frame,
@@ -85,12 +85,10 @@ impl App {
             .report_logs_category_id
             .map(|category_id| self.report_logs_for_category(category_id));
 
-        let default_summary = self.report_logs_category_id.is_none()
-            && self.historical_activity_edit.is_none()
-            && self.report_range_edit.is_none();
-        let layer_detail = self.report_logs_category_id.is_some()
-            && self.historical_activity_edit.is_none()
-            && self.report_range_edit.is_none();
+        let default_summary =
+            self.report_logs_category_id.is_none() && self.report_range_edit.is_none();
+        let layer_detail =
+            self.report_logs_category_id.is_some() && self.report_range_edit.is_none();
         let mut body_row_count = if layer_detail {
             self.report_ledger_row_count()
         } else {
@@ -101,13 +99,23 @@ impl App {
         if layer_detail && self.ledger_entry_edit.is_some() {
             body_row_count = body_row_count.saturating_add(2);
         }
+        if layer_detail {
+            body_row_count = body_row_count.saturating_add(
+                self.ledger_confirmation_extra_height(),
+            );
+        }
 
         let preferred_inner_width = self
             .preferred_report_inner_width(&summary, logs_for_view.as_deref())
-            .max(if self.historical_activity_edit.is_some() {
-                REPORT_MODAL_SETTINGS.historical_activity_editor_min_width
-            } else if self.report_range_edit.is_some() {
+            .max(if self.report_range_edit.is_some() {
                 REPORT_MODAL_SETTINGS.range_editor_min_width
+            } else if self
+                .ledger_entry_edit
+                .as_ref()
+                .and_then(|edit| edit.confirmation.as_ref())
+                .is_some()
+            {
+                62
             } else {
                 0
             });
@@ -208,99 +216,7 @@ impl App {
             Span::styled(" >", newer_chevron_style),
         ])
         .alignment(Alignment::Center);
-        let interaction_bottom_title = if let Some(edit) = self.historical_activity_edit.as_ref() {
-            if edit.confirmation.is_some() {
-                let labels = self.historical_activity_conflict_labels();
-                let preview = if labels.is_empty() {
-                    "recorded activity".to_string()
-                } else {
-                    let remaining = labels.len().saturating_sub(3);
-                    let mut preview = labels.into_iter().take(3).collect::<Vec<_>>().join("; ");
-                    if remaining > 0 {
-                        preview.push_str(&format!("; +{remaining} more"));
-                    }
-                    preview
-                };
-                let mut spans = vec![
-                    Span::styled("collision · ", Style::default().fg(self.theme_warning())),
-                    Span::styled(preview, Style::default().fg(self.theme_foreground())),
-                ];
-                if edit.confirmation.as_ref().is_some_and(|confirmation| {
-                    confirmation.conflicts.iter().any(|item| item.active)
-                }) {
-                    let active_name = self
-                        .time_tracker
-                        .category_by_id(self.time_tracker.active_category_id())
-                        .map(|category| self.display_layer_name(&category.name))
-                        .unwrap_or_else(|| "current layer".to_string());
-                    spans.push(Span::styled(
-                        format!(" · current stays {active_name}"),
-                        Style::default().fg(self.theme_status()),
-                    ));
-                }
-                spans.push(Span::styled(
-                    " · Enter replace · Esc back",
-                    Style::default().fg(self.theme_status()),
-                ));
-                Some(Line::from(spans).alignment(Alignment::Right))
-            } else {
-                let active_style = Style::default()
-                    .fg(self.theme_accent())
-                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
-                let inactive_style = Style::default().fg(self.theme_foreground());
-                let target = self
-                    .historical_activity_target_name()
-                    .unwrap_or_else(|| "unavailable".to_string());
-                let mut spans = vec![
-                    Span::styled(
-                        "log past · layer ",
-                        Style::default().fg(self.theme_status()),
-                    ),
-                    Span::styled(
-                        target,
-                        if edit.active_field == super::HistoricalActivityField::Layer {
-                            active_style
-                        } else {
-                            inactive_style
-                        },
-                    ),
-                    Span::styled(" · from ", Style::default().fg(self.theme_status())),
-                    Span::styled(
-                        edit.from.clone(),
-                        if edit.active_field == super::HistoricalActivityField::From {
-                            active_style
-                        } else {
-                            inactive_style
-                        },
-                    ),
-                    Span::styled(" · to ", Style::default().fg(self.theme_status())),
-                    Span::styled(
-                        edit.to.clone(),
-                        if edit.active_field == super::HistoricalActivityField::To {
-                            active_style
-                        } else {
-                            inactive_style
-                        },
-                    ),
-                ];
-                if let Some(error) = edit.error.as_ref() {
-                    spans.push(Span::styled(
-                        format!(" · {error}"),
-                        Style::default().fg(self.theme_error()),
-                    ));
-                    spans.push(Span::styled(
-                        " · Enter retry · Esc cancel",
-                        Style::default().fg(self.theme_status()),
-                    ));
-                } else {
-                    spans.push(Span::styled(
-                        " · ←/→ layer · Tab next · Enter save · Esc cancel",
-                        Style::default().fg(self.theme_status()),
-                    ));
-                }
-                Some(Line::from(spans).alignment(Alignment::Right))
-            }
-        } else if let Some(edit) = self.report_range_edit.as_ref() {
+        let interaction_bottom_title = if let Some(edit) = self.report_range_edit.as_ref() {
             let active_style = Style::default()
                 .fg(self.theme_accent())
                 .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
@@ -342,45 +258,16 @@ impl App {
             }
             Some(Line::from(spans).alignment(Alignment::Right))
         } else if let Some(edit) = self.ledger_entry_edit.as_ref() {
-            if let Some(confirmation) = edit.confirmation.as_ref() {
-                let labels = self.ledger_entry_conflict_labels();
-                let preview = if labels.is_empty() {
-                    "recorded activity".to_string()
-                } else {
-                    let remaining = labels.len().saturating_sub(3);
-                    let mut preview = labels.into_iter().take(3).collect::<Vec<_>>().join("; ");
-                    if remaining > 0 {
-                        preview.push_str(&format!("; +{remaining} more"));
-                    }
-                    preview
-                };
-                let mut spans = vec![
-                    Span::styled("collision · ", Style::default().fg(self.theme_warning())),
-                    Span::styled(preview, Style::default().fg(self.theme_foreground())),
-                ];
-                if confirmation.conflicts.iter().any(|item| item.active) {
-                    spans.push(Span::styled(
-                        " · current activity is protected",
+            edit.error.as_ref().map(|error| {
+                Line::from(vec![
+                    Span::styled(error.clone(), Style::default().fg(self.theme_error())),
+                    Span::styled(
+                        " · Enter retry · Esc cancel",
                         Style::default().fg(self.theme_status()),
-                    ));
-                }
-                spans.push(Span::styled(
-                    " · Enter replace · Esc back",
-                    Style::default().fg(self.theme_status()),
-                ));
-                Some(Line::from(spans).alignment(Alignment::Right))
-            } else {
-                edit.error.as_ref().map(|error| {
-                    Line::from(vec![
-                        Span::styled(error.clone(), Style::default().fg(self.theme_error())),
-                        Span::styled(
-                            " · Enter retry · Esc cancel",
-                            Style::default().fg(self.theme_status()),
-                        ),
-                    ])
-                    .alignment(Alignment::Right)
-                })
-            }
+                    ),
+                ])
+                .alignment(Alignment::Right)
+            })
         } else {
             None
         };
@@ -536,6 +423,202 @@ impl App {
         f.render_widget(right_arrow, right_rect);
     }
 
+    fn ledger_confirmation_card_height(&self) -> u16 {
+        let row_count = self
+            .ledger_entry_edit
+            .as_ref()
+            .and_then(|edit| edit.confirmation.as_ref())
+            .map(|confirmation| {
+                confirmation
+                    .changes
+                    .iter()
+                    .map(|change| change.after.len().max(1))
+                    .sum::<usize>()
+            })
+            .unwrap_or(0);
+        if row_count == 0 {
+            0
+        } else {
+            row_count
+                .saturating_add(6)
+                .min(u16::MAX as usize) as u16
+        }
+    }
+
+    fn ledger_confirmation_extra_height(&self) -> usize {
+        usize::from(self.ledger_confirmation_card_height().saturating_sub(4))
+    }
+
+    fn ledger_confirmation_interval(
+        &self,
+        started_at_utc: DateTime<Utc>,
+        ended_at_utc: DateTime<Utc>,
+        policy: crate::domain::OperationalDayPolicy,
+        show_date: bool,
+    ) -> String {
+        let Ok(start) = crate::temporal::civil_from_policy(started_at_utc, policy) else {
+            return "?".to_string();
+        };
+        let Ok(end) = crate::temporal::civil_from_policy(ended_at_utc, policy) else {
+            return "?".to_string();
+        };
+        if !show_date && start.date_naive() == end.date_naive() {
+            return format!("{}–{}", start.format("%H:%M"), end.format("%H:%M"));
+        }
+        if start.date_naive() == end.date_naive() {
+            return format!(
+                "{} · {}–{}",
+                start.format("%b %-d"),
+                start.format("%H:%M"),
+                end.format("%H:%M")
+            );
+        }
+        format!(
+            "{} {}–{} {}",
+            start.format("%b %-d"),
+            start.format("%H:%M"),
+            end.format("%b %-d"),
+            end.format("%H:%M")
+        )
+    }
+
+    fn render_ledger_confirmation_card(&self, f: &mut Frame, area: Rect) {
+        let Some(confirmation) = self
+            .ledger_entry_edit
+            .as_ref()
+            .and_then(|edit| edit.confirmation.as_ref())
+        else {
+            return;
+        };
+        if confirmation.changes.is_empty() || area.width < 4 || area.height < 3 {
+            return;
+        }
+
+        let desired_width = 62u16.min(area.width);
+        let x = area.x + area.width.saturating_sub(desired_width) / 2;
+        let card = Rect::new(x, area.y, desired_width, area.height);
+        let title = if confirmation.changes.len() == 1 {
+            "Another entry will change".to_string()
+        } else {
+            format!("{} other entries will change", confirmation.changes.len())
+        };
+        let block = Block::default()
+            .title(Line::from(Span::styled(
+                title,
+                Style::default()
+                    .fg(self.theme_warning())
+                    .add_modifier(Modifier::BOLD),
+            )))
+            .title_alignment(Alignment::Center)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(self.theme_warning()))
+            .style(Style::default().bg(self.theme_background()));
+        f.render_widget(block.clone(), card);
+        let inner = block.inner(card);
+        if inner.height == 0 || inner.width == 0 {
+            return;
+        }
+
+        let show_date = {
+            let window = self.current_report_window();
+            window.start != window.end
+                || confirmation.changes.iter().any(|change| {
+                    let start = crate::temporal::civil_from_policy(
+                        change.started_at_utc,
+                        change.operational_day_policy,
+                    );
+                    let end = crate::temporal::civil_from_policy(
+                        change.ended_at_utc,
+                        change.operational_day_policy,
+                    );
+                    start.ok().map(|value| value.date_naive())
+                        != end.ok().map(|value| value.date_naive())
+                })
+        };
+
+        let columns_total = usize::from(inner.width);
+        let widths = Self::ledger_weighted_widths(columns_total, &[1, 2, 2]);
+        let header = Line::from(vec![
+            Span::raw(self.ledger_center_cell("", widths[0])),
+            Span::styled(
+                self.ledger_center_cell("BEFORE", widths[1]),
+                Style::default().fg(self.theme_status()).add_modifier(Modifier::DIM),
+            ),
+            Span::styled(
+                self.ledger_center_cell("AFTER", widths[2]),
+                Style::default().fg(self.theme_status()).add_modifier(Modifier::DIM),
+            ),
+        ]);
+
+        let mut lines = vec![header, Line::default()];
+        for change in &confirmation.changes {
+            let mut name = self.report_layer_display_name(change.category_id);
+            if change.active {
+                name.push_str(" · current");
+            }
+            let before = self.ledger_confirmation_interval(
+                change.started_at_utc,
+                change.ended_at_utc,
+                change.operational_day_policy,
+                show_date,
+            );
+            let after = if change.after.is_empty() {
+                vec!["removed".to_string()]
+            } else {
+                change
+                    .after
+                    .iter()
+                    .map(|interval| {
+                        self.ledger_confirmation_interval(
+                            interval.started_at_utc,
+                            interval.ended_at_utc,
+                            change.operational_day_policy,
+                            show_date,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            };
+            for (index, after_value) in after.iter().enumerate() {
+                let name_value = if index == 0 { name.as_str() } else { "" };
+                let before_value = if index == 0 { before.as_str() } else { "" };
+                let after_color = if after_value == "removed" {
+                    self.theme_error()
+                } else {
+                    self.theme_foreground()
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        self.ledger_center_cell(name_value, widths[0]),
+                        Style::default().fg(self.category_color_for_id(change.category_id)),
+                    ),
+                    Span::styled(
+                        self.ledger_center_cell(before_value, widths[1]),
+                        Style::default().fg(self.theme_foreground()),
+                    ),
+                    Span::styled(
+                        self.ledger_center_cell(after_value, widths[2]),
+                        Style::default().fg(after_color),
+                    ),
+                ]));
+            }
+        }
+        lines.push(Line::default());
+        lines.push(
+            Line::from(vec![
+                Span::styled(
+                    "Enter apply",
+                    Style::default()
+                        .fg(self.theme_accent())
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" · Esc back", Style::default().fg(self.theme_status())),
+            ])
+            .alignment(Alignment::Center),
+        );
+        f.render_widget(Paragraph::new(lines), inner);
+    }
+
     fn render_layer_detail_with_instrument(
         &self,
         f: &mut Frame,
@@ -545,6 +628,29 @@ impl App {
         category_id: CategoryId,
         border_color: Color,
     ) {
+        if self
+            .ledger_entry_edit
+            .as_ref()
+            .and_then(|edit| edit.confirmation.as_ref())
+            .is_some()
+        {
+            let desired_card_height = self.ledger_confirmation_card_height();
+            let card_height = desired_card_height
+                .min(area.height.saturating_sub(3))
+                .max(3.min(area.height));
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(card_height),
+                    Constraint::Length(u16::from(area.height > card_height)),
+                    Constraint::Min(0),
+                ])
+                .split(area);
+            self.render_ledger_confirmation_card(f, rows[0]);
+            self.render_report_logs_view(f, rows[2], logs, category_id, border_color);
+            return;
+        }
+
         let (total_area, meter_area, list_area) = if area.height >= 6 {
             let rows = Layout::default()
                 .direction(Direction::Vertical)

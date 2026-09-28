@@ -130,85 +130,10 @@ struct ReportRangeEditState {
     error: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum HistoricalActivityField {
-    Layer,
-    From,
-    To,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct HistoricalActivityConfirmation {
+struct LedgerCorrectionConfirmation {
     plan_token: String,
-    conflicts: Vec<sqlite::TuiHistoricalConflict>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct HistoricalActivityEditState {
-    target_category_id: CategoryId,
-    from: String,
-    to: String,
-    active_field: HistoricalActivityField,
-    select_all: bool,
-    error: Option<String>,
-    confirmation: Option<HistoricalActivityConfirmation>,
-}
-
-impl HistoricalActivityEditState {
-    fn append(&mut self, character: char) {
-        let target = match self.active_field {
-            HistoricalActivityField::Layer => return,
-            HistoricalActivityField::From => &mut self.from,
-            HistoricalActivityField::To => &mut self.to,
-        };
-        if self.select_all {
-            target.clear();
-            self.select_all = false;
-        }
-        if target.len() < 19 {
-            target.push(character);
-        }
-        self.error = None;
-        self.confirmation = None;
-    }
-
-    fn backspace(&mut self) {
-        let target = match self.active_field {
-            HistoricalActivityField::Layer => return,
-            HistoricalActivityField::From => &mut self.from,
-            HistoricalActivityField::To => &mut self.to,
-        };
-        if self.select_all {
-            target.clear();
-            self.select_all = false;
-        } else {
-            target.pop();
-        }
-        self.error = None;
-        self.confirmation = None;
-    }
-
-    fn next_field(&mut self) {
-        self.active_field = match self.active_field {
-            HistoricalActivityField::Layer => HistoricalActivityField::From,
-            HistoricalActivityField::From => HistoricalActivityField::To,
-            HistoricalActivityField::To => HistoricalActivityField::Layer,
-        };
-        self.select_all = !matches!(self.active_field, HistoricalActivityField::Layer);
-        self.error = None;
-        self.confirmation = None;
-    }
-
-    fn previous_field(&mut self) {
-        self.active_field = match self.active_field {
-            HistoricalActivityField::Layer => HistoricalActivityField::To,
-            HistoricalActivityField::From => HistoricalActivityField::Layer,
-            HistoricalActivityField::To => HistoricalActivityField::From,
-        };
-        self.select_all = !matches!(self.active_field, HistoricalActivityField::Layer);
-        self.error = None;
-        self.confirmation = None;
-    }
+    changes: Vec<sqlite::TuiHistoricalCollateralChange>,
 }
 
 impl ReportRangeEditState {
@@ -1139,7 +1064,6 @@ struct App {
     report_custom_window: Option<ReportWindow>,
     report_range_boundary: Option<ReportRangeBoundary>,
     report_range_edit: Option<ReportRangeEditState>,
-    historical_activity_edit: Option<HistoricalActivityEditState>,
     report_logs_category_id: Option<CategoryId>,
     report_log_selected_index: usize,
     ledger_entry_edit: Option<LedgerEntryEditState>,
@@ -1241,7 +1165,6 @@ impl App {
             report_custom_window: None,
             report_range_boundary: None,
             report_range_edit: None,
-            historical_activity_edit: None,
             report_logs_category_id: None,
             report_log_selected_index: 0,
             ledger_entry_edit: None,
@@ -1472,7 +1395,6 @@ impl App {
         self.report_custom_window = None;
         self.report_range_boundary = None;
         self.report_range_edit = None;
-        self.historical_activity_edit = None;
         self.report_logs_category_id = None;
         self.report_log_selected_index = 0;
         self.ledger_entry_edit = None;
@@ -1492,7 +1414,6 @@ impl App {
         self.ledger_entry_edit = None;
         self.report_range_boundary = None;
         self.report_range_edit = None;
-        self.historical_activity_edit = None;
         self.report_snapshot_end_day = None;
         self.report_snapshot_artifact = None;
         self.report_snapshot_preview_key = None;

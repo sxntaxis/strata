@@ -1,4 +1,4 @@
-use super::HistoricalActivityConfirmation;
+use super::LedgerCorrectionConfirmation;
 use crate::domain::CategoryId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,7 +29,7 @@ pub(super) struct LedgerEntryEditState {
     pub(super) active_field: LedgerEntryField,
     pub(super) select_all: bool,
     pub(super) error: Option<String>,
-    pub(super) confirmation: Option<HistoricalActivityConfirmation>,
+    pub(super) confirmation: Option<LedgerCorrectionConfirmation>,
 }
 
 impl LedgerEntryEditState {

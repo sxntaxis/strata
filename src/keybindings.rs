@@ -250,7 +250,7 @@ impl Action {
             Action::ReportRange => "Edit an explicit From/To balance range",
             Action::ReportRangeStart => "Select the Balance range start boundary",
             Action::ReportRangeEnd => "Select the Balance range end boundary",
-            Action::LogActivity => "Log or correct an arbitrary past activity interval",
+            Action::LogActivity => "Add a ledger entry to the selected Balance layer",
 
             Action::SettingsTop => "Jump Settings to top",
             Action::SettingsBottom => "Jump Settings to bottom",
@@ -292,7 +292,7 @@ impl Action {
             Action::ReportRange => "Custom range",
             Action::ReportRangeStart => "Range start",
             Action::ReportRangeEnd => "Range end",
-            Action::LogActivity => "Log past activity…",
+            Action::LogActivity => "Add entry…",
 
             Action::SettingsTop => "Jump to top",
             Action::SettingsBottom => "Jump to bottom",

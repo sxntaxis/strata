@@ -213,7 +213,7 @@ impl App {
             ),
             self.palette_action_entry(
                 Action::LogActivity,
-                "Log past activity…",
+                "Add entry…",
                 &[
                     "history",
                     "retroactive",
