@@ -5,9 +5,13 @@ state: active
 created: 2026-08-01
 updated: 2026-09-27
 authority: working
-summary: "SEDIMENT-016 per-category resize/restart mass proof passes with doctrine promotion still explicit; BALANCE-RANGE-UX-001 now has an authored bracket-boundary candidate with inclusive ReportWindow authority preserved."
-next: Natively validate BALANCE-RANGE-UX-001 bracket-boundary editing and TUI smoke it across wide/normal/constrained panes; keep SEDIMENT-016 doctrine promotion separate.
+summary: "BALANCE-LAYER-DETAIL-UX-001 is an authored editable-ledger candidate with a minimal signed-sum hero and parent-relative influence meter; BALANCE-RANGE-UX-001 and SEDIMENT-016 remain preserved underneath."
+next: Natively validate BALANCE-LAYER-DETAIL-UX-001 together with the bracket-boundary base across wide/normal/constrained panes, then owner-test the ledger edit/add flow; keep SEDIMENT-016 doctrine promotion separate.
 ---
+
+## BALANCE-LAYER-DETAIL-UX-001 editable layer ledger — 2026-09-27
+
+**AUTHORED CANDIDATE / OWNER-DESIGNED:** Balance layer detail now uses the layer name as its frame title, retains only the shared bottom interval chrome, and replaces inherited global-net/side-arrow/instruction chrome with a minimal layer hero: centered signed contribution plus a nested influence meter whose marker can never exceed the parent Balance displacement envelope. The ledger beneath uses evenly distributed Tag/Time/Effect rows for single-day windows and Tag/Date/Time/Effect for multi-day windows, with explicit cross-day temporal spans. Existing completed rows edit in place; a synthetic `+ Add entry…` row uses the same inline grammar and scoped historical-assignment transaction. Native Rust checks and TUI/SQLite smoke remain required before promotion. See `notebook/work/BALANCE-LAYER-DETAIL-UX-001.md`.
 
 ## BALANCE-UX-004 one-cell modal inset — 2026-09-27
 

@@ -1175,7 +1175,11 @@ impl App {
                 if !self.in_balance_modal() {
                     self.open_report_modal();
                 }
-                self.begin_historical_activity_edit();
+                if let Some(category_id) = self.report_logs_category_id {
+                    self.begin_ledger_add_edit(category_id);
+                } else {
+                    self.begin_historical_activity_edit();
+                }
                 false
             }
             PaletteCommand::Action(action) => self.handle_main_action(action),
@@ -2059,11 +2063,17 @@ mod report_edit_tests {
     fn enter_commits_and_escape_cancels() {
         let keymap = default_keymap();
         assert_eq!(
-            resolve_ledger_entry_edit_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), &keymap),
+            resolve_ledger_entry_edit_key(
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                &keymap,
+            ),
             LedgerEntryEditKeyIntent::Commit
         );
         assert_eq!(
-            resolve_ledger_entry_edit_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), &keymap),
+            resolve_ledger_entry_edit_key(
+                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                &keymap,
+            ),
             LedgerEntryEditKeyIntent::Cancel
         );
     }

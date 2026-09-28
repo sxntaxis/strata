@@ -236,7 +236,7 @@ Category color choice is stored as a theme-independent RGB anchor. Switching the
 - In Balance, `d` or `t` selects day range, `w` week, and `m` month.
 - Balance always shows explicit interval boundaries: a single included day such as Sep 21 appears as `Sep 21 – Sep 22`. Press `[` to select the start boundary or `]` to select the exclusive end boundary, then use `←` / `→` to move that boundary one operational day at a time. `Esc` deselects the boundary before ordinary close/back behavior resumes.
 - Press `r` in Balance for a direct From/To jump. The typed values use the same boundary convention (`From 2026-09-21`, `To 2026-09-22` means Sep 21 only); `Tab` switches fields, `Enter` applies, and `Esc` cancels.
-- Press `l` in Balance to log/correct arbitrary past activity. These Balance keys do not act as hidden Main shortcuts; use `b` or the command palette to enter historical work deliberately.
+- Press `l` from the Balance summary to log/correct arbitrary past activity. Inside a layer detail, `l` is scoped to that layer and opens the same inline new-entry editor as the final `+ Add entry…` ledger row. Confirm on a completed ledger row edits its Tag and full start/end boundaries in place. These Balance keys do not act as hidden Main shortcuts; use `b` or the command palette to enter historical work deliberately.
 - In layer text entry, `?` remains a normal character; use `F1` there.
 - Optional config file: `~/.config/strata/keymap.json`.
 - In Balance, `←` moves to older intervals and `→` moves toward current.

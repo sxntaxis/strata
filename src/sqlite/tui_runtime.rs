@@ -4259,6 +4259,130 @@ mod clear_all_additional_transaction_tests {
     }
 
     #[test]
+    fn ledger_entry_edit_preserves_identity_and_rewrites_chronology_atomically() {
+        let path = repository_file("ledger-edit-existing");
+        seed_history_session(
+            &path,
+            1,
+            "work-ledger-edit",
+            "2026-08-02T10:00:00Z",
+            "2026-08-02T11:00:00Z",
+            "2026-08-02",
+            3600,
+        );
+        let active = seed_history_active(
+            &path,
+            "active-ledger-edit",
+            1,
+            "live",
+            "2026-08-02T12:00:00Z",
+            "2026-08-02T12:30:00Z",
+        );
+        let session_id = {
+            let repository = open_cli_repository(&path).unwrap();
+            let id = usize::try_from(repository.list_sessions().unwrap()[0].id).unwrap();
+            drop(repository);
+            id
+        };
+
+        edit_historical_session(
+            &path,
+            HistoricalSessionEditRequest {
+                session_id,
+                description: "Anibal".to_string(),
+                started_at_utc: parse_utc("2026-08-02T10:15:00Z").unwrap(),
+                ended_at_utc: parse_utc("2026-08-02T11:20:00Z").unwrap(),
+                active_preview: active,
+            },
+        )
+        .unwrap();
+
+        let repository = open_cli_repository(&path).unwrap();
+        let rows = repository.list_sessions().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].stable_id, "work-ledger-edit");
+        assert_eq!(rows[0].category_id, 1);
+        assert_eq!(rows[0].description, "Anibal");
+        assert_eq!(rows[0].started_at_utc, "2026-08-02T10:15:00.000Z");
+        assert_eq!(rows[0].ended_at_utc, "2026-08-02T11:20:00.000Z");
+        assert_eq!(rows[0].elapsed_seconds, 3900);
+        drop(repository);
+        remove_database(&path);
+    }
+
+    #[test]
+    fn ledger_entry_edit_rejects_overlap_without_mutating_source_session() {
+        let path = repository_file("ledger-edit-overlap");
+        seed_history_session(
+            &path,
+            1,
+            "work-ledger-a",
+            "2026-08-02T10:00:00Z",
+            "2026-08-02T11:00:00Z",
+            "2026-08-02",
+            3600,
+        );
+        seed_history_session(
+            &path,
+            0,
+            "idle-ledger-b",
+            "2026-08-02T11:00:00Z",
+            "2026-08-02T11:30:00Z",
+            "2026-08-02",
+            1800,
+        );
+        let active = seed_history_active(
+            &path,
+            "active-ledger-overlap",
+            1,
+            "live",
+            "2026-08-02T12:00:00Z",
+            "2026-08-02T12:30:00Z",
+        );
+        let session_id = {
+            let repository = open_cli_repository(&path).unwrap();
+            let id = usize::try_from(
+                repository
+                    .list_sessions()
+                    .unwrap()
+                    .into_iter()
+                    .find(|row| row.stable_id == "work-ledger-a")
+                    .unwrap()
+                    .id,
+            )
+            .unwrap();
+            drop(repository);
+            id
+        };
+
+        let error = edit_historical_session(
+            &path,
+            HistoricalSessionEditRequest {
+                session_id,
+                description: "changed".to_string(),
+                started_at_utc: parse_utc("2026-08-02T10:00:00Z").unwrap(),
+                ended_at_utc: parse_utc("2026-08-02T11:15:00Z").unwrap(),
+                active_preview: active,
+            },
+        )
+        .unwrap_err();
+        assert!(error.contains("overlaps existing session"));
+
+        let repository = open_cli_repository(&path).unwrap();
+        let rows = repository.list_sessions().unwrap();
+        let source = rows
+            .iter()
+            .find(|row| row.stable_id == "work-ledger-a")
+            .unwrap();
+        assert_eq!(source.description, "");
+        assert_eq!(source.started_at_utc, "2026-08-02T10:00:00Z");
+        assert_eq!(source.ended_at_utc, "2026-08-02T11:00:00Z");
+        assert_eq!(source.elapsed_seconds, 3600);
+        drop(repository);
+        remove_database(&path);
+    }
+
+    #[test]
     fn historical_activity_refuses_preexisting_overlapping_canonical_history() {
         let path = repository_file("history-assignment-overlap-authority");
         seed_history_session(

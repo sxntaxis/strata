@@ -1,4 +1,3 @@
-use chrono::NaiveDate;
 use ratatui::prelude::{Line, Span};
 use ratatui::{
     Frame,
@@ -8,24 +7,12 @@ use ratatui::{
 };
 
 use crate::constants::REPORT_MODAL_SETTINGS;
-use crate::domain::{
-    BalanceReportSummary, CategoryId, CategoryLogEntry, DRIFT_CATEGORY_ID, ReportPeriod,
-};
-use crate::keybindings::Action;
+use crate::domain::{BalanceReportSummary, CategoryId, CategoryLogEntry, DRIFT_CATEGORY_ID};
 
 use super::{
-    App, ReportRangeBoundary, balance_instrument, overlay_layout, ui_helpers, view_style,
+    App, LedgerEntryField, ReportRangeBoundary, balance_instrument, overlay_layout, ui_helpers,
+    view_style,
 };
-
-fn balance_key_hint(key: impl ToString) -> String {
-    let raw = key.to_string();
-    let label = if raw.chars().count() == 1 {
-        raw.to_uppercase()
-    } else {
-        raw
-    };
-    format!("[{label}]")
-}
 
 fn summary_border_color(
     summary: &BalanceReportSummary,
@@ -45,12 +32,19 @@ impl App {
             .report_logs_category_id
             .map(|category_id| self.report_logs_for_category(category_id));
 
-        let body_row_count = logs_for_view
-            .as_ref()
-            .map_or(summary.entries.len(), |logs| logs.len());
         let default_summary = self.report_logs_category_id.is_none()
             && self.historical_activity_edit.is_none()
             && self.report_range_edit.is_none();
+        let layer_detail = self.report_logs_category_id.is_some()
+            && self.historical_activity_edit.is_none()
+            && self.report_range_edit.is_none();
+        let body_row_count = if layer_detail {
+            self.report_ledger_row_count()
+        } else {
+            logs_for_view
+                .as_ref()
+                .map_or(summary.entries.len(), |logs| logs.len())
+        };
 
         let preferred_inner_width = self
             .preferred_report_inner_width(&summary, logs_for_view.as_deref())
@@ -70,7 +64,7 @@ impl App {
         let summary_content_height =
             balance_instrument::preferred_summary_inner_height(body_row_count);
 
-        let modal_rect = if default_summary {
+        let modal_rect = if default_summary || layer_detail {
             overlay_layout::centered_overlay_rect(
                 terminal_size,
                 summary_content_width.saturating_add(2),
@@ -108,8 +102,12 @@ impl App {
         ))
         .alignment(Alignment::Left);
 
+        let center_title_text = self
+            .report_logs_category_id
+            .map(|category_id| self.report_layer_display_name(category_id))
+            .unwrap_or_else(|| "Balance".to_string());
         let center_title = Line::from(Span::styled(
-            "Balance",
+            center_title_text,
             Style::default()
                 .fg(self.theme_foreground())
                 .add_modifier(Modifier::BOLD),
@@ -287,32 +285,51 @@ impl App {
                 ));
             }
             Some(Line::from(spans).alignment(Alignment::Right))
-        } else if self.report_logs_category_id.is_some() {
-            let log_key = self
-                .keymap
-                .keys_for_action(Action::LogActivity)
-                .first()
-                .map(ToString::to_string);
-            let label = if self.report_log_edit.is_some() {
-                "Enter save · Esc cancel".to_string()
-            } else {
-                log_key.map_or_else(
-                    || "Enter edit · Esc back".to_string(),
-                    |key| format!("{} Log past · Enter edit · Esc back", balance_key_hint(key)),
-                )
-            };
-            Some(
-                Line::from(Span::styled(
-                    label,
+        } else if let Some(edit) = self.ledger_entry_edit.as_ref() {
+            if let Some(confirmation) = edit.confirmation.as_ref() {
+                let labels = self.ledger_entry_conflict_labels();
+                let preview = if labels.is_empty() {
+                    "recorded activity".to_string()
+                } else {
+                    let remaining = labels.len().saturating_sub(3);
+                    let mut preview = labels.into_iter().take(3).collect::<Vec<_>>().join("; ");
+                    if remaining > 0 {
+                        preview.push_str(&format!("; +{remaining} more"));
+                    }
+                    preview
+                };
+                let mut spans = vec![
+                    Span::styled("collision · ", Style::default().fg(self.theme_warning())),
+                    Span::styled(preview, Style::default().fg(self.theme_foreground())),
+                ];
+                if confirmation.conflicts.iter().any(|item| item.active) {
+                    spans.push(Span::styled(
+                        " · current activity is protected",
+                        Style::default().fg(self.theme_status()),
+                    ));
+                }
+                spans.push(Span::styled(
+                    " · Enter replace · Esc back",
                     Style::default().fg(self.theme_status()),
-                ))
-                .alignment(Alignment::Right),
-            )
+                ));
+                Some(Line::from(spans).alignment(Alignment::Right))
+            } else {
+                edit.error.as_ref().map(|error| {
+                    Line::from(vec![
+                        Span::styled(error.clone(), Style::default().fg(self.theme_error())),
+                        Span::styled(
+                            " · Enter retry · Esc cancel",
+                            Style::default().fg(self.theme_status()),
+                        ),
+                    ])
+                    .alignment(Alignment::Right)
+                })
+            }
         } else {
             None
         };
 
-        let mut frame_block = if default_summary {
+        let mut frame_block = if default_summary || layer_detail {
             Block::default()
                 .style(Style::default().bg(self.theme_background()))
                 .title(center_title)
@@ -330,7 +347,7 @@ impl App {
                 .border_style(Style::default().fg(border_color))
         };
 
-        if default_summary {
+        if default_summary || layer_detail {
             frame_block = frame_block.title_bottom(period_bottom_title);
         }
         if let Some(interaction_bottom_title) = interaction_bottom_title {
@@ -339,18 +356,30 @@ impl App {
 
         f.render_widget(ratatui::widgets::Clear, modal_rect);
         f.render_widget(frame_block.clone(), modal_rect);
-        if !default_summary {
+        if !default_summary && !layer_detail {
             self.render_report_navigation_arrows(f, modal_rect);
         }
 
         let frame_inner = frame_block.inner(modal_rect);
-        let list_area = if default_summary {
+        let list_area = if default_summary || layer_detail {
             overlay_layout::modal_content_rect(frame_inner, summary_content_height, false)
         } else {
             frame_inner
         };
 
-        if let Some(category_id) = self.report_logs_category_id {
+        if layer_detail {
+            if let Some(category_id) = self.report_logs_category_id {
+                let empty_logs = Vec::new();
+                self.render_layer_detail_with_instrument(
+                    f,
+                    list_area,
+                    &summary,
+                    logs_for_view.as_deref().unwrap_or(&empty_logs),
+                    category_id,
+                    border_color,
+                );
+            }
+        } else if let Some(category_id) = self.report_logs_category_id {
             let empty_logs = Vec::new();
             self.render_report_logs_view(
                 f,
@@ -381,9 +410,12 @@ impl App {
                 .iter()
                 .map(|row| {
                     if row.description.trim().is_empty() {
-                        format!("{}-{}", row.start_time, row.end_time)
+                        format!("{} {}-{} {}", row.date, row.start_time, row.end_date, row.end_time)
                     } else {
-                        format!("{} · {}-{}", row.description, row.start_time, row.end_time)
+                        format!(
+                            "{} · {} {}-{} {}",
+                            row.description, row.date, row.start_time, row.end_date, row.end_time
+                        )
                     }
                 })
                 .map(|text| text.chars().count())
@@ -445,6 +477,284 @@ impl App {
         f.render_widget(right_arrow, right_rect);
     }
 
+    fn render_layer_detail_with_instrument(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        summary: &BalanceReportSummary,
+        logs: &[CategoryLogEntry],
+        category_id: CategoryId,
+        border_color: Color,
+    ) {
+        let (total_area, meter_area, list_area) = if area.height >= 6 {
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Min(0),
+                    Constraint::Length(1),
+                ])
+                .split(area);
+            (Some(rows[1]), Some(rows[2]), rows[4])
+        } else if area.height >= 5 {
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Min(0),
+                ])
+                .split(area);
+            (Some(rows[1]), Some(rows[2]), rows[4])
+        } else if area.height >= 3 {
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Min(0),
+                ])
+                .split(area);
+            (Some(rows[0]), Some(rows[1]), rows[2])
+        } else {
+            (None, None, area)
+        };
+
+        if let (Some(total_area), Some(meter_area)) = (total_area, meter_area) {
+            self.render_layer_influence_instrument(
+                f,
+                total_area,
+                meter_area,
+                summary,
+                category_id,
+            );
+        }
+
+        self.render_report_logs_view(f, list_area, logs, category_id, border_color);
+    }
+
+    fn ledger_weighted_widths(total: usize, weights: &[usize]) -> Vec<usize> {
+        let weight_sum = weights.iter().sum::<usize>().max(1);
+        let mut widths = weights
+            .iter()
+            .map(|weight| total.saturating_mul(*weight) / weight_sum)
+            .collect::<Vec<_>>();
+        let used = widths.iter().sum::<usize>();
+        let mut remaining = total.saturating_sub(used);
+        let mut cursor = 0;
+        while remaining > 0 && !widths.is_empty() {
+            widths[cursor] = widths[cursor].saturating_add(1);
+            remaining -= 1;
+            cursor = (cursor + 1) % widths.len();
+        }
+        widths
+    }
+
+    fn ledger_center_cell(&self, text: &str, width: usize) -> String {
+        if width == 0 {
+            return String::new();
+        }
+        let text = self.truncate_label(text, width);
+        let text_width = text.chars().count();
+        let remaining = width.saturating_sub(text_width);
+        let left = remaining / 2;
+        let right = remaining.saturating_sub(left);
+        format!("{}{}{}", " ".repeat(left), text, " ".repeat(right))
+    }
+
+    fn ledger_date_label(&self, raw: &str) -> String {
+        ui_helpers::format_report_interval_label(raw)
+    }
+
+    fn ledger_minute_time(raw: &str) -> String {
+        raw.get(..5).unwrap_or(raw).to_string()
+    }
+
+    fn ledger_active_token(value: String, active: bool) -> String {
+        if active { format!("[{value}]") } else { value }
+    }
+
+    fn ledger_metric_value(&self, row: &CategoryLogEntry, is_none_category: bool) -> String {
+        if is_none_category {
+            self.format_time(row.elapsed_seconds)
+        } else if row.balance_seconds == 0 && row.balance_effect < 0 {
+            "-00:00:00".to_string()
+        } else {
+            self.format_balance_time(row.balance_seconds)
+        }
+    }
+
+    fn ledger_metric_color(&self, row: &CategoryLogEntry, is_none_category: bool) -> Color {
+        if is_none_category {
+            self.theme_status()
+        } else if row.balance_seconds == 0 {
+            if row.balance_effect < 0 {
+                self.theme_error()
+            } else if row.balance_effect > 0 {
+                self.theme_success()
+            } else {
+                self.theme_status()
+            }
+        } else {
+            view_style::balance_color(
+                row.balance_seconds,
+                self.theme_error(),
+                self.theme_success(),
+                self.theme_status(),
+            )
+        }
+    }
+
+    fn ledger_normal_line(
+        &self,
+        row: &CategoryLogEntry,
+        row_width: usize,
+        show_date_column: bool,
+        selected_text: Option<Color>,
+        is_none_category: bool,
+    ) -> Line<'static> {
+        let tag = if row.description.trim().is_empty() {
+            String::new()
+        } else {
+            row.description.trim().to_string()
+        };
+        let start_time = Self::ledger_minute_time(&row.start_time);
+        let end_time = Self::ledger_minute_time(&row.end_time);
+        let metric = self.ledger_metric_value(row, is_none_category);
+        let metric_color = selected_text
+            .unwrap_or_else(|| self.ledger_metric_color(row, is_none_category));
+        let tag_color = selected_text.unwrap_or_else(|| self.theme_foreground());
+        let temporal_color = selected_text.unwrap_or_else(|| self.theme_status());
+        let cross_day = row.date != row.end_date;
+
+        let (widths, values): (Vec<usize>, Vec<(String, Color)>) = if cross_day {
+            let widths = Self::ledger_weighted_widths(row_width, &[1, 2, 1]);
+            let temporal = format!(
+                "{} {} → {} {}",
+                self.ledger_date_label(&row.date),
+                start_time,
+                self.ledger_date_label(&row.end_date),
+                end_time,
+            );
+            (
+                widths,
+                vec![(tag, tag_color), (temporal, temporal_color), (metric, metric_color)],
+            )
+        } else if show_date_column {
+            let widths = Self::ledger_weighted_widths(row_width, &[1, 1, 1, 1]);
+            (
+                widths,
+                vec![
+                    (tag, tag_color),
+                    (self.ledger_date_label(&row.date), temporal_color),
+                    (format!("{start_time}–{end_time}"), temporal_color),
+                    (metric, metric_color),
+                ],
+            )
+        } else {
+            let widths = Self::ledger_weighted_widths(row_width, &[1, 1, 1]);
+            (
+                widths,
+                vec![
+                    (tag, tag_color),
+                    (format!("{start_time}–{end_time}"), temporal_color),
+                    (metric, metric_color),
+                ],
+            )
+        };
+
+        let spans = values
+            .into_iter()
+            .zip(widths)
+            .map(|((value, color), width)| {
+                Span::styled(self.ledger_center_cell(&value, width), Style::default().fg(color))
+            })
+            .collect::<Vec<_>>();
+        Line::from(spans)
+    }
+
+    fn ledger_edit_line(
+        &self,
+        row_width: usize,
+        show_date_column: bool,
+        selected_text: Color,
+    ) -> Line<'static> {
+        let Some(edit) = self.ledger_entry_edit.as_ref() else {
+            return Line::default();
+        };
+        let active = edit.active_field;
+        let description = Self::ledger_active_token(
+            edit.description.clone(),
+            active == LedgerEntryField::Description,
+        );
+        let start_date = Self::ledger_active_token(
+            self.ledger_date_label(&edit.start_date),
+            active == LedgerEntryField::StartDate,
+        );
+        let start_time = Self::ledger_active_token(
+            edit.start_time.clone(),
+            active == LedgerEntryField::StartTime,
+        );
+        let end_date = Self::ledger_active_token(
+            self.ledger_date_label(&edit.end_date),
+            active == LedgerEntryField::EndDate,
+        );
+        let end_time = Self::ledger_active_token(
+            edit.end_time.clone(),
+            active == LedgerEntryField::EndTime,
+        );
+        let cross_day = edit.start_date != edit.end_date;
+        let placeholder = "…".to_string();
+
+        let (widths, values): (Vec<usize>, Vec<String>) = if cross_day {
+            (
+                Self::ledger_weighted_widths(row_width, &[1, 2, 1]),
+                vec![
+                    description,
+                    format!("{start_date} {start_time} → {end_date} {end_time}"),
+                    placeholder,
+                ],
+            )
+        } else if show_date_column {
+            (
+                Self::ledger_weighted_widths(row_width, &[1, 1, 1, 1]),
+                vec![
+                    description,
+                    start_date,
+                    format!("{start_time}–{end_time}"),
+                    placeholder,
+                ],
+            )
+        } else {
+            (
+                Self::ledger_weighted_widths(row_width, &[1, 1, 1]),
+                vec![
+                    description,
+                    format!("{start_date} · {start_time}–{end_time}"),
+                    placeholder,
+                ],
+            )
+        };
+
+        Line::from(
+            values
+                .into_iter()
+                .zip(widths)
+                .map(|(value, width)| {
+                    Span::styled(
+                        self.ledger_center_cell(&value, width),
+                        Style::default().fg(selected_text),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )
+    }
+
     fn render_report_logs_view(
         &self,
         f: &mut Frame,
@@ -453,151 +763,92 @@ impl App {
         category_id: CategoryId,
         border_color: Color,
     ) {
-        let selected_log_index = if logs.is_empty() {
-            None
-        } else {
-            Some(self.report_log_selected_index.min(logs.len() - 1))
-        };
+        let can_add = self.report_layer_can_add(category_id);
+        let row_count = logs.len().saturating_add(usize::from(can_add));
+        let selected_log_index = (row_count > 0)
+            .then(|| self.report_log_selected_index.min(row_count.saturating_sub(1)));
         let is_none_category = category_id == DRIFT_CATEGORY_ID;
-
         let row_width = list_area.width as usize;
-        let metric_width = if is_none_category {
-            REPORT_MODAL_SETTINGS.detail_metric_width_drift
-        } else {
-            REPORT_MODAL_SETTINGS.detail_metric_width_default
+        let show_date_column = {
+            let window = self.current_report_window();
+            window.start != window.end
         };
-        let window = self.current_report_window();
-        let show_date_column = window.start != window.end;
-        let date_width = if show_date_column {
-            REPORT_MODAL_SETTINGS.detail_date_width
-        } else {
-            0
-        };
-        let separator_count = if show_date_column { 3 } else { 2 };
-        let tag_width = row_width
-            .saturating_sub(
-                date_width
-                    + REPORT_MODAL_SETTINGS.detail_time_width
-                    + metric_width
-                    + separator_count,
-            )
-            .max(REPORT_MODAL_SETTINGS.min_tag_width);
+        let text_color = crate::appearance::contrasting_text_color(
+            border_color,
+            self.theme_foreground(),
+        );
 
-        let items: Vec<ListItem> = logs
+        let mut items = logs
             .iter()
             .enumerate()
             .map(|(idx, row)| {
                 let is_selected = selected_log_index == Some(idx);
-                let date_label = if show_date_column {
-                    self.format_log_date_label(&row.date)
-                } else {
-                    String::new()
-                };
-                let date = if show_date_column {
-                    self.truncate_label(&date_label, date_width)
-                } else {
-                    String::new()
-                };
-                let date_cell = if show_date_column {
-                    format!("{date:<width$}", width = date_width)
-                } else {
-                    String::new()
-                };
-
-                let displayed_description = self
-                    .report_log_edit
+                let editing_this_row = self
+                    .ledger_entry_edit
                     .as_ref()
-                    .filter(|edit| row.session_id == Some(edit.session_id))
-                    .map(|edit| format!("{}▏", edit.draft))
-                    .unwrap_or_else(|| row.description.trim().to_string());
-                let tag = self.truncate_label(&displayed_description, tag_width);
-                let tag_cell = format!("{tag:<width$}", width = tag_width);
-
-                let time_text = self.truncate_label(
-                    &format!("{}-{}", row.start_time, row.end_time),
-                    REPORT_MODAL_SETTINGS.detail_time_width,
-                );
-                let time_cell = format!(
-                    "{time_text:<width$}",
-                    width = REPORT_MODAL_SETTINGS.detail_time_width
-                );
-
-                let metric_value = if is_none_category {
-                    self.format_time(row.elapsed_seconds)
-                } else if row.balance_seconds == 0 && row.balance_effect < 0 {
-                    "-00:00:00".to_string()
+                    .is_some_and(|edit| edit.session_id() == row.session_id);
+                let line = if editing_this_row {
+                    self.ledger_edit_line(row_width, show_date_column, text_color)
                 } else {
-                    self.format_balance_time(row.balance_seconds)
-                };
-                let metric_cell = format!("{metric_value:>width$}", width = metric_width);
-
-                let metric_color = if is_none_category {
-                    self.theme_status()
-                } else if row.balance_seconds == 0 {
-                    if row.balance_effect < 0 {
-                        self.theme_error()
-                    } else if row.balance_effect > 0 {
-                        self.theme_success()
-                    } else {
-                        self.theme_status()
-                    }
-                } else {
-                    view_style::balance_color(
-                        row.balance_seconds,
-                        self.theme_error(),
-                        self.theme_success(),
-                        self.theme_status(),
+                    self.ledger_normal_line(
+                        row,
+                        row_width,
+                        show_date_column,
+                        is_selected.then_some(text_color),
+                        is_none_category,
                     )
                 };
-
                 if is_selected {
-                    let text_color = crate::appearance::contrasting_text_color(
-                        border_color,
-                        self.theme_foreground(),
-                    );
-                    let mut spans = Vec::new();
-                    if show_date_column {
-                        spans.push(Span::raw(date_cell.clone()).fg(text_color));
-                        spans.push(Span::raw(" ").fg(text_color));
-                    }
-                    spans.push(Span::raw(tag_cell.clone()).fg(text_color));
-                    spans.push(Span::raw(" ").fg(text_color));
-                    spans.push(Span::raw(time_cell.clone()).fg(text_color));
-                    spans.push(Span::raw(" ").fg(text_color));
-                    spans.push(Span::raw(metric_cell.clone()).fg(text_color));
-
-                    ListItem::new(Line::from(spans))
-                        .style(Style::default().fg(text_color).bg(border_color))
+                    ListItem::new(line).style(Style::default().fg(text_color).bg(border_color))
                 } else {
-                    let mut spans = Vec::new();
-                    if show_date_column {
-                        spans.push(Span::raw(date_cell).fg(self.theme_status()));
-                        spans.push(Span::raw(" ").fg(self.theme_status()));
-                    }
-                    spans.push(Span::raw(tag_cell).fg(self.theme_foreground()));
-                    spans.push(Span::raw(" ").fg(self.theme_foreground()));
-                    spans.push(Span::raw(time_cell).fg(self.theme_status()));
-                    spans.push(Span::raw(" ").fg(self.theme_foreground()));
-                    spans.push(Span::raw(metric_cell).fg(metric_color));
-
-                    ListItem::new(Line::from(spans))
+                    ListItem::new(line)
                 }
             })
-            .collect();
+            .collect::<Vec<_>>();
+
+        if can_add {
+            let add_index = logs.len();
+            let is_selected = selected_log_index == Some(add_index);
+            let editing_add = self
+                .ledger_entry_edit
+                .as_ref()
+                .is_some_and(|edit| edit.is_add());
+            let line = if editing_add {
+                self.ledger_edit_line(row_width, show_date_column, text_color)
+            } else {
+                let label = "+ Add entry…";
+                let padded = format!(
+                    "{label}{}",
+                    " ".repeat(row_width.saturating_sub(label.chars().count()))
+                );
+                Line::from(Span::styled(
+                    padded,
+                    Style::default().fg(if is_selected {
+                        text_color
+                    } else {
+                        self.theme_status()
+                    }),
+                ))
+            };
+            if is_selected {
+                items.push(
+                    ListItem::new(line).style(Style::default().fg(text_color).bg(border_color)),
+                );
+            } else {
+                items.push(ListItem::new(line));
+            }
+        }
+
+        if items.is_empty() {
+            items.push(ListItem::new(Line::from(Span::styled(
+                "No entries for this layer in this period.",
+                Style::default().fg(self.theme_status()),
+            ))));
+        }
 
         let mut list_state = ListState::default();
         list_state.select(selected_log_index);
-
-        let list = if logs.is_empty() {
-            List::new(vec![ListItem::new(Line::from(vec![Span::styled(
-                "No logs for this layer in this period.",
-                Style::default().fg(self.theme_status()),
-            )]))])
-        } else {
-            List::new(items)
-        };
-
-        f.render_stateful_widget(list, list_area, &mut list_state);
+        f.render_stateful_widget(List::new(items), list_area, &mut list_state);
     }
 
     fn render_report_summary_with_instrument(
@@ -747,32 +998,20 @@ impl App {
 
         f.render_stateful_widget(list, list_area, &mut list_state);
     }
-
-    fn format_log_date_label(&self, date: &str) -> String {
-        if self.report_range_is_custom() {
-            return ui_helpers::format_report_interval_label(date);
-        }
-        match self.report_period {
-            ReportPeriod::Today => String::new(),
-            ReportPeriod::Week => NaiveDate::parse_from_str(date, "%Y-%m-%d")
-                .map(|parsed| parsed.format("%a %-d").to_string())
-                .unwrap_or_else(|_| date.to_string()),
-            ReportPeriod::Month => ui_helpers::format_report_interval_label(date),
-        }
-    }
 }
 
 #[cfg(test)]
 mod hardening_tests {
     use ratatui::style::Color;
 
-    use super::{balance_key_hint, summary_border_color};
+    use super::{App, summary_border_color};
     use crate::domain::{BalanceReportEntry, BalanceReportSummary, CategoryId};
 
     #[test]
-    fn balance_key_hint_makes_single_letter_actions_legible() {
-        assert_eq!(balance_key_hint("l"), "[L]");
-        assert_eq!(balance_key_hint("Ctrl+L"), "[Ctrl+L]");
+    fn ledger_data_regions_split_evenly_for_three_and_four_bit_rows() {
+        assert_eq!(App::ledger_weighted_widths(60, &[1, 1, 1]), vec![20, 20, 20]);
+        assert_eq!(App::ledger_weighted_widths(60, &[1, 1, 1, 1]), vec![15, 15, 15, 15]);
+        assert_eq!(App::ledger_weighted_widths(60, &[1, 2, 1]), vec![15, 30, 15]);
     }
 
     #[test]

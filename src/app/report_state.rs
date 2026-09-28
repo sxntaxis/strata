@@ -790,7 +790,10 @@ impl App {
             return false;
         }
 
-        let selected = self.report_log_selected_index.min(logs.len() - 1);
+        if self.report_log_selected_index >= logs.len() {
+            return false;
+        }
+        let selected = self.report_log_selected_index;
         let Some(row) = logs.get(selected) else {
             return false;
         };
@@ -932,11 +935,13 @@ impl App {
             Ok(bounds) => bounds,
             Err(_) => return false,
         };
-        let Ok(from_civil) = temporal::civil_from_policy(from, active_preview.operational_day_policy)
+        let Ok(from_civil) =
+            temporal::civil_from_policy(from, active_preview.operational_day_policy)
         else {
             return false;
         };
-        let Ok(to_civil) = temporal::civil_from_policy(to, active_preview.operational_day_policy)
+        let Ok(to_civil) =
+            temporal::civil_from_policy(to, active_preview.operational_day_policy)
         else {
             return false;
         };
@@ -984,7 +989,9 @@ impl App {
             .ok_or_else(|| "default ledger interval overflowed".to_string())?
             .min(active_preview.ended_at_utc);
         if to <= from {
-            return Err("selected period has no completed time available for a new entry".to_string());
+            return Err(
+                "selected period has no completed time available for a new entry".to_string(),
+            );
         }
         Ok((from, to))
     }
@@ -1124,7 +1131,8 @@ impl App {
             super::LedgerEntryEditKind::Add => {
                 if self.time_tracker.category_by_id(edit.category_id).is_none() {
                     if let Some(current) = self.ledger_entry_edit.as_mut() {
-                        current.error = Some("archived layer cannot receive new entries".to_string());
+                        current.error =
+                            Some("archived layer cannot receive new entries".to_string());
                     }
                     self.render_needed = true;
                     return false;
