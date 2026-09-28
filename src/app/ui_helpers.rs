@@ -91,6 +91,8 @@ pub fn wrap_next_index(current: usize, len: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use chrono::NaiveDate;
+
     use super::{
         format_report_interval_label, format_report_window_boundaries, wrap_next_index,
         wrap_prev_index,

@@ -13,9 +13,7 @@ use crate::domain::{
 };
 use crate::keybindings::Action;
 
-use super::{
-    App, ReportRangeBoundary, balance_instrument, overlay_layout, ui_helpers, view_style,
-};
+use super::{App, ReportRangeBoundary, balance_instrument, overlay_layout, ui_helpers, view_style};
 
 fn balance_key_hint(key: impl ToString) -> String {
     let raw = key.to_string();

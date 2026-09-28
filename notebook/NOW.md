@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-27
 authority: working
-summary: "SEDIMENT-016 per-category resize/restart mass proof passes with doctrine promotion still explicit; BALANCE-RANGE-UX-001 now has an authored bracket-boundary candidate with inclusive ReportWindow authority preserved."
-next: Natively validate BALANCE-RANGE-UX-001 bracket-boundary editing and TUI smoke it across wide/normal/constrained panes; keep SEDIMENT-016 doctrine promotion separate.
+summary: "BALANCE-RANGE-UX-001 bracket-boundary candidate passes native Rust checks and disposable PTY smoke with inclusive ReportWindow authority preserved; SEDIMENT-016 doctrine promotion remains explicit and separate."
+next: Publish the BALANCE-RANGE-UX-001 implementation as a stacked draft PR based on work/balance-range-ux-001-probe, then review CI and owner feedback without modifying PR #105 or promoting sediment doctrine.
 ---
 
 ## BALANCE-UX-004 one-cell modal inset — 2026-09-27
@@ -15,7 +15,7 @@ next: Natively validate BALANCE-RANGE-UX-001 bracket-boundary editing and TUI sm
 
 ## BALANCE-RANGE-UX-001 bracket boundary editing — 2026-09-27
 
-**AUTHORED CANDIDATE / NATIVE VALIDATION PENDING:** Balance keeps inclusive internal `ReportWindow` semantics while presenting explicit start/exclusive-end boundaries. Configurable `[` / `]` actions select the start/end handle; Left/Right moves that handle live, Esc deselects first, and `r` remains the typed distant-range editor using the same exclusive visible `To` boundary. The physical modifier/Caps Lock probe is retired as a product gate; no terminal-specific workaround is introduced. See `notebook/work/BALANCE-RANGE-UX-001.md`.
+**NATIVE-GREEN / DRAFT PUBLICATION NEXT:** Balance keeps inclusive internal `ReportWindow` semantics while presenting explicit start/exclusive-end boundaries. Configurable `[` / `]` actions select the start/end handle; Left/Right moves that handle live, Esc deselects first, and `r` remains the typed distant-range editor using the same exclusive visible `To` boundary. `cargo fmt`, strict Clippy, all-feature tests (553 unit/library tests plus 24 integration/process tests; 20 ignored), CLI help, diff hygiene, 200×60/80×24/40×14 disposable PTY smoke, and SQLite doctor pass. The physical modifier/Caps Lock probe is retired as a product gate; no terminal-specific workaround is introduced. See `notebook/work/BALANCE-RANGE-UX-001.md`.
 
 ## SEDIMENT-016 vertical physics corridor — 2026-09-27
 

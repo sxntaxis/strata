@@ -663,12 +663,9 @@ impl App {
             return false;
         };
         let current = self.current_report_window();
-        let Some(shifted) = shifted_report_boundary(
-            &current,
-            boundary,
-            direction,
-            operational_day_key_now(),
-        ) else {
+        let Some(shifted) =
+            shifted_report_boundary(&current, boundary, direction, operational_day_key_now())
+        else {
             return false;
         };
         if shifted == current {
@@ -1222,9 +1219,7 @@ mod report_edit_state_tests {
         let today = NaiveDate::from_ymd_opt(2026, 8, 17).unwrap();
         let one_day = ReportWindow::new(today, today).unwrap();
 
-        assert!(
-            shifted_report_boundary(&one_day, ReportRangeBoundary::Start, 1, today).is_none()
-        );
+        assert!(shifted_report_boundary(&one_day, ReportRangeBoundary::Start, 1, today).is_none());
         assert!(shifted_report_boundary(&one_day, ReportRangeBoundary::End, -1, today).is_none());
         assert!(shifted_report_boundary(&one_day, ReportRangeBoundary::End, 1, today).is_none());
 
