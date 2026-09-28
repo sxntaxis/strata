@@ -1,6 +1,6 @@
 # Interaction authority
 
-Status: accepted authority; BALANCE-LAYER-DETAIL-UX-001 implementation candidate awaiting native certification
+Status: accepted authority; BALANCE-LAYER-DETAIL-UX-001 candidate natively validated, owner review pending
 Program: INTERACTION-001 + INTERACTION-002 convergence
 Current completed unit: INTERACTION-002; PLATEAU-001H H1 presentation hardening certified
 Issues completed: #19, #20, #24

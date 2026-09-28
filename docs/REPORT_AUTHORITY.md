@@ -1,6 +1,6 @@
 # Report and export authority
 
-Status: accepted authority; BALANCE-LAYER-DETAIL-UX-001 implementation candidate awaiting native certification
+Status: accepted authority; BALANCE-LAYER-DETAIL-UX-001 candidate natively validated, owner review pending
 Last reviewed: 2026-09-27
 
 ## Purpose

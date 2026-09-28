@@ -414,10 +414,7 @@ impl App {
 
         f.render_widget(
             Paragraph::new(meter_line(
-                meter_cells_for_offset(
-                    width,
-                    layer_influence_offset(width, totals, contribution),
-                ),
+                meter_cells_for_offset(width, layer_influence_offset(width, totals, contribution)),
                 self.theme_status(),
                 self.theme_error(),
                 self.theme_success(),
@@ -491,7 +488,6 @@ mod tests {
     #[test]
     fn aggregate_totals_exclude_idle_from_polarity() {
         let summary = BalanceReportSummary {
-            date: "2026-09-27".to_string(),
             entries: vec![
                 entry(1, "positive", 861, 1, 861),
                 BalanceReportEntry {
@@ -662,5 +658,4 @@ mod tests {
         assert_eq!(layer_influence_offset(width, totals, -50), 0);
         assert_eq!(layer_influence_offset(width, totals, 50), 0);
     }
-
 }

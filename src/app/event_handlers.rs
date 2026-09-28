@@ -1937,7 +1937,6 @@ impl App {
         }
         false
     }
-
 }
 
 #[cfg(test)]
@@ -2070,10 +2069,7 @@ mod report_edit_tests {
             LedgerEntryEditKeyIntent::Commit
         );
         assert_eq!(
-            resolve_ledger_entry_edit_key(
-                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
-                &keymap,
-            ),
+            resolve_ledger_entry_edit_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), &keymap,),
             LedgerEntryEditKeyIntent::Cancel
         );
     }
@@ -2100,10 +2096,7 @@ mod report_edit_tests {
     fn ledger_entry_editor_owns_tab_navigation() {
         let keymap = default_keymap();
         assert_eq!(
-            resolve_ledger_entry_edit_key(
-                KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
-                &keymap,
-            ),
+            resolve_ledger_entry_edit_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), &keymap,),
             LedgerEntryEditKeyIntent::NextField
         );
         assert_eq!(

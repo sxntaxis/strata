@@ -1453,8 +1453,14 @@ mod tests {
             Action::from_config_name("balance_range_end"),
             Some(Action::ReportRangeEnd)
         );
-        assert_eq!(Action::ReportRangeStart.category(), ActionCategory::ReportModal);
-        assert_eq!(Action::ReportRangeEnd.category(), ActionCategory::ReportModal);
+        assert_eq!(
+            Action::ReportRangeStart.category(),
+            ActionCategory::ReportModal
+        );
+        assert_eq!(
+            Action::ReportRangeEnd.category(),
+            ActionCategory::ReportModal
+        );
         assert_eq!(KeyBinding::parse("[").unwrap().to_config_string(), "[");
         assert_eq!(KeyBinding::parse("]").unwrap().to_config_string(), "]");
     }

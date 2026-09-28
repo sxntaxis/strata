@@ -448,7 +448,9 @@ impl App {
                 .collect();
             self.sand_engine
                 .restore_state(state, &valid_category_ids)
-                .map_err(|error| format!("history committed but sediment refresh failed: {error}"))?;
+                .map_err(|error| {
+                    format!("history committed but sediment refresh failed: {error}")
+                })?;
         }
         let active_start_changed = self.session.active_session_started_at_utc
             != Some(receipt.resulting_active_started_at_utc);
@@ -673,12 +675,9 @@ impl App {
             return false;
         };
         let current = self.current_report_window();
-        let Some(shifted) = shifted_report_boundary(
-            &current,
-            boundary,
-            direction,
-            operational_day_key_now(),
-        ) else {
+        let Some(shifted) =
+            shifted_report_boundary(&current, boundary, direction, operational_day_key_now())
+        else {
             return false;
         };
         if shifted == current {
@@ -884,8 +883,10 @@ impl App {
         if self.report_log_selected_index == add_index && self.report_layer_can_add(category_id) {
             return self.begin_ledger_add_edit(category_id);
         }
-        let Some(row) = logs.get(self.report_log_selected_index.min(logs.len().saturating_sub(1)))
-        else {
+        let Some(row) = logs.get(
+            self.report_log_selected_index
+                .min(logs.len().saturating_sub(1)),
+        ) else {
             return false;
         };
         let Some(session_id) = row.session_id else {
@@ -927,6 +928,9 @@ impl App {
     }
 
     pub(super) fn begin_ledger_add_edit(&mut self, category_id: CategoryId) -> bool {
+        if !self.report_layer_can_add(category_id) {
+            return false;
+        }
         let active_preview = match self.historical_correction_active_preview() {
             Ok(preview) => preview,
             Err(_) => return false,
@@ -940,8 +944,7 @@ impl App {
         else {
             return false;
         };
-        let Ok(to_civil) =
-            temporal::civil_from_policy(to, active_preview.operational_day_policy)
+        let Ok(to_civil) = temporal::civil_from_policy(to, active_preview.operational_day_policy)
         else {
             return false;
         };
@@ -952,6 +955,7 @@ impl App {
             to_civil.format("%Y-%m-%d").to_string(),
             to_civil.format("%H:%M:%S").to_string(),
         ));
+        self.report_log_selected_index = self.report_current_logs().len();
         self.report_range_boundary = None;
         self.render_needed = true;
         true
@@ -1503,9 +1507,7 @@ mod report_edit_state_tests {
         let today = NaiveDate::from_ymd_opt(2026, 8, 17).unwrap();
         let one_day = ReportWindow::new(today, today).unwrap();
 
-        assert!(
-            shifted_report_boundary(&one_day, ReportRangeBoundary::Start, 1, today).is_none()
-        );
+        assert!(shifted_report_boundary(&one_day, ReportRangeBoundary::Start, 1, today).is_none());
         assert!(shifted_report_boundary(&one_day, ReportRangeBoundary::End, -1, today).is_none());
         assert!(shifted_report_boundary(&one_day, ReportRangeBoundary::End, 1, today).is_none());
 

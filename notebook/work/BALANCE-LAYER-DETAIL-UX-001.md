@@ -91,4 +91,13 @@ This candidate does not change:
 
 ## Validation state
 
-The authored candidate includes focused domain/state/meter tests, including canonical cross-day row projection and the invariant that layer influence never exceeds the parent displacement envelope. Native formatter, strict Clippy, all-feature tests, TUI smoke, and SQLite doctor remain required on the owner's Rust environment before promotion.
+## Local validation facts — 2026-09-27
+
+- Formatter, strict Clippy, all-feature tests (563 unit + 24 integration; 20 ignored), and CLI help pass.
+- Focused domain/state/meter tests cover canonical cross-day row projection, inclusive report filtering, and the invariant that layer influence never exceeds the parent displacement envelope.
+- The first constrained-pane smoke exposed that the one-row edit preview clipped the second timestamp. The editor now uses a three-line selected ledger row and budgets the extra row height, preserving the complete Tag/From/To values and seconds in the same detail view.
+- In an isolated loaded test profile, Balance layer detail and the inline editor rendered at 120×40, 80×24, 40×14, and 200×60. The existing Tag was edited in place with complete boundary values visible, committed, and verified again after restart.
+- `l` opened the scoped Add draft with Tag/From/To fields. Committing its default interval replaced overlapping Idle history without a collision prompt, as specified; the resulting ledger rows survived restart.
+- The focused SQLite transaction tests cover successful stable-identity edit, overlap refusal, and injected commit-failure rollback. The disposable profile exited normally and passed `sqlite-doctor` after both sessions.
+
+The candidate is natively validated; owner review of the loaded-profile edit/add experience remains the promotion review. SEDIMENT-016 doctrine promotion remains separate.

@@ -5,13 +5,13 @@ state: active
 created: 2026-08-01
 updated: 2026-09-27
 authority: working
-summary: "BALANCE-LAYER-DETAIL-UX-001 is an authored editable-ledger candidate with a minimal signed-sum hero and parent-relative influence meter; BALANCE-RANGE-UX-001 and SEDIMENT-016 remain preserved underneath."
-next: Natively validate BALANCE-LAYER-DETAIL-UX-001 together with the bracket-boundary base across wide/normal/constrained panes, then owner-test the ledger edit/add flow; keep SEDIMENT-016 doctrine promotion separate.
+summary: "BALANCE-LAYER-DETAIL-UX-001 passes native checks and loaded-test-profile edit/add restart smoke, including complete constrained-pane boundary fields; owner review remains before promotion, with SEDIMENT-016 separate."
+next: Owner-review the populated layer-ledger edit/add flow, then explicitly promote or revise BALANCE-LAYER-DETAIL-UX-001 without coupling it to SEDIMENT-016 doctrine promotion.
 ---
 
 ## BALANCE-LAYER-DETAIL-UX-001 editable layer ledger — 2026-09-27
 
-**AUTHORED CANDIDATE / OWNER-DESIGNED:** Balance layer detail now uses the layer name as its frame title, retains only the shared bottom interval chrome, and replaces inherited global-net/side-arrow/instruction chrome with a minimal layer hero: centered signed contribution plus a nested influence meter whose marker can never exceed the parent Balance displacement envelope. The ledger beneath uses evenly distributed Tag/Time/Effect rows for single-day windows and Tag/Date/Time/Effect for multi-day windows, with explicit cross-day temporal spans. Existing completed rows edit in place; a synthetic `+ Add entry…` row uses the same inline grammar and scoped historical-assignment transaction. Native Rust checks and TUI/SQLite smoke remain required before promotion. See `notebook/work/BALANCE-LAYER-DETAIL-UX-001.md`.
+**NATIVELY VALIDATED CANDIDATE / OWNER REVIEW REMAINS:** Balance layer detail uses the layer name as its frame title, retains only the shared bottom interval chrome, and replaces inherited global-net/side-arrow/instruction chrome with a minimal layer hero: centered signed contribution plus a nested influence meter whose marker can never exceed the parent Balance displacement envelope. The ledger uses evenly distributed Tag/Time/Effect rows for single-day windows and Tag/Date/Time/Effect for multi-day windows, with explicit cross-day temporal spans. Existing completed rows edit in place; a synthetic `+ Add entry…` row uses the same inline grammar and scoped historical-assignment transaction. Formatting, strict Clippy, all-feature tests, loaded-profile TUI edit/add/restart smoke, and SQLite doctor pass. See `notebook/work/BALANCE-LAYER-DETAIL-UX-001.md`.
 
 ## BALANCE-UX-004 one-cell modal inset — 2026-09-27
 

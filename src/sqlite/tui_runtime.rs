@@ -744,7 +744,10 @@ pub(crate) fn edit_historical_session(
         }
         let (start, end, _, _) = historical_session_bounds(session)?;
         if start < request.ended_at_utc && end > request.started_at_utc {
-            return Err(format!("ledger entry overlaps existing session {}", session.id));
+            return Err(format!(
+                "ledger entry overlaps existing session {}",
+                session.id
+            ));
         }
     }
     if request.active_preview.started_at_utc < request.ended_at_utc
@@ -4378,6 +4381,74 @@ mod clear_all_additional_transaction_tests {
         assert_eq!(source.started_at_utc, "2026-08-02T10:00:00Z");
         assert_eq!(source.ended_at_utc, "2026-08-02T11:00:00Z");
         assert_eq!(source.elapsed_seconds, 3600);
+        drop(repository);
+        remove_database(&path);
+    }
+
+    #[test]
+    fn ledger_entry_edit_commit_fault_rolls_back_session_and_daily_projection() {
+        let path = repository_file("ledger-edit-commit-fault");
+        seed_history_session(
+            &path,
+            1,
+            "work-ledger-edit-fault",
+            "2026-08-02T10:00:00Z",
+            "2026-08-02T11:00:00Z",
+            "2026-08-02",
+            3600,
+        );
+        let active = seed_history_active(
+            &path,
+            "active-ledger-edit-fault",
+            1,
+            "live",
+            "2026-08-02T12:00:00Z",
+            "2026-08-02T12:30:00Z",
+        );
+        let session_id = {
+            let repository = open_cli_repository(&path).unwrap();
+            let id = usize::try_from(repository.list_sessions().unwrap()[0].id).unwrap();
+            drop(repository);
+            id
+        };
+
+        let result = runtime_coordination::with_test_fault(
+            "session-ledger-edit",
+            "commit",
+            "commit",
+            || {
+                edit_historical_session(
+                    &path,
+                    HistoricalSessionEditRequest {
+                        session_id,
+                        description: "must roll back".to_string(),
+                        started_at_utc: parse_utc("2026-08-02T10:15:00Z").unwrap(),
+                        ended_at_utc: parse_utc("2026-08-02T11:20:00Z").unwrap(),
+                        active_preview: active,
+                    },
+                )
+            },
+        );
+        assert!(result.is_err());
+
+        let repository = open_cli_repository(&path).unwrap();
+        let rows = repository.list_sessions().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].stable_id, "work-ledger-edit-fault");
+        assert_eq!(rows[0].description, "");
+        assert_eq!(rows[0].started_at_utc, "2026-08-02T10:00:00Z");
+        assert_eq!(rows[0].ended_at_utc, "2026-08-02T11:00:00Z");
+        assert_eq!(rows[0].elapsed_seconds, 3600);
+        let contribution_count = repository
+            .connection
+            .query_row(
+                "SELECT count(*) FROM sand_snapshots
+                 WHERE snapshot_kind = 'daily-contribution'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap();
+        assert_eq!(contribution_count, 0);
         drop(repository);
         remove_database(&path);
     }

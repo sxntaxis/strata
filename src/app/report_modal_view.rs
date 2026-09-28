@@ -1,3 +1,4 @@
+use chrono::{Duration as ChronoDuration, NaiveDate, NaiveTime};
 use ratatui::prelude::{Line, Span};
 use ratatui::{
     Frame,
@@ -10,8 +11,8 @@ use crate::constants::REPORT_MODAL_SETTINGS;
 use crate::domain::{BalanceReportSummary, CategoryId, CategoryLogEntry, DRIFT_CATEGORY_ID};
 
 use super::{
-    App, LedgerEntryField, ReportRangeBoundary, balance_instrument, overlay_layout, ui_helpers,
-    view_style,
+    App, LedgerEntryEditState, LedgerEntryField, ReportRangeBoundary, balance_instrument,
+    overlay_layout, ui_helpers, view_style,
 };
 
 fn summary_border_color(
@@ -23,6 +24,58 @@ fn summary_border_color(
         .and_then(|idx| summary.entries.get(idx))
         .map(|entry| entry.color)
         .unwrap_or(fallback)
+}
+
+fn ledger_edit_display_lines(edit: &LedgerEntryEditState) -> Vec<Line<'static>> {
+    let token = |value: String, active: bool| {
+        if active { format!("[{value}]") } else { value }
+    };
+    let end_date = if edit.dates_linked
+        && let (Ok(start), Ok(end), Ok(date)) = (
+            NaiveTime::parse_from_str(&edit.start_time, "%H:%M:%S"),
+            NaiveTime::parse_from_str(&edit.end_time, "%H:%M:%S"),
+            NaiveDate::parse_from_str(&edit.start_date, "%Y-%m-%d"),
+        )
+        && end < start
+    {
+        date.checked_add_signed(ChronoDuration::days(1))
+            .map(|date| date.format("%Y-%m-%d").to_string())
+            .unwrap_or_else(|| edit.end_date.clone())
+    } else if edit.dates_linked {
+        edit.start_date.clone()
+    } else {
+        edit.end_date.clone()
+    };
+    let start_date_active = edit.active_field == LedgerEntryField::StartDate;
+    let end_date_active = !edit.dates_linked && edit.active_field == LedgerEntryField::EndDate;
+
+    vec![
+        Line::from(vec![
+            Span::raw("Tag: "),
+            Span::raw(token(
+                edit.description.clone(),
+                edit.active_field == LedgerEntryField::Description,
+            )),
+        ]),
+        Line::from(vec![
+            Span::raw("From: "),
+            Span::raw(token(edit.start_date.clone(), start_date_active)),
+            Span::raw(" "),
+            Span::raw(token(
+                edit.start_time.clone(),
+                edit.active_field == LedgerEntryField::StartTime,
+            )),
+        ]),
+        Line::from(vec![
+            Span::raw("To: "),
+            Span::raw(token(end_date, end_date_active)),
+            Span::raw(" "),
+            Span::raw(token(
+                edit.end_time.clone(),
+                edit.active_field == LedgerEntryField::EndTime,
+            )),
+        ]),
+    ]
 }
 
 impl App {
@@ -38,13 +91,16 @@ impl App {
         let layer_detail = self.report_logs_category_id.is_some()
             && self.historical_activity_edit.is_none()
             && self.report_range_edit.is_none();
-        let body_row_count = if layer_detail {
+        let mut body_row_count = if layer_detail {
             self.report_ledger_row_count()
         } else {
             logs_for_view
                 .as_ref()
                 .map_or(summary.entries.len(), |logs| logs.len())
         };
+        if layer_detail && self.ledger_entry_edit.is_some() {
+            body_row_count = body_row_count.saturating_add(2);
+        }
 
         let preferred_inner_width = self
             .preferred_report_inner_width(&summary, logs_for_view.as_deref())
@@ -410,7 +466,10 @@ impl App {
                 .iter()
                 .map(|row| {
                     if row.description.trim().is_empty() {
-                        format!("{} {}-{} {}", row.date, row.start_time, row.end_date, row.end_time)
+                        format!(
+                            "{} {}-{} {}",
+                            row.date, row.start_time, row.end_date, row.end_time
+                        )
                     } else {
                         format!(
                             "{} · {} {}-{} {}",
@@ -526,13 +585,7 @@ impl App {
         };
 
         if let (Some(total_area), Some(meter_area)) = (total_area, meter_area) {
-            self.render_layer_influence_instrument(
-                f,
-                total_area,
-                meter_area,
-                summary,
-                category_id,
-            );
+            self.render_layer_influence_instrument(f, total_area, meter_area, summary, category_id);
         }
 
         self.render_report_logs_view(f, list_area, logs, category_id, border_color);
@@ -573,10 +626,6 @@ impl App {
 
     fn ledger_minute_time(raw: &str) -> String {
         raw.get(..5).unwrap_or(raw).to_string()
-    }
-
-    fn ledger_active_token(value: String, active: bool) -> String {
-        if active { format!("[{value}]") } else { value }
     }
 
     fn ledger_metric_value(&self, row: &CategoryLogEntry, is_none_category: bool) -> String {
@@ -626,8 +675,8 @@ impl App {
         let start_time = Self::ledger_minute_time(&row.start_time);
         let end_time = Self::ledger_minute_time(&row.end_time);
         let metric = self.ledger_metric_value(row, is_none_category);
-        let metric_color = selected_text
-            .unwrap_or_else(|| self.ledger_metric_color(row, is_none_category));
+        let metric_color =
+            selected_text.unwrap_or_else(|| self.ledger_metric_color(row, is_none_category));
         let tag_color = selected_text.unwrap_or_else(|| self.theme_foreground());
         let temporal_color = selected_text.unwrap_or_else(|| self.theme_status());
         let cross_day = row.date != row.end_date;
@@ -643,7 +692,11 @@ impl App {
             );
             (
                 widths,
-                vec![(tag, tag_color), (temporal, temporal_color), (metric, metric_color)],
+                vec![
+                    (tag, tag_color),
+                    (temporal, temporal_color),
+                    (metric, metric_color),
+                ],
             )
         } else if show_date_column {
             let widths = Self::ledger_weighted_widths(row_width, &[1, 1, 1, 1]);
@@ -672,87 +725,13 @@ impl App {
             .into_iter()
             .zip(widths)
             .map(|((value, color), width)| {
-                Span::styled(self.ledger_center_cell(&value, width), Style::default().fg(color))
+                Span::styled(
+                    self.ledger_center_cell(&value, width),
+                    Style::default().fg(color),
+                )
             })
             .collect::<Vec<_>>();
         Line::from(spans)
-    }
-
-    fn ledger_edit_line(
-        &self,
-        row_width: usize,
-        show_date_column: bool,
-        selected_text: Color,
-    ) -> Line<'static> {
-        let Some(edit) = self.ledger_entry_edit.as_ref() else {
-            return Line::default();
-        };
-        let active = edit.active_field;
-        let description = Self::ledger_active_token(
-            edit.description.clone(),
-            active == LedgerEntryField::Description,
-        );
-        let start_date = Self::ledger_active_token(
-            self.ledger_date_label(&edit.start_date),
-            active == LedgerEntryField::StartDate,
-        );
-        let start_time = Self::ledger_active_token(
-            edit.start_time.clone(),
-            active == LedgerEntryField::StartTime,
-        );
-        let end_date = Self::ledger_active_token(
-            self.ledger_date_label(&edit.end_date),
-            active == LedgerEntryField::EndDate,
-        );
-        let end_time = Self::ledger_active_token(
-            edit.end_time.clone(),
-            active == LedgerEntryField::EndTime,
-        );
-        let cross_day = edit.start_date != edit.end_date;
-        let placeholder = "…".to_string();
-
-        let (widths, values): (Vec<usize>, Vec<String>) = if cross_day {
-            (
-                Self::ledger_weighted_widths(row_width, &[1, 2, 1]),
-                vec![
-                    description,
-                    format!("{start_date} {start_time} → {end_date} {end_time}"),
-                    placeholder,
-                ],
-            )
-        } else if show_date_column {
-            (
-                Self::ledger_weighted_widths(row_width, &[1, 1, 1, 1]),
-                vec![
-                    description,
-                    start_date,
-                    format!("{start_time}–{end_time}"),
-                    placeholder,
-                ],
-            )
-        } else {
-            (
-                Self::ledger_weighted_widths(row_width, &[1, 1, 1]),
-                vec![
-                    description,
-                    format!("{start_date} · {start_time}–{end_time}"),
-                    placeholder,
-                ],
-            )
-        };
-
-        Line::from(
-            values
-                .into_iter()
-                .zip(widths)
-                .map(|(value, width)| {
-                    Span::styled(
-                        self.ledger_center_cell(&value, width),
-                        Style::default().fg(selected_text),
-                    )
-                })
-                .collect::<Vec<_>>(),
-        )
     }
 
     fn render_report_logs_view(
@@ -765,18 +744,18 @@ impl App {
     ) {
         let can_add = self.report_layer_can_add(category_id);
         let row_count = logs.len().saturating_add(usize::from(can_add));
-        let selected_log_index = (row_count > 0)
-            .then(|| self.report_log_selected_index.min(row_count.saturating_sub(1)));
+        let selected_log_index = (row_count > 0).then(|| {
+            self.report_log_selected_index
+                .min(row_count.saturating_sub(1))
+        });
         let is_none_category = category_id == DRIFT_CATEGORY_ID;
         let row_width = list_area.width as usize;
         let show_date_column = {
             let window = self.current_report_window();
             window.start != window.end
         };
-        let text_color = crate::appearance::contrasting_text_color(
-            border_color,
-            self.theme_foreground(),
-        );
+        let text_color =
+            crate::appearance::contrasting_text_color(border_color, self.theme_foreground());
 
         let mut items = logs
             .iter()
@@ -787,21 +766,25 @@ impl App {
                     .ledger_entry_edit
                     .as_ref()
                     .is_some_and(|edit| edit.session_id() == row.session_id);
-                let line = if editing_this_row {
-                    self.ledger_edit_line(row_width, show_date_column, text_color)
+                let item = if editing_this_row {
+                    ListItem::new(ledger_edit_display_lines(
+                        self.ledger_entry_edit
+                            .as_ref()
+                            .expect("editing row has ledger edit state"),
+                    ))
                 } else {
-                    self.ledger_normal_line(
+                    ListItem::new(self.ledger_normal_line(
                         row,
                         row_width,
                         show_date_column,
                         is_selected.then_some(text_color),
                         is_none_category,
-                    )
+                    ))
                 };
                 if is_selected {
-                    ListItem::new(line).style(Style::default().fg(text_color).bg(border_color))
+                    item.style(Style::default().fg(text_color).bg(border_color))
                 } else {
-                    ListItem::new(line)
+                    item
                 }
             })
             .collect::<Vec<_>>();
@@ -813,29 +796,31 @@ impl App {
                 .ledger_entry_edit
                 .as_ref()
                 .is_some_and(|edit| edit.is_add());
-            let line = if editing_add {
-                self.ledger_edit_line(row_width, show_date_column, text_color)
+            let item = if editing_add {
+                ListItem::new(ledger_edit_display_lines(
+                    self.ledger_entry_edit
+                        .as_ref()
+                        .expect("adding row has ledger edit state"),
+                ))
             } else {
                 let label = "+ Add entry…";
                 let padded = format!(
                     "{label}{}",
                     " ".repeat(row_width.saturating_sub(label.chars().count()))
                 );
-                Line::from(Span::styled(
+                ListItem::new(Line::from(Span::styled(
                     padded,
                     Style::default().fg(if is_selected {
                         text_color
                     } else {
                         self.theme_status()
                     }),
-                ))
+                )))
             };
             if is_selected {
-                items.push(
-                    ListItem::new(line).style(Style::default().fg(text_color).bg(border_color)),
-                );
+                items.push(item.style(Style::default().fg(text_color).bg(border_color)));
             } else {
-                items.push(ListItem::new(line));
+                items.push(item);
             }
         }
 
@@ -1004,20 +989,59 @@ impl App {
 mod hardening_tests {
     use ratatui::style::Color;
 
-    use super::{App, summary_border_color};
+    use super::super::{LedgerEntryEditState, LedgerEntryField};
+    use super::{App, ledger_edit_display_lines, summary_border_color};
     use crate::domain::{BalanceReportEntry, BalanceReportSummary, CategoryId};
 
     #[test]
     fn ledger_data_regions_split_evenly_for_three_and_four_bit_rows() {
-        assert_eq!(App::ledger_weighted_widths(60, &[1, 1, 1]), vec![20, 20, 20]);
-        assert_eq!(App::ledger_weighted_widths(60, &[1, 1, 1, 1]), vec![15, 15, 15, 15]);
-        assert_eq!(App::ledger_weighted_widths(60, &[1, 2, 1]), vec![15, 30, 15]);
+        assert_eq!(
+            App::ledger_weighted_widths(60, &[1, 1, 1]),
+            vec![20, 20, 20]
+        );
+        assert_eq!(
+            App::ledger_weighted_widths(60, &[1, 1, 1, 1]),
+            vec![15, 15, 15, 15]
+        );
+        assert_eq!(
+            App::ledger_weighted_widths(60, &[1, 2, 1]),
+            vec![15, 30, 15]
+        );
+    }
+
+    #[test]
+    fn ledger_edit_lines_keep_all_fields_and_overnight_end_date_visible() {
+        let mut edit = LedgerEntryEditState::existing(
+            7,
+            CategoryId::new(2),
+            "UX detail smoke".to_string(),
+            "2026-09-27".to_string(),
+            "23:40:00".to_string(),
+            "2026-09-27".to_string(),
+            "00:20:00".to_string(),
+        );
+        edit.active_field = LedgerEntryField::EndTime;
+
+        let lines = ledger_edit_display_lines(&edit);
+        let rendered = lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.to_string())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(rendered.len(), 3);
+        assert_eq!(rendered[0], "Tag: UX detail smoke");
+        assert_eq!(rendered[1], "From: 2026-09-27 23:40:00");
+        assert_eq!(rendered[2], "To: 2026-09-28 [00:20:00]");
     }
 
     #[test]
     fn summary_frame_follows_selected_layer_color_with_safe_fallback() {
         let summary = BalanceReportSummary {
-            date: "2026-09-27".to_string(),
             entries: vec![
                 BalanceReportEntry {
                     category_id: CategoryId::new(1),
