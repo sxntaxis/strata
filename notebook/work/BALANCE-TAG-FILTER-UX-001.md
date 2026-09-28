@@ -78,3 +78,8 @@ The validated PR #109 base already has STRATA-D071 accepted and native-green. `d
 - The test profile SQLite doctor passed after app exit: schema v1, integrity and foreign-key checks healthy. The loaded source test profile was exported read-only and not modified by the smoke.
 
 The owner accepted STRATA-D072, and it is now implemented and natively certified in the accepted decision index and report/interaction authorities. The exact implementation base was PR #109 head `7f7e56d4e7c6fc34b3438c099b49707c06b2edc4`; no schema change was made.
+
+## Publication — 2026-09-28
+
+- Published as draft PR [#110](https://github.com/sxntaxis/strata/pull/110), stacked on PR #109 (`work/balance-meter-layer-parity-001`).
+- STRATA-D072 remains accepted; its implementation status is natively certified. SEDIMENT-016 remains separate.
