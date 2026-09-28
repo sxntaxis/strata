@@ -86,6 +86,14 @@ The source session retains stable identity where the corrected target interval r
 
 This pass does not reopen Balance arithmetic, boundary semantics, the nested layer influence meter, selected-layer colors, one-cell modal spacing, snapshot authority, SQLite schema, or SEDIMENT-016 physics/corridor authority.
 
-## Validation state
+## Native validation facts — 2026-09-28
 
-Assistant-side environment has no Rust toolchain. Current implementation is staged for native validation; only repository/static hygiene can be checked here. Native formatter, strict Clippy, all-feature tests, CLI smoke, focused correction/sediment tests, and disposable-profile TUI persistence remain required before publication or promotion.
+- `cargo fmt --all -- --check`, strict Clippy, `cargo test --all-features`, and `cargo run -- --help` pass. The suite reports 563 library tests and 24 integration/process tests passed; 20 ignored; 0 failed.
+- Focused correction coverage passes for all 18 historical-assignment tests plus `ledger_entry_edit_previews_and_applies_collateral_carving`.
+- Native execution exposed and fixed two planner defects before validation completed: corrections over the current active interval now materialize the target-classified completed row while rebasing the live generation, and same-layer active backdating no longer duplicates the absorbed prefix. Target insertion spans now follow canonical whole-second boundaries across fractional session timestamps.
+- Replacing the leading/full explicit Idle row with a new entry retains the row's stable identity; derived suffixes receive their own stable identity, and the recorded fractional endpoint is preserved when the correction reaches that endpoint.
+- Editing only a row's tag (or leaving a boundary at its displayed second) preserves the original hidden subsecond timestamp; changing the visible second uses the requested boundary.
+- PTY smoke at 120×40 used a separately rooted imported test profile at `/mnt/Tokyo/Lab/.tmp/opencode/strata-balance-ledger-correction-ux-001-test-profile` (UUID `c9a67f32-2ae4-4246-aec0-de553ae14e13`). Add against the active `Oficina` interval rendered the centered BEFORE/AFTER collateral card; Enter applied the correction to `Arcade` while rebasing the current layer. The corrected row remained visible after process restart.
+- The disposable profile's SQLite doctor passed after apply and restart: schema v1, integrity and foreign keys healthy. The source loaded test profile used to create the portable fixture was not mutated by this smoke.
+
+The candidate is natively validated; owner review of the unified loaded-profile correction flow remains pending. SEDIMENT-016 doctrine promotion remains separate.

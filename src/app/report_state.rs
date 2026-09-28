@@ -749,6 +749,26 @@ impl App {
         Ok((from, to))
     }
 
+    fn preserve_hidden_subseconds(
+        requested: DateTime<Utc>,
+        original: DateTime<Utc>,
+        policy: OperationalDayPolicy,
+    ) -> DateTime<Utc> {
+        let (Ok(requested_civil), Ok(original_civil)) = (
+            temporal::civil_from_policy(requested, policy),
+            temporal::civil_from_policy(original, policy),
+        ) else {
+            return requested;
+        };
+        if requested_civil.format("%Y-%m-%d %H:%M:%S").to_string()
+            == original_civil.format("%Y-%m-%d %H:%M:%S").to_string()
+        {
+            original
+        } else {
+            requested
+        }
+    }
+
     pub(super) fn commit_ledger_entry_edit(&mut self) -> bool {
         let Some(edit) = self.ledger_entry_edit.clone() else {
             return false;
@@ -780,7 +800,7 @@ impl App {
                 .unwrap_or(active_preview.operational_day_policy),
             super::LedgerEntryEditKind::Add => active_preview.operational_day_policy,
         };
-        let (from, to) = match Self::ledger_edit_bounds(&edit, policy) {
+        let (mut from, mut to) = match Self::ledger_edit_bounds(&edit, policy) {
             Ok(bounds) => bounds,
             Err(error) => {
                 if let Some(current) = self.ledger_entry_edit.as_mut() {
@@ -791,6 +811,20 @@ impl App {
                 return false;
             }
         };
+        if let super::LedgerEntryEditKind::Existing { session_id } = edit.kind
+            && let Some(session) = self
+                .time_tracker
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+        {
+            if let Some(original) = session.started_at_utc {
+                from = Self::preserve_hidden_subseconds(from, original, policy);
+            }
+            if let Some(original) = session.ended_at_utc {
+                to = Self::preserve_hidden_subseconds(to, original, policy);
+            }
+        }
         if to > active_preview.ended_at_utc {
             if let Some(current) = self.ledger_entry_edit.as_mut() {
                 current.error = Some("end cannot be later than now".to_string());
@@ -1043,13 +1077,12 @@ impl App {
 
 #[cfg(test)]
 mod report_edit_state_tests {
-    use chrono::NaiveDate;
+    use chrono::{Duration as ChronoDuration, NaiveDate, TimeZone, Utc};
     use ratatui::style::Color;
 
     use super::{
-        build_historical_preview, parse_historical_activity_timestamp, parse_report_range,
-        report_range_edit_state, shifted_custom_window_newer, shifted_custom_window_older,
-        shifted_report_boundary,
+        build_historical_preview, parse_report_range, report_range_edit_state,
+        shifted_custom_window_newer, shifted_custom_window_older, shifted_report_boundary,
     };
     use crate::{
         app::{ReportRangeBoundary, ui_helpers},
@@ -1102,14 +1135,26 @@ mod report_edit_state_tests {
     }
 
     #[test]
-    fn historical_activity_timestamp_uses_explicit_civil_second() {
+    fn unchanged_visible_boundary_second_preserves_hidden_subseconds() {
         let policy = OperationalDayPolicy {
             utc_offset_seconds: -6 * 60 * 60,
             start_minutes: 0,
         };
-        let parsed = parse_historical_activity_timestamp("2026-08-01 23:45:00", policy).unwrap();
-        assert_eq!(parsed.to_rfc3339(), "2026-08-02T05:45:00+00:00");
-        assert!(parse_historical_activity_timestamp("2026/08/01 23:45", policy).is_err());
+        let original =
+            Utc.with_ymd_and_hms(2026, 8, 2, 5, 45, 0).unwrap() + ChronoDuration::milliseconds(500);
+        let requested = Utc.with_ymd_and_hms(2026, 8, 2, 5, 45, 0).unwrap();
+        assert_eq!(
+            crate::app::App::preserve_hidden_subseconds(requested, original, policy),
+            original
+        );
+        assert_eq!(
+            crate::app::App::preserve_hidden_subseconds(
+                requested + ChronoDuration::seconds(1),
+                original,
+                policy,
+            ),
+            requested + ChronoDuration::seconds(1)
+        );
     }
 
     #[test]

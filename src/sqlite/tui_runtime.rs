@@ -1270,9 +1270,9 @@ fn historical_plan_token(
     }
     for session in sessions {
         let (start, end, _, elapsed) = historical_session_bounds(session)?;
-        let is_source = request.source_session_id.is_some_and(|source_id| {
-            usize::try_from(session.id).ok() == Some(source_id)
-        });
+        let is_source = request
+            .source_session_id
+            .is_some_and(|source_id| usize::try_from(session.id).ok() == Some(source_id));
         if is_source || (start < request.ended_at_utc && end > request.started_at_utc) {
             parts.push(format!(
                 "{}:{}:{}:{}:{}",
@@ -1716,8 +1716,7 @@ pub(crate) fn apply_historical_correction(
             .then(left.category_id.0.cmp(&right.category_id.0))
             .then(left.active.cmp(&right.active))
     });
-    if !changes.is_empty() && request.confirmed_plan_token.as_deref() != Some(plan_token.as_str())
-    {
+    if !changes.is_empty() && request.confirmed_plan_token.as_deref() != Some(plan_token.as_str()) {
         return Ok(HistoricalCorrectionOutcome::NeedsConfirmation {
             plan_token,
             changes,
@@ -1814,26 +1813,148 @@ pub(crate) fn apply_historical_correction(
             target_barriers.push((selected_start, selected_end));
         }
     }
-    if active_overlap {
-        let start = if active.category_id == request.target_category_id && active_backdate {
-            active_absorb_start.unwrap_or(request.started_at_utc)
-        } else {
-            active.started_at_utc
-        }
-        .max(request.started_at_utc);
+    if active_overlap && active.category_id == request.target_category_id {
+        let start = active.started_at_utc.max(request.started_at_utc);
         let end = active.ended_at_utc.min(request.ended_at_utc);
         if start < end {
             // The active generation is rewritten separately below. Treat its selected
-            // interval as a barrier here so the completed target insertion cannot
-            // duplicate the active-assignment fragment.
+            // interval as a barrier only when it already has the requested category;
+            // otherwise the selected active time must become a completed target row.
             target_barriers.push((start, end));
         }
     }
-    let target_insert_intervals = historical_gaps_from_covered(
+    if active_backdate && let Some(absorb_start) = active_absorb_start {
+        let end = active.started_at_utc.min(request.ended_at_utc);
+        if absorb_start < end {
+            // The current active generation absorbs this same-layer prefix. Do not
+            // also materialize it as a completed correction row.
+            target_barriers.push((absorb_start, end));
+        }
+    }
+    let mut target_spans = historical_gap_intervals(
         request.started_at_utc,
         request.ended_at_utc,
-        target_barriers,
-    );
+        &planning_sessions,
+        active,
+    )?;
+    for session in &planning_sessions {
+        if session.category_id == target_category_id {
+            continue;
+        }
+        let (start, end, _, elapsed) = historical_session_bounds(session)?;
+        if start >= request.ended_at_utc || end <= request.started_at_utc {
+            continue;
+        }
+        let left = historical_index_at_or_after(start, request.started_at_utc, elapsed)?;
+        let right = historical_index_at_or_after(start, request.ended_at_utc, elapsed)?;
+        if right <= left {
+            continue;
+        }
+        let left = i64::try_from(left).map_err(|_| "historical split is too large".to_string())?;
+        let right =
+            i64::try_from(right).map_err(|_| "historical split is too large".to_string())?;
+        target_spans.push((
+            start + ChronoDuration::seconds(left),
+            start + ChronoDuration::seconds(right),
+        ));
+    }
+    if active_overlap && active.category_id != request.target_category_id {
+        let left = historical_index_at_or_after(
+            active.started_at_utc,
+            request.started_at_utc,
+            active.elapsed_seconds,
+        )?;
+        let right = historical_index_at_or_after(
+            active.started_at_utc,
+            request.ended_at_utc,
+            active.elapsed_seconds,
+        )?;
+        if right > left {
+            let left = i64::try_from(left).map_err(|_| "active split is too large".to_string())?;
+            let right =
+                i64::try_from(right).map_err(|_| "active split is too large".to_string())?;
+            target_spans.push((
+                active.started_at_utc + ChronoDuration::seconds(left),
+                active.started_at_utc + ChronoDuration::seconds(right),
+            ));
+        }
+    }
+    target_spans.sort_by_key(|interval| interval.0);
+    let mut merged_target_spans: Vec<HistoricalInterval> = Vec::new();
+    for (start, end) in target_spans {
+        if let Some(last) = merged_target_spans.last_mut()
+            && start <= last.1
+        {
+            last.1 = last.1.max(end);
+        } else if start < end {
+            merged_target_spans.push((start, end));
+        }
+    }
+    let mut target_insert_intervals = Vec::new();
+    for (start, end) in merged_target_spans {
+        let barriers = target_barriers
+            .iter()
+            .filter_map(|(barrier_start, barrier_end)| {
+                let clipped = (
+                    barrier_start.max(&start).to_owned(),
+                    barrier_end.min(&end).to_owned(),
+                );
+                (clipped.0 < clipped.1).then_some(clipped)
+            })
+            .collect();
+        target_insert_intervals.extend(historical_gaps_from_covered(start, end, barriers));
+    }
+    target_insert_intervals.sort_by_key(|interval| interval.0);
+    let mut normalized_target_intervals: Vec<HistoricalInterval> = Vec::new();
+    for (start, end) in target_insert_intervals {
+        if let Some(last) = normalized_target_intervals.last_mut()
+            && start <= last.1
+        {
+            last.1 = last.1.max(end);
+        } else if start < end {
+            normalized_target_intervals.push((start, end));
+        }
+    }
+    let target_insert_intervals = normalized_target_intervals;
+
+    let mut recorded_end_overrides = BTreeMap::new();
+    for session in &sessions {
+        if session.category_id == target_category_id {
+            continue;
+        }
+        let (_, effective_end, recorded_end, _) = historical_session_bounds(session)?;
+        if effective_end > request.started_at_utc && effective_end <= request.ended_at_utc {
+            recorded_end_overrides.insert(effective_end, recorded_end);
+        }
+    }
+
+    // When Add replaces the leading edge of an explicit Idle row, carry that
+    // row's stable identity into the newly classified interval. The retained
+    // Idle suffix, if any, becomes the derived fragment instead.
+    let mut idle_identity_transfers = Vec::new();
+    if source_session.is_none() {
+        for (target_start, target_end) in &target_insert_intervals {
+            for session in &planning_sessions {
+                if session.category_id != 0 {
+                    continue;
+                }
+                let (start, end, _, _) = historical_session_bounds(session)?;
+                if start == *target_start && start < *target_end && start < end {
+                    idle_identity_transfers.push((
+                        start,
+                        end,
+                        session.id,
+                        session.stable_id.clone(),
+                    ));
+                    break;
+                }
+            }
+        }
+    }
+    let transferred_idle_session_ids = idle_identity_transfers
+        .iter()
+        .map(|(_, _, session_id, _)| *session_id)
+        .collect::<BTreeSet<_>>();
 
     let mut source_target_stable_id = source_session
         .as_ref()
@@ -1923,10 +2044,21 @@ pub(crate) fn apply_historical_correction(
                 )?;
             }
             (false, true) => {
+                let transferred_to_target = transferred_idle_session_ids.contains(&session.id);
+                let suffix_stable_id = if transferred_to_target {
+                    correction_stable_id(
+                        &session.stable_id,
+                        "idle-suffix",
+                        selected_end,
+                        source_category,
+                    )
+                } else {
+                    session.stable_id.clone()
+                };
                 write_history_fragment(
                     &transaction,
                     Some(session.id),
-                    &session.stable_id,
+                    &suffix_stable_id,
                     source_category,
                     &session.description,
                     selected_end,
@@ -1937,7 +2069,6 @@ pub(crate) fn apply_historical_correction(
             }
             (false, false) => historical_delete_session(&transaction, session.id)?,
         }
-
     }
 
     for (target_start, target_end) in target_insert_intervals {
@@ -1947,14 +2078,24 @@ pub(crate) fn apply_historical_correction(
         }
         let target_seconds = usize::try_from(target_seconds)
             .map_err(|_| "historical correction duration is too large".to_string())?;
-        let stable_id = source_target_stable_id.take().unwrap_or_else(|| {
-            correction_stable_id(
-                "correction",
-                "assignment",
-                target_start,
-                request.target_category_id,
-            )
-        });
+        let idle_identity_transfer = idle_identity_transfers
+            .iter()
+            .find(|(start, _, _, _)| *start == target_start);
+        let stable_id = source_target_stable_id
+            .take()
+            .or_else(|| idle_identity_transfer.map(|(_, _, _, stable_id)| stable_id.clone()))
+            .unwrap_or_else(|| {
+                correction_stable_id(
+                    "correction",
+                    "assignment",
+                    target_start,
+                    request.target_category_id,
+                )
+            });
+        let recorded_target_end = recorded_end_overrides
+            .get(&target_end)
+            .copied()
+            .unwrap_or(target_end);
         write_history_fragment(
             &transaction,
             None,
@@ -1962,13 +2103,13 @@ pub(crate) fn apply_historical_correction(
             request.target_category_id,
             &request.description,
             target_start,
-            target_end,
+            recorded_target_end,
             target_seconds,
             target_policy,
         )?;
         affected_days.extend(historical_affected_days(
             target_start,
-            target_end,
+            recorded_target_end,
             target_seconds,
             target_policy,
         )?);
@@ -4459,7 +4600,10 @@ mod clear_all_additional_transaction_tests {
                 changes,
             } => {
                 assert_eq!(changes.len(), 1);
-                assert_eq!(changes[0].category_id, CategoryId::new(u64::try_from(reading_id).unwrap()));
+                assert_eq!(
+                    changes[0].category_id,
+                    CategoryId::new(u64::try_from(reading_id).unwrap())
+                );
                 assert_eq!(
                     changes[0].started_at_utc,
                     parse_utc("2026-08-02T11:00:00Z").unwrap()
@@ -4513,7 +4657,7 @@ mod clear_all_additional_transaction_tests {
         assert_eq!(rows[0].elapsed_seconds, 4500);
         assert_eq!(rows[1].stable_id, "reading-ledger-b");
         assert_eq!(rows[1].started_at_utc, "2026-08-02T11:15:00.000Z");
-        assert_eq!(rows[1].ended_at_utc, "2026-08-02T11:30:00Z");
+        assert_eq!(rows[1].ended_at_utc, "2026-08-02T11:30:00.000Z");
         assert_eq!(rows[1].elapsed_seconds, 900);
         drop(repository);
         remove_database(&path);
@@ -4555,12 +4699,10 @@ mod clear_all_additional_transaction_tests {
         );
         request.source_session_id = Some(session_id);
         request.description = "must roll back".to_string();
-        let result = runtime_coordination::with_test_fault(
-            "history-assignment",
-            "commit",
-            "commit",
-            || apply_historical_correction(&path, request.clone()),
-        );
+        let result =
+            runtime_coordination::with_test_fault("history-assignment", "commit", "commit", || {
+                apply_historical_correction(&path, request.clone())
+            });
         assert!(result.is_err());
 
         let repository = open_cli_repository(&path).unwrap();
@@ -4640,7 +4782,11 @@ mod clear_all_additional_transaction_tests {
             .resulting_sand_state
             .expect("released explicit time should recolor retained mass to Idle");
         assert_eq!(
-            after.pending_runs.iter().map(|run| run.count).sum::<usize>(),
+            after
+                .pending_runs
+                .iter()
+                .map(|run| run.count)
+                .sum::<usize>(),
             4
         );
         assert_eq!(
@@ -5831,7 +5977,9 @@ mod clear_all_additional_transaction_tests {
         first.checkpoint_json = historical_checkpoint_json_with_sand(&active, "", &before);
         let plan_token = match apply_historical_correction(&path, first).unwrap() {
             HistoricalCorrectionOutcome::NeedsConfirmation { plan_token, .. } => plan_token,
-            HistoricalCorrectionOutcome::Applied(_) => panic!("shortfall collision skipped preview"),
+            HistoricalCorrectionOutcome::Applied(_) => {
+                panic!("shortfall collision skipped preview")
+            }
         };
         let mut confirmed = historical_correction_request(
             reading_id,
@@ -5843,7 +5991,9 @@ mod clear_all_additional_transaction_tests {
         confirmed.checkpoint_json = historical_checkpoint_json_with_sand(&active, "", &before);
         let receipt = match apply_historical_correction(&path, confirmed).unwrap() {
             HistoricalCorrectionOutcome::Applied(receipt) => receipt,
-            HistoricalCorrectionOutcome::NeedsConfirmation { .. } => panic!("shortfall re-previewed"),
+            HistoricalCorrectionOutcome::NeedsConfirmation { .. } => {
+                panic!("shortfall re-previewed")
+            }
         };
         let after = receipt.resulting_sand_state.unwrap();
         assert_eq!(
@@ -5908,7 +6058,11 @@ mod clear_all_additional_transaction_tests {
             .resulting_sand_state
             .expect("retained Idle mass should be recolored");
         assert_eq!(
-            after.pending_runs.iter().map(|run| run.count).sum::<usize>(),
+            after
+                .pending_runs
+                .iter()
+                .map(|run| run.count)
+                .sum::<usize>(),
             2
         );
         assert_eq!(

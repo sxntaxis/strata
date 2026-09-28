@@ -100,9 +100,7 @@ impl App {
             body_row_count = body_row_count.saturating_add(2);
         }
         if layer_detail {
-            body_row_count = body_row_count.saturating_add(
-                self.ledger_confirmation_extra_height(),
-            );
+            body_row_count = body_row_count.saturating_add(self.ledger_confirmation_extra_height());
         }
 
         let preferred_inner_width = self
@@ -439,9 +437,7 @@ impl App {
         if row_count == 0 {
             0
         } else {
-            row_count
-                .saturating_add(6)
-                .min(u16::MAX as usize) as u16
+            row_count.saturating_add(6).min(u16::MAX as usize) as u16
         }
     }
 
@@ -543,20 +539,21 @@ impl App {
             Span::raw(self.ledger_center_cell("", widths[0])),
             Span::styled(
                 self.ledger_center_cell("BEFORE", widths[1]),
-                Style::default().fg(self.theme_status()).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(self.theme_status())
+                    .add_modifier(Modifier::DIM),
             ),
             Span::styled(
                 self.ledger_center_cell("AFTER", widths[2]),
-                Style::default().fg(self.theme_status()).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(self.theme_status())
+                    .add_modifier(Modifier::DIM),
             ),
         ]);
 
         let mut lines = vec![header, Line::default()];
         for change in &confirmation.changes {
-            let mut name = self.report_layer_display_name(change.category_id);
-            if change.active {
-                name.push_str(" · current");
-            }
+            let name = self.report_layer_display_name(change.category_id);
             let before = self.ledger_confirmation_interval(
                 change.started_at_utc,
                 change.ended_at_utc,

@@ -71,7 +71,6 @@ enum ReportRangeEditKeyIntent {
     Ignore,
 }
 
-
 fn direct_command_or_fuzzy_fallback(
     query: &str,
     has_fuzzy_result: bool,
@@ -146,7 +145,6 @@ fn resolve_report_range_edit_key(
         _ => ReportRangeEditKeyIntent::Ignore,
     }
 }
-
 
 impl App {
     #[cfg(debug_assertions)]
