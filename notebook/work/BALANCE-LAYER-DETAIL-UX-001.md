@@ -101,3 +101,7 @@ This candidate does not change:
 - The focused SQLite transaction tests cover successful stable-identity edit, overlap refusal, and injected commit-failure rollback. The disposable profile exited normally and passed `sqlite-doctor` after both sessions.
 
 The candidate is natively validated; owner review of the loaded-profile edit/add experience remains the promotion review. SEDIMENT-016 doctrine promotion remains separate.
+
+## Publication — 2026-09-27
+
+- Published as draft PR [#107](https://github.com/sxntaxis/strata/pull/107), stacked on PR #106 (`work/balance-range-ux-001-bracket-boundaries`). Owner review remains pending.
