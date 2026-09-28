@@ -488,6 +488,7 @@ mod tests {
     #[test]
     fn aggregate_totals_exclude_idle_from_polarity() {
         let summary = BalanceReportSummary {
+            date: "2026-09-27".to_string(),
             entries: vec![
                 entry(1, "positive", 861, 1, 861),
                 BalanceReportEntry {

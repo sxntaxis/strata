@@ -77,7 +77,21 @@ The earlier standalone Crossterm probe established only synthetic tmux observati
 
 The implementation must preserve the existing Balance instrument/layout, historical preview animation, selected-layer frame color, one-cell modal inset, report arithmetic, storage authority, and SEDIMENT-016 behavior. Focused tests cover boundary formatting/conversion, movement limits, typed-editor conversion, configurable bracket bindings, and existing whole-window navigation regressions.
 
-Local native Rust/TUI validation remains required for the authored candidate.
+## Validation — 2026-09-27
+
+The supplied candidate was based on exact PR #105 head `d29311362c8dc23a15440c7b620a7b524231bac4`. Its initial formatting check exposed rustfmt differences, a missing `NaiveDate` test import, and the now UI-unused shared summary `date` field lint (still read by the CLI binary). These mechanical issues were corrected without changing report behavior.
+
+Passed:
+
+- `cargo fmt --all -- --check`;
+- `cargo clippy --all-targets --all-features -- -D warnings`;
+- `cargo test --all-features` — 553 passed, 0 failed, 20 ignored; integration/process suites contributed 24 passing tests;
+- `cargo run -- --help`;
+- `git diff --check`;
+- disposable PTY smoke at 200×60, 80×24, and 40×14. All sizes showed the two-boundary Balance chrome. At 200×60, `[` selected the start, Left moved it live, `]` selected the end, Left/Right exercised bounded movement, Esc cleared the handle while Balance remained open, and `r` displayed `from 2026-…` / `to 2026-…` with the exclusive end boundary;
+- `sqlite-doctor` on the clean 200×60 disposable profile — healthy schema v1, integrity and foreign-key checks passed.
+
+Each smoke size used a newly created disposable profile under `/mnt/Tokyo/Lab/.tmp/opencode/strata-balance-range-ux-001-smoke-final-*`; the active profile was not selected. No physical keyboard/Caps Lock test was performed or required. `docs/SEDIMENT_AUTHORITY.md` and production sediment behavior were not changed. Notebook conformance CLI was unavailable; the touched YAML frontmatter and repository TOML are structurally validated separately.
 
 ## Non-goals
 

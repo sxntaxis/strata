@@ -1042,6 +1042,7 @@ mod hardening_tests {
     #[test]
     fn summary_frame_follows_selected_layer_color_with_safe_fallback() {
         let summary = BalanceReportSummary {
+            date: "2026-09-27".to_string(),
             entries: vec![
                 BalanceReportEntry {
                     category_id: CategoryId::new(1),

@@ -5,7 +5,7 @@ state: active
 created: 2026-08-01
 updated: 2026-09-27
 authority: working
-summary: "BALANCE-LAYER-DETAIL-UX-001 passes native checks and loaded-test-profile edit/add restart smoke, including complete constrained-pane boundary fields; owner review remains before promotion, with SEDIMENT-016 separate."
+summary: "BALANCE-LAYER-DETAIL-UX-001 passes native checks and loaded-test-profile edit/add restart smoke, including complete constrained-pane boundary fields; bracket-boundary range authority is native-green and SEDIMENT-016 remains separate."
 next: Owner-review the populated layer-ledger edit/add flow, then explicitly promote or revise BALANCE-LAYER-DETAIL-UX-001 without coupling it to SEDIMENT-016 doctrine promotion.
 ---
 
@@ -19,7 +19,7 @@ next: Owner-review the populated layer-ledger edit/add flow, then explicitly pro
 
 ## BALANCE-RANGE-UX-001 bracket boundary editing — 2026-09-27
 
-**AUTHORED CANDIDATE / NATIVE VALIDATION PENDING:** Balance keeps inclusive internal `ReportWindow` semantics while presenting explicit start/exclusive-end boundaries. Configurable `[` / `]` actions select the start/end handle; Left/Right moves that handle live, Esc deselects first, and `r` remains the typed distant-range editor using the same exclusive visible `To` boundary. The physical modifier/Caps Lock probe is retired as a product gate; no terminal-specific workaround is introduced. See `notebook/work/BALANCE-RANGE-UX-001.md`.
+**NATIVE-GREEN / DRAFT PUBLICATION NEXT:** Balance keeps inclusive internal `ReportWindow` semantics while presenting explicit start/exclusive-end boundaries. Configurable `[` / `]` actions select the start/end handle; Left/Right moves that handle live, Esc deselects first, and `r` remains the typed distant-range editor using the same exclusive visible `To` boundary. `cargo fmt`, strict Clippy, all-feature tests (553 unit/library tests plus 24 integration/process tests; 20 ignored), CLI help, diff hygiene, 200×60/80×24/40×14 disposable PTY smoke, and SQLite doctor pass. The physical modifier/Caps Lock probe is retired as a product gate; no terminal-specific workaround is introduced. See `notebook/work/BALANCE-RANGE-UX-001.md`.
 
 ## SEDIMENT-016 vertical physics corridor — 2026-09-27
 

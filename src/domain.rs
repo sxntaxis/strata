@@ -110,6 +110,11 @@ pub struct BalanceReportEntry {
 
 #[derive(Debug, Clone)]
 pub struct BalanceReportSummary {
+    #[allow(
+        dead_code,
+        reason = "The CLI binary prints the report date from this shared summary"
+    )]
+    pub date: String,
     pub entries: Vec<BalanceReportEntry>,
     pub total_seconds: usize,
     pub total_balance_seconds: isize,
@@ -1006,7 +1011,13 @@ pub fn build_balance_report_for_window(
     categories: &[Category],
     window: &ReportWindow,
 ) -> BalanceReportSummary {
-    build_balance_report_for_date_range(sessions, categories, window.start, window.end)
+    build_balance_report_for_date_range(
+        sessions,
+        categories,
+        window.start,
+        window.end,
+        window.label.clone(),
+    )
 }
 
 fn build_balance_report_for_date_range(
@@ -1014,6 +1025,7 @@ fn build_balance_report_for_date_range(
     categories: &[Category],
     start: NaiveDate,
     end: NaiveDate,
+    label: String,
 ) -> BalanceReportSummary {
     let mut entries: Vec<BalanceReportEntry> = categories
         .iter()
@@ -1054,6 +1066,7 @@ fn build_balance_report_for_date_range(
     let total_balance_seconds = entries.iter().map(|entry| entry.balance_seconds).sum();
 
     BalanceReportSummary {
+        date: label,
         entries,
         total_seconds,
         total_balance_seconds,
@@ -2062,6 +2075,10 @@ mod tests {
         let window = report_period_window_with_offset(ReportPeriod::Month, 1);
         let summary = build_balance_report_for_window(&sessions, &categories, &window);
 
+        assert_eq!(
+            summary.date,
+            format!("{}..{}", previous_start, previous_end)
+        );
         assert_eq!(summary.total_seconds, 1800);
         assert_eq!(summary.total_balance_seconds, 600);
     }
@@ -2140,6 +2157,7 @@ mod tests {
 
         let window = report_period_window_with_offset(ReportPeriod::Today, 0);
         let summary = build_balance_report_for_window(&sessions, &categories, &window);
+        assert_eq!(summary.date, today);
         assert_eq!(summary.total_seconds, 600);
         assert_eq!(summary.total_balance_seconds, 600);
     }
