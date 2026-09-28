@@ -10,7 +10,7 @@ use crate::domain::BalanceReportSummary;
 
 use super::{App, view_style};
 
-const PREFERRED_WIDTH: u16 = 45;
+const MIN_PREFERRED_WIDTH: u16 = 45;
 const INSTRUMENT_SIDE_PADDING: u16 = 2;
 const SUMMARY_VERTICAL_CHROME_ROWS: u16 = 5;
 const MIN_THREE_COLUMN_WIDTH: u16 = 27;
@@ -91,7 +91,7 @@ fn format_net_total(seconds: isize) -> String {
 }
 
 pub(super) fn preferred_summary_inner_width() -> u16 {
-    PREFERRED_WIDTH.saturating_add(INSTRUMENT_SIDE_PADDING)
+    MIN_PREFERRED_WIDTH.saturating_add(INSTRUMENT_SIDE_PADDING)
 }
 
 pub(super) fn preferred_summary_inner_height(row_count: usize) -> u16 {
@@ -115,7 +115,7 @@ fn side_total_line(
 }
 
 fn instrument_width(available: u16) -> u16 {
-    let cap = available.min(PREFERRED_WIDTH);
+    let cap = available;
     if cap >= MIN_THREE_COLUMN_WIDTH {
         for width in (MIN_THREE_COLUMN_WIDTH..=cap).rev() {
             if width % 6 == 3 {
@@ -136,10 +136,15 @@ fn rounded_meter_offset(signed_seconds: i128, total_seconds: i128, radius: i128)
         return 0;
     }
     let scaled = signed_seconds.saturating_mul(radius);
-    if scaled > 0 {
+    let rounded = if scaled > 0 {
         (scaled + total_seconds / 2) / total_seconds
     } else {
         (scaled - total_seconds / 2) / total_seconds
+    };
+    if rounded == 0 {
+        signed_seconds.signum()
+    } else {
+        rounded
     }
 }
 
@@ -484,7 +489,15 @@ mod tests {
 
     #[test]
     fn responsive_width_keeps_total_center_aligned_with_meter_center() {
-        for (available, expected) in [(45, 45), (44, 39), (38, 33), (32, 27)] {
+        for (available, expected) in [
+            (117, 117),
+            (80, 75),
+            (66, 63),
+            (45, 45),
+            (44, 39),
+            (38, 33),
+            (32, 27),
+        ] {
             let width = instrument_width(available);
             assert_eq!(width, expected);
             assert!(width >= MIN_THREE_COLUMN_WIDTH);
@@ -498,6 +511,16 @@ mod tests {
 
         assert_eq!(instrument_width(26), 25);
         assert_eq!(instrument_width(0), 0);
+    }
+
+    #[test]
+    fn nonzero_meter_values_always_leave_equilibrium_by_at_least_one_cell() {
+        let width = 117;
+        let total_recorded = 30 * 24 * 60 * 60;
+
+        assert_eq!(meter_offset(width, 0, total_recorded), 0);
+        assert_eq!(meter_offset(width, 1, total_recorded), 1);
+        assert_eq!(meter_offset(width, -1, total_recorded), -1);
     }
 
     #[test]

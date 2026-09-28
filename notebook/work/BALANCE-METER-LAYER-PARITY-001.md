@@ -5,7 +5,7 @@ state: candidate
 authority: working
 created: 2026-09-28
 updated: 2026-09-28
-summary: "Put Balance and Layer Detail on one recorded-time meter scale, restore layer-marker parity, align ledger edge cells outward, and give Layer Detail the full Balance period selector."
+summary: "Put Balance and Layer Detail on one recorded-time meter scale, use available meter width with nonzero displacement, restore marker/tag/editor ledger parity, and give Layer Detail the full Balance period selector."
 ---
 
 # BALANCE-METER-LAYER-PARITY-001 — shared meter and layer-detail parity
@@ -19,12 +19,13 @@ Balance and Layer Detail are two views of the same instrument. Their horizontal 
 - A Layer Detail marker is that layer's signed `balance_seconds / summary.total_seconds` projected onto the same radius.
 - Global and layer markers are independent projections on the same scale. A globally positive period may therefore contain a negative layer whose detail marker sits left of equilibrium, and a globally balanced period does not collapse nonzero layer markers to the center.
 - Projection is performed from the original time values and rounded once at the terminal-cell boundary. The previous parent-displacement envelope/double-quantization model is retired.
+- The meter consumes the available instrument width instead of stopping at 45 cells. Exact zero alone occupies equilibrium; any representable non-zero signed value receives at least one cell of displacement toward its sign after projection.
 
 The Balance side totals remain the negative aggregate, net, and positive aggregate; Idle is neutral there but remains part of the meter's recorded-time denominator.
 
-## Accepted-authority gate
+## Accepted-authority adjudication
 
-This supplied owner candidate explicitly conflicts with accepted STRATA-D069 and `docs/REPORT_AUTHORITY.md` lines 40–46: accepted behavior divides the global meter by polarized time and derives Layer Detail from the rounded parent displacement envelope. The candidate instead divides global and layer values directly by all recorded period time, including Idle. Those accepted records remain unchanged in this working candidate. Before promotion, the owner must explicitly adjudicate whether this candidate supersedes D069 and the report-authority meter section.
+The owner explicitly adjudicated the conflict on 2026-09-28. STRATA-D069 is superseded by STRATA-D071, and `docs/REPORT_AUTHORITY.md` now records the shared recorded-time denominator, independent global/layer projection, available-width meter, and one-cell minimum displacement for non-zero values. The former parent-envelope rule is retired authority rather than a pending gate.
 
 ## Marker parity
 
@@ -33,7 +34,13 @@ Balance uses the same layer marker grammar as the Strata layer modal:
 - negative layer: `◯`;
 - positive or neutral/Idle layer: `●`.
 
-Layer Detail ledger rows carry the same marker before the tag, colored with the layer color when unselected. Selected rows retain contrast-safe text against the layer background. `+ Add entry…` has no fake layer marker; it is indented by the marker slot so its label aligns with ledger tags.
+Layer Detail ledger rows carry the same marker before the tag, colored with the layer color when unselected. Selected rows retain contrast-safe text against the layer background. `+ Add entry…` uses `+` itself as the synthetic row marker, in the exact marker column occupied by `●`/`◯`; it is not indented past that slot.
+
+An empty persisted ledger description remains empty in storage. Presentation falls back to the selected layer name, so an untagged Cinema row renders `Cinema` instead of a visually blank Tag cell.
+
+## Inline ledger editor
+
+Add and existing-entry Edit retain the correction transaction and full timestamp semantics already implemented, but their TUI projection is a single ledger row rather than the obsolete three-line `Tag:` / `From:` / `To:` form. The active field is bracketed in place, `+` remains the Add marker, an existing row retains its layer marker, and the editor uses the same Tag/Date/Time/Effect geometry as ordinary rows. Same-day windows omit the date cell; multi-day windows retain it; cross-civil-date edits use one explicit `start → end` temporal cell. The Effect cell stays empty while the draft chronology is being edited rather than displaying a stale pre-edit effect.
 
 ## Alignment rule
 
@@ -63,7 +70,7 @@ Command-palette start/end boundary actions preserve Layer Detail rather than ret
 
 This pass does not change historical-correction semantics, collateral-confirmation custody, SQLite schema, sediment correction/recolor doctrine, report-window inclusive internal semantics, or SEDIMENT-016 authority.
 
-## Native validation facts — 2026-09-28
+## Native validation facts — prior published candidate, 2026-09-28
 
 - `cargo fmt --all -- --check`, strict Clippy, `cargo test --all-features`, and `cargo run -- --help` pass. The suite reports 564 library tests and 24 integration/process tests passed; 20 ignored; 0 failed.
 - Focused meter tests cover the shared recorded-time denominator, independent opposite-sign layer/global projections, and noncollapsed layer positions when the global net is zero.
@@ -71,9 +78,9 @@ This pass does not change historical-correction semantics, collateral-confirmati
 - Opening `r` inside Layer Detail initially exposed overlapping bottom-border titles. The period footer now yields to the explicit From/To editor while that editor is active, and the modal grants it enough width to keep the full dates and instructions visible; PTY smoke confirmed the layer and ledger remain present.
 - The isolated test profile's SQLite doctor passed after the smoke: schema v1, integrity and foreign-key checks healthy. The source profile used to create the portable test fixture was not mutated.
 
-The implementation is natively validated as a candidate. Owner review must first resolve the accepted D069/report-authority meter conflict; SEDIMENT-016 remains separate.
+That published candidate was natively validated. The subsequent owner-review amendment described above changes meter width/minimum displacement, ledger fallback/alignment, the editor projection, and accepted meter authority; this environment has no Rust toolchain, so the amended candidate still requires the repository-declared native formatter/Clippy/test/help gates before publication. SEDIMENT-016 remains separate.
 
 ## Publication — 2026-09-28
 
 - Published as draft PR [#109](https://github.com/sxntaxis/strata/pull/109), stacked on PR #108 (`work/balance-ledger-correction-ux-001`).
-- Accepted STRATA-D069 and `docs/REPORT_AUTHORITY.md` remain unchanged pending explicit owner adjudication of the meter-scale conflict.
+- The supplied validated bundle tip is `2919966f3ea245b3c97ce1a38d549d037b875e2e`. The owner-review amendment is authored on top of that exact lineage for local native validation before the draft PR is advanced.
