@@ -3118,7 +3118,7 @@ mod tests {
             ],
             frame_count: 0,
             sweep_left_to_right: true,
-            rng_state: 0x5ED1_016,
+            rng_state: 0x05ED_1016,
             ingress_focus_x: None,
             pending_grains: Vec::new(),
             pending_runs: vec![PendingGrainRun {
