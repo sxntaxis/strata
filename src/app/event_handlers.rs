@@ -217,12 +217,27 @@ impl App {
             return self.handle_settings_overlay_key(key);
         }
 
-        if let Some(action) = self.resolve_action(key) {
-            return self.route_action(action, key);
+        if self.in_category_modal()
+            && !self.show_settings
+            && !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        {
+            match key.code {
+                KeyCode::Char(_) => {
+                    self.handle_modal_text_input(key);
+                    return false;
+                }
+                KeyCode::Backspace | KeyCode::Delete => {
+                    self.handle_modal_text_delete();
+                    return false;
+                }
+                _ => {}
+            }
         }
 
-        if self.in_category_modal() {
-            self.handle_modal_text_input(key);
+        if let Some(action) = self.resolve_action(key) {
+            return self.route_action(action, key);
         }
 
         false
@@ -1326,6 +1341,29 @@ impl App {
     }
 
     fn handle_modal_action(&mut self, action: Action) -> bool {
+        if self.modal_editing_category_metadata {
+            match action {
+                Action::Cancel => {
+                    self.leave_category_metadata_edit();
+                }
+                Action::Confirm => {
+                    if self.time_tracker.set_category_description_by_index(
+                        self.selected_index,
+                        self.modal_description.clone(),
+                    ) {
+                        self.persist_categories();
+                    }
+                    if !self.has_persistence_recovery() {
+                        self.leave_category_metadata_edit();
+                    }
+                }
+                Action::EditCategoryDescription => {}
+                _ => {}
+            }
+            self.render_needed = true;
+            return true;
+        }
+
         let mut handled = true;
 
         match action {
@@ -1363,8 +1401,10 @@ impl App {
                     self.cycle_selected_tag(1);
                 }
             }
-            Action::ShiftUp => {
-                if self.time_tracker.move_category_up(self.selected_index) {
+            Action::MoveLayerUp => {
+                if !self.is_on_insert_space()
+                    && self.time_tracker.move_category_up(self.selected_index)
+                {
                     self.selected_index = self.selected_index.saturating_sub(1);
                     self.persist_categories();
                     if self.has_persistence_recovery() {
@@ -1372,8 +1412,10 @@ impl App {
                     }
                 }
             }
-            Action::ShiftDown => {
-                if self.time_tracker.move_category_down(self.selected_index) {
+            Action::MoveLayerDown => {
+                if !self.is_on_insert_space()
+                    && self.time_tracker.move_category_down(self.selected_index)
+                {
                     self.selected_index += 1;
                     self.persist_categories();
                     if self.has_persistence_recovery() {
@@ -1381,7 +1423,7 @@ impl App {
                     }
                 }
             }
-            Action::ShiftLeft => {
+            Action::PreviousLayerColor | Action::NextLayerColor => {
                 if !self.is_on_insert_space() && self.selected_index > 0 {
                     let Some(current_color) = self
                         .time_tracker
@@ -1391,55 +1433,27 @@ impl App {
                         self.render_needed = true;
                         return true;
                     };
-                    let new_color = self.appearance.cycle_category_anchor(current_color, -1);
-                    if self
-                        .time_tracker
-                        .set_category_color_by_index(self.selected_index, new_color)
-                    {
-                        self.persist_categories();
-                    }
-                } else if self.is_on_insert_space() {
-                    let count = self.appearance.sand_color_count();
-                    self.new_category_color_cursor =
-                        (self.new_category_color_cursor + count - 1) % count;
-                }
-            }
-            Action::ShiftRight => {
-                if !self.is_on_insert_space() && self.selected_index > 0 {
-                    let Some(current_color) = self
-                        .time_tracker
-                        .category_by_index(self.selected_index)
-                        .map(|category| category.color)
-                    else {
-                        self.render_needed = true;
-                        return true;
+                    let direction = if matches!(action, Action::PreviousLayerColor) {
+                        -1
+                    } else {
+                        1
                     };
-                    let new_color = self.appearance.cycle_category_anchor(current_color, 1);
+                    let new_color = self
+                        .appearance
+                        .cycle_category_anchor(current_color, direction);
                     if self
                         .time_tracker
                         .set_category_color_by_index(self.selected_index, new_color)
                     {
                         self.persist_categories();
                     }
-                } else if self.is_on_insert_space() {
-                    let count = self.appearance.sand_color_count();
-                    self.new_category_color_cursor = (self.new_category_color_cursor + 1) % count;
                 }
             }
+            Action::ShiftLeft | Action::ShiftRight => {}
             Action::Confirm => {
                 if self.is_on_insert_space() {
                     if !self.new_category_name.is_empty() {
                         self.add_category();
-                        self.close_modal();
-                    }
-                } else if self.modal_editing_category_metadata {
-                    if self.time_tracker.set_category_description_by_index(
-                        self.selected_index,
-                        self.modal_description.clone(),
-                    ) {
-                        self.persist_categories();
-                    }
-                    if !self.has_persistence_recovery() {
                         self.close_modal();
                     }
                 } else {
@@ -1468,7 +1482,7 @@ impl App {
                 }
             }
             Action::EditCategoryDescription => {
-                self.toggle_category_metadata_edit();
+                self.begin_category_metadata_edit();
             }
             Action::DeleteCategory => {
                 if !self.is_on_insert_space() && self.selected_index > 0 {
@@ -1495,16 +1509,6 @@ impl App {
                         .set_category_balance_by_index(self.selected_index, -1)
                 {
                     self.persist_categories();
-                }
-            }
-            Action::Backspace => {
-                if self.is_on_insert_space() {
-                    self.new_category_name.pop();
-                } else if self.selected_index < self.time_tracker.category_count() {
-                    self.modal_tag_index = None;
-                    self.modal_tag_cycle_prefix = None;
-                    self.modal_description.pop();
-                    self.preview_active_description_from_modal();
                 }
             }
             _ => handled = false,
@@ -1539,9 +1543,21 @@ impl App {
         }
     }
 
+    fn handle_modal_text_delete(&mut self) {
+        if self.is_on_insert_space() {
+            self.new_category_name.pop();
+        } else if self.selected_index < self.time_tracker.category_count() {
+            self.modal_tag_index = None;
+            self.modal_tag_cycle_prefix = None;
+            self.modal_description.pop();
+            self.preview_active_description_from_modal();
+        }
+        self.render_needed = true;
+    }
+
     fn handle_report_modal_action(&mut self, action: Action) -> bool {
         let summary = self.report_rows();
-        self.clamp_report_selection(summary.entries.len());
+        self.sync_report_selection_to_summary(&summary);
         let logs = self.report_current_logs();
         let in_logs_view = self.report_logs_category_id.is_some();
         let ledger_row_count = if in_logs_view {
@@ -1568,7 +1584,9 @@ impl App {
                 }
             }
             Action::Confirm => {
-                if in_logs_view {
+                if in_logs_view && self.report_filter_focus_active() {
+                    handled = self.toggle_selected_report_filter();
+                } else if in_logs_view {
                     handled = self.begin_ledger_entry_edit();
                 } else if let Some(entry) = summary.entries.get(self.report_selected_index) {
                     self.clear_report_range_boundary();
@@ -1579,35 +1597,39 @@ impl App {
                 }
             }
             Action::Up => {
-                if in_logs_view {
+                if in_logs_view && self.report_filter_focus_active() {
+                    // A multi-tag selector owns its row until it is applied or cancelled.
+                } else if in_logs_view {
                     if ledger_row_count > 0 {
                         self.report_log_selected_index = ui_helpers::wrap_prev_index(
                             self.report_log_selected_index,
                             ledger_row_count,
                         );
-                        self.sync_report_filter_focus_for_selection();
                     }
                 } else if !summary.entries.is_empty() {
-                    self.report_selected_index = ui_helpers::wrap_prev_index(
+                    let index = ui_helpers::wrap_prev_index(
                         self.report_selected_index,
                         summary.entries.len(),
                     );
+                    self.select_report_summary_index(&summary, index);
                 }
             }
             Action::Down => {
-                if in_logs_view {
+                if in_logs_view && self.report_filter_focus_active() {
+                    // A multi-tag selector owns its row until it is applied or cancelled.
+                } else if in_logs_view {
                     if ledger_row_count > 0 {
                         self.report_log_selected_index = ui_helpers::wrap_next_index(
                             self.report_log_selected_index,
                             ledger_row_count,
                         );
-                        self.sync_report_filter_focus_for_selection();
                     }
                 } else if !summary.entries.is_empty() {
-                    self.report_selected_index = ui_helpers::wrap_next_index(
+                    let index = ui_helpers::wrap_next_index(
                         self.report_selected_index,
                         summary.entries.len(),
                     );
+                    self.select_report_summary_index(&summary, index);
                 }
             }
             Action::Left => {
@@ -1629,21 +1651,21 @@ impl App {
                 }
             }
             Action::ShiftLeft => {
-                if self.report_range_boundary.is_some() {
-                    self.move_report_range_boundary_steps(-1, 7);
-                } else if self.report_range_is_custom() {
-                    self.set_report_period(ReportPeriod::Month);
+                if in_logs_view && self.report_filter_focus_active() {
+                    // Shift never escapes the active tag selector into period navigation.
+                } else if self.report_range_boundary.is_some() {
+                    self.move_report_range_boundary_month(-1);
                 } else {
-                    self.set_report_period(ui_helpers::report_period_prev(self.report_period));
+                    handled = false;
                 }
             }
             Action::ShiftRight => {
-                if self.report_range_boundary.is_some() {
-                    self.move_report_range_boundary_steps(1, 7);
-                } else if self.report_range_is_custom() {
-                    self.set_report_period(ReportPeriod::Today);
+                if in_logs_view && self.report_filter_focus_active() {
+                    // Shift never escapes the active tag selector into period navigation.
+                } else if self.report_range_boundary.is_some() {
+                    self.move_report_range_boundary_month(1);
                 } else {
-                    self.set_report_period(ui_helpers::report_period_next(self.report_period));
+                    handled = false;
                 }
             }
             Action::ReportToday => self.set_report_period(ReportPeriod::Today),
@@ -1821,9 +1843,8 @@ impl App {
                     .ledger_entry_edit
                     .as_ref()
                     .is_some_and(|edit| edit.active_field == super::LedgerEntryField::Description);
-                if description_active {
-                    self.cycle_ledger_tag(direction as isize);
-                } else if let Some(edit) = self.ledger_entry_edit.as_mut()
+                if !description_active
+                    && let Some(edit) = self.ledger_entry_edit.as_mut()
                     && edit.adjust_active_temporal(direction, true)
                 {
                     self.render_needed = true;

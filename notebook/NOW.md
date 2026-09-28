@@ -5,13 +5,17 @@ state: active
 created: 2026-08-01
 updated: 2026-09-28
 authority: working
-summary: "BALANCE-BEHAVIOR-COHERENCE-001 is native-green for Tab-only field navigation, prefix-aware tag cycling, forgiving time entry/adjustment, accelerated range boundaries, and filter/layout coherence; draft PR #111 is stacked on #110."
-next: Owner-review PR #111's loaded-profile input behavior and responsive editor, then decide promote or revise; keep SEDIMENT-016 separate.
+summary: "INTERACTION-GRAMMAR-001 applies owner-reviewed STRATA-D074 keyboard ownership/modifier coherence on the natively validated D073 base; native validation of the new candidate is pending."
+next: Native-validate INTERACTION-GRAMMAR-001 on the owner's machine, then review the resulting Main/Layer/Balance keyboard behavior before publication; keep Settings/palette and SEDIMENT-016 separate.
 ---
+
+## INTERACTION-GRAMMAR-001 coherent keyboard ownership — 2026-09-28
+
+**OWNER-ACCEPTED D074 / IMPLEMENTATION CANDIDATE / NATIVE VALIDATION PENDING:** starting from validated D073 head `0dc12cf476316486852475c0999f38d40d5fe681`, the next pass makes printable Layer input text-first; moves metadata to `Ctrl+E`; moves existing-Layer reorder/color to Ctrl+arrows; assigns Main Backspace/Delete to Idle/all-sand clearing; removes Shift-arrow period cycling; unbinds redundant `r` and `l` defaults; changes Date/boundary Shift acceleration from a week to one civil month while Time remains one hour; simplifies multi-tag `f` selection; pins Balance selection by Layer ID; and widens Layer responsively for active text. Settings/palette internals remain deferred. This authored environment has no Rust toolchain, so no formatter/Clippy/test claim is made yet. See `notebook/work/INTERACTION-GRAMMAR-001.md`.
 
 ## BALANCE-BEHAVIOR-COHERENCE-001 input/presentation coherence — 2026-09-28
 
-**NATIVE-GREEN CANDIDATE / D073 CERTIFIED / DRAFT #111 PUBLISHED:** on exact PR #110 head `f8c397e71f3633c2e952be6c63c94902a6e6ecc4`, owner review makes Tab/Shift+Tab exclusively field navigation, aligns Layer and ledger tag arrows around prefix-restricted known-tag cycling, adds forgiving time input plus timestamp-safe Left/Right adjustment with Shift acceleration, extends the same one/seven-day grammar to active Balance range handles, and cleans up Layer Detail filtering/layout without changing D071/D072 semantics. Filter state moves below the meter, nonmatches use theme-derived de-emphasis, Add receives a collapsible separator, and cross-day/long-tag rows may request more width. Formatter, strict Clippy, all-feature tests (581 library + 24 integration/process; 20 ignored), CLI help, loaded-profile 120×40 tag/time/range smoke, and SQLite doctor pass. No schema change. Draft PR #111 is stacked on #110. See `notebook/work/BALANCE-BEHAVIOR-COHERENCE-001.md`.
+**NATIVE-GREEN D073 BASE / SUPERSEDED KEYBOARD DETAILS:** on exact PR #110 head `f8c397e71f3633c2e952be6c63c94902a6e6ecc4`, owner review makes Tab/Shift+Tab exclusively field navigation, aligns Layer and ledger tag arrows around prefix-restricted known-tag cycling, adds forgiving time input plus timestamp-safe Left/Right adjustment with Shift acceleration, extends the same one/seven-day grammar to active Balance range handles, and cleans up Layer Detail filtering/layout without changing D071/D072 semantics. Filter state moves below the meter, nonmatches use theme-derived de-emphasis, Add receives a collapsible separator, and cross-day/long-tag rows may request more width. Formatter, strict Clippy, all-feature tests (581 library + 24 integration/process; 20 ignored), CLI help, loaded-profile 120×40 tag/time/range smoke, and SQLite doctor pass. No schema change. Draft PR #111 is stacked on #110. See `notebook/work/BALANCE-BEHAVIOR-COHERENCE-001.md`.
 
 ## BALANCE-TAG-FILTER-UX-001 multi-tag attribution and contextual filtering — 2026-09-28
 
@@ -35,7 +39,7 @@ next: Owner-review PR #111's loaded-profile input behavior and responsive editor
 
 ## BALANCE-RANGE-UX-001 bracket boundary editing — 2026-09-27
 
-**NATIVE-GREEN / DRAFT PUBLICATION NEXT:** Balance keeps inclusive internal `ReportWindow` semantics while presenting explicit start/exclusive-end boundaries. Configurable `[` / `]` actions select the start/end handle; Left/Right moves that handle live, Esc deselects first, and `r` remains the typed distant-range editor using the same exclusive visible `To` boundary. `cargo fmt`, strict Clippy, all-feature tests (553 unit/library tests plus 24 integration/process tests; 20 ignored), CLI help, diff hygiene, 200×60/80×24/40×14 disposable PTY smoke, and SQLite doctor pass. The physical modifier/Caps Lock probe is retired as a product gate; no terminal-specific workaround is introduced. See `notebook/work/BALANCE-RANGE-UX-001.md`.
+**HISTORICAL D070 RANGE BASE / KEYBOARD ROUTE SUPERSEDED BY D074:** Balance keeps inclusive internal `ReportWindow` semantics while presenting explicit start/exclusive-end boundaries. Configurable `[` / `]` actions select the start/end handle; Left/Right moves that handle live, Esc deselects first, and `r` remains the typed distant-range editor using the same exclusive visible `To` boundary. `cargo fmt`, strict Clippy, all-feature tests (553 unit/library tests plus 24 integration/process tests; 20 ignored), CLI help, diff hygiene, 200×60/80×24/40×14 disposable PTY smoke, and SQLite doctor pass. The physical modifier/Caps Lock probe is retired as a product gate; no terminal-specific workaround is introduced. See `notebook/work/BALANCE-RANGE-UX-001.md`.
 
 ## SEDIMENT-016 vertical physics corridor — 2026-09-27
 

@@ -288,6 +288,7 @@ impl App {
 
     pub(super) fn sync_modal_description_from_selection(&mut self) {
         self.modal_editing_category_metadata = false;
+        self.modal_description_before_metadata = None;
         if self.is_on_insert_space() {
             self.modal_description.clear();
         } else if self.time_tracker.active_category_index() == Some(self.selected_index) {
@@ -313,20 +314,32 @@ impl App {
         }
     }
 
-    pub(super) fn toggle_category_metadata_edit(&mut self) {
-        if self.is_on_insert_space() {
+    pub(super) fn begin_category_metadata_edit(&mut self) {
+        if self.is_on_insert_space() || self.modal_editing_category_metadata {
             return;
         }
-        self.modal_editing_category_metadata = !self.modal_editing_category_metadata;
-        self.modal_description = if self.modal_editing_category_metadata {
-            self.time_tracker
-                .category_description_by_index(self.selected_index)
-                .unwrap_or_default()
-        } else if self.time_tracker.active_category_index() == Some(self.selected_index) {
-            self.time_tracker.active_description().to_string()
-        } else {
-            String::new()
-        };
+        self.modal_description_before_metadata = Some(self.modal_description.clone());
+        self.modal_editing_category_metadata = true;
+        self.modal_description = self
+            .time_tracker
+            .category_description_by_index(self.selected_index)
+            .unwrap_or_default();
+        self.modal_tag_index = None;
+        self.modal_tag_cycle_prefix = None;
+    }
+
+    pub(super) fn leave_category_metadata_edit(&mut self) {
+        if !self.modal_editing_category_metadata {
+            return;
+        }
+        self.modal_editing_category_metadata = false;
+        self.modal_description = self.modal_description_before_metadata.take().unwrap_or_else(|| {
+            if self.time_tracker.active_category_index() == Some(self.selected_index) {
+                self.time_tracker.active_description().to_string()
+            } else {
+                String::new()
+            }
+        });
         self.modal_tag_index = None;
         self.modal_tag_cycle_prefix = None;
     }

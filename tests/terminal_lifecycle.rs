@@ -448,8 +448,8 @@ fn active_subtitle_updates_live_and_persists_on_escape_without_enter() {
 }
 
 #[test]
-fn shift_c_clears_only_idle_sediment_and_preserves_sqlite_extent() {
-    let profile = TerminalProfile::new("shift-c-idle-clear");
+fn backspace_clears_only_idle_sediment_and_preserves_sqlite_extent() {
+    let profile = TerminalProfile::new("backspace-idle-clear");
     profile.seed_work_category();
 
     let mut tui = spawn_live_tui(&profile);
@@ -479,8 +479,8 @@ fn shift_c_clears_only_idle_sediment_and_preserves_sqlite_extent() {
 
     let mut tui = spawn_live_tui(&profile);
     wait_for_path(&profile.control_socket_path());
-    tui.write_all(b"C")
-        .expect("uppercase C should reach the real PTY");
+    tui.write_all(b"\x7f")
+        .expect("Backspace should reach the real PTY");
 
     let mut cleared = None;
     for _ in 0..80 {
@@ -494,7 +494,7 @@ fn shift_c_clears_only_idle_sediment_and_preserves_sqlite_extent() {
         thread::sleep(Duration::from_millis(25));
     }
     let (after_width, after_height, after_payload) =
-        cleared.expect("Shift-C should synchronously persist the Idle-only clear");
+        cleared.expect("Backspace should synchronously persist the Idle-only clear");
     assert_eq!((after_width, after_height), (before_width, before_height));
     assert_eq!(sediment_mass_for_category(&after_payload, 0), 0);
     assert_eq!(sediment_mass_for_category(&after_payload, 1), work_before);

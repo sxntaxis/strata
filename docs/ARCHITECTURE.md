@@ -72,7 +72,7 @@ The product remains keyboard-first and keeps the continuous sand view as its cen
 - Themes define arbitrary named RGB palettes, optional arbitrary-length sand subsets, and Strata UI-role mappings.
 - `default` means external terminal/environment authority for supported UI roles; it is not a palette swatch.
 - Category color persistence is a theme-independent perceptual anchor, not a theme slot.
-- Layer `Shift+←` / `Shift+→` navigation derives a stable OKLCH hue wheel from the active theme.
+- Layer `Ctrl+←` / `Ctrl+→` color navigation derives a stable OKLCH hue wheel from the active theme.
 - Theme changes are presentation-only: no sand topology, category/session identity, RNG, or chronology changes.
 - `rgb-luma-safe` is the accepted Classic Braille blend baseline. Terminal auto light/dark detection and contrast adaptation are a subsequent appearance unit.
 

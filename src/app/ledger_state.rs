@@ -276,25 +276,49 @@ impl LedgerEntryEditState {
         match self.active_field {
             LedgerEntryField::Description => return false,
             LedgerEntryField::StartDate => {
-                let delta = ChronoDuration::days(sign * if accelerated { 7 } else { 1 });
-                if self.dates_linked {
-                    let (Some(next_start), Some(next_end)) = (
-                        start.checked_add_signed(delta),
-                        end.checked_add_signed(delta),
-                    ) else {
+                if accelerated {
+                    if self.dates_linked {
+                        let (Some(next_start_date), Some(next_end_date)) = (
+                            crate::temporal::shift_civil_month(start.date(), sign),
+                            crate::temporal::shift_civil_month(end.date(), sign),
+                        ) else {
+                            return false;
+                        };
+                        start = next_start_date.and_time(start.time());
+                        end = next_end_date.and_time(end.time());
+                    } else if let Some(next_date) =
+                        crate::temporal::shift_civil_month(start.date(), sign)
+                    {
+                        start = next_date.and_time(start.time());
+                    } else {
                         return false;
-                    };
-                    start = next_start;
-                    end = next_end;
-                } else if let Some(next) = start.checked_add_signed(delta) {
-                    start = next;
+                    }
                 } else {
-                    return false;
+                    let delta = ChronoDuration::days(sign);
+                    if self.dates_linked {
+                        let (Some(next_start), Some(next_end)) = (
+                            start.checked_add_signed(delta),
+                            end.checked_add_signed(delta),
+                        ) else {
+                            return false;
+                        };
+                        start = next_start;
+                        end = next_end;
+                    } else if let Some(next) = start.checked_add_signed(delta) {
+                        start = next;
+                    } else {
+                        return false;
+                    }
                 }
             }
             LedgerEntryField::EndDate => {
-                let delta = ChronoDuration::days(sign * if accelerated { 7 } else { 1 });
-                if let Some(next) = end.checked_add_signed(delta) {
+                if accelerated {
+                    if let Some(next_date) = crate::temporal::shift_civil_month(end.date(), sign) {
+                        end = next_date.and_time(end.time());
+                    } else {
+                        return false;
+                    }
+                } else if let Some(next) = end.checked_add_signed(ChronoDuration::days(sign)) {
                     end = next;
                 } else {
                     return false;
@@ -520,6 +544,23 @@ mod tests {
     }
 
     #[test]
+    fn temporal_shift_month_clamps_to_month_end() {
+        let mut edit = LedgerEntryEditState::existing(
+            7,
+            CategoryId::new(2),
+            "tag".to_string(),
+            "2026-01-31".to_string(),
+            "10:30:15".to_string(),
+            "2026-01-31".to_string(),
+            "12:00:15".to_string(),
+        );
+        edit.active_field = LedgerEntryField::StartDate;
+        assert!(edit.adjust_active_temporal(1, true));
+        assert_eq!(edit.start_date, "2026-02-28");
+        assert_eq!(edit.end_date, "2026-02-28");
+    }
+
+    #[test]
     fn temporal_shift_arrows_use_large_steps_and_preserve_seconds() {
         let mut edit = LedgerEntryEditState::existing(
             7,
@@ -532,8 +573,8 @@ mod tests {
         );
         edit.active_field = LedgerEntryField::StartDate;
         assert!(edit.adjust_active_temporal(1, true));
-        assert_eq!(edit.start_date, "2026-09-27");
-        assert_eq!(edit.end_date, "2026-09-27");
+        assert_eq!(edit.start_date, "2026-10-20");
+        assert_eq!(edit.end_date, "2026-10-20");
 
         edit.active_field = LedgerEntryField::EndTime;
         assert!(edit.adjust_active_temporal(-1, false));

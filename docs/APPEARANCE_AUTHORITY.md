@@ -50,7 +50,7 @@ CLI projection schema remains unchanged: its legacy `color_index` field is a com
 The existing Layers interaction remains authoritative:
 
 - select a category;
-- `Shift+←` / `Shift+→` changes its category color;
+- `Ctrl+←` / `Ctrl+→` changes its category color;
 - the same controls select the color while forging a new layer.
 
 Strata derives the cycling wheel from the active theme rather than trusting declaration order. Eligible swatches are converted to OKLCH and stably ordered by hue; near-neutral colors follow chromatic colors and use lightness ordering. Same-hue ties use lightness/chroma/key ordering.

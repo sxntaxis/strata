@@ -192,11 +192,7 @@ impl App {
                 preferred_inner_width.saturating_add(REPORT_MODAL_SETTINGS.expanded_inner_padding),
             )
         };
-        let selected_summary_index = if summary.entries.is_empty() {
-            None
-        } else {
-            Some(self.report_selected_index.min(summary.entries.len() - 1))
-        };
+        let selected_summary_index = self.report_selected_summary_index(&summary);
         let report_window = self.current_report_window();
         let (interval_start, interval_end) =
             ui_helpers::format_report_window_boundary_parts(&report_window);

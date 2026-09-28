@@ -1061,12 +1061,14 @@ struct App {
     new_category_name: String,
     new_category_color_cursor: usize,
     modal_description: String,
+    modal_description_before_metadata: Option<String>,
     modal_active_description_dirty: bool,
     modal_editing_category_metadata: bool,
     category_tags: storage::CategoryTagsState,
     modal_tag_index: Option<usize>,
     modal_tag_cycle_prefix: Option<String>,
     report_selected_index: usize,
+    report_selected_category_id: Option<CategoryId>,
     report_period: ReportPeriod,
     report_period_offset: usize,
     report_custom_window: Option<ReportWindow>,
@@ -1165,12 +1167,14 @@ impl App {
             new_category_name: String::new(),
             new_category_color_cursor: 0,
             modal_description: String::new(),
+            modal_description_before_metadata: None,
             modal_active_description_dirty: false,
             modal_editing_category_metadata: false,
             category_tags,
             modal_tag_index: None,
             modal_tag_cycle_prefix: None,
             report_selected_index: 0,
+            report_selected_category_id: None,
             report_period: ReportPeriod::Today,
             report_period_offset: 0,
             report_custom_window: None,
@@ -1395,6 +1399,7 @@ impl App {
         }
         self.ui_mode = UiMode::Main;
         self.modal_description = String::new();
+        self.modal_description_before_metadata = None;
         self.modal_editing_category_metadata = false;
         self.modal_tag_index = None;
         self.modal_tag_cycle_prefix = None;
@@ -1404,6 +1409,7 @@ impl App {
     fn open_report_modal(&mut self) {
         self.ui_mode = UiMode::BalanceModal;
         self.report_selected_index = 0;
+        self.report_selected_category_id = None;
         self.report_period = ReportPeriod::Today;
         self.report_period_offset = 0;
         self.report_custom_window = None;

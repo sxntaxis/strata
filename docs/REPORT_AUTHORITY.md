@@ -82,8 +82,7 @@ up to the existing terminal/margin clamp.
 
 Balance browsing remains a projection until the user explicitly enters a ledger mutation. The layer-detail ledger is
 the canonical historical-correction surface. `+ Add entry…` creates past activity for that layer, Confirm on an existing
-completed row edits that stable source entry, and `balance_log_activity` / `l` is only a shortcut into the same Add row
-for the currently selected Balance layer. The former separate Balance-wide Layer/From/To editor is retired.
+completed row edits that stable source entry. The synthetic Add row is the normal keyboard route; `balance_log_activity` remains available as an unbound configurable/palette action rather than a default `l` shortcut. The former separate Balance-wide Layer/From/To editor is retired.
 
 HISTORY-001C established the first safe transactional primitive by reclassifying a positive sub-interval of one
 completed Idle session while conserving canonical whole seconds, regenerating affected `daily-contribution`
@@ -121,8 +120,7 @@ provenance and the existing cumulative allocator, including fractional UTC bound
 HISTORY-001D established ledger truth without changing sediment. HISTORY-001E extends that same assignment transaction with bounded current-pile reconciliation: canonical seconds reclassified from one existing category to another request an in-place transfer of retained source-category sediment into the target category. True-gap seconds create no current grains, and prior clears may limit how much source mass remains available. Missing visual mass never blocks the ledger correction and unrelated categories are never consumed to force the current pile to equal historical accounting. First-write authentic day-end snapshots remain immutable.
 
 The unified layer-detail Add/Edit row owns the historical Tag field and persists its canonical description, including
-semicolon-separated multi-tag attribution under STRATA-D072. `balance_log_activity` / `l` enters this same row rather
-than a second global editor. Active-generation rebasing preserves the persisted live description.
+semicolon-separated multi-tag attribution under STRATA-D072. `balance_log_activity` enters this same row when invoked through configuration/palette rather than creating a second global editor. Active-generation rebasing preserves the persisted live description.
 
 ## Provisional active time
 

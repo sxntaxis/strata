@@ -1,11 +1,35 @@
 use std::time::Duration;
 
-use chrono::{DateTime, Duration as ChronoDuration, FixedOffset, NaiveDate, NaiveTime, Utc};
+use chrono::{
+    DateTime, Datelike, Duration as ChronoDuration, FixedOffset, NaiveDate, NaiveTime, Utc,
+};
 
 use crate::domain::{DayBoundaryConfig, OperationalDayPolicy};
 
 pub(crate) const MAX_LIVE_CLOCK_SKEW: Duration = Duration::from_secs(5);
 pub(crate) const MAX_UNATTENDED_WALL_INTERVAL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+pub(crate) fn shift_civil_month(date: NaiveDate, direction: i64) -> Option<NaiveDate> {
+    if direction == 0 {
+        return Some(date);
+    }
+    let month_index = i64::from(date.year())
+        .checked_mul(12)?
+        .checked_add(i64::from(date.month0()))?
+        .checked_add(direction.signum())?;
+    let year = i32::try_from(month_index.div_euclid(12)).ok()?;
+    let month = u32::try_from(month_index.rem_euclid(12)).ok()?.saturating_add(1);
+    let first = NaiveDate::from_ymd_opt(year, month, 1)?;
+    let next_first = if month == 12 {
+        NaiveDate::from_ymd_opt(year.checked_add(1)?, 1, 1)?
+    } else {
+        NaiveDate::from_ymd_opt(year, month + 1, 1)?
+    };
+    let last_day = next_first
+        .checked_sub_signed(ChronoDuration::days(1))?
+        .day();
+    NaiveDate::from_ymd_opt(first.year(), first.month(), date.day().min(last_day))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ReconciledInterval {
@@ -469,6 +493,27 @@ mod tests {
         assert_eq!(slices.len(), 1);
         assert_eq!(slices[0].operational_day.to_string(), "2026-08-21");
         assert_eq!(slices[0].elapsed_seconds, 1);
+    }
+
+    #[test]
+    fn civil_month_shift_preserves_day_or_clamps_to_month_end() {
+        let jan_15 = NaiveDate::from_ymd_opt(2026, 1, 15).unwrap();
+        assert_eq!(
+            shift_civil_month(jan_15, 1),
+            NaiveDate::from_ymd_opt(2026, 2, 15)
+        );
+
+        let jan_31 = NaiveDate::from_ymd_opt(2026, 1, 31).unwrap();
+        assert_eq!(
+            shift_civil_month(jan_31, 1),
+            NaiveDate::from_ymd_opt(2026, 2, 28)
+        );
+
+        let mar_31 = NaiveDate::from_ymd_opt(2026, 3, 31).unwrap();
+        assert_eq!(
+            shift_civil_month(mar_31, -1),
+            NaiveDate::from_ymd_opt(2026, 2, 28)
+        );
     }
 
     #[test]

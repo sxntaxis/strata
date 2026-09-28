@@ -60,6 +60,40 @@ fn parse_report_range(from: &str, to: &str) -> Result<ReportWindow, String> {
     ReportWindow::new(start, end)
 }
 
+fn shifted_report_boundary_month(
+    window: &ReportWindow,
+    boundary: ReportRangeBoundary,
+    direction: i8,
+    today: NaiveDate,
+) -> Option<ReportWindow> {
+    if direction == 0 {
+        return Some(window.clone());
+    }
+    let sign = i64::from(direction.signum());
+    match boundary {
+        ReportRangeBoundary::Start => {
+            let candidate = crate::temporal::shift_civil_month(window.start, sign)?;
+            let start = if sign > 0 {
+                candidate.min(window.end)
+            } else {
+                candidate
+            };
+            ReportWindow::new(start, window.end).ok()
+        }
+        ReportRangeBoundary::End => {
+            let end_exclusive = ui_helpers::report_window_end_exclusive(window)?;
+            let shifted_exclusive = crate::temporal::shift_civil_month(end_exclusive, sign)?;
+            let candidate_end = shifted_exclusive.checked_sub_signed(ChronoDuration::days(1))?;
+            let end = if sign > 0 {
+                candidate_end.min(today)
+            } else {
+                candidate_end.max(window.start)
+            };
+            ReportWindow::new(window.start, end).ok()
+        }
+    }
+}
+
 fn shifted_report_boundary(
     window: &ReportWindow,
     boundary: ReportRangeBoundary,
@@ -160,12 +194,54 @@ fn filtered_layer_balance(logs: &[CategoryLogEntry], filter: &[ReportTagFacet]) 
 impl App {
     pub(super) fn focus_none_report_row(&mut self) {
         let summary = self.report_rows();
-        self.report_selected_index = summary
+        let index = summary
             .entries
             .iter()
             .position(|entry| entry.category_id == DRIFT_CATEGORY_ID)
             .unwrap_or(0);
-        self.clamp_report_selection(summary.entries.len());
+        self.select_report_summary_index(&summary, index);
+    }
+
+    pub(super) fn report_selected_summary_index(
+        &self,
+        summary: &BalanceReportSummary,
+    ) -> Option<usize> {
+        if summary.entries.is_empty() {
+            return None;
+        }
+        self.report_selected_category_id
+            .and_then(|category_id| {
+                summary
+                    .entries
+                    .iter()
+                    .position(|entry| entry.category_id == category_id)
+            })
+            .or_else(|| Some(self.report_selected_index.min(summary.entries.len() - 1)))
+    }
+
+    pub(super) fn sync_report_selection_to_summary(&mut self, summary: &BalanceReportSummary) {
+        let Some(index) = self.report_selected_summary_index(summary) else {
+            self.report_selected_index = 0;
+            self.report_selected_category_id = None;
+            return;
+        };
+        self.report_selected_index = index;
+        self.report_selected_category_id = Some(summary.entries[index].category_id);
+    }
+
+    pub(super) fn select_report_summary_index(
+        &mut self,
+        summary: &BalanceReportSummary,
+        index: usize,
+    ) {
+        if summary.entries.is_empty() {
+            self.report_selected_index = 0;
+            self.report_selected_category_id = None;
+            return;
+        }
+        let index = index.min(summary.entries.len() - 1);
+        self.report_selected_index = index;
+        self.report_selected_category_id = Some(summary.entries[index].category_id);
     }
 
     fn report_categories(&self) -> Vec<Category> {
@@ -197,10 +273,6 @@ impl App {
         self.report_custom_window.clone().unwrap_or_else(|| {
             report_period_window_with_offset(self.report_period, self.report_period_offset)
         })
-    }
-
-    pub(super) fn report_range_is_custom(&self) -> bool {
-        self.report_custom_window.is_some()
     }
 
     pub(super) fn report_rows(&self) -> BalanceReportSummary {
@@ -294,11 +366,17 @@ impl App {
             return false;
         }
         self.clear_report_range_boundary();
+
+        if facets.len() > 1 && self.report_filter_tag_index.is_none() {
+            self.report_filter_tag_index = Some(0);
+            self.render_needed = true;
+            return true;
+        }
+
         let focus = self
             .report_filter_tag_index
             .unwrap_or(0)
             .min(facets.len().saturating_sub(1));
-        self.report_filter_tag_index = (facets.len() > 1).then_some(focus);
         let facet = facets[focus].clone();
         if let Some(index) = self
             .report_tag_filter
@@ -309,6 +387,7 @@ impl App {
         } else {
             self.report_tag_filter.push(facet);
         }
+        self.report_filter_tag_index = None;
         self.render_needed = true;
         true
     }
@@ -356,23 +435,6 @@ impl App {
             self.render_needed = true;
         }
         changed
-    }
-
-    pub(super) fn sync_report_filter_focus_for_selection(&mut self) {
-        let Some(current) = self.report_filter_tag_index else {
-            return;
-        };
-        let logs = self.report_current_logs();
-        let Some(row) = logs.get(self.report_log_selected_index) else {
-            self.report_filter_tag_index = None;
-            return;
-        };
-        let facets = self.report_tag_facets_for_log(row);
-        if facets.len() <= 1 {
-            self.report_filter_tag_index = None;
-        } else {
-            self.report_filter_tag_index = Some(current.min(facets.len() - 1));
-        }
     }
 
     fn live_session_preview(&self) -> Option<LiveSessionPreview> {
@@ -523,22 +585,35 @@ impl App {
     }
 
     pub(super) fn move_report_range_boundary(&mut self, direction: i8) -> bool {
-        self.move_report_range_boundary_steps(direction, 1)
-    }
-
-    pub(super) fn move_report_range_boundary_steps(&mut self, direction: i8, steps: usize) -> bool {
         let Some(boundary) = self.report_range_boundary else {
             return false;
         };
         let original = self.current_report_window();
-        let mut shifted = original.clone();
         let today = operational_day_key_now();
-        for _ in 0..steps.max(1) {
-            let Some(next) = shifted_report_boundary(&shifted, boundary, direction, today) else {
-                break;
-            };
-            shifted = next;
-        }
+        let Some(shifted) = shifted_report_boundary(&original, boundary, direction, today) else {
+            return false;
+        };
+        self.install_shifted_report_boundary(original, shifted)
+    }
+
+    pub(super) fn move_report_range_boundary_month(&mut self, direction: i8) -> bool {
+        let Some(boundary) = self.report_range_boundary else {
+            return false;
+        };
+        let original = self.current_report_window();
+        let today = operational_day_key_now();
+        let Some(shifted) = shifted_report_boundary_month(&original, boundary, direction, today)
+        else {
+            return false;
+        };
+        self.install_shifted_report_boundary(original, shifted)
+    }
+
+    fn install_shifted_report_boundary(
+        &mut self,
+        original: ReportWindow,
+        shifted: ReportWindow,
+    ) -> bool {
         if shifted == original {
             return false;
         }
@@ -792,10 +867,10 @@ impl App {
             return self.begin_ledger_add_edit(category_id);
         }
         let summary = self.report_rows();
-        let Some(entry) = summary.entries.get(
-            self.report_selected_index
-                .min(summary.entries.len().saturating_sub(1)),
-        ) else {
+        let Some(index) = self.report_selected_summary_index(&summary) else {
+            return false;
+        };
+        let Some(entry) = summary.entries.get(index) else {
             return false;
         };
         let category_id = entry.category_id;
@@ -1143,10 +1218,9 @@ impl App {
         if self.report_logs_category_id.is_some() {
             let row_count = self.report_ledger_row_count();
             self.clamp_report_log_selection(row_count);
-            self.sync_report_filter_focus_for_selection();
         } else {
-            let row_count = self.report_rows().entries.len();
-            self.clamp_report_selection(row_count);
+            let summary = self.report_rows();
+            self.sync_report_selection_to_summary(&summary);
         }
         self.render_needed = true;
     }
@@ -1278,14 +1352,6 @@ impl App {
         }
     }
 
-    pub(super) fn clamp_report_selection(&mut self, row_count: usize) {
-        if row_count == 0 {
-            self.report_selected_index = 0;
-        } else if self.report_selected_index >= row_count {
-            self.report_selected_index = row_count - 1;
-        }
-    }
-
     pub(super) fn clamp_report_log_selection(&mut self, row_count: usize) {
         if row_count == 0 {
             self.report_log_selected_index = 0;
@@ -1303,7 +1369,7 @@ mod report_edit_state_tests {
     use super::{
         build_historical_preview, filtered_layer_balance, parse_report_range,
         report_log_matches_tag_filter, report_range_edit_state, shifted_custom_window_newer,
-        shifted_custom_window_older, shifted_report_boundary,
+        shifted_custom_window_older, shifted_report_boundary, shifted_report_boundary_month,
     };
     use crate::{
         app::{ReportRangeBoundary, ReportTagFacet, ui_helpers},
@@ -1476,6 +1542,47 @@ mod report_edit_state_tests {
         assert_eq!(
             expanded_right.end,
             NaiveDate::from_ymd_opt(2026, 8, 15).unwrap()
+        );
+    }
+
+    #[test]
+    fn bracket_boundary_shift_uses_month_scale_and_visible_end_boundary() {
+        let today = NaiveDate::from_ymd_opt(2026, 9, 28).unwrap();
+        let window = ReportWindow::new(
+            NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 6, 30).unwrap(),
+        )
+        .unwrap();
+
+        let start_shift =
+            shifted_report_boundary_month(&window, ReportRangeBoundary::Start, 1, today).unwrap();
+        assert_eq!(
+            start_shift.start,
+            NaiveDate::from_ymd_opt(2026, 6, 30).unwrap()
+        );
+
+        let end_shift =
+            shifted_report_boundary_month(&window, ReportRangeBoundary::End, 1, today).unwrap();
+        assert_eq!(
+            end_shift.end,
+            NaiveDate::from_ymd_opt(2026, 7, 31).unwrap()
+        );
+
+        let reaches_present = ReportWindow::new(
+            NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 9, 15).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            shifted_report_boundary_month(
+                &reaches_present,
+                ReportRangeBoundary::End,
+                1,
+                today,
+            )
+            .unwrap()
+            .end,
+            today
         );
     }
 

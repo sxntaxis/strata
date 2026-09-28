@@ -17,18 +17,51 @@ impl App {
             categories.len().saturating_add(1).min(u16::MAX as usize) as u16;
         let category_width = categories
             .iter()
-            .map(|category| self.display_layer_name(&category.name).chars().count())
+            .map(|category| {
+                2usize.saturating_add(self.display_layer_name(&category.name).chars().count())
+            })
             .max()
             .unwrap_or(0);
-        let insert_width = "+ Forge new layer...".chars().count();
-        let description_width = if self.modal_editing_category_metadata {
-            self.modal_description.chars().count().saturating_add(1)
+        let insert_label_width = if self.new_category_name.is_empty() {
+            "+ Forge new layer...".chars().count()
         } else {
-            0
+            self.new_category_name.chars().count()
         };
-        let minimum_content_width = 2usize
-            .saturating_add(category_width.max(insert_width))
-            .saturating_add(description_width)
+        let insert_width = 2usize.saturating_add(insert_label_width);
+        let selected_width = categories
+            .get(self.selected_index)
+            .map(|category| {
+                let layer_width =
+                    2usize.saturating_add(self.display_layer_name(&category.name).chars().count());
+                let description_width = if self.modal_editing_category_metadata {
+                    self.modal_description.chars().count()
+                } else if let Some(completion) =
+                    self.tag_completion_for_category(category.id, &self.modal_description)
+                {
+                    let suffix_width = completion
+                        .tag
+                        .chars()
+                        .skip(completion.typed_chars)
+                        .count();
+                    self.modal_description
+                        .chars()
+                        .count()
+                        .saturating_add(suffix_width)
+                } else {
+                    self.modal_description.chars().count()
+                };
+                if description_width == 0 {
+                    layer_width
+                } else {
+                    layer_width
+                        .saturating_add(1)
+                        .saturating_add(description_width)
+                }
+            })
+            .unwrap_or(0);
+        let minimum_content_width = category_width
+            .max(insert_width)
+            .max(selected_width)
             .min(u16::MAX as usize) as u16;
         let minimum_inner_width = minimum_content_width.saturating_add(2);
         let minimum_inner_height = minimum_content_height.saturating_add(2);

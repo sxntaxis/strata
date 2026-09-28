@@ -52,3 +52,7 @@ STRATA-D073 is accepted, implemented, and natively certified in the decision, re
 
 - Published as draft PR [#111](https://github.com/sxntaxis/strata/pull/111), stacked on PR #110 (`work/balance-tag-filter-ux-001`).
 - STRATA-D073 is accepted and natively certified; this PR changes no schema and keeps SEDIMENT-016 separate.
+
+## Supersession — STRATA-D074
+
+The native-green D073 evidence above remains historical certification of its exact bundle. The owner subsequently accepted STRATA-D074 on 2026-09-28: Date/Balance-boundary Shift acceleration changes from seven days to one civil month, old Shift-arrow period/color/reorder meanings are retired, metadata moves to `Ctrl+E`, Main sand clearing moves to Backspace/Delete, and multi-tag filter focus becomes a confirmable selector rather than an immediate first-facet toggle. See `notebook/work/INTERACTION-GRAMMAR-001.md`; the D074 implementation is not native-certified by this D073 record.
