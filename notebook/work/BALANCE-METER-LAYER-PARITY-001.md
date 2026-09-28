@@ -72,3 +72,8 @@ This pass does not change historical-correction semantics, collateral-confirmati
 - The isolated test profile's SQLite doctor passed after the smoke: schema v1, integrity and foreign-key checks healthy. The source profile used to create the portable test fixture was not mutated.
 
 The implementation is natively validated as a candidate. Owner review must first resolve the accepted D069/report-authority meter conflict; SEDIMENT-016 remains separate.
+
+## Publication — 2026-09-28
+
+- Published as draft PR [#109](https://github.com/sxntaxis/strata/pull/109), stacked on PR #108 (`work/balance-ledger-correction-ux-001`).
+- Accepted STRATA-D069 and `docs/REPORT_AUTHORITY.md` remain unchanged pending explicit owner adjudication of the meter-scale conflict.
