@@ -142,12 +142,8 @@ impl App {
             .title_alignment(ratatui::layout::Alignment::Center)
             .border_style(Style::default().fg(border_color));
         let inner = frame_block.inner(modal_rect);
-        let list_area = overlay_layout::responsive_content_rect(
-            inner,
-            minimum_content_width,
-            minimum_content_height,
-            true,
-        );
+        let list_area =
+            overlay_layout::modal_content_rect(inner, minimum_content_height, true);
 
         f.render_widget(ratatui::widgets::Clear, modal_rect);
         f.render_widget(frame_block, modal_rect);

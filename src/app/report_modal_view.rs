@@ -329,12 +329,7 @@ impl App {
 
         let frame_inner = frame_block.inner(modal_rect);
         let list_area = if default_summary {
-            overlay_layout::responsive_content_rect(
-                frame_inner,
-                summary_content_width,
-                summary_content_height,
-                false,
-            )
+            overlay_layout::modal_content_rect(frame_inner, summary_content_height, false)
         } else {
             frame_inner
         };

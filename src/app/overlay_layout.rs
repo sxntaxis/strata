@@ -1,6 +1,6 @@
 use ratatui::layout::Rect;
 
-const CONTENT_INSET_STEPS: [u16; 4] = [1, 2, 4, 6];
+const HORIZONTAL_CONTENT_INSET: u16 = 1;
 const MAX_VERTICAL_CONTENT_INSET: u16 = 2;
 
 pub(super) fn centered_overlay_rect(
@@ -34,26 +34,28 @@ pub(super) fn centered_overlay_rect(
     Rect::new(x, y, width, height)
 }
 
-/// Inset modal content without turning the modal into a fixed-width card.
+/// Inset ordinary modal content without turning the modal into a fixed-width card.
 ///
-/// Horizontal padding consumes only width that exists beyond the content's hard
-/// minimum. It grows through deliberate 1/2/4/6-cell steps, so roomy overlays
-/// gain breathing space while constrained layouts collapse padding before they
-/// squeeze the actual content. Vertical padding is optional because structured
-/// surfaces such as Balance own their own section rhythm.
-pub(super) fn responsive_content_rect(
+/// Horizontal content inset is deliberately fixed at one terminal cell per side.
+/// Modal geometry already owns the hard content minimum, so wider overlays keep
+/// their spare width inside the content span instead of converting it into larger
+/// side padding. Only physically tiny areas that cannot retain a content cell drop
+/// the inset. Vertical padding remains optional and surplus-driven because surfaces
+/// such as Balance own their own section rhythm.
+pub(super) fn modal_content_rect(
     area: Rect,
-    minimum_content_width: u16,
     minimum_content_height: u16,
     vertical_padding: bool,
 ) -> Rect {
-    let horizontal_capacity = area.width.saturating_sub(minimum_content_width) / 2;
-    let horizontal = CONTENT_INSET_STEPS
-        .iter()
-        .copied()
-        .rev()
-        .find(|step| *step <= horizontal_capacity)
-        .unwrap_or(0);
+    let horizontal = if area.width
+        >= HORIZONTAL_CONTENT_INSET
+            .saturating_mul(2)
+            .saturating_add(1)
+    {
+        HORIZONTAL_CONTENT_INSET
+    } else {
+        0
+    };
 
     let vertical = if vertical_padding {
         (area.height.saturating_sub(minimum_content_height) / 2).min(MAX_VERTICAL_CONTENT_INSET)
@@ -73,7 +75,7 @@ pub(super) fn responsive_content_rect(
 mod tests {
     use ratatui::layout::Rect;
 
-    use super::{centered_overlay_rect, responsive_content_rect};
+    use super::{centered_overlay_rect, modal_content_rect};
 
     #[test]
     fn proportional_comfort_floor_wins_when_content_is_smaller() {
@@ -106,34 +108,32 @@ mod tests {
     }
 
     #[test]
-    fn responsive_content_inset_consumes_surplus_in_deliberate_steps() {
+    fn modal_content_inset_is_exactly_one_cell_when_possible() {
         assert_eq!(
-            responsive_content_rect(Rect::new(10, 20, 49, 13), 47, 13, false),
+            modal_content_rect(Rect::new(10, 20, 49, 13), 13, false),
             Rect::new(11, 20, 47, 13)
         );
         assert_eq!(
-            responsive_content_rect(Rect::new(10, 20, 51, 13), 47, 13, false),
-            Rect::new(12, 20, 47, 13)
-        );
-        assert_eq!(
-            responsive_content_rect(Rect::new(10, 20, 55, 13), 47, 13, false),
-            Rect::new(14, 20, 47, 13)
-        );
-        assert_eq!(
-            responsive_content_rect(Rect::new(10, 20, 59, 13), 47, 13, false),
-            Rect::new(16, 20, 47, 13)
+            modal_content_rect(Rect::new(10, 20, 59, 13), 13, false),
+            Rect::new(11, 20, 57, 13)
         );
     }
 
     #[test]
-    fn responsive_content_inset_collapses_before_content_is_squeezed() {
-        let rect = responsive_content_rect(Rect::new(3, 4, 30, 8), 30, 8, true);
-        assert_eq!(rect, Rect::new(3, 4, 30, 8));
+    fn modal_content_inset_drops_only_when_one_cell_per_side_is_impossible() {
+        assert_eq!(
+            modal_content_rect(Rect::new(3, 4, 2, 8), 8, true),
+            Rect::new(3, 4, 2, 8)
+        );
+        assert_eq!(
+            modal_content_rect(Rect::new(3, 4, 3, 8), 8, true),
+            Rect::new(4, 4, 1, 8)
+        );
     }
 
     #[test]
-    fn responsive_vertical_inset_adds_calm_only_when_height_is_spare() {
-        let rect = responsive_content_rect(Rect::new(10, 20, 40, 14), 30, 10, true);
-        assert_eq!(rect, Rect::new(14, 22, 32, 10));
+    fn surplus_vertical_inset_keeps_existing_calm() {
+        let rect = modal_content_rect(Rect::new(10, 20, 40, 14), 10, true);
+        assert_eq!(rect, Rect::new(11, 22, 38, 10));
     }
 }
