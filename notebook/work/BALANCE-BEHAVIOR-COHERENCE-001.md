@@ -47,3 +47,8 @@ STRATA-D073 records the owner-reviewed coherence pass:
 - SQLite doctor passed after PTY exit: schema v1, integrity and foreign keys healthy. The source profile used to create the portable test fixture was exported read-only and not mutated.
 
 STRATA-D073 is accepted, implemented, and natively certified in the decision, report, and interaction authorities. This coherence pass changes no schema and leaves D071/D072 semantics and SEDIMENT-016 separate.
+
+## Publication — 2026-09-28
+
+- Published as draft PR [#111](https://github.com/sxntaxis/strata/pull/111), stacked on PR #110 (`work/balance-tag-filter-ux-001`).
+- STRATA-D073 is accepted and natively certified; this PR changes no schema and keeps SEDIMENT-016 separate.
