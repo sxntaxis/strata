@@ -781,10 +781,9 @@ impl App {
         show_date_column: bool,
         selected_text: Option<Color>,
         is_none_category: bool,
-        marker: (i8, Color),
-        fallback_tag: &str,
+        marker: (i8, Color, &str),
     ) -> Line<'static> {
-        let (balance_effect, marker_color) = marker;
+        let (balance_effect, marker_color, fallback_tag) = marker;
         let tag = ledger_display_tag(&row.description, fallback_tag);
         let start_time = Self::ledger_minute_time(&row.start_time);
         let end_time = Self::ledger_minute_time(&row.end_time);
@@ -870,6 +869,34 @@ impl App {
         marker: &str,
         fallback_tag: &str,
     ) -> Line<'static> {
+        if row_width < 52 {
+            let effective_end_date = ledger_edit_effective_end_date(edit);
+            let active_value = match edit.active_field {
+                LedgerEntryField::Description => {
+                    format!("Tag {}", ledger_edit_token(edit.description.trim(), true))
+                }
+                LedgerEntryField::StartDate => {
+                    format!("From {}", ledger_edit_token(&edit.start_date, true))
+                }
+                LedgerEntryField::StartTime => format!(
+                    "From {} {}",
+                    self.ledger_date_label(&edit.start_date),
+                    ledger_edit_token(&edit.start_time, true)
+                ),
+                LedgerEntryField::EndDate => {
+                    format!("To {}", ledger_edit_token(&effective_end_date, true))
+                }
+                LedgerEntryField::EndTime => format!(
+                    "To {} {}",
+                    self.ledger_date_label(&effective_end_date),
+                    ledger_edit_token(&edit.end_time, true)
+                ),
+            };
+            return Line::from(Span::raw(
+                self.ledger_left_cell(&format!("{marker} {active_value}"), row_width),
+            ));
+        }
+
         let description = edit.description.trim();
         let tag = if edit.active_field == LedgerEntryField::Description {
             ledger_edit_token(description, true)
@@ -880,12 +907,20 @@ impl App {
         let effective_end_date = ledger_edit_effective_end_date(edit);
         let cross_day = edit.start_date != effective_end_date;
 
-        let start_date_label = self.ledger_date_label(&edit.start_date);
+        let start_date_label = if edit.active_field == LedgerEntryField::StartDate {
+            edit.start_date.clone()
+        } else {
+            self.ledger_date_label(&edit.start_date)
+        };
         let start_date = ledger_edit_token(
             &start_date_label,
             edit.active_field == LedgerEntryField::StartDate,
         );
-        let end_date_label = self.ledger_date_label(&effective_end_date);
+        let end_date_label = if edit.active_field == LedgerEntryField::EndDate {
+            effective_end_date.clone()
+        } else {
+            self.ledger_date_label(&effective_end_date)
+        };
         let end_date = if !edit.dates_linked && edit.active_field == LedgerEntryField::EndDate {
             ledger_edit_token(&end_date_label, true)
         } else {
@@ -989,15 +1024,17 @@ impl App {
                     .as_ref()
                     .is_some_and(|edit| edit.session_id() == row.session_id);
                 let item = if editing_this_row {
-                    ListItem::new(self.ledger_edit_line(
-                        self.ledger_entry_edit
-                            .as_ref()
-                            .expect("editing row has ledger edit state"),
-                        row_width,
-                        show_date_column,
-                        balance_marker(balance_effect),
-                        &layer_display_name,
-                    ))
+                    ListItem::new(
+                        self.ledger_edit_line(
+                            self.ledger_entry_edit
+                                .as_ref()
+                                .expect("editing row has ledger edit state"),
+                            row_width,
+                            show_date_column,
+                            balance_marker(balance_effect),
+                            &layer_display_name,
+                        ),
+                    )
                 } else {
                     ListItem::new(self.ledger_normal_line(
                         row,
@@ -1005,8 +1042,7 @@ impl App {
                         show_date_column,
                         is_selected.then_some(text_color),
                         is_none_category,
-                        (balance_effect, border_color),
-                        &layer_display_name,
+                        (balance_effect, border_color, &layer_display_name),
                     ))
                 };
                 if is_selected {
@@ -1025,18 +1061,20 @@ impl App {
                 .as_ref()
                 .is_some_and(|edit| edit.is_add());
             let item = if editing_add {
-                ListItem::new(self.ledger_edit_line(
-                    self.ledger_entry_edit
-                        .as_ref()
-                        .expect("adding row has ledger edit state"),
-                    row_width,
-                    show_date_column,
-                    "+",
-                    &layer_display_name,
-                ))
+                ListItem::new(
+                    self.ledger_edit_line(
+                        self.ledger_entry_edit
+                            .as_ref()
+                            .expect("adding row has ledger edit state"),
+                        row_width,
+                        show_date_column,
+                        "+",
+                        &layer_display_name,
+                    ),
+                )
             } else {
                 let label = "+ Add entry…";
-                let padded = self.ledger_left_cell(&label, row_width);
+                let padded = self.ledger_left_cell(label, row_width);
                 ListItem::new(Line::from(Span::styled(
                     padded,
                     Style::default().fg(if is_selected {
@@ -1263,7 +1301,10 @@ mod hardening_tests {
         edit.active_field = LedgerEntryField::EndTime;
 
         assert_eq!(ledger_edit_effective_end_date(&edit), "2026-09-28");
-        assert_eq!(ledger_edit_token("UX detail smoke", false), "UX detail smoke");
+        assert_eq!(
+            ledger_edit_token("UX detail smoke", false),
+            "UX detail smoke"
+        );
         assert_eq!(ledger_edit_token("00:20:00", true), "[00:20:00]");
         assert_eq!(ledger_edit_token("", true), "[        ]");
     }

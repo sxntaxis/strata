@@ -148,13 +148,16 @@ fn rounded_meter_offset(signed_seconds: i128, total_seconds: i128, radius: i128)
     }
 }
 
-fn meter_offset(width: u16, signed_seconds: isize, total_seconds: usize) -> i128 {
-    let width = usize::from(width);
+fn meter_radius(width: usize) -> i128 {
     if width < 3 {
         return 0;
     }
-    let center = width / 2;
-    let radius = center.saturating_sub(1) as i128;
+    (width / 2).saturating_sub(1).max(1) as i128
+}
+
+fn meter_offset(width: u16, signed_seconds: isize, total_seconds: usize) -> i128 {
+    let width = usize::from(width);
+    let radius = meter_radius(width);
     rounded_meter_offset(signed_seconds as i128, total_seconds as i128, radius)
         .clamp(-radius, radius)
 }
@@ -191,7 +194,7 @@ fn meter_cells_for_offset(width: u16, offset: i128) -> Vec<MeterCell> {
         role: MeterRole::Equilibrium,
     };
 
-    let radius = center.saturating_sub(1) as i128;
+    let radius = meter_radius(width);
     let offset = offset.clamp(-radius, radius);
     let dot = (center as i128 + offset) as usize;
 
@@ -402,8 +405,8 @@ mod tests {
     use super::{
         InstrumentTotals, MIN_THREE_COLUMN_WIDTH, MeterRole, format_negative_total,
         format_net_total, format_positive_total, instrument_totals, instrument_width, meter_cells,
-        meter_offset, preferred_summary_inner_height, preferred_summary_inner_width,
-        side_total_line,
+        meter_cells_for_offset, meter_offset, preferred_summary_inner_height,
+        preferred_summary_inner_width, side_total_line,
     };
 
     fn entry(
@@ -521,6 +524,14 @@ mod tests {
         assert_eq!(meter_offset(width, 0, total_recorded), 0);
         assert_eq!(meter_offset(width, 1, total_recorded), 1);
         assert_eq!(meter_offset(width, -1, total_recorded), -1);
+
+        assert_eq!(meter_offset(3, 1, 100), 1);
+        assert_eq!(meter_offset(3, -1, 100), -1);
+        assert_eq!(
+            meter_cells_for_offset(3, -1)[0].role,
+            MeterRole::DotNegative
+        );
+        assert_eq!(meter_cells_for_offset(3, 1)[2].role, MeterRole::DotPositive);
     }
 
     #[test]

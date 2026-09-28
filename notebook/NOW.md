@@ -5,13 +5,13 @@ state: active
 created: 2026-08-01
 updated: 2026-09-28
 authority: working
-summary: "BALANCE-METER-LAYER-PARITY-001 owner review has superseded D069 and authored the wide/nonzero meter plus true inline ledger-editor correction on top of validated PR #109 lineage; native revalidation is next."
-next: Run the repository-declared native formatter, strict Clippy, all-feature tests, help, and focused TUI smoke on the owner-review amendment before advancing draft PR #109; keep SEDIMENT-016 separate.
+summary: "BALANCE-METER-LAYER-PARITY-001 owner review supersedes D069 and is native-green for the wide/nonzero meter and true inline ledger editor; draft PR #109 now includes the amendment."
+next: Owner-review PR #109's loaded-profile wide/normal/constrained editor and meter behavior; keep SEDIMENT-016 separate.
 ---
 
 ## BALANCE-METER-LAYER-PARITY-001 shared meter and layer-detail parity — 2026-09-28
 
-**OWNER-REVIEW AMENDMENT AUTHORED / NATIVE REVALIDATION NEXT / DRAFT #109 PUBLISHED:** the previously native-green PR #109 lineage now has explicit owner adjudication: STRATA-D071 supersedes D069 and `docs/REPORT_AUTHORITY.md` records one shared `total_seconds` scale. Owner review also removes the fixed 45-cell meter cap, reserves equilibrium for exact zero by guaranteeing a one-cell minimum displacement for representable non-zero values, makes `+` occupy the same marker column as `●`/`◯`, falls back from an empty stored Tag to the layer name for display only, and replaces the obsolete three-line `Tag:/From:/To:` editor projection with a true single-row ledger editor. Layer Detail retains the full Balance period selector and prior correction transaction semantics. The supplied validated tip was `2919966f3ea245b3c97ce1a38d549d037b875e2e`; that baseline had passed formatter, strict Clippy, all-feature tests (564 library + 24 integration/process tests; 20 ignored), CLI help, populated PTY smoke, SQLite doctor, and diff hygiene. The owner-review amendment was authored in an environment without a Rust toolchain and therefore requires native revalidation before advancing draft PR #109. See `notebook/work/BALANCE-METER-LAYER-PARITY-001.md`.
+**OWNER-REVIEW AMENDMENT NATIVE-GREEN / DRAFT #109 UPDATED:** STRATA-D071 supersedes D069 and is now implemented/natively certified in `docs/DECISIONS.md` and `docs/REPORT_AUTHORITY.md`. The implementation removes the fixed 45-cell meter cap, guarantees at least one meter-cell displacement for non-zero values when the geometry has a usable rail, makes `+` occupy the marker column, falls back from an empty stored Tag to the layer name for display only, and replaces the obsolete multi-line edit projection with a single inline row. Narrow panes prioritize the active full date/time field on that same row. Layer Detail retains the full Balance period selector and prior correction transaction semantics. Formatting, strict Clippy, 566 library + 24 integration/process tests (20 ignored), CLI help, 120×40/80×24/40×14 populated-profile PTY checks (including Tag persistence after restart), SQLite doctor, and diff hygiene pass. See `notebook/work/BALANCE-METER-LAYER-PARITY-001.md`.
 
 ## BALANCE-LEDGER-CORRECTION-UX-001 unified correction — 2026-09-28
 

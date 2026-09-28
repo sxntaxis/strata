@@ -1,6 +1,6 @@
 # Report and export authority
 
-Status: accepted authority; STRATA-D071 supersedes D069; current owner-review implementation amendment awaits native recertification
+Status: accepted authority; STRATA-D071 supersedes D069 and is implemented/natively certified
 Last reviewed: 2026-09-28
 
 ## Purpose

@@ -70,17 +70,19 @@ Command-palette start/end boundary actions preserve Layer Detail rather than ret
 
 This pass does not change historical-correction semantics, collateral-confirmation custody, SQLite schema, sediment correction/recolor doctrine, report-window inclusive internal semantics, or SEDIMENT-016 authority.
 
-## Native validation facts — prior published candidate, 2026-09-28
+## Native validation facts — owner-review amendment, 2026-09-28
 
-- `cargo fmt --all -- --check`, strict Clippy, `cargo test --all-features`, and `cargo run -- --help` pass. The suite reports 564 library tests and 24 integration/process tests passed; 20 ignored; 0 failed.
-- Focused meter tests cover the shared recorded-time denominator, independent opposite-sign layer/global projections, and noncollapsed layer positions when the global net is zero.
-- A freshly rooted imported test profile with eight layers was exercised at 120×40. Balance/month showed the net marker projected against recorded time including Idle; Layer Detail displayed positive/neutral `●` and negative `◯` row markers, aligned the left/right outer ledger cells, and retained the selected layer through Week, Month, `[` + Left boundary movement, Esc boundary clearing, and command-palette range-start selection.
-- Opening `r` inside Layer Detail initially exposed overlapping bottom-border titles. The period footer now yields to the explicit From/To editor while that editor is active, and the modal grants it enough width to keep the full dates and instructions visible; PTY smoke confirmed the layer and ledger remain present.
-- The isolated test profile's SQLite doctor passed after the smoke: schema v1, integrity and foreign-key checks healthy. The source profile used to create the portable test fixture was not mutated.
+- `cargo fmt --all -- --check`, strict Clippy, `cargo test --all-features`, and `cargo run -- --help` pass. The suite reports 566 library tests and 24 integration/process tests passed; 20 ignored; 0 failed.
+- Focused meter tests cover the shared recorded-time denominator, independent opposite-sign layer/global projections, noncollapsed layer positions when the global net is zero, a non-zero contribution in a three-cell meter, and expanded instrument widths.
+- A freshly rooted imported test profile at `/mnt/Tokyo/Lab/.tmp/opencode/strata-balance-owner-review-inline-001-test-profile-r2` (UUID `3eaac84a-72c8-4f3e-8d71-f1b71ebabe73`) with eight layers was exercised at 120×40, 80×24, and 40×14. Balance/month showed the net marker against recorded time including Idle. Layer Detail displayed positive/neutral `●` and negative `◯` row markers, layer-name fallback for empty Tags, and outward-aligned edge cells. Week/month switching, `[` + Left boundary movement, Esc clearing, command-palette range-start selection, and `r` editing all retained Layer Detail.
+- The `r` editor uses the bottom border in place of the period footer while active and has enough width to keep its fields/instructions visible. In the 40×14 editor, the active date is shown in full ISO form on the same inline row; time/date focus moves between fields without opening another panel.
+- On the loaded profile, an empty Tag was edited to `Inline proof`, committed, and observed again in the ledger. It remained visible after process restart. SQLite doctor passed after apply and restart: schema v1, integrity and foreign keys healthy; the source profile used to create the portable fixture was not mutated.
 
-That published candidate was natively validated. The subsequent owner-review amendment described above changes meter width/minimum displacement, ledger fallback/alignment, the editor projection, and accepted meter authority; this environment has no Rust toolchain, so the amended candidate still requires the repository-declared native formatter/Clippy/test/help gates before publication. SEDIMENT-016 remains separate.
+STRATA-D071 supersedes D069 and is now accepted and natively certified. `docs/DECISIONS.md` and `docs/REPORT_AUTHORITY.md` are updated; SEDIMENT-016 remains separate.
+
+The owner-reviewed amendment is natively validated and is being added as a fast-forward update to the existing draft PR #109. SEDIMENT-016 remains separate.
 
 ## Publication — 2026-09-28
 
 - Published as draft PR [#109](https://github.com/sxntaxis/strata/pull/109), stacked on PR #108 (`work/balance-ledger-correction-ux-001`).
-- The supplied validated bundle tip is `2919966f3ea245b3c97ce1a38d549d037b875e2e`. The owner-review amendment is authored on top of that exact lineage for local native validation before the draft PR is advanced.
+- Owner-review amendment is based on validated PR #109 head `2919966f3ea245b3c97ce1a38d549d037b875e2e` and is being published as a fast-forward update to that draft PR.
