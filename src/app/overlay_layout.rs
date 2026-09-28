@@ -1,7 +1,7 @@
 use ratatui::layout::Rect;
 
 const HORIZONTAL_CONTENT_INSET: u16 = 1;
-const MAX_VERTICAL_CONTENT_INSET: u16 = 2;
+const VERTICAL_CONTENT_INSET: u16 = 1;
 
 pub(super) fn centered_overlay_rect(
     terminal: Rect,
@@ -40,8 +40,9 @@ pub(super) fn centered_overlay_rect(
 /// Modal geometry already owns the hard content minimum, so wider overlays keep
 /// their spare width inside the content span instead of converting it into larger
 /// side padding. Only physically tiny areas that cannot retain a content cell drop
-/// the inset. Vertical padding remains optional and surplus-driven because surfaces
-/// such as Balance own their own section rhythm.
+/// the inset. Ordinary list surfaces that request vertical padding use the same
+/// one-cell inset above and below whenever two spare rows exist; Balance owns its
+/// own section rhythm and therefore does not request this vertical inset.
 pub(super) fn modal_content_rect(
     area: Rect,
     minimum_content_height: u16,
@@ -53,8 +54,11 @@ pub(super) fn modal_content_rect(
         0
     };
 
-    let vertical = if vertical_padding {
-        (area.height.saturating_sub(minimum_content_height) / 2).min(MAX_VERTICAL_CONTENT_INSET)
+    let vertical = if vertical_padding
+        && area.height
+            >= minimum_content_height.saturating_add(VERTICAL_CONTENT_INSET.saturating_mul(2))
+    {
+        VERTICAL_CONTENT_INSET
     } else {
         0
     };
@@ -128,8 +132,17 @@ mod tests {
     }
 
     #[test]
-    fn surplus_vertical_inset_keeps_existing_calm() {
-        let rect = modal_content_rect(Rect::new(10, 20, 40, 14), 10, true);
-        assert_eq!(rect, Rect::new(11, 22, 38, 10));
+    fn ordinary_vertical_inset_is_exactly_one_cell_when_possible() {
+        let roomy = modal_content_rect(Rect::new(10, 20, 40, 14), 10, true);
+        assert_eq!(roomy, Rect::new(11, 21, 38, 12));
+
+        let exact = modal_content_rect(Rect::new(10, 20, 40, 12), 10, true);
+        assert_eq!(exact, Rect::new(11, 21, 38, 10));
+    }
+
+    #[test]
+    fn ordinary_vertical_inset_collapses_when_two_spare_rows_do_not_exist() {
+        let rect = modal_content_rect(Rect::new(10, 20, 40, 11), 10, true);
+        assert_eq!(rect, Rect::new(11, 20, 38, 11));
     }
 }
