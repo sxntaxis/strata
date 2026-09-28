@@ -32,6 +32,7 @@ mod category_modal_view;
 mod category_state;
 mod command_palette_view;
 mod event_handlers;
+mod ledger_state;
 mod overlay_layout;
 mod persistence_recovery;
 mod recovery_statement;
@@ -46,6 +47,7 @@ mod view_style;
 
 #[cfg(debug_assertions)]
 use crate::sand::{ClassicRainMode, ClassicSandboxEngine, OsloBoundaryMode, OsloSandboxEngine};
+use ledger_state::{LedgerEntryEditKind, LedgerEntryEditState, LedgerEntryField};
 use persistence_recovery::{PersistenceOperation, PersistenceRecoveryState, RecoveryAction};
 use terminal_lifecycle::{ManagedTerminal, TerminalSession};
 
@@ -293,12 +295,6 @@ fn valid_category_ids_for_catalog(
         .collect::<HashSet<_>>();
     category_ids.extend(archived_categories.iter().map(|category| category.id.0));
     category_ids
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ReportLogEditState {
-    session_id: usize,
-    draft: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1146,7 +1142,7 @@ struct App {
     historical_activity_edit: Option<HistoricalActivityEditState>,
     report_logs_category_id: Option<CategoryId>,
     report_log_selected_index: usize,
-    report_log_edit: Option<ReportLogEditState>,
+    ledger_entry_edit: Option<LedgerEntryEditState>,
     report_snapshot_end_day: Option<String>,
     report_snapshot_artifact: Option<SedimentSnapshot>,
     report_snapshot_preview_key: Option<String>,
@@ -1248,7 +1244,7 @@ impl App {
             historical_activity_edit: None,
             report_logs_category_id: None,
             report_log_selected_index: 0,
-            report_log_edit: None,
+            ledger_entry_edit: None,
             report_snapshot_end_day: None,
             report_snapshot_artifact: None,
             report_snapshot_preview_key: None,
@@ -1479,7 +1475,7 @@ impl App {
         self.historical_activity_edit = None;
         self.report_logs_category_id = None;
         self.report_log_selected_index = 0;
-        self.report_log_edit = None;
+        self.ledger_entry_edit = None;
         self.report_snapshot_end_day = None;
         self.report_snapshot_artifact = None;
         self.report_snapshot_preview_key = None;
@@ -1493,7 +1489,7 @@ impl App {
         self.ui_mode = UiMode::Main;
         self.report_logs_category_id = None;
         self.report_log_selected_index = 0;
-        self.report_log_edit = None;
+        self.ledger_entry_edit = None;
         self.report_range_boundary = None;
         self.report_range_edit = None;
         self.historical_activity_edit = None;
