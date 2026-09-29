@@ -7,7 +7,8 @@ use chrono::{
 use ratatui::{prelude::Line, style::Color};
 
 use crate::domain::{
-    BalanceReportSummary, Category, CategoryId, CategoryLogEntry, DRIFT_CATEGORY_ID,
+    BalanceReportEntry, BalanceReportSummary, Category, CategoryId, CategoryLogEntry,
+    DRIFT_CATEGORY_ID,
     LiveSessionPreview, OperationalDayPolicy, ReportPeriod, ReportWindow,
     build_balance_report_with_live_for_window, build_category_logs_for_window, day_boundary_config,
     operational_day_key_now, report_period_window_with_offset, session_slices,
@@ -191,9 +192,17 @@ fn filtered_layer_balance(logs: &[CategoryLogEntry], filter: &[ReportTagFacet]) 
         .sum()
 }
 
+fn report_entry_is_visible(entry: &BalanceReportEntry) -> bool {
+    if entry.category_id == DRIFT_CATEGORY_ID {
+        entry.elapsed_seconds != 0
+    } else {
+        entry.balance_seconds != 0
+    }
+}
+
 impl App {
     pub(super) fn focus_none_report_row(&mut self) {
-        let summary = self.report_rows();
+        let summary = self.report_visible_rows();
         let index = summary
             .entries
             .iter()
@@ -288,6 +297,106 @@ impl App {
         )
     }
 
+    pub(super) fn report_visible_rows(&self) -> BalanceReportSummary {
+        let mut summary = self.report_rows();
+        summary.entries.retain(report_entry_is_visible);
+        summary
+    }
+
+    pub(super) fn begin_report_layer_delete_confirmation(
+        &mut self,
+        summary: &BalanceReportSummary,
+    ) -> bool {
+        let Some(index) = self.report_selected_summary_index(summary) else {
+            return false;
+        };
+        let Some(entry) = summary.entries.get(index) else {
+            return false;
+        };
+        if entry.category_id == DRIFT_CATEGORY_ID {
+            return false;
+        }
+        self.clear_report_range_boundary();
+        self.report_layer_delete_confirmation = Some(entry.category_id);
+        self.render_needed = true;
+        true
+    }
+
+    pub(super) fn cancel_report_layer_delete_confirmation(&mut self) {
+        if self.report_layer_delete_confirmation.take().is_some() {
+            self.render_needed = true;
+        }
+    }
+
+    pub(super) fn confirm_report_layer_delete(&mut self) -> bool {
+        let Some(category_id) = self.report_layer_delete_confirmation else {
+            return false;
+        };
+        let fallback_index = self.report_selected_index;
+
+        if self.time_tracker.active_category_id() == category_id {
+            self.apply_runtime_mutation(super::RuntimeMutation::SwitchLayer {
+                category_id: DRIFT_CATEGORY_ID,
+                description: String::new(),
+            });
+            if self.has_persistence_recovery()
+                || self.time_tracker.active_category_id() == category_id
+            {
+                return false;
+            }
+        }
+
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::CategoryDelete,
+                RecoveryAction::ReloadAuthority,
+                Err("SQLite authority is unavailable".to_string()),
+            );
+            return false;
+        };
+        let Some(()) = self.record_storage_result_for(
+            PersistenceOperation::CategoryDelete,
+            RecoveryAction::ReloadAuthority,
+            crate::sqlite::delete_tui_category(&database_path, category_id),
+        ) else {
+            return false;
+        };
+
+        let Some(state) = self.record_storage_result_for(
+            PersistenceOperation::StateReload,
+            RecoveryAction::ReloadAuthority,
+            crate::sqlite::load_tui_state(&database_path),
+        ) else {
+            return false;
+        };
+        self.time_tracker.apply_loaded_state(
+            state.loaded_categories.categories,
+            state.loaded_categories.next_category_id,
+            state.loaded_sessions.sessions,
+            state.loaded_sessions.next_session_id,
+        );
+        self.archived_categories = state.archived_categories;
+        self.category_tags = state.category_tags;
+
+        self.report_layer_delete_confirmation = None;
+        self.report_tag_filter.clear();
+        self.report_filter_tag_index = None;
+        self.ledger_entry_edit = None;
+        self.clear_report_snapshot_cache();
+        let summary = self.report_visible_rows();
+        if summary.entries.is_empty() {
+            self.report_selected_index = 0;
+            self.report_selected_category_id = None;
+        } else {
+            self.select_report_summary_index(
+                &summary,
+                fallback_index.min(summary.entries.len().saturating_sub(1)),
+            );
+        }
+        self.render_needed = true;
+        true
+    }
+
     pub(super) fn report_logs_for_category(
         &self,
         category_id: CategoryId,
@@ -341,7 +450,7 @@ impl App {
                 .iter()
                 .map(|facet| match facet {
                     ReportTagFacet::Tag(tag) => tag.clone(),
-                    ReportTagFacet::Untagged => "untagged".to_string(),
+                    ReportTagFacet::Untagged => "—".to_string(),
                 })
                 .collect::<Vec<_>>()
                 .join("; "),
@@ -530,6 +639,7 @@ impl App {
         self.report_period_offset = 0;
         self.report_custom_window = None;
         self.report_range_boundary = None;
+        self.report_range_boundary_original = None;
         self.report_range_edit = None;
         self.ledger_entry_edit = None;
         self.clear_report_snapshot_cache();
@@ -540,6 +650,7 @@ impl App {
         self.report_filter_tag_index = None;
         let window = self.current_report_window();
         self.report_range_boundary = None;
+        self.report_range_boundary_original = None;
         self.ledger_entry_edit = None;
         self.report_range_edit = Some(report_range_edit_state(&window));
         self.render_needed = true;
@@ -574,12 +685,40 @@ impl App {
 
     pub(super) fn select_report_range_boundary(&mut self, boundary: ReportRangeBoundary) {
         self.report_filter_tag_index = None;
+        if self.report_range_boundary.is_none() {
+            self.report_range_boundary_original = Some(super::ReportRangeBoundarySnapshot {
+                period: self.report_period,
+                period_offset: self.report_period_offset,
+                custom_window: self.report_custom_window.clone(),
+                selected_category_id: self.report_selected_category_id,
+                selected_index: self.report_selected_index,
+            });
+        }
         self.report_range_boundary = Some(boundary);
         self.render_needed = true;
     }
 
     pub(super) fn clear_report_range_boundary(&mut self) {
-        if self.report_range_boundary.take().is_some() {
+        let changed = self.report_range_boundary.take().is_some()
+            || self.report_range_boundary_original.take().is_some();
+        if changed {
+            self.render_needed = true;
+        }
+    }
+
+    pub(super) fn cancel_report_range_boundary(&mut self) {
+        let snapshot = self.report_range_boundary_original.take();
+        let changed = self.report_range_boundary.take().is_some() || snapshot.is_some();
+        if let Some(snapshot) = snapshot {
+            self.report_period = snapshot.period;
+            self.report_period_offset = snapshot.period_offset;
+            self.report_custom_window = snapshot.custom_window;
+            self.report_selected_category_id = snapshot.selected_category_id;
+            self.report_selected_index = snapshot.selected_index;
+            self.clear_report_snapshot_cache();
+            self.sync_report_selection_for_interval();
+        }
+        if changed {
             self.render_needed = true;
         }
     }
@@ -858,6 +997,7 @@ impl App {
             end.format("%H:%M:%S").to_string(),
         ));
         self.report_range_boundary = None;
+        self.report_range_boundary_original = None;
         self.render_needed = true;
         true
     }
@@ -866,7 +1006,7 @@ impl App {
         if let Some(category_id) = self.report_logs_category_id {
             return self.begin_ledger_add_edit(category_id);
         }
-        let summary = self.report_rows();
+        let summary = self.report_visible_rows();
         let Some(index) = self.report_selected_summary_index(&summary) else {
             return false;
         };
@@ -914,6 +1054,7 @@ impl App {
         ));
         self.report_log_selected_index = self.report_current_logs().len();
         self.report_range_boundary = None;
+        self.report_range_boundary_original = None;
         self.render_needed = true;
         true
     }
@@ -1219,7 +1360,7 @@ impl App {
             let row_count = self.report_ledger_row_count();
             self.clamp_report_log_selection(row_count);
         } else {
-            let summary = self.report_rows();
+            let summary = self.report_visible_rows();
             self.sync_report_selection_to_summary(&summary);
         }
         self.render_needed = true;
@@ -1368,12 +1509,16 @@ mod report_edit_state_tests {
 
     use super::{
         build_historical_preview, filtered_layer_balance, parse_report_range,
-        report_log_matches_tag_filter, report_range_edit_state, shifted_custom_window_newer,
+        report_entry_is_visible, report_log_matches_tag_filter, report_range_edit_state,
+        shifted_custom_window_newer,
         shifted_custom_window_older, shifted_report_boundary, shifted_report_boundary_month,
     };
     use crate::{
         app::{ReportRangeBoundary, ReportTagFacet, ui_helpers},
-        domain::{Category, CategoryId, CategoryLogEntry, OperationalDayPolicy, ReportWindow},
+        domain::{
+            BalanceReportEntry, Category, CategoryId, CategoryLogEntry, OperationalDayPolicy,
+            ReportWindow, DRIFT_CATEGORY_ID,
+        },
         sand::{SandState, SandStateGrain, SedimentSnapshot},
     };
 
@@ -1429,6 +1574,39 @@ mod report_edit_state_tests {
 
         assert!(report_log_matches_tag_filter(&untagged, &filter));
         assert!(!report_log_matches_tag_filter(&tagged, &filter));
+    }
+
+    #[test]
+    fn balance_summary_visibility_omits_exact_zero_rows_only() {
+        let ordinary_zero = BalanceReportEntry {
+            category_id: CategoryId::new(1),
+            category_name: "Work".to_string(),
+            color: Color::White,
+            elapsed_seconds: 3600,
+            balance_effect: 1,
+            balance_seconds: 0,
+        };
+        let ordinary_nonzero = BalanceReportEntry {
+            balance_seconds: 1,
+            ..ordinary_zero.clone()
+        };
+        let idle_zero = BalanceReportEntry {
+            category_id: DRIFT_CATEGORY_ID,
+            category_name: "Idle".to_string(),
+            color: Color::White,
+            elapsed_seconds: 0,
+            balance_effect: 0,
+            balance_seconds: 0,
+        };
+        let idle_nonzero = BalanceReportEntry {
+            elapsed_seconds: 1,
+            ..idle_zero.clone()
+        };
+
+        assert!(!report_entry_is_visible(&ordinary_zero));
+        assert!(report_entry_is_visible(&ordinary_nonzero));
+        assert!(!report_entry_is_visible(&idle_zero));
+        assert!(report_entry_is_visible(&idle_nonzero));
     }
 
     #[test]

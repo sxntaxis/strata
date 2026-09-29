@@ -1,6 +1,6 @@
 # Report and export authority
 
-Status: accepted authority; STRATA-D071/D072/D073 Balance behavior is implemented and natively certified
+Status: accepted authority; STRATA-D071/D072/D073/D074 behavior is natively certified; STRATA-D075 owner corrections are implemented as a candidate pending native validation
 Last reviewed: 2026-09-28
 
 ## Purpose
@@ -17,9 +17,9 @@ The interactive historical/report surface is named **Balance**. Day, week, and m
 
 Balance consumes the same inclusive `ReportWindow` authority, but its visible interval chrome is a boundary projection: the left date is the first included operational day and the right date is the exclusive boundary one day after the last included operational day. Thus internal `2026-09-21..2026-09-21` displays `Sep 21 – Sep 22`, and internal `2026-09-21..2026-09-27` displays `Sep 21 – Sep 28`. This is presentation/interaction semantics only; report filtering remains inclusive over `ReportWindow.start..=ReportWindow.end`.
 
-The Balance `[` and `]` actions select the visible start or exclusive-end boundary. Left/Right then moves that selected boundary by one operational day while preserving a minimum one-day window and preventing the included end from moving later than the current operational day. Without a selected boundary, Left/Right retains whole-window navigation.
+The Balance `[` and `]` actions select the visible start or exclusive-end boundary and begin one preview transaction over the whole opening range. Left/Right previews a one-operational-day move; Shift+Left/Right previews one civil month with normal end-of-month clamping. `[` and `]` may switch endpoints inside that same transaction. Enter accepts the resulting range; Esc restores the complete opening range/navigation state. Without a selected boundary, Left/Right retains whole-window navigation and Shift+Left/Right has no period-cycling meaning.
 
-The inline `r` From/To editor uses the same visible boundary convention. It accepts `YYYY-MM-DD`, requires `From < To`, converts `To` to the inclusive internal end by subtracting one day, and then applies one ordinary `ReportWindow`; it does not synthesize a second TUI-specific interval model. A custom window may still be shifted backward or toward the present by its own inclusive span, but forward whole-window navigation never extends past the current operational day.
+The inline From/To range editor remains an unbound configurable/palette action using the same visible boundary convention. It accepts `YYYY-MM-DD`, requires `From < To`, converts `To` to the inclusive internal end by subtracting one day, and then applies one ordinary `ReportWindow`; it does not synthesize a second TUI-specific interval model. Normal keyboard custom-range construction uses `[` / `]`. A custom window may still be shifted backward or toward the present by its own inclusive span, but forward whole-window navigation never extends past the current operational day.
 
 A canonical session remains one row. Exact overlap slices contribute only the seconds that belong inside the selected operational-day range.
 
@@ -31,14 +31,9 @@ session that intersect the selected window are aggregated for row display, with 
 included boundary retained for temporal presentation. The provisional active generation may also project as a row,
 but because it has no completed persisted session identity it is not an existing-entry edit target.
 
-The row presentation is deliberately responsive to interval scope. A single-operational-day window uses three data
-regions: Tag, Time, and signed Effect. A multi-day window uses four responsive regions: Tag, Date, Time, and signed
-Effect. Date remains adjacent to Time rather than becoming a leading identity column. A cross-day row keeps those same
-columns: Date compresses the span (for example `Sep 10-11`) and Time shows the separate start/end times (for example
-`23:50–06:00`). It does not merge date and time into one displaced temporal cell.
+The row presentation is deliberately responsive to interval scope. A single-operational-day window uses three equal full-row cells: Tag, Time, and signed Effect. A multi-day window uses four equal full-row cells: Tag, Date, Time, and signed Effect. Date remains adjacent to Time rather than becoming a leading identity column. A cross-day row keeps that same 1:1:1:1 geometry: Date compresses the span (for example `Sep 10-11`) and Time shows the separate start/end times (for example `23:50–06:00`). It does not merge date and time into one displaced temporal cell. The overlay widens until all visible values fit their assigned equal cells, within terminal/margin bounds; only a true terminal-width constraint permits truncation.
 
-Each ordinary ledger row begins with the layer marker in the first cell. If the persisted Tag is empty, presentation
-falls back to the selected layer name without writing that fallback into storage. The synthetic `+ Add entry…` row uses
+Each ordinary ledger row begins with the layer marker in the first cell. If the persisted Tag is empty, presentation uses the neutral `—` placeholder without writing it into storage. The synthetic `+ Add entry…` row uses
 `+` itself in that exact marker column. Add and existing-entry Edit reuse the same single-row geometry: the active field
 is bracketed in place, dates remain visible when the selected period needs them, cross-civil-date edits keep the date
 span and time span in their respective columns, and Effect remains blank while chronology is being edited rather than
@@ -64,7 +59,7 @@ scale, not a subscale derived from the parent marker's already-quantized displac
 
 Layer Detail may additionally project an explicit tag filter without hiding chronology. The filter is an OR-set of
 individual tag facets. Rows matching any selected tag remain normal and nonmatching rows remain present but dimmed; an
-untagged row is a distinct filter facet even though its ordinary Tag cell uses the layer-name display fallback. The
+untagged row is a distinct internal filter facet whose visible Tag/filter label is the neutral `—` placeholder. The
 filtered hero subtotal and marker sum each matching ledger row exactly once, even when one row carries or matches more
 than one selected tag. Only that numerator changes: the meter denominator remains the complete selected-period
 `summary.total_seconds` required by STRATA-D071. Consequently a one-hour `Renzo; Anibal` row in a one-hour period may
@@ -75,11 +70,13 @@ periods inside the same layer.
 The active filter label is separate instrument chrome below the meter and serializes selected tags with the same `; `
 grammar used by Tag input. De-emphasis is semantic presentation: nonmatches reuse theme-derived secondary/status color
 roles plus terminal dimming rather than assuming a particular gray RGB value. The ledger remains chronological, with a
-presentation-only blank row before `+ Add entry…` when vertical room permits. Layer Detail width sizes to the actual
-Tag, date-span, time-span, and effect columns instead of truncating them at an arbitrary detail-width cap, then clamps
-the overlay to terminal bounds and margins. Available row width is distributed across stable columns: Tag stays at
-the left, Date and Time remain distinctly spaced, and Effect stays right-aligned. On a physically narrow terminal,
-Tag/date columns yield space before the separate time/effect columns.
+presentation-only blank row before `+ Add entry…` when vertical room permits. Layer Detail width is solved from the actual Tag, date-span, time-span, and effect values under the fixed proportional geometry: 1:1:1 for single-day rows and 1:1:1:1 when Date is present. The overlay grows until the longest visible value fits its cell, then clamps only to terminal bounds/margins. Tag remains left-aligned, Date/Time centered, and Effect right-aligned. Ellipsis is therefore a physical-terminal fallback, not the ordinary response to a long Tag.
+
+## Balance summary visibility and Layer deletion
+
+Balance summary omits exact-zero rows as presentation only: an ordinary Layer appears only when its displayed `balance_seconds` is non-zero for the selected period, while Idle appears only when its elapsed seconds are non-zero. Changing the report window may therefore reveal or hide Layers without mutating them. Selection follows stable Layer identity when possible and falls to a remaining visible row when the selected identity disappears from the projection.
+
+`Ctrl+x` on the Balance summary requests permanent deletion of the selected non-Idle Layer. Enter confirms and Esc cancels. A confirmed deletion removes that Layer's canonical sessions and Tag history and removes it from normal active/archived product surfaces; an active target is first switched safely to Idle. Deletion deliberately does **not** rewrite current or historical sand/sediment. SQLite therefore preserves only a hidden, non-restorable archived identity/color tombstone for the deleted CategoryId so existing sediment category references remain valid and the identifier cannot be reused with a different color. The tombstone has no Balance history and is not a user-facing Layer. In Layer Detail, `Ctrl+x` deletes only the selected persisted ledger entry and does nothing on the synthetic `+ Add entry…` row.
 
 ## Explicit historical correction
 

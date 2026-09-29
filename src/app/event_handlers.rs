@@ -224,9 +224,22 @@ impl App {
                 .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
         {
             match key.code {
-                KeyCode::Char(_) => {
-                    self.handle_modal_text_input(key);
-                    return false;
+                KeyCode::Char(character) => {
+                    let current_tag_empty = self
+                        .modal_description
+                        .rsplit(';')
+                        .next()
+                        .unwrap_or_default()
+                        .trim()
+                        .is_empty();
+                    let polarity_command = !self.modal_renaming_category
+                        && !self.is_on_insert_space()
+                        && matches!(character, '+' | '=' | '-' | '_')
+                        && (!self.modal_tag_text_editing || current_tag_empty);
+                    if !polarity_command {
+                        self.handle_modal_text_input(key);
+                        return false;
+                    }
                 }
                 KeyCode::Backspace | KeyCode::Delete => {
                     self.handle_modal_text_delete();
@@ -1359,7 +1372,7 @@ impl App {
         let mut handled = true;
 
         match action {
-            Action::Cancel => self.close_modal(),
+            Action::Cancel => self.cancel_modal(),
             Action::Up => {
                 let total_rows = self.time_tracker.category_count() + 1;
                 if total_rows > 0 {
@@ -1532,6 +1545,7 @@ impl App {
             } else if self.selected_index < self.time_tracker.category_count() {
                 self.modal_tag_index = None;
                 self.modal_tag_cycle_prefix = None;
+                self.modal_tag_text_editing = true;
                 self.modal_description.push(c);
                 self.preview_active_description_from_modal();
                 self.render_needed = true;
@@ -1548,6 +1562,7 @@ impl App {
         } else if self.selected_index < self.time_tracker.category_count() {
             self.modal_tag_index = None;
             self.modal_tag_cycle_prefix = None;
+            self.modal_tag_text_editing = true;
             self.modal_description.pop();
             self.preview_active_description_from_modal();
         }
@@ -1555,10 +1570,26 @@ impl App {
     }
 
     fn handle_report_modal_action(&mut self, action: Action) -> bool {
-        let summary = self.report_rows();
+        if self.report_layer_delete_confirmation.is_some() {
+            match action {
+                Action::Confirm => {
+                    self.confirm_report_layer_delete();
+                }
+                Action::Cancel => self.cancel_report_layer_delete_confirmation(),
+                Action::Quit => return true,
+                _ => {}
+            }
+            return false;
+        }
+
+        let in_logs_view = self.report_logs_category_id.is_some();
+        let summary = if in_logs_view {
+            self.report_rows()
+        } else {
+            self.report_visible_rows()
+        };
         self.sync_report_selection_to_summary(&summary);
         let logs = self.report_current_logs();
-        let in_logs_view = self.report_logs_category_id.is_some();
         let ledger_row_count = if in_logs_view {
             self.report_ledger_row_count()
         } else {
@@ -1571,7 +1602,7 @@ impl App {
         match action {
             Action::Cancel => {
                 if self.report_range_boundary.is_some() {
-                    self.clear_report_range_boundary();
+                    self.cancel_report_range_boundary();
                 } else if in_logs_view {
                     if !self.leave_report_filter_focus() && !self.clear_report_tag_filter() {
                         self.ledger_entry_edit = None;
@@ -1583,7 +1614,9 @@ impl App {
                 }
             }
             Action::Confirm => {
-                if in_logs_view && self.report_filter_focus_active() {
+                if self.report_range_boundary.is_some() {
+                    self.clear_report_range_boundary();
+                } else if in_logs_view && self.report_filter_focus_active() {
                     handled = self.toggle_selected_report_filter();
                 } else if in_logs_view {
                     handled = self.begin_ledger_entry_edit();
@@ -1687,6 +1720,8 @@ impl App {
             Action::DeleteCategory => {
                 if in_logs_view && self.report_log_selected_index < logs.len() {
                     handled = self.delete_selected_report_session();
+                } else if !in_logs_view {
+                    handled = self.begin_report_layer_delete_confirmation(&summary);
                 } else {
                     handled = false;
                 }

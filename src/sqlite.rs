@@ -33,6 +33,7 @@ pub(crate) use tui_runtime::{
     archive_category as archive_tui_category, clear_all_state as clear_tui_state,
     clear_checkpoint as clear_tui_checkpoint,
     commit_checkpoint_recovery as commit_tui_checkpoint_recovery,
+    delete_category_permanently as delete_tui_category,
     delete_daily_snapshot as delete_tui_daily_snapshot, delete_session as delete_tui_session,
     ensure_active_session as ensure_tui_active_session,
     finish_active_session as finish_tui_active_session,

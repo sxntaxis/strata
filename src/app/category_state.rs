@@ -299,6 +299,7 @@ impl App {
         }
         self.modal_tag_index = None;
         self.modal_tag_cycle_prefix = None;
+        self.modal_tag_text_editing = false;
     }
 
     pub(super) fn preview_active_description_from_modal(&mut self) {
@@ -482,6 +483,7 @@ impl App {
         };
         self.modal_description = cycle.value;
         self.modal_tag_cycle_prefix = Some(cycle.prefix);
+        self.modal_tag_text_editing = true;
         let current = self
             .modal_description
             .rsplit(';')

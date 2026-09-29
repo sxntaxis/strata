@@ -64,3 +64,18 @@ At bundle authorship, the source environment lacked `cargo`, `rustc`, and `rustf
 Rust 1.98.1 passed the declared formatter check, strict Clippy, all-feature tests (588 library + 24 integration/process tests; 20 ignored), and CLI help after the owner clarified rename semantics and supplied the Layer Detail screenshots. On the loaded behavior-coherence test profile, one Backspace changed `Lab` to `La`; typing `b` and committing restored `Lab` with the same CategoryId. The rename title hint was absent. SQLite doctor passed after the profile smokes; the profile is test-only.
 
 Unit coverage verifies Ctrl+e without Shift maps to rename while Ctrl+Shift+E is unbound; rename trims valid names and rejects empty, reserved Idle, and duplicate names; and cross-day labels remain `Sep 10-11` with an independent `23:50–06:00` time span. A loaded-profile PTY showed the cross-day row with separate, distributed columns and the full multi-tag text while its second facet was selected. Responsive sizing distributes spare width across content-derived columns and terminal-clamps narrow layouts. The user's tag-filter test profile had a live TUI and was not used. Owner final visual verification remains welcome.
+
+## Owner final correction — STRATA-D075
+
+The owner accepted a final interaction/presentation correction after reviewing the local-agent screenshots:
+
+- active-Layer Tag changes remain live previews, but opening Layer snapshots the original Tag; Enter accepts the preview and Esc restores that opening Tag. Structural Layer operations remain immediate and are not rolled back;
+- `+` / `=` and `-` / `_` retain polarity semantics only before Tag text editing begins. Once typing/backspace/tag cycling establishes text editing, those symbols are text. A Tag may contain them but cannot be manually started with them;
+- empty Tags render as neutral `—`, including untagged filter presentation;
+- the contextual destructive key is `Ctrl+x`: Layer archives the selected Layer; Balance summary requests permanent Layer deletion with Enter/Esc confirmation; Layer Detail deletes only the selected persisted ledger row and ignores the Add row;
+- permanent Balance Layer deletion removes sessions and tag history but does not rewrite sediment. SQLite keeps a hidden non-restorable identity/color tombstone solely so already-materialized sand retains valid CategoryId/color meaning and the identifier cannot be reused;
+- Balance summary omits exact-zero Layer rows for the selected period while retaining stable-ID selection;
+- `[` / `]` share one boundary-edit transaction. Left/Right previews ±1 day, Shift+Left/Right previews ±1 civil month, Enter accepts the full edited range, and Esc restores the complete opening range;
+- Layer Detail returns to the original full-row proportional geometry: 1:1:1 for Tag/Time/Effect and 1:1:1:1 when Date is present, including cross-day rows. The modal—not individual columns—widens until every visible value fits its assigned equal cell; truncation is allowed only when the actual terminal width prevents further growth.
+
+The implementation candidate is based on owner-corrections head `1ce73f3688556e918fe359f1b9707d94f4d0928e`. This authorship environment has no Rust toolchain, so D075 carries no formatter/Clippy/test claim yet; native validation and owner screenshot testing are the next gate. Settings/palette behavior remains explicitly deferred.

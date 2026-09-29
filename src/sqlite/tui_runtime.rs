@@ -11,8 +11,8 @@ use serde::{Serialize, de::DeserializeOwned};
 use crate::{
     appearance::{decode_color_anchor, encode_color_anchor},
     domain::{
-        Category, CategoryId, DRIFT_CATEGORY_CONFIG_NAME, OperationalDayPolicy, Session,
-        day_boundary_config, runtime_settings,
+        Category, CategoryId, DRIFT_CATEGORY_CONFIG_NAME, DRIFT_CATEGORY_ID, OperationalDayPolicy,
+        Session, day_boundary_config, runtime_settings,
     },
     sand::{
         DailySedimentSlice, SandState, SedimentSnapshot, daily_contribution_from_slices,
@@ -545,6 +545,59 @@ pub(crate) fn archive_category(
         return Err(format!("active category {category_id} does not exist"));
     }
     runtime_coordination::maybe_inject_test_fault("category-archive", "commit")
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
+}
+
+pub(crate) fn delete_category_permanently(
+    database_path: &Path,
+    category_id: CategoryId,
+) -> Result<(), String> {
+    if category_id == DRIFT_CATEGORY_ID {
+        return Err("the reserved idle category cannot be deleted".to_string());
+    }
+    runtime_coordination::maybe_inject_test_fault("category-delete", "before-write")
+        .map_err(|error| error.to_string())?;
+    let mut repository = open_cli_repository(database_path)?;
+    let category_id = as_i64(category_id.0, "category ID")?;
+    let transaction = repository
+        .connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let active_category_id: Option<i64> = transaction
+        .query_row(
+            "SELECT category_id FROM active_session WHERE singleton = 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    if active_category_id == Some(category_id) {
+        return Err("the active category cannot be deleted".to_string());
+    }
+
+    transaction
+        .execute("DELETE FROM sessions WHERE category_id = ?1", params![category_id])
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "DELETE FROM category_tags WHERE category_id = ?1",
+            params![category_id],
+        )
+        .map_err(|error| error.to_string())?;
+    let tombstone_name = format!("__strata_deleted_layer_{category_id}__");
+    let changed = transaction
+        .execute(
+            "UPDATE categories
+             SET name = ?1, description = '', balance_effect = 0, archived_at_utc = ?2
+             WHERE id = ?3",
+            params![tombstone_name, timestamp(Utc::now()), category_id],
+        )
+        .map_err(|error| error.to_string())?;
+    if changed != 1 {
+        return Err(format!("category {category_id} does not exist"));
+    }
+    runtime_coordination::maybe_inject_test_fault("category-delete", "commit")
         .map_err(|error| error.to_string())?;
     transaction.commit().map_err(|error| error.to_string())
 }
@@ -3308,6 +3361,91 @@ mod tests {
             CategoryId::new(1)
         );
         assert!(restored.archived_categories.is_empty());
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn permanent_category_delete_removes_history_and_tags_without_touching_sand_snapshots() {
+        let path = repository_file("category-delete");
+        let mut repository = SqliteRepository::open(&path).unwrap();
+        repository
+            .create_category(&NewCategoryRecord {
+                name: "Work",
+                description: "",
+                color_index: 0,
+                balance_effect: 1,
+            })
+            .unwrap();
+        repository
+            .replace_category_tags(1, &["focus".to_string()])
+            .unwrap();
+        repository
+            .connection
+            .execute(
+                "INSERT INTO sessions (
+                    id, stable_id, category_id, description, started_at_utc,
+                    ended_at_utc, operational_day, elapsed_seconds, source
+                 ) VALUES (7, 'stable-delete', 1, 'focus',
+                    '2026-09-28T12:00:00Z', '2026-09-28T13:00:00Z',
+                    '2026-09-28', 3600, 'test')",
+                [],
+            )
+            .unwrap();
+        repository
+            .connection
+            .execute(
+                "INSERT INTO sand_snapshots (
+                    id, formation_id, snapshot_kind, operational_day, quantum_seconds,
+                    payload_json, captured_at_utc
+                 ) VALUES (1, 'formation', 'daily', '2026-09-28', 60, '{}',
+                    '2026-09-28T23:59:59Z')",
+                [],
+            )
+            .unwrap();
+        drop(repository);
+
+        delete_category_permanently(&path, CategoryId::new(1)).unwrap();
+
+        let repository = open_cli_repository(&path).unwrap();
+        let tombstone: (String, Option<String>, i64) = repository
+            .connection
+            .query_row(
+                "SELECT name, archived_at_utc, balance_effect FROM categories WHERE id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        let sessions: i64 = repository
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM sessions WHERE category_id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let tags: i64 = repository
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM category_tags WHERE category_id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let snapshots: i64 = repository
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM sand_snapshots WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(tombstone.0, "__strata_deleted_layer_1__");
+        assert!(tombstone.1.is_some());
+        assert_eq!(tombstone.2, 0);
+        assert_eq!(sessions, 0);
+        assert_eq!(tags, 0);
+        assert_eq!(snapshots, 1);
+        drop(repository);
         std::fs::remove_file(path).ok();
     }
 

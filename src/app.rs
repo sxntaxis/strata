@@ -123,6 +123,15 @@ enum ReportRangeBoundary {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+struct ReportRangeBoundarySnapshot {
+    period: ReportPeriod,
+    period_offset: usize,
+    custom_window: Option<ReportWindow>,
+    selected_category_id: Option<CategoryId>,
+    selected_index: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum ReportTagFacet {
     Tag(String),
     Untagged,
@@ -1061,6 +1070,8 @@ struct App {
     new_category_name: String,
     new_category_color_cursor: usize,
     modal_description: String,
+    modal_active_description_snapshot: String,
+    modal_tag_text_editing: bool,
     modal_category_name_draft: String,
     modal_category_name_error: Option<String>,
     modal_active_description_dirty: bool,
@@ -1074,7 +1085,9 @@ struct App {
     report_period_offset: usize,
     report_custom_window: Option<ReportWindow>,
     report_range_boundary: Option<ReportRangeBoundary>,
+    report_range_boundary_original: Option<ReportRangeBoundarySnapshot>,
     report_range_edit: Option<ReportRangeEditState>,
+    report_layer_delete_confirmation: Option<CategoryId>,
     report_logs_category_id: Option<CategoryId>,
     report_log_selected_index: usize,
     report_tag_filter: Vec<ReportTagFacet>,
@@ -1168,6 +1181,8 @@ impl App {
             new_category_name: String::new(),
             new_category_color_cursor: 0,
             modal_description: String::new(),
+            modal_active_description_snapshot: String::new(),
+            modal_tag_text_editing: false,
             modal_category_name_draft: String::new(),
             modal_category_name_error: None,
             modal_active_description_dirty: false,
@@ -1181,7 +1196,9 @@ impl App {
             report_period_offset: 0,
             report_custom_window: None,
             report_range_boundary: None,
+            report_range_boundary_original: None,
             report_range_edit: None,
+            report_layer_delete_confirmation: None,
             report_logs_category_id: None,
             report_log_selected_index: 0,
             report_tag_filter: Vec::new(),
@@ -1351,7 +1368,9 @@ impl App {
         self.selected_index = self.time_tracker.active_category_index().unwrap_or(0);
         self.new_category_name = String::new();
         self.new_category_color_cursor = 0;
+        self.modal_active_description_snapshot = self.time_tracker.active_description().to_string();
         self.modal_active_description_dirty = false;
+        self.modal_tag_text_editing = false;
         self.sync_modal_description_from_selection();
         self.render_needed = true;
     }
@@ -1394,6 +1413,15 @@ impl App {
         !self.has_persistence_recovery()
     }
 
+    fn cancel_modal(&mut self) {
+        if self.modal_active_description_dirty {
+            self.time_tracker
+                .set_active_description(self.modal_active_description_snapshot.clone());
+            self.modal_active_description_dirty = false;
+        }
+        self.close_modal();
+    }
+
     fn close_modal(&mut self) {
         if !self.persist_modal_active_description() {
             self.render_needed = true;
@@ -1401,6 +1429,8 @@ impl App {
         }
         self.ui_mode = UiMode::Main;
         self.modal_description = String::new();
+        self.modal_active_description_snapshot.clear();
+        self.modal_tag_text_editing = false;
         self.modal_category_name_draft.clear();
         self.modal_category_name_error = None;
         self.modal_renaming_category = false;
@@ -1417,7 +1447,9 @@ impl App {
         self.report_period_offset = 0;
         self.report_custom_window = None;
         self.report_range_boundary = None;
+        self.report_range_boundary_original = None;
         self.report_range_edit = None;
+        self.report_layer_delete_confirmation = None;
         self.report_logs_category_id = None;
         self.report_log_selected_index = 0;
         self.report_tag_filter.clear();
@@ -1440,7 +1472,9 @@ impl App {
         self.report_filter_tag_index = None;
         self.ledger_entry_edit = None;
         self.report_range_boundary = None;
+        self.report_range_boundary_original = None;
         self.report_range_edit = None;
+        self.report_layer_delete_confirmation = None;
         self.report_snapshot_end_day = None;
         self.report_snapshot_artifact = None;
         self.report_snapshot_preview_key = None;
@@ -1643,6 +1677,7 @@ impl App {
         if self.show_settings {
             if self.in_balance_modal() {
                 self.report_range_boundary = None;
+                self.report_range_boundary_original = None;
                 self.report_filter_tag_index = None;
             }
             self.settings_selected_index = 0;
@@ -1664,6 +1699,7 @@ impl App {
         if self.show_command_palette {
             if self.in_balance_modal() {
                 self.report_range_boundary = None;
+                self.report_range_boundary_original = None;
                 self.report_filter_tag_index = None;
             }
             self.command_palette_query.clear();

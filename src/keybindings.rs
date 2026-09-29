@@ -244,7 +244,7 @@ impl Action {
             Action::Confirm => "Confirm / open",
             Action::Cancel => "Cancel / close",
 
-            Action::DeleteCategory => "Archive selected Layer / delete selected Balance log",
+            Action::DeleteCategory => "Archive selected Layer / delete selected Balance selection",
             Action::RenameCategory => "Rename selected Layer",
             Action::MoveLayerUp => "Move selected Layer up",
             Action::MoveLayerDown => "Move selected Layer down",
@@ -288,7 +288,7 @@ impl Action {
             Action::Confirm => "Confirm / open",
             Action::Cancel => "Cancel / close",
 
-            Action::DeleteCategory => "Archive layer / delete log",
+            Action::DeleteCategory => "Archive layer / delete Balance selection",
             Action::RenameCategory => "Rename layer",
             Action::MoveLayerUp => "Move layer up",
             Action::MoveLayerDown => "Move layer down",
@@ -903,7 +903,7 @@ const DEFAULT_BINDINGS: [(&str, Action); 35] = [
     ("ctrl-left", Action::PreviousLayerColor),
     ("ctrl-right", Action::NextLayerColor),
     ("ctrl-e", Action::RenameCategory),
-    ("x", Action::DeleteCategory),
+    ("ctrl-x", Action::DeleteCategory),
     ("+", Action::IncreaseBalance),
     ("=", Action::IncreaseBalance),
     ("-", Action::DecreaseBalance),
@@ -1475,15 +1475,19 @@ mod tests {
     }
 
     #[test]
-    fn default_x_action_is_the_contextual_remove_action() {
+    fn default_ctrl_x_action_is_the_contextual_remove_action() {
         let keymap = default_keymap();
         assert_eq!(
-            keymap.action_for_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
+            keymap.action_for_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL)),
             Some(Action::DeleteCategory)
         );
         assert_eq!(
+            keymap.action_for_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
+            None
+        );
+        assert_eq!(
             Action::DeleteCategory.description(),
-            "Archive selected Layer / delete selected Balance log"
+            "Archive selected Layer / delete selected Balance selection"
         );
     }
 
