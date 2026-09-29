@@ -333,13 +333,16 @@ impl App {
             return;
         }
         self.modal_editing_category_metadata = false;
-        self.modal_description = self.modal_description_before_metadata.take().unwrap_or_else(|| {
-            if self.time_tracker.active_category_index() == Some(self.selected_index) {
-                self.time_tracker.active_description().to_string()
-            } else {
-                String::new()
-            }
-        });
+        self.modal_description = self
+            .modal_description_before_metadata
+            .take()
+            .unwrap_or_else(|| {
+                if self.time_tracker.active_category_index() == Some(self.selected_index) {
+                    self.time_tracker.active_description().to_string()
+                } else {
+                    String::new()
+                }
+            });
         self.modal_tag_index = None;
         self.modal_tag_cycle_prefix = None;
     }

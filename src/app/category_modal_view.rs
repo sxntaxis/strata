@@ -38,11 +38,7 @@ impl App {
                 } else if let Some(completion) =
                     self.tag_completion_for_category(category.id, &self.modal_description)
                 {
-                    let suffix_width = completion
-                        .tag
-                        .chars()
-                        .skip(completion.typed_chars)
-                        .count();
+                    let suffix_width = completion.tag.chars().skip(completion.typed_chars).count();
                     self.modal_description
                         .chars()
                         .count()

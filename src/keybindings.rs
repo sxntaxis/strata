@@ -1483,7 +1483,10 @@ mod tests {
         let r = KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE);
 
         assert_eq!(keymap.action_for_key_event(r), None);
-        assert_eq!(keymap.action_state(Action::ReportRange), ActionBindingState::Unbound);
+        assert_eq!(
+            keymap.action_state(Action::ReportRange),
+            ActionBindingState::Unbound
+        );
     }
 
     #[test]
@@ -1523,7 +1526,10 @@ mod tests {
         let l = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE);
 
         assert_eq!(keymap.action_for_key_event(l), None);
-        assert_eq!(keymap.action_state(Action::LogActivity), ActionBindingState::Unbound);
+        assert_eq!(
+            keymap.action_state(Action::LogActivity),
+            ActionBindingState::Unbound
+        );
     }
 
     #[test]

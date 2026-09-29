@@ -1,22 +1,6 @@
 use chrono::{Datelike, Duration as ChronoDuration, NaiveDate};
 
-use crate::domain::{ReportPeriod, ReportWindow};
-
-pub fn report_period_prev(period: ReportPeriod) -> ReportPeriod {
-    match period {
-        ReportPeriod::Today => ReportPeriod::Month,
-        ReportPeriod::Week => ReportPeriod::Today,
-        ReportPeriod::Month => ReportPeriod::Week,
-    }
-}
-
-pub fn report_period_next(period: ReportPeriod) -> ReportPeriod {
-    match period {
-        ReportPeriod::Today => ReportPeriod::Week,
-        ReportPeriod::Week => ReportPeriod::Month,
-        ReportPeriod::Month => ReportPeriod::Today,
-    }
-}
+use crate::domain::ReportWindow;
 
 pub fn format_report_interval_label(raw: &str) -> String {
     let parse = |value: &str| NaiveDate::parse_from_str(value, "%Y-%m-%d").ok();

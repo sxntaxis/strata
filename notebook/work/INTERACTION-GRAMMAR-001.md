@@ -44,4 +44,8 @@ This pass starts from the owner-supplied, natively validated BALANCE-BEHAVIOR-CO
 
 ## Validation status
 
-The authored environment does not contain `cargo`, `rustc`, or `rustfmt`, so this candidate deliberately makes **no native-green claim**. Before promotion, local validation must run formatter check, strict Clippy, all-feature tests, CLI help, loaded-profile TUI smoke for the revised keys/editors/filter selector, and SQLite doctor. Bundle/history/diff integrity can be verified independently of that native pass.
+**VALIDATION UPDATE — NATIVE-GREEN / OWNER INTERACTION REVIEW NEXT.** Rust 1.98.1 validation passed `cargo fmt --all -- --check`, strict Clippy with all targets/features and warnings denied, all-feature tests (585 library + 24 integration/process tests; 20 ignored), and CLI help. The first Clippy pass identified now-unused `report_period_prev` / `report_period_next` helpers after Shift-arrow period cycling was removed; the dead helpers were deleted, and the checks then passed. Formatting cleanup was applied.
+
+A loaded test-profile PTY confirmed `Ctrl+E` opens the isolated metadata editor, printable draft text is accepted, Esc cancels/returns, and Balance opens. The multi-tag selector's displayed row/facet was not conclusively confirmed in PTY capture, so owner review should inspect multi-tag `f` selection, Left/Right facet movement, Enter/`f` apply, Esc cancel, and inert vertical movement. The isolated test profile is `/mnt/Tokyo/Lab/.tmp/opencode/strata-balance-tag-filter-ux-001-test-profile`; SQLite doctor passes after the smoke. No production profile was used. Native process regression also verifies Backspace clears only Idle sand and preserves other category mass across restart.
+
+At bundle authorship, the source environment lacked `cargo`, `rustc`, and `rustfmt`, so the candidate made no native-green claim. The validation update above records the subsequent native checks and the remaining owner interaction review.

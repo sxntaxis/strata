@@ -1563,10 +1563,7 @@ mod report_edit_state_tests {
 
         let end_shift =
             shifted_report_boundary_month(&window, ReportRangeBoundary::End, 1, today).unwrap();
-        assert_eq!(
-            end_shift.end,
-            NaiveDate::from_ymd_opt(2026, 7, 31).unwrap()
-        );
+        assert_eq!(end_shift.end, NaiveDate::from_ymd_opt(2026, 7, 31).unwrap());
 
         let reaches_present = ReportWindow::new(
             NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
@@ -1574,14 +1571,9 @@ mod report_edit_state_tests {
         )
         .unwrap();
         assert_eq!(
-            shifted_report_boundary_month(
-                &reaches_present,
-                ReportRangeBoundary::End,
-                1,
-                today,
-            )
-            .unwrap()
-            .end,
+            shifted_report_boundary_month(&reaches_present, ReportRangeBoundary::End, 1, today,)
+                .unwrap()
+                .end,
             today
         );
     }

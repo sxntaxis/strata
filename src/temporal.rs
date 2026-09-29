@@ -18,7 +18,9 @@ pub(crate) fn shift_civil_month(date: NaiveDate, direction: i64) -> Option<Naive
         .checked_add(i64::from(date.month0()))?
         .checked_add(direction.signum())?;
     let year = i32::try_from(month_index.div_euclid(12)).ok()?;
-    let month = u32::try_from(month_index.rem_euclid(12)).ok()?.saturating_add(1);
+    let month = u32::try_from(month_index.rem_euclid(12))
+        .ok()?
+        .saturating_add(1);
     let first = NaiveDate::from_ymd_opt(year, month, 1)?;
     let next_first = if month == 12 {
         NaiveDate::from_ymd_opt(year.checked_add(1)?, 1, 1)?
