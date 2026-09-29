@@ -41,13 +41,15 @@ This pass starts from the owner-supplied, natively validated BALANCE-BEHAVIOR-CO
 - Ledger Date acceleration uses the same civil-month helper; Time acceleration remains timestamp-safe sixty-minute arithmetic.
 - Multi-tag filter focus is now an explicit transient selector rather than an immediate facet toggle/focus hybrid.
 - Balance selection stores the selected `CategoryId` and derives its current row index at render/action time.
-- Layer Detail width now derives from untruncated Tag/date/time/effect columns without the previous hard cap; cross-day rows keep Date and Time in their regular separate columns (for example `Sep 10-11` and `23:50–06:00`). Narrow-terminal fitting yields Tag/date space before time/effect.
+- Layer Detail width now derives from untruncated Tag/date/time/effect columns without the previous hard cap; spare modal width distributes across stable columns, Tag remains left-aligned, Date/Time are visibly separated, and Effect remains right-aligned. Cross-day rows use separate compact Date and Time cells.
 
 ## Owner review correction — layer rename and ledger geometry
 
 The owner clarified that the Ctrl+e editor should change the Layer's displayed name, not its Tag or durable description; category descriptions are unnecessary as a user-facing feature. The owner specified unshifted Ctrl+e, distinct from Ctrl+Shift+E. Existing stored category-description values are preserved for compatibility/round-trip; the editor and palette-search surface are retired.
 
 The owner then reported two Layer Detail visual defects from populated-profile screenshots: a selected multi-tag value was ellipsized despite the modal expansion, and a cross-day row placed dates and times together in a different middle cell than neighboring rows. The requested presentation is a compact date span in Date (for example `Sep 10-11`) and only the start/end times in Time (for example `23:50-06:00`). The repair sizes columns from their actual content, retains the ordinary separate columns for cross-day rows, and still respects terminal bounds.
+
+The owner's follow-up screenshot review found the revised row cells were only sized to their minimum text widths, leaving a large blank region to the right and bunching Date/Time/Effect together. The clarified requirement is to distribute spare modal width across stable columns, keep Tag at the left and Effect aligned to the right, and visibly separate Date and Time. Rename follow-up: Backspace removes one character per keypress, no underline on the draft, and no `Rename layer · Enter save · Esc cancel` title.
 
 ## Validation status
 
@@ -59,6 +61,6 @@ At bundle authorship, the source environment lacked `cargo`, `rustc`, and `rustf
 
 ### Latest integrated correction
 
-Rust 1.98.1 passed the declared formatter check, strict Clippy, all-feature tests (588 library + 24 integration/process tests; 20 ignored), and CLI help after the owner clarified rename semantics and supplied the Layer Detail screenshots. The loaded behavior-coherence test profile smoke renamed `Lab` to `Layer Smoke` and back through Ctrl+e; the rename title was visible, both commits retained the same CategoryId, and the original name was restored. SQLite doctor passed afterward. The profile gained two test TUI sessions and remains test-only.
+Rust 1.98.1 passed the declared formatter check, strict Clippy, all-feature tests (588 library + 24 integration/process tests; 20 ignored), and CLI help after the owner clarified rename semantics and supplied the Layer Detail screenshots. On the loaded behavior-coherence test profile, one Backspace changed `Lab` to `La`; typing `b` and committing restored `Lab` with the same CategoryId. The rename title hint was absent. SQLite doctor passed after the profile smokes; the profile is test-only.
 
-Unit coverage verifies Ctrl+e without Shift maps to rename while Ctrl+Shift+E is unbound; rename trims valid names and rejects empty, reserved Idle, and duplicate names; and cross-day labels remain `Sep 10-11` with an independent `23:50–06:00` time span. Responsive sizing uses content-derived column widths with terminal-clamped fit. The user's tag-filter test profile had a live TUI and was not used for this smoke. Owner should verify the final selected long-tag and cross-day row visually before promotion.
+Unit coverage verifies Ctrl+e without Shift maps to rename while Ctrl+Shift+E is unbound; rename trims valid names and rejects empty, reserved Idle, and duplicate names; and cross-day labels remain `Sep 10-11` with an independent `23:50–06:00` time span. A loaded-profile PTY showed the cross-day row with separate, distributed columns and the full multi-tag text while its second facet was selected. Responsive sizing distributes spare width across content-derived columns and terminal-clamps narrow layouts. The user's tag-filter test profile had a live TUI and was not used. Owner final visual verification remains welcome.

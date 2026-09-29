@@ -1523,10 +1523,6 @@ impl App {
 
         if let KeyCode::Char(c) = key.code {
             if self.modal_renaming_category {
-                if self.modal_category_name_select_all {
-                    self.modal_category_name_draft.clear();
-                    self.modal_category_name_select_all = false;
-                }
                 self.modal_category_name_draft.push(c);
                 self.modal_category_name_error = None;
                 self.render_needed = true;
@@ -1545,12 +1541,7 @@ impl App {
 
     fn handle_modal_text_delete(&mut self) {
         if self.modal_renaming_category {
-            if self.modal_category_name_select_all {
-                self.modal_category_name_draft.clear();
-                self.modal_category_name_select_all = false;
-            } else {
-                self.modal_category_name_draft.pop();
-            }
+            self.modal_category_name_draft.pop();
             self.modal_category_name_error = None;
         } else if self.is_on_insert_space() {
             self.new_category_name.pop();

@@ -1063,7 +1063,6 @@ struct App {
     modal_description: String,
     modal_category_name_draft: String,
     modal_category_name_error: Option<String>,
-    modal_category_name_select_all: bool,
     modal_active_description_dirty: bool,
     modal_renaming_category: bool,
     category_tags: storage::CategoryTagsState,
@@ -1171,7 +1170,6 @@ impl App {
             modal_description: String::new(),
             modal_category_name_draft: String::new(),
             modal_category_name_error: None,
-            modal_category_name_select_all: false,
             modal_active_description_dirty: false,
             modal_renaming_category: false,
             category_tags,
@@ -1405,7 +1403,6 @@ impl App {
         self.modal_description = String::new();
         self.modal_category_name_draft.clear();
         self.modal_category_name_error = None;
-        self.modal_category_name_select_all = false;
         self.modal_renaming_category = false;
         self.modal_tag_index = None;
         self.modal_tag_cycle_prefix = None;

@@ -38,7 +38,10 @@ impl App {
                 };
                 let layer_width = 2usize.saturating_add(layer_name.chars().count());
                 if self.modal_renaming_category {
-                    layer_width
+                    self.modal_category_name_error
+                        .as_deref()
+                        .map(|error| layer_width.saturating_add(3 + error.chars().count()))
+                        .unwrap_or(layer_width)
                 } else if let Some(completion) =
                     self.tag_completion_for_category(category.id, &self.modal_description)
                 {
@@ -58,18 +61,9 @@ impl App {
                 }
             })
             .unwrap_or(0);
-        let title_width = if self.modal_renaming_category {
-            self.modal_category_name_error
-                .as_deref()
-                .map(|error| format!("Rename layer · {error}").chars().count())
-                .unwrap_or_else(|| "Rename layer · Enter save · Esc cancel".chars().count())
-        } else {
-            "Strata".chars().count()
-        };
         let minimum_content_width = category_width
             .max(insert_width)
             .max(selected_width)
-            .max(title_width)
             .min(u16::MAX as usize) as u16;
         let minimum_inner_width = minimum_content_width.saturating_add(2);
         let minimum_inner_height = minimum_content_height.saturating_add(2);
@@ -110,16 +104,16 @@ impl App {
                         .add_modifier(ratatui::style::Modifier::ITALIC);
                     let mut line_spans = vec![
                         Span::raw(dot).fg(text_color),
-                        if self.modal_renaming_category {
-                            Span::raw(layer_name).style(
-                                Style::default()
-                                    .fg(text_color)
-                                    .add_modifier(ratatui::style::Modifier::UNDERLINED),
-                            )
-                        } else {
-                            Span::raw(layer_name).fg(text_color)
-                        },
+                        Span::raw(layer_name).fg(text_color),
                     ];
+                    if self.modal_renaming_category
+                        && let Some(error) = self.modal_category_name_error.as_deref()
+                    {
+                        line_spans.push(Span::styled(
+                            format!(" · {error}"),
+                            Style::default().fg(self.theme_error()),
+                        ));
+                    }
                     if !self.modal_renaming_category
                         && let Some(completion) =
                             self.tag_completion_for_category(cat.id, &self.modal_description)
@@ -201,14 +195,7 @@ impl App {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .title(Line::from(Span::styled(
-                if self.modal_renaming_category {
-                    self.modal_category_name_error
-                        .as_deref()
-                        .map(|error| format!("Rename layer · {error}"))
-                        .unwrap_or_else(|| "Rename layer · Enter save · Esc cancel".to_string())
-                } else {
-                    "Strata".to_string()
-                },
+                "Strata",
                 Style::default().fg(self.theme_foreground()),
             )))
             .title_alignment(ratatui::layout::Alignment::Center)

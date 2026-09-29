@@ -91,6 +91,23 @@ impl LedgerColumnWidths {
                 break;
             }
         }
+        let mut remaining = available.saturating_sub(widths.iter().sum::<usize>());
+        while remaining > 0 {
+            let mut expanded = false;
+            for index in [0, 1, 2, 3] {
+                if remaining == 0 {
+                    break;
+                }
+                if self.show_date || index != 1 {
+                    widths[index] = widths[index].saturating_add(1);
+                    remaining -= 1;
+                    expanded = true;
+                }
+            }
+            if !expanded {
+                break;
+            }
+        }
         Self {
             tag: widths[0],
             date: widths[1],
@@ -1579,6 +1596,11 @@ mod hardening_tests {
         };
         assert_eq!(natural.total(), 55);
         assert_eq!(natural.fit(natural.total()), natural);
+        let distributed = natural.fit(91);
+        assert_eq!(distributed.total(), 91);
+        assert!(distributed.date > natural.date);
+        assert!(distributed.time > natural.time);
+        assert!(distributed.metric > natural.metric);
         assert!(natural.fit(24).total() <= 24);
     }
 

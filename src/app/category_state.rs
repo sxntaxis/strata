@@ -290,7 +290,6 @@ impl App {
         self.modal_renaming_category = false;
         self.modal_category_name_draft.clear();
         self.modal_category_name_error = None;
-        self.modal_category_name_select_all = false;
         if self.is_on_insert_space() {
             self.modal_description.clear();
         } else if self.time_tracker.active_category_index() == Some(self.selected_index) {
@@ -325,7 +324,6 @@ impl App {
         };
         self.modal_category_name_draft = category.name.clone();
         self.modal_category_name_error = None;
-        self.modal_category_name_select_all = true;
         self.modal_renaming_category = true;
     }
 
@@ -336,7 +334,6 @@ impl App {
         self.modal_renaming_category = false;
         self.modal_category_name_draft.clear();
         self.modal_category_name_error = None;
-        self.modal_category_name_select_all = false;
     }
 
     pub(super) fn commit_category_rename(&mut self) {

@@ -77,8 +77,9 @@ grammar used by Tag input. De-emphasis is semantic presentation: nonmatches reus
 roles plus terminal dimming rather than assuming a particular gray RGB value. The ledger remains chronological, with a
 presentation-only blank row before `+ Add entry…` when vertical room permits. Layer Detail width sizes to the actual
 Tag, date-span, time-span, and effect columns instead of truncating them at an arbitrary detail-width cap, then clamps
-the overlay to terminal bounds and margins. On a physically narrow terminal, Tag/date columns yield space before the
-separate time/effect columns.
+the overlay to terminal bounds and margins. Available row width is distributed across stable columns: Tag stays at
+the left, Date and Time remain distinctly spaced, and Effect stays right-aligned. On a physically narrow terminal,
+Tag/date columns yield space before the separate time/effect columns.
 
 ## Explicit historical correction
 
