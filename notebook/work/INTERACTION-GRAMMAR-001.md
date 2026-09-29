@@ -16,8 +16,9 @@ This pass starts from the owner-supplied, natively validated BALANCE-BEHAVIOR-CO
 
 ## Owner decision — STRATA-D074
 
-- Layer Tag/name/metadata input owns printable characters before configurable command routing. Uppercase letters and symbols are text rather than hidden Shift-letter commands.
-- `Ctrl+E` replaces `Shift+E` for durable Layer metadata. Metadata is an isolated editor: printable text and Backspace/Delete edit, Enter saves and returns, Esc discards and returns, and Layer Tag/navigation/color/reorder actions are inert while it owns input.
+- Layer Tag/name input owns printable characters before configurable command routing. Uppercase letters and symbols are text rather than hidden Shift-letter commands.
+- `Ctrl+e` without Shift renames the selected non-Idle Layer. Rename is an isolated editor: printable text and Backspace/Delete edit the name draft, Enter validates/saves and returns, and Esc discards and returns. `Ctrl+Shift+E` is a distinct unbound chord.
+- Remove the durable layer-description editor and palette-search surface; preserve existing description values only for SQLite/portable-interchange compatibility and round-trip. Dropping the stored field/data requires a separate versioned schema/interchange migration.
 - Main `Backspace` clears only Idle sand; Main `Delete` clears all sand. The old `c` / `Shift+C` defaults are removed. Editors continue to own Backspace/Delete locally.
 - Plain arrows operate the focused value or selection. Shift is reserved for a larger form of that same directional adjustment. Ctrl owns structural/alternate Layer operations.
 - Existing Layer: Up/Down selects, Left/Right cycles Tag, `Ctrl+Up/Down` reorders, `Ctrl+Left/Right` changes color. The previous Shift-arrow reorder/color bindings are retired.
@@ -29,18 +30,24 @@ This pass starts from the owner-supplied, natively validated BALANCE-BEHAVIOR-CO
 - Ledger Date uses one day / one civil month for plain/Shift horizontal adjustment. Ledger Time uses one minute / one hour. Tag has no Shift accelerator.
 - Multi-tag filtering: a one-tag row toggles immediately with `f`; on a multi-tag row the first `f` enters an in-row selector without changing filter state, Left/Right chooses a facet, Enter or `f` applies and exits, Esc cancels, and vertical or Shift-arrow movement is inert while selecting.
 - Balance summary selection follows stable Layer identity rather than a dynamically sorted row index.
-- Layer modal width may expand for the visible Tag/name/metadata within existing terminal clamps.
+- Layer modal width may expand for the visible Tag/name editor within existing terminal clamps.
 
 ## Implementation candidate
 
-- Default keymap now binds Main sand clearing to Backspace/Delete, metadata to `Ctrl+E`, Layer reorder to `Ctrl+Up/Down`, and existing-Layer recolor to `Ctrl+Left/Right`; `r` and `l` remain actions but are unbound by default.
+- Default keymap now binds Main sand clearing to Backspace/Delete, layer rename to unshifted `Ctrl+e`, Layer reorder to `Ctrl+Up/Down`, and existing-Layer recolor to `Ctrl+Left/Right`; `r` and `l` remain actions but are unbound by default.
 - Layer modal text ownership runs before ordinary configured action routing for unmodified printable characters and Backspace/Delete.
-- Metadata preserves the pre-edit Tag draft while the durable description is edited, then restores that draft after save/cancel.
+- Rename uses a distinct layer-name draft and does not alter the active session Tag; SQLite category sync preserves stable CategoryId and history.
 - Shift-arrow period cycling is removed. Month-scale boundary adjustment uses one shared civil-month helper with end-of-month clamping.
 - Ledger Date acceleration uses the same civil-month helper; Time acceleration remains timestamp-safe sixty-minute arithmetic.
 - Multi-tag filter focus is now an explicit transient selector rather than an immediate facet toggle/focus hybrid.
 - Balance selection stores the selected `CategoryId` and derives its current row index at render/action time.
-- Layer modal preferred width incorporates the active text/completion width as well as layer names.
+- Layer Detail width now derives from untruncated Tag/date/time/effect columns without the previous hard cap; cross-day rows keep Date and Time in their regular separate columns (for example `Sep 10-11` and `23:50–06:00`). Narrow-terminal fitting yields Tag/date space before time/effect.
+
+## Owner review correction — layer rename and ledger geometry
+
+The owner clarified that the Ctrl+e editor should change the Layer's displayed name, not its Tag or durable description; category descriptions are unnecessary as a user-facing feature. The owner specified unshifted Ctrl+e, distinct from Ctrl+Shift+E. Existing stored category-description values are preserved for compatibility/round-trip; the editor and palette-search surface are retired.
+
+The owner then reported two Layer Detail visual defects from populated-profile screenshots: a selected multi-tag value was ellipsized despite the modal expansion, and a cross-day row placed dates and times together in a different middle cell than neighboring rows. The requested presentation is a compact date span in Date (for example `Sep 10-11`) and only the start/end times in Time (for example `23:50-06:00`). The repair sizes columns from their actual content, retains the ordinary separate columns for cross-day rows, and still respects terminal bounds.
 
 ## Validation status
 
@@ -49,3 +56,9 @@ This pass starts from the owner-supplied, natively validated BALANCE-BEHAVIOR-CO
 A loaded test-profile PTY confirmed `Ctrl+E` opens the isolated metadata editor, printable draft text is accepted, Esc cancels/returns, and Balance opens. The multi-tag selector's displayed row/facet was not conclusively confirmed in PTY capture, so owner review should inspect multi-tag `f` selection, Left/Right facet movement, Enter/`f` apply, Esc cancel, and inert vertical movement. The isolated test profile is `/mnt/Tokyo/Lab/.tmp/opencode/strata-balance-tag-filter-ux-001-test-profile`; SQLite doctor passes after the smoke. No production profile was used. Native process regression also verifies Backspace clears only Idle sand and preserves other category mass across restart.
 
 At bundle authorship, the source environment lacked `cargo`, `rustc`, and `rustfmt`, so the candidate made no native-green claim. The validation update above records the subsequent native checks and the remaining owner interaction review.
+
+### Latest integrated correction
+
+Rust 1.98.1 passed the declared formatter check, strict Clippy, all-feature tests (588 library + 24 integration/process tests; 20 ignored), and CLI help after the owner clarified rename semantics and supplied the Layer Detail screenshots. The loaded behavior-coherence test profile smoke renamed `Lab` to `Layer Smoke` and back through Ctrl+e; the rename title was visible, both commits retained the same CategoryId, and the original name was restored. SQLite doctor passed afterward. The profile gained two test TUI sessions and remains test-only.
+
+Unit coverage verifies Ctrl+e without Shift maps to rename while Ctrl+Shift+E is unbound; rename trims valid names and rejects empty, reserved Idle, and duplicate names; and cross-day labels remain `Sep 10-11` with an independent `23:50–06:00` time span. Responsive sizing uses content-derived column widths with terminal-clamped fit. The user's tag-filter test profile had a live TUI and was not used for this smoke. Owner should verify the final selected long-tag and cross-day row visually before promotion.

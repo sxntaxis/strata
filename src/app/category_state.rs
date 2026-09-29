@@ -287,8 +287,10 @@ impl App {
     }
 
     pub(super) fn sync_modal_description_from_selection(&mut self) {
-        self.modal_editing_category_metadata = false;
-        self.modal_description_before_metadata = None;
+        self.modal_renaming_category = false;
+        self.modal_category_name_draft.clear();
+        self.modal_category_name_error = None;
+        self.modal_category_name_select_all = false;
         if self.is_on_insert_space() {
             self.modal_description.clear();
         } else if self.time_tracker.active_category_index() == Some(self.selected_index) {
@@ -301,7 +303,7 @@ impl App {
     }
 
     pub(super) fn preview_active_description_from_modal(&mut self) {
-        if self.modal_editing_category_metadata
+        if self.modal_renaming_category
             || self.is_on_insert_space()
             || self.time_tracker.active_category_index() != Some(self.selected_index)
         {
@@ -314,37 +316,42 @@ impl App {
         }
     }
 
-    pub(super) fn begin_category_metadata_edit(&mut self) {
-        if self.is_on_insert_space() || self.modal_editing_category_metadata {
+    pub(super) fn begin_category_rename(&mut self) {
+        if self.is_on_insert_space() || self.selected_index == 0 || self.modal_renaming_category {
             return;
         }
-        self.modal_description_before_metadata = Some(self.modal_description.clone());
-        self.modal_editing_category_metadata = true;
-        self.modal_description = self
-            .time_tracker
-            .category_description_by_index(self.selected_index)
-            .unwrap_or_default();
-        self.modal_tag_index = None;
-        self.modal_tag_cycle_prefix = None;
+        let Some(category) = self.time_tracker.category_by_index(self.selected_index) else {
+            return;
+        };
+        self.modal_category_name_draft = category.name.clone();
+        self.modal_category_name_error = None;
+        self.modal_category_name_select_all = true;
+        self.modal_renaming_category = true;
     }
 
-    pub(super) fn leave_category_metadata_edit(&mut self) {
-        if !self.modal_editing_category_metadata {
+    pub(super) fn leave_category_rename(&mut self) {
+        if !self.modal_renaming_category {
             return;
         }
-        self.modal_editing_category_metadata = false;
-        self.modal_description = self
-            .modal_description_before_metadata
-            .take()
-            .unwrap_or_else(|| {
-                if self.time_tracker.active_category_index() == Some(self.selected_index) {
-                    self.time_tracker.active_description().to_string()
-                } else {
-                    String::new()
+        self.modal_renaming_category = false;
+        self.modal_category_name_draft.clear();
+        self.modal_category_name_error = None;
+        self.modal_category_name_select_all = false;
+    }
+
+    pub(super) fn commit_category_rename(&mut self) {
+        match self
+            .time_tracker
+            .rename_category_by_index(self.selected_index, &self.modal_category_name_draft)
+        {
+            Ok(()) => {
+                self.persist_categories();
+                if !self.has_persistence_recovery() {
+                    self.leave_category_rename();
                 }
-            });
-        self.modal_tag_index = None;
-        self.modal_tag_cycle_prefix = None;
+            }
+            Err(error) => self.modal_category_name_error = Some(error.to_string()),
+        }
     }
 
     fn selected_category_id(&self) -> Option<CategoryId> {

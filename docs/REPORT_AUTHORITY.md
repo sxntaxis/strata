@@ -31,17 +31,18 @@ session that intersect the selected window are aggregated for row display, with 
 included boundary retained for temporal presentation. The provisional active generation may also project as a row,
 but because it has no completed persisted session identity it is not an existing-entry edit target.
 
-The row presentation is deliberately responsive to interval scope. A single-operational-day window uses three evenly
-distributed data regions: Tag, Time, and signed Effect. A multi-day window uses four evenly distributed regions: Tag,
-Date, Time, and signed Effect. Date remains adjacent to Time rather than becoming a leading identity column. If an
-entry crosses civil dates, the temporal middle region may expand to an explicit `start → end` pair so both date/time
-boundaries remain truthful.
+The row presentation is deliberately responsive to interval scope. A single-operational-day window uses three data
+regions: Tag, Time, and signed Effect. A multi-day window uses four responsive regions: Tag, Date, Time, and signed
+Effect. Date remains adjacent to Time rather than becoming a leading identity column. A cross-day row keeps those same
+columns: Date compresses the span (for example `Sep 10-11`) and Time shows the separate start/end times (for example
+`23:50–06:00`). It does not merge date and time into one displaced temporal cell.
 
 Each ordinary ledger row begins with the layer marker in the first cell. If the persisted Tag is empty, presentation
 falls back to the selected layer name without writing that fallback into storage. The synthetic `+ Add entry…` row uses
 `+` itself in that exact marker column. Add and existing-entry Edit reuse the same single-row geometry: the active field
-is bracketed in place, dates remain visible when the selected period needs them, cross-civil-date edits use one explicit
-`start → end` temporal cell, and Effect remains blank while chronology is being edited rather than showing stale data.
+is bracketed in place, dates remain visible when the selected period needs them, cross-civil-date edits keep the date
+span and time span in their respective columns, and Effect remains blank while chronology is being edited rather than
+showing stale data.
 
 A non-empty Tag field may carry multiple independent attribution tags. The existing session description remains the
 only persisted field; canonical serialization trims/deduplicates tags case-insensitively and writes them as an ordered
@@ -74,9 +75,10 @@ periods inside the same layer.
 The active filter label is separate instrument chrome below the meter and serializes selected tags with the same `; `
 grammar used by Tag input. De-emphasis is semantic presentation: nonmatches reuse theme-derived secondary/status color
 roles plus terminal dimming rather than assuming a particular gray RGB value. The ledger remains chronological, with a
-presentation-only blank row before `+ Add entry…` when vertical room permits. Layer Detail width remains responsive:
-ordinary rows keep the established compact target, while cross-day spans or long Tag text may request a wider overlay
-up to the existing terminal/margin clamp.
+presentation-only blank row before `+ Add entry…` when vertical room permits. Layer Detail width sizes to the actual
+Tag, date-span, time-span, and effect columns instead of truncating them at an arbitrary detail-width cap, then clamps
+the overlay to terminal bounds and margins. On a physically narrow terminal, Tag/date columns yield space before the
+separate time/effect columns.
 
 ## Explicit historical correction
 

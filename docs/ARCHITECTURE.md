@@ -53,7 +53,7 @@ Core responsibilities:
 - Active and archived categories share one stable ID space.
 - Archive changes availability, not historical meaning.
 - Restore reactivates the same row/ID.
-- Archived metadata remains available to sessions, reports, sediment, snapshots, tags, recovery, and interchange.
+- Archived identity and legacy metadata remain available to sessions, reports, sediment, snapshots, tags, recovery, and interchange. The legacy category-description field is retained for round-trip compatibility, not exposed as a current editing/search feature.
 - Unknown category references fail closed and are never coerced to idle.
 - Category merge/permanent deletion is not a current product capability.
 
@@ -63,7 +63,7 @@ The product remains keyboard-first and keeps the continuous sand view as its cen
 
 - `Ctrl-P` opens a hybrid palette: valid direct commands execute directly; otherwise the same text remains fuzzy search and Enter executes the selected result.
 - Informational direct commands keep the palette open and show their result.
-- The category modal is compact in ordinary use; durable metadata has an explicit edit mode.
+- The category modal is compact in ordinary use; `Ctrl+e` without Shift edits the selected layer name while preserving its CategoryId and active-session Tag.
 - Report history is read-only until explicit edit mode; SQLite persistence succeeds before the in-memory row changes.
 - The configured keymap remains truthful about bound/unbound/disabled actions. Ctrl-C is the mandatory terminal-safety quit path.
 

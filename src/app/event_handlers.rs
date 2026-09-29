@@ -1341,23 +1341,15 @@ impl App {
     }
 
     fn handle_modal_action(&mut self, action: Action) -> bool {
-        if self.modal_editing_category_metadata {
+        if self.modal_renaming_category {
             match action {
                 Action::Cancel => {
-                    self.leave_category_metadata_edit();
+                    self.leave_category_rename();
                 }
                 Action::Confirm => {
-                    if self.time_tracker.set_category_description_by_index(
-                        self.selected_index,
-                        self.modal_description.clone(),
-                    ) {
-                        self.persist_categories();
-                    }
-                    if !self.has_persistence_recovery() {
-                        self.leave_category_metadata_edit();
-                    }
+                    self.commit_category_rename();
                 }
-                Action::EditCategoryDescription => {}
+                Action::RenameCategory => {}
                 _ => {}
             }
             self.render_needed = true;
@@ -1481,8 +1473,8 @@ impl App {
                     self.close_modal();
                 }
             }
-            Action::EditCategoryDescription => {
-                self.begin_category_metadata_edit();
+            Action::RenameCategory => {
+                self.begin_category_rename();
             }
             Action::DeleteCategory => {
                 if !self.is_on_insert_space() && self.selected_index > 0 {
@@ -1530,7 +1522,15 @@ impl App {
         }
 
         if let KeyCode::Char(c) = key.code {
-            if self.is_on_insert_space() {
+            if self.modal_renaming_category {
+                if self.modal_category_name_select_all {
+                    self.modal_category_name_draft.clear();
+                    self.modal_category_name_select_all = false;
+                }
+                self.modal_category_name_draft.push(c);
+                self.modal_category_name_error = None;
+                self.render_needed = true;
+            } else if self.is_on_insert_space() {
                 self.new_category_name.push(c);
                 self.render_needed = true;
             } else if self.selected_index < self.time_tracker.category_count() {
@@ -1544,7 +1544,15 @@ impl App {
     }
 
     fn handle_modal_text_delete(&mut self) {
-        if self.is_on_insert_space() {
+        if self.modal_renaming_category {
+            if self.modal_category_name_select_all {
+                self.modal_category_name_draft.clear();
+                self.modal_category_name_select_all = false;
+            } else {
+                self.modal_category_name_draft.pop();
+            }
+            self.modal_category_name_error = None;
+        } else if self.is_on_insert_space() {
             self.new_category_name.pop();
         } else if self.selected_index < self.time_tracker.category_count() {
             self.modal_tag_index = None;

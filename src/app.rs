@@ -1061,9 +1061,11 @@ struct App {
     new_category_name: String,
     new_category_color_cursor: usize,
     modal_description: String,
-    modal_description_before_metadata: Option<String>,
+    modal_category_name_draft: String,
+    modal_category_name_error: Option<String>,
+    modal_category_name_select_all: bool,
     modal_active_description_dirty: bool,
-    modal_editing_category_metadata: bool,
+    modal_renaming_category: bool,
     category_tags: storage::CategoryTagsState,
     modal_tag_index: Option<usize>,
     modal_tag_cycle_prefix: Option<String>,
@@ -1167,9 +1169,11 @@ impl App {
             new_category_name: String::new(),
             new_category_color_cursor: 0,
             modal_description: String::new(),
-            modal_description_before_metadata: None,
+            modal_category_name_draft: String::new(),
+            modal_category_name_error: None,
+            modal_category_name_select_all: false,
             modal_active_description_dirty: false,
-            modal_editing_category_metadata: false,
+            modal_renaming_category: false,
             category_tags,
             modal_tag_index: None,
             modal_tag_cycle_prefix: None,
@@ -1399,8 +1403,10 @@ impl App {
         }
         self.ui_mode = UiMode::Main;
         self.modal_description = String::new();
-        self.modal_description_before_metadata = None;
-        self.modal_editing_category_metadata = false;
+        self.modal_category_name_draft.clear();
+        self.modal_category_name_error = None;
+        self.modal_category_name_select_all = false;
+        self.modal_renaming_category = false;
         self.modal_tag_index = None;
         self.modal_tag_cycle_prefix = None;
         self.render_needed = true;

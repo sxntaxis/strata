@@ -1,6 +1,6 @@
 # Interaction authority
 
-Status: accepted authority; STRATA-D071/D072/D073/D074 are natively certified; D074 awaits owner interaction review
+Status: accepted authority; STRATA-D071/D072/D073/D074 are natively certified; latest D074 rename/layout correction is native-green and awaits owner visual verification
 Program: INTERACTION-001 + INTERACTION-002 convergence
 Current completed unit: INTERACTION-002; PLATEAU-001H H1 presentation hardening certified
 Issues completed: #19, #20, #24
@@ -49,7 +49,7 @@ A failed persistence attempt leaves the draft visible and canonical in-memory hi
 
 The normal layer detail keeps the ledger itself as the interaction surface rather than showing a permanent instruction footer. Existing entries remain compact rows; the final `+ Add entry…` row is part of normal selection. During edit, the selected row changes in place and brackets the active field. Validation or collision text appears only when needed.
 
-Single-day rows distribute three data regions evenly: **Tag · Time · Effect**. Multi-day rows distribute four regions evenly: **Tag · Date · Time · Effect**, keeping date adjacent to time. A cross-day entry may use the two middle regions as one explicit `start → end` temporal span rather than pretending one date owns both boundaries.
+Single-day rows use **Tag · Time · Effect**. Multi-day rows use **Tag · Date · Time · Effect**, keeping date adjacent to time. Cross-day entries keep those same columns: the Date cell uses a compact span such as `Sep 10-11`, and the Time cell shows the separate time span such as `23:50–06:00`. Layer Detail expands to the content-required width within terminal/margin bounds; on a constrained pane, Tag/Date yield before Time/Effect.
 
 Closing Balance, leaving layer detail, or replacing the edit with another explicit Balance editor discards the transient draft. Deletion remains a separate configured command and never applies to the synthetic Add row.
 
@@ -97,12 +97,12 @@ STRATA-D074 makes modifier meaning contextual but consistent:
 
 - unmodified arrows operate the currently focused value or selection;
 - Shift is reserved for a larger form of the same directional adjustment. It does not switch Balance period presets, recolor layers, or reorder layers;
-- Ctrl selects a structural/alternate Layer operation: `Ctrl+↑` / `Ctrl+↓` reorders the selected existing layer, `Ctrl+←` / `Ctrl+→` cycles its color, and `Ctrl+E` enters durable metadata editing;
+- Ctrl selects a structural/alternate Layer operation: `Ctrl+↑` / `Ctrl+↓` reorders the selected existing layer, `Ctrl+←` / `Ctrl+→` cycles its color, and `Ctrl+e` (without Shift) renames the selected non-Idle layer. `Ctrl+Shift+E` is distinct and does not invoke rename;
 - while forging a new layer, plain `←` / `→` chooses color because there is no Tag axis yet;
 - Main `Backspace` clears Idle sand and Main `Delete` clears all sand. Editors retain Backspace/Delete as text editing because they own those keys before action resolution;
 - Layer Tag/name/metadata input owns every printable character before configurable command routing. Uppercase letters and symbols therefore remain text rather than hidden Shift-letter commands.
 
-Durable metadata is an isolated sub-editor. `Ctrl+E` enters it; printable text plus Backspace/Delete edit it; Enter saves and returns to ordinary Layer interaction; Esc discards the metadata draft and returns. Tag cycling, row movement, color changes, and reorder commands are inert while that sub-editor is active.
+Layer rename is an isolated sub-editor. `Ctrl+e` starts from the current layer name; printable text plus Backspace/Delete edit the draft; Enter validates and saves it; Esc cancels. Empty names, reserved Idle names, and case-insensitive duplicates remain in edit mode with visible feedback. Idle cannot be renamed. Rename preserves the stable CategoryId, existing sessions, current session Tag, and legacy category-description data. The legacy description field is not exposed as an editing or command-palette search surface.
 
 ## Balance vocabulary cutover
 

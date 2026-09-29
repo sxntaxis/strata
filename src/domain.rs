@@ -492,6 +492,36 @@ impl CategoryStore {
         Some(removed_id)
     }
 
+    pub fn rename_by_index(&mut self, index: usize, name: &str) -> Result<(), &'static str> {
+        if index == 0 {
+            return Err("Idle cannot be renamed");
+        }
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err("Layer name cannot be empty");
+        }
+        if is_drift_name(trimmed) {
+            return Err("That name is reserved for Idle");
+        }
+        let Some(id) = self.id_at_index(index) else {
+            return Err("No layer is selected");
+        };
+        if self
+            .order
+            .iter()
+            .filter(|existing| **existing != id)
+            .filter_map(|existing| self.by_id.get(existing))
+            .any(|category| category.name.eq_ignore_ascii_case(trimmed))
+        {
+            return Err("A layer with that name already exists");
+        }
+        let Some(category) = self.by_id.get_mut(&id) else {
+            return Err("No layer is selected");
+        };
+        category.name = trimmed.to_string();
+        Ok(())
+    }
+
     pub fn move_up(&mut self, index: usize) -> bool {
         if index <= 1 || index >= self.order.len() {
             return false;
@@ -522,19 +552,6 @@ impl CategoryStore {
         };
 
         category.color = color;
-        true
-    }
-
-    pub fn set_description_by_index(&mut self, index: usize, description: String) -> bool {
-        let Some(id) = self.id_at_index(index) else {
-            return false;
-        };
-
-        let Some(category) = self.by_id.get_mut(&id) else {
-            return false;
-        };
-
-        category.description = description;
         true
     }
 
@@ -619,11 +636,6 @@ impl TimeTracker {
         self.category_store.get_by_id(id)
     }
 
-    pub fn category_description_by_index(&self, index: usize) -> Option<String> {
-        self.category_by_index(index)
-            .map(|category| category.description.clone())
-    }
-
     pub fn category_id_by_name(&self, name: &str) -> Option<CategoryId> {
         self.category_store.category_id_by_name(name)
     }
@@ -657,9 +669,12 @@ impl TimeTracker {
         true
     }
 
-    pub fn set_category_description_by_index(&mut self, index: usize, description: String) -> bool {
-        self.category_store
-            .set_description_by_index(index, description)
+    pub fn rename_category_by_index(
+        &mut self,
+        index: usize,
+        name: &str,
+    ) -> Result<(), &'static str> {
+        self.category_store.rename_by_index(index, name)
     }
 
     pub fn set_category_color_by_index(&mut self, index: usize, color: Color) -> bool {
@@ -1339,6 +1354,27 @@ mod tests {
         let id2 = CategoryId::new(2);
         assert_ne!(id1, id2);
         assert_eq!(id1, CategoryId::new(1));
+    }
+
+    #[test]
+    fn renaming_layer_preserves_identity_and_rejects_reserved_or_duplicate_names() {
+        let mut tracker = TimeTracker::new();
+        let work = tracker
+            .add_category("Work".to_string(), String::new(), None)
+            .unwrap();
+        let research = tracker
+            .add_category("Research".to_string(), String::new(), None)
+            .unwrap();
+
+        tracker
+            .rename_category_by_index(1, "  Deep Work  ")
+            .unwrap();
+        assert_eq!(tracker.category_by_id(work).unwrap().name, "Deep Work");
+        assert_eq!(tracker.category_id_by_name("Research"), Some(research));
+        assert!(tracker.rename_category_by_index(1, "research").is_err());
+        assert!(tracker.rename_category_by_index(0, "Rest").is_err());
+        assert!(tracker.rename_category_by_index(1, "idle").is_err());
+        assert!(tracker.rename_category_by_index(1, " ").is_err());
     }
 
     #[test]

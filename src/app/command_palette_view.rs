@@ -244,9 +244,8 @@ impl App {
             let layer_name = self.display_layer_name(&category.name);
             let title = format!("Switch layer: {layer_name}");
             let search_text = format!(
-                "switch layer focus activate {} {}",
-                layer_name.to_ascii_lowercase(),
-                category.description.to_ascii_lowercase()
+                "switch layer focus activate {}",
+                layer_name.to_ascii_lowercase()
             );
 
             entries.push(PaletteEntry {

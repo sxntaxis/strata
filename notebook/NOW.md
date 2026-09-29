@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-28
 authority: working
-summary: "INTERACTION-GRAMMAR-001 applies owner-accepted STRATA-D074 keyboard ownership/modifier coherence on the natively validated D073 base; native checks pass and owner interaction review remains."
-next: Review INTERACTION-GRAMMAR-001's Main/Layer/Balance keyboard behavior on the loaded test profile, then decide whether to promote or revise; keep Settings/palette and SEDIMENT-016 separate.
+summary: "INTERACTION-GRAMMAR-001 applies the owner-corrected D074 rename chord and responsive Layer Detail columns; integrated native validation and isolated-profile rename persistence smoke pass."
+next: Verify the corrected Layer rename and populated Layer Detail date/time/tag presentation on the owner's test profile, then decide promote or revise; keep Settings/palette and SEDIMENT-016 separate.
 ---
 
 ## INTERACTION-GRAMMAR-001 coherent keyboard ownership — 2026-09-28
@@ -14,6 +14,10 @@ next: Review INTERACTION-GRAMMAR-001's Main/Layer/Balance keyboard behavior on t
 **OWNER-ACCEPTED D074 / IMPLEMENTATION CANDIDATE / NATIVE VALIDATION PENDING:** starting from validated D073 head `0dc12cf476316486852475c0999f38d40d5fe681`, the next pass makes printable Layer input text-first; moves metadata to `Ctrl+E`; moves existing-Layer reorder/color to Ctrl+arrows; assigns Main Backspace/Delete to Idle/all-sand clearing; removes Shift-arrow period cycling; unbinds redundant `r` and `l` defaults; changes Date/boundary Shift acceleration from a week to one civil month while Time remains one hour; simplifies multi-tag `f` selection; pins Balance selection by Layer ID; and widens Layer responsively for active text. Settings/palette internals remain deferred. This authored environment has no Rust toolchain, so no formatter/Clippy/test claim is made yet. See `notebook/work/INTERACTION-GRAMMAR-001.md`.
 
 **INTERACTION-GRAMMAR-001 VALIDATION UPDATE — NATIVE-GREEN / OWNER REVIEW NEXT:** a Rust 1.98.1 environment passed formatting, strict Clippy, all-feature tests (585 library + 24 integration/process; 20 ignored), and CLI help. A loaded test-profile PTY confirmed `Ctrl+E` opens the isolated metadata editor, printable draft text is accepted, Esc cancels/returns, and Balance opens. The multi-tag selector's displayed row/facet was not conclusively confirmed in PTY capture and remains a specific owner-review check. SQLite doctor passes on the test profile; production data was not used. See `notebook/work/INTERACTION-GRAMMAR-001.md`.
+
+**OWNER FOLLOW-UP — CORRECTION IMPLEMENTED / NATIVE-GREEN:** Ctrl+e without Shift renames the selected non-Idle Layer; category-description editing and palette search are retired. Existing category-description values remain only for SQLite/portable-interchange compatibility and round-trip (no schema/data deletion). Owner screenshot review showed clipped multi-tag values and cross-day date/time merged in a different cell; Layer Detail now sizes from actual column content and renders compressed Date span plus separate Time span. Integrated validation and isolated-profile rename persistence smoke pass. Final rendered screenshot review remains for the owner.
+
+**INTEGRATED VALIDATION — NATIVE-GREEN / OWNER VISUAL VERIFICATION NEXT:** Rust 1.98.1 passed formatting, strict Clippy, all-feature tests (588 library + 24 integration/process; 20 ignored), and CLI help. Added proofs cover unshifted Ctrl+e versus unbound Ctrl+Shift+E, stable-ID Layer rename with empty/reserved/duplicate rejection, compact cross-day date/time labels, and content-sized columns. On the loaded test profile `/mnt/Tokyo/Lab/.tmp/opencode/strata-balance-behavior-coherence-001-test-profile-final`, PTY renamed Lab → Layer Smoke → Lab; both saves retained the same CategoryId. SQLite doctor passed afterward. The test profile accumulated two smoke TUI sessions; no production profile was used. The user's separate tag-filter test profile has a live TUI and was not disturbed. The final rendered multi-tag/cross-day screenshot review remains with the owner.
 
 ## BALANCE-BEHAVIOR-COHERENCE-001 input/presentation coherence — 2026-09-28
 

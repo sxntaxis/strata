@@ -31,10 +31,14 @@ impl App {
         let selected_width = categories
             .get(self.selected_index)
             .map(|category| {
-                let layer_width =
-                    2usize.saturating_add(self.display_layer_name(&category.name).chars().count());
-                let description_width = if self.modal_editing_category_metadata {
-                    self.modal_description.chars().count()
+                let layer_name = if self.modal_renaming_category {
+                    self.modal_category_name_draft.as_str()
+                } else {
+                    category.name.as_str()
+                };
+                let layer_width = 2usize.saturating_add(layer_name.chars().count());
+                if self.modal_renaming_category {
+                    layer_width
                 } else if let Some(completion) =
                     self.tag_completion_for_category(category.id, &self.modal_description)
                 {
@@ -43,21 +47,29 @@ impl App {
                         .chars()
                         .count()
                         .saturating_add(suffix_width)
-                } else {
-                    self.modal_description.chars().count()
-                };
-                if description_width == 0 {
+                } else if self.modal_description.is_empty() {
                     layer_width
                 } else {
-                    layer_width
+                    self.modal_description
+                        .chars()
+                        .count()
+                        .saturating_add(layer_width)
                         .saturating_add(1)
-                        .saturating_add(description_width)
                 }
             })
             .unwrap_or(0);
+        let title_width = if self.modal_renaming_category {
+            self.modal_category_name_error
+                .as_deref()
+                .map(|error| format!("Rename layer · {error}").chars().count())
+                .unwrap_or_else(|| "Rename layer · Enter save · Esc cancel".chars().count())
+        } else {
+            "Strata".chars().count()
+        };
         let minimum_content_width = category_width
             .max(insert_width)
             .max(selected_width)
+            .max(title_width)
             .min(u16::MAX as usize) as u16;
         let minimum_inner_width = minimum_content_width.saturating_add(2);
         let minimum_inner_height = minimum_content_height.saturating_add(2);
@@ -88,23 +100,29 @@ impl App {
                         cat.color,
                         self.theme_foreground(),
                     );
-                    let layer_name = self.display_layer_name(&cat.name);
+                    let layer_name = if self.modal_renaming_category {
+                        self.modal_category_name_draft.clone()
+                    } else {
+                        self.display_layer_name(&cat.name)
+                    };
                     let description_style = Style::default()
                         .fg(text_color)
                         .add_modifier(ratatui::style::Modifier::ITALIC);
                     let mut line_spans = vec![
                         Span::raw(dot).fg(text_color),
-                        Span::raw(layer_name).fg(text_color),
+                        if self.modal_renaming_category {
+                            Span::raw(layer_name).style(
+                                Style::default()
+                                    .fg(text_color)
+                                    .add_modifier(ratatui::style::Modifier::UNDERLINED),
+                            )
+                        } else {
+                            Span::raw(layer_name).fg(text_color)
+                        },
                     ];
-                    if self.modal_editing_category_metadata {
-                        if !self.modal_description.is_empty() {
-                            line_spans.push(Span::styled(
-                                format!(" {}", self.modal_description),
-                                description_style,
-                            ));
-                        }
-                    } else if let Some(completion) =
-                        self.tag_completion_for_category(cat.id, &self.modal_description)
+                    if !self.modal_renaming_category
+                        && let Some(completion) =
+                            self.tag_completion_for_category(cat.id, &self.modal_description)
                     {
                         let suffix = completion
                             .tag
@@ -119,7 +137,7 @@ impl App {
                             suffix,
                             description_style.add_modifier(ratatui::style::Modifier::DIM),
                         ));
-                    } else if !self.modal_description.is_empty() {
+                    } else if !self.modal_renaming_category && !self.modal_description.is_empty() {
                         line_spans.push(Span::styled(
                             format!(" {}", self.modal_description),
                             description_style,
@@ -183,10 +201,13 @@ impl App {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .title(Line::from(Span::styled(
-                if self.modal_editing_category_metadata {
-                    "Strata · layer metadata"
+                if self.modal_renaming_category {
+                    self.modal_category_name_error
+                        .as_deref()
+                        .map(|error| format!("Rename layer · {error}"))
+                        .unwrap_or_else(|| "Rename layer · Enter save · Esc cancel".to_string())
                 } else {
-                    "Strata"
+                    "Strata".to_string()
                 },
                 Style::default().fg(self.theme_foreground()),
             )))

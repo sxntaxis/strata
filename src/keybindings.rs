@@ -63,7 +63,7 @@ pub(crate) enum Action {
     Cancel,
 
     DeleteCategory,
-    EditCategoryDescription,
+    RenameCategory,
     MoveLayerUp,
     MoveLayerDown,
     PreviousLayerColor,
@@ -104,7 +104,7 @@ impl Action {
         Action::Confirm,
         Action::Cancel,
         Action::DeleteCategory,
-        Action::EditCategoryDescription,
+        Action::RenameCategory,
         Action::MoveLayerUp,
         Action::MoveLayerDown,
         Action::PreviousLayerColor,
@@ -149,7 +149,7 @@ impl Action {
             Action::Cancel => "cancel",
 
             Action::DeleteCategory => "delete_layer",
-            Action::EditCategoryDescription => "edit_layer_metadata",
+            Action::RenameCategory => "rename_layer",
             Action::MoveLayerUp => "move_layer_up",
             Action::MoveLayerDown => "move_layer_down",
             Action::PreviousLayerColor => "previous_layer_color",
@@ -197,8 +197,8 @@ impl Action {
             "cancel" => Some(Self::Cancel),
 
             "delete_layer" | "delete_category" => Some(Self::DeleteCategory),
-            "edit_layer_metadata" | "edit_category_description" => {
-                Some(Self::EditCategoryDescription)
+            "rename_layer" | "edit_layer_metadata" | "edit_category_description" => {
+                Some(Self::RenameCategory)
             }
             "move_layer_up" | "shift_up" => Some(Self::MoveLayerUp),
             "move_layer_down" | "shift_down" => Some(Self::MoveLayerDown),
@@ -245,7 +245,7 @@ impl Action {
             Action::Cancel => "Cancel / close",
 
             Action::DeleteCategory => "Archive selected Layer / delete selected Balance log",
-            Action::EditCategoryDescription => "Edit durable layer metadata",
+            Action::RenameCategory => "Rename selected Layer",
             Action::MoveLayerUp => "Move selected Layer up",
             Action::MoveLayerDown => "Move selected Layer down",
             Action::PreviousLayerColor => "Cycle selected Layer to previous color",
@@ -289,7 +289,7 @@ impl Action {
             Action::Cancel => "Cancel / close",
 
             Action::DeleteCategory => "Archive layer / delete log",
-            Action::EditCategoryDescription => "Edit layer metadata",
+            Action::RenameCategory => "Rename layer",
             Action::MoveLayerUp => "Move layer up",
             Action::MoveLayerDown => "Move layer down",
             Action::PreviousLayerColor => "Previous layer color",
@@ -333,7 +333,7 @@ impl Action {
             | Action::Cancel => ActionCategory::Navigation,
 
             Action::DeleteCategory
-            | Action::EditCategoryDescription
+            | Action::RenameCategory
             | Action::MoveLayerUp
             | Action::MoveLayerDown
             | Action::PreviousLayerColor
@@ -902,7 +902,7 @@ const DEFAULT_BINDINGS: [(&str, Action); 35] = [
     ("ctrl-down", Action::MoveLayerDown),
     ("ctrl-left", Action::PreviousLayerColor),
     ("ctrl-right", Action::NextLayerColor),
-    ("ctrl-e", Action::EditCategoryDescription),
+    ("ctrl-e", Action::RenameCategory),
     ("x", Action::DeleteCategory),
     ("+", Action::IncreaseBalance),
     ("=", Action::IncreaseBalance),
@@ -1376,6 +1376,17 @@ mod tests {
     }
 
     #[test]
+    fn uppercase_modified_letter_is_distinct_from_unshifted_modified_letter() {
+        let control_e = KeyBinding::parse("ctrl-e").expect("Ctrl+e should parse");
+        let control_shift_e = KeyBinding::parse("ctrl-E").expect("Ctrl+Shift+E should parse");
+        assert_ne!(control_e, control_shift_e);
+        assert_eq!(
+            control_shift_e,
+            KeyBinding::parse("ctrl-shift-e").expect("Ctrl+Shift+e should parse")
+        );
+    }
+
+    #[test]
     fn test_key_event_normalizes_uppercase_letter_to_shift() {
         let event = KeyEvent::new(KeyCode::Char('C'), KeyModifiers::SHIFT);
         let key = KeyBinding::from_key_event(event).expect("event should normalize");
@@ -1432,7 +1443,7 @@ mod tests {
         );
         assert_eq!(
             keymap.action_for_key_event(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL)),
-            Some(Action::EditCategoryDescription)
+            Some(Action::RenameCategory)
         );
         assert_eq!(
             keymap.action_for_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::CONTROL)),
@@ -1452,6 +1463,13 @@ mod tests {
         );
         assert_eq!(
             keymap.action_for_key_event(KeyEvent::new(KeyCode::Char('E'), KeyModifiers::SHIFT)),
+            None
+        );
+        assert_eq!(
+            keymap.action_for_key_event(KeyEvent::new(
+                KeyCode::Char('E'),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            )),
             None
         );
     }

@@ -12,7 +12,7 @@ Category authority preserves the meaning of recorded time and sediment across ac
 A category is identified by one stable numeric `CategoryId`. Durable category state includes:
 
 - name;
-- description/metadata;
+- legacy description text retained for SQLite and portable-interchange compatibility;
 - theme-independent RGB color anchor (legacy `color_index` storage remains a compatibility envelope);
 - balance effect;
 - active or archived state;
@@ -61,7 +61,7 @@ Every persisted session category ID must resolve to the catalog or to explicit i
 
 ## Tags and metadata
 
-Tag suggestions/history belong to stable category identity and survive archive/restore. The active session description/draft is separate from durable category metadata. A session may carry multiple independent attribution tags in that existing description field, canonically serialized with `; ` between tags; the per-category tag history stores the individual canonical tag spellings used for completion rather than becoming a second time authority. Ordinary layer switching edits the active-session text; durable metadata has an explicit edit mode.
+Tag suggestions/history belong to stable category identity and survive archive/restore. The active session description/draft is separate from the category's legacy description field. A session may carry multiple independent attribution tags in its existing description field, canonically serialized with `; ` between tags; the per-category tag history stores the individual canonical tag spellings used for completion rather than becoming a second time authority. Ordinary layer switching edits the active-session text. The legacy category-description value is preserved for SQLite and portable interchange, but the current TUI neither edits it nor searches it; layer identity is changed by renaming the category name while preserving its stable ID. Physically dropping stored legacy values requires a separately versioned schema/interchange migration.
 
 ## Portable interchange
 
