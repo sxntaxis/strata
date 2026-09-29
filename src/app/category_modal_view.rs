@@ -206,5 +206,46 @@ impl App {
         f.render_widget(ratatui::widgets::Clear, modal_rect);
         f.render_widget(frame_block, modal_rect);
         f.render_stateful_widget(list, list_area, &mut list_state);
+
+        let visible_row = self.selected_index.saturating_sub(list_state.offset());
+        if visible_row < usize::from(list_area.height) {
+            let cursor_y = list_area.y.saturating_add(visible_row as u16);
+            let cursor_x = if self.modal_renaming_category {
+                Some(
+                    list_area
+                        .x
+                        .saturating_add(2)
+                        .saturating_add(self.modal_category_name_draft.chars().count() as u16),
+                )
+            } else if self.is_on_insert_space() {
+                Some(
+                    list_area
+                        .x
+                        .saturating_add(2)
+                        .saturating_add(self.new_category_name.chars().count() as u16),
+                )
+            } else if self.modal_tag_text_editing
+                && let Some(category) = categories.get(self.selected_index)
+            {
+                Some(
+                    list_area
+                        .x
+                        .saturating_add(2)
+                        .saturating_add(
+                            self.display_layer_name(&category.name).chars().count() as u16
+                        )
+                        .saturating_add(1)
+                        .saturating_add(self.modal_description.chars().count() as u16),
+                )
+            } else {
+                None
+            };
+            if let Some(cursor_x) = cursor_x
+                && cursor_x < list_area.x.saturating_add(list_area.width)
+            {
+                #[allow(deprecated)]
+                f.set_cursor(cursor_x, cursor_y);
+            }
+        }
     }
 }

@@ -117,7 +117,7 @@ See `docs/RECOVERY_AUTHORITY.md`.
 - Growing beyond the current logical canvas expands it monotonically, preserving existing cells around the horizontal center and bottom baseline and filling new space with emptiness.
 - The logical canvas does not shrink again merely because the viewport shrinks.
 - Pending grains may occupy newly available capacity after expansion.
-- Historical artifacts remain immutable projections of stored or reconstructed sediment state.
+- Historical geometry, mass, topology, and chronology remain immutable projections of stored or reconstructed sediment state. Layer color resolves from current stable identity at render time; permanent Layer deletion is the explicit classification exception and atomically rewrites that CategoryId to Idle in current and persisted historical sediment without moving grains.
 
 This preserves responsive v0.7.7-style artwork without making terminal size destructive persistence authority.
 

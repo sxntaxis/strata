@@ -159,6 +159,20 @@ fn assert_terminal_restored(output: &PtyOutput) {
         output.before, output.after,
         "terminal termios must be restored exactly"
     );
+    assert!(
+        output
+            .bytes
+            .windows(5)
+            .any(|sequence| sequence == b"\x1b[5 q"),
+        "editable TUI should request a blinking bar cursor"
+    );
+    assert!(
+        output
+            .bytes
+            .windows(5)
+            .any(|sequence| sequence == b"\x1b[0 q"),
+        "terminal teardown should restore the user's default cursor style"
+    );
 }
 
 fn wait_for_path(path: &Path) {
@@ -227,6 +241,80 @@ fn sediment_mass_for_category(payload: &serde_json::Value, category_id: u64) -> 
         .filter(|id| id.as_u64() == Some(category_id))
         .count();
     placed + pending_runs + legacy_pending
+}
+
+fn total_sediment_mass(payload: &serde_json::Value) -> usize {
+    let placed = payload
+        .get("grains")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
+    let pending_runs = payload
+        .get("pending_runs")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|run| {
+            usize::try_from(
+                run.get("count")
+                    .and_then(serde_json::Value::as_u64)
+                    .expect("pending run count should be numeric"),
+            )
+            .expect("pending run count should fit usize")
+        })
+        .sum::<usize>();
+    let legacy_pending = payload
+        .get("pending_grains")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
+    placed + pending_runs + legacy_pending
+}
+
+fn pending_category_sequence(payload: &serde_json::Value) -> Vec<u64> {
+    let mut categories = payload
+        .get("pending_grains")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|category_id| category_id.as_u64().unwrap())
+        .collect::<Vec<_>>();
+    for run in payload
+        .get("pending_runs")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let category_id = run
+            .get("category_id")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap();
+        let count = usize::try_from(
+            run.get("count")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap(),
+        )
+        .unwrap();
+        categories.extend(std::iter::repeat_n(category_id, count));
+    }
+    categories
+}
+
+fn placed_grains(payload: &serde_json::Value) -> Vec<(u64, u64, u64)> {
+    payload
+        .get("grains")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|grain| {
+            (
+                grain.get("x").and_then(serde_json::Value::as_u64).unwrap(),
+                grain.get("y").and_then(serde_json::Value::as_u64).unwrap(),
+                grain
+                    .get("category_id")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap(),
+            )
+        })
+        .collect()
 }
 
 #[test]
@@ -525,7 +613,7 @@ fn active_tag_preview_requires_enter_and_escape_restores_opening_tag() {
 }
 
 #[test]
-fn ctrl_x_balance_delete_requires_confirmation_and_preserves_sand() {
+fn ctrl_x_balance_delete_reclassifies_sand_without_changing_geometry_or_mass() {
     let profile = TerminalProfile::new("balance-permanent-layer-delete");
     profile.seed_work_category();
     Connection::open(profile.database_path())
@@ -563,9 +651,11 @@ fn ctrl_x_balance_delete_requires_confirmation_and_preserves_sand() {
     assert!(stop.status.success(), "{}", combined_output(&stop));
 
     let sand_before = persisted_sand_state(&profile);
+    let work_mass_before = sediment_mass_for_category(&sand_before.2, 1);
+    let idle_mass_before = sediment_mass_for_category(&sand_before.2, 0);
     assert!(
-        sediment_mass_for_category(&sand_before.2, 1) > 0,
-        "the test Layer should have materialized sand before deletion"
+        work_mass_before > 0,
+        "test Layer should have sand before deletion"
     );
 
     tui.write_all(b"b").expect("Balance should open from Main");
@@ -638,10 +728,30 @@ fn ctrl_x_balance_delete_requires_confirmation_and_preserves_sand() {
         "confirmation should delete session and Tag history"
     );
     let sand_after = persisted_sand_state(&profile);
+    assert_eq!(sand_after.0, sand_before.0);
+    assert_eq!(sand_after.1, sand_before.1);
     assert_eq!(
-        sand_after, sand_before,
-        "Layer deletion must not rewrite sand"
+        total_sediment_mass(&sand_after.2),
+        total_sediment_mass(&sand_before.2)
     );
+    let mut expected_grains = placed_grains(&sand_before.2);
+    for (_, _, category_id) in &mut expected_grains {
+        if *category_id == 1 {
+            *category_id = 0;
+        }
+    }
+    assert_eq!(placed_grains(&sand_after.2), expected_grains);
+    let expected_pending = pending_category_sequence(&sand_before.2)
+        .into_iter()
+        .map(|category_id| if category_id == 1 { 0 } else { category_id })
+        .collect::<Vec<_>>();
+    assert_eq!(pending_category_sequence(&sand_after.2), expected_pending);
+    assert_eq!(
+        sediment_mass_for_category(&sand_after.2, 0),
+        idle_mass_before + work_mass_before,
+        "deleted Layer grains should become Idle without loss"
+    );
+    assert_eq!(sediment_mass_for_category(&sand_after.2, 1), 0);
     let tombstone: (String, Option<String>) = Connection::open(profile.database_path())
         .unwrap()
         .query_row(

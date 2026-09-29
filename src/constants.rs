@@ -69,14 +69,12 @@ pub const COMMAND_PALETTE_SETTINGS: CommandPaletteSettings = CommandPaletteSetti
 };
 
 pub const REPORT_MODAL_SETTINGS: ReportModalSettings = ReportModalSettings {
-    log_detail_preferred_width: 72,
     summary_name_fallback_width: 12,
     summary_name_max_width: 28,
     expanded_inner_padding: 4,
     detail_metric_width_drift: 8,
     detail_metric_width_default: 9,
     summary_metric_width: 9,
-    detail_date_preview_width: 7,
     min_tag_width: 4,
     summary_name_gap: 4,
     range_editor_min_width: 64,
@@ -145,14 +143,12 @@ pub struct CommandPaletteSettings {
 }
 
 pub struct ReportModalSettings {
-    pub log_detail_preferred_width: usize,
     pub summary_name_fallback_width: usize,
     pub summary_name_max_width: usize,
     pub expanded_inner_padding: usize,
     pub detail_metric_width_drift: usize,
     pub detail_metric_width_default: usize,
     pub summary_metric_width: usize,
-    pub detail_date_preview_width: usize,
     pub min_tag_width: usize,
     pub summary_name_gap: usize,
     pub range_editor_min_width: usize,

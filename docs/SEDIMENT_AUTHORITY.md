@@ -165,21 +165,21 @@ These kinds are not interchangeable. Historical bare daily payloads are cumulati
 
 Balance historical background is visual memory, not a synthetic chart. While Strata is running, each autosave publishes the exact cumulative canonical `SandState` for the current operational day as its latest available visual checkpoint. The checkpoint preserves exact grain coordinates, category identity, pending mass, frame/sweep/RNG metadata, and canonical grid dimensions; SQLite retains its capture timestamp.
 
-When live simulation crosses an operational-day cutoff, Strata captures the exact canonical `SandState` after processing events due through that boundary and promotes it to the final day-end checkpoint. For a fixed 06:00 day start, this is the canvas at the following 06:00 cutoff. A final day-end checkpoint is immutable; earlier autosave checkpoints for that day may be replaced by newer autosave captures until the boundary is observed.
+When live simulation crosses an operational-day cutoff, Strata captures the exact canonical `SandState` after processing events due through that boundary and promotes it to the final day-end checkpoint. For a fixed 06:00 day start, this is the canvas at the following 06:00 cutoff. A final day-end checkpoint is immutable with respect to ordinary runtime, resize, reporting, and ledger-correction flows; earlier autosave checkpoints for that day may be replaced by newer autosave captures until the boundary is observed. STRATA-D076 adds one explicit identity-lifecycle exception: permanent Layer deletion reclassifies that Layer's category identity to Idle in persisted historical sediment without changing coordinates, mass, topology, chronology, or simulation metadata.
 
 - `snapshot_kind = 'daily'` stores the latest canonical visual checkpoint, then the final day-end checkpoint when the cutoff is observed;
 - `daily-contribution` remains separate ledger-derived accounting evidence;
-- terminal resize, ledger reconciliation, report viewing, or category/session editing never rewrites a stored canonical photo;
+- terminal resize, ledger reconciliation, report viewing, or ordinary category/session editing never rewrites a stored canonical photo; permanent Layer deletion is the explicit D076 identity-reclassification exception;
 - each operational day may own a different canonical canvas size.
 
 If Strata is not running at the cutoff, historical Balance uses the most recent canonical checkpoint already saved for that day; provenance still identifies it internally as the latest saved checkpoint, but normal Balance chrome does not need to print that label. It does not substitute a ledger-derived preview when such a checkpoint exists. A `DerivedPreview` is used only when no authentic canonical checkpoint exists for the day, and its reconstructed status remains explicit model authority.
 
 ## Disposable historical viewing
 
-Historical viewing preserves immutable source authority while allowing a temporary visual simulation:
+Historical viewing preserves source geometry/mass/topology/chronology while allowing a temporary visual simulation. The only accepted classification rewrite is D076 permanent Layer deletion (Layer → Idle); current Layer color is resolved as presentation from stable Layer identity:
 
 - Balance prefers the latest canonical visual checkpoint for the selected interval end day, including an authentic day-end capture or the last autosaved capture when the cutoff was missed;
-- the snapshot envelope and source `SandState` remain immutable;
+- the snapshot envelope and source `SandState` remain immutable during viewing and ordinary correction; permanent Layer deletion may rewrite only category classification to Idle and refresh source identity;
 - entering a historical visualization restores a clone into a fresh production-Classic preview engine;
 - the preview may advance gravity/settling for already placed grains, but it never generates rain, calls ingress, or materializes pending logical sediment;
 - a smaller current viewport crops the historical canvas around horizontal center and bottom baseline;
@@ -204,7 +204,7 @@ The builder:
 - is independent of terminal and canonical-canvas dimensions;
 - calculates a source revision from day, quantum, idle policy, category identity, elapsed seconds, slice endpoints, and session identity.
 
-Description text and canvas dimensions are deliberately absent from the contribution revision because neither changes sediment mass or chronology. Consequently, resizing or clearing the visual canvas today cannot make an old accounting contribution stale. Persisted contribution reconciliation remains ledger-driven and separate from immutable canonical daily visual artifacts.
+Description text and canvas dimensions are deliberately absent from the contribution revision because neither changes sediment mass or chronology. Consequently, resizing or clearing the visual canvas today cannot make an old accounting contribution stale. Persisted contribution reconciliation remains ledger-driven and separate from canonical daily visual artifacts; D076 permanent Layer deletion is the explicit category-classification rewrite exception for those artifacts.
 
 ## Historical correction and retained current sediment
 

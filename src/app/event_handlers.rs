@@ -1451,6 +1451,10 @@ impl App {
                         .set_category_color_by_index(self.selected_index, new_color)
                     {
                         self.persist_categories();
+                        // Historical sediment keeps Layer identity, not frozen RGB.
+                        // Invalidate any presentation cache so the new color resolves
+                        // retroactively anywhere that Layer appears.
+                        self.clear_report_snapshot_cache();
                     }
                 }
             }

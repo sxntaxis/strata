@@ -377,6 +377,33 @@ impl App {
         self.archived_categories = state.archived_categories;
         self.category_tags = state.category_tags;
 
+        // Permanent deletion reclassifies every retained representation of the
+        // deleted Layer as Idle. Keep staged day-end photos aligned with the
+        // same identity rewrite before they can be persisted later.
+        for pending in &mut self.pending_day_end_snapshots {
+            if crate::sand::recolor_state_category_mass(
+                &mut pending.snapshot.state,
+                category_id,
+                DRIFT_CATEGORY_ID,
+                usize::MAX,
+            ) > 0
+            {
+                let day = pending
+                    .snapshot
+                    .operational_day
+                    .clone()
+                    .unwrap_or_else(|| pending.operational_day.format("%Y-%m-%d").to_string());
+                pending.snapshot = crate::sand::SedimentSnapshot::day_end_checkpoint(
+                    day,
+                    pending.snapshot.state.clone(),
+                );
+            }
+        }
+        self.restore_sand_state();
+        if self.has_persistence_recovery() {
+            return false;
+        }
+
         self.report_layer_delete_confirmation = None;
         self.report_tag_filter.clear();
         self.report_filter_tag_index = None;

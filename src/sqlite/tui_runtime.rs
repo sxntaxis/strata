@@ -16,7 +16,7 @@ use crate::{
     },
     sand::{
         DailySedimentSlice, SandState, SedimentSnapshot, daily_contribution_from_slices,
-        recolor_state_category_mass,
+        recolor_state_category_mass, stable_source_revision,
     },
     storage::{CategoryTagsState, LoadedCategories, LoadedSessions},
     temporal,
@@ -549,6 +549,75 @@ pub(crate) fn archive_category(
     transaction.commit().map_err(|error| error.to_string())
 }
 
+fn reclassify_all_category_mass(
+    state: &mut SandState,
+    from_category_id: CategoryId,
+    to_category_id: CategoryId,
+) -> usize {
+    let reclassified =
+        recolor_state_category_mass(state, from_category_id, to_category_id, usize::MAX);
+    if reclassified > 0 && state.version == SandState::PROVENANCE_COMPATIBILITY_VERSION {
+        state.version = SandState::VERSION;
+    }
+    reclassified
+}
+
+fn refresh_snapshot_source_revision(snapshot: &mut SedimentSnapshot) -> Result<(), String> {
+    snapshot.source_revision.clear();
+    let material = serde_json::to_vec(snapshot).map_err(|error| error.to_string())?;
+    snapshot.source_revision = stable_source_revision(&material);
+    Ok(())
+}
+
+fn reclassify_snapshot_payload(
+    payload_json: &str,
+    from_category_id: CategoryId,
+) -> Result<Option<String>, String> {
+    if let Ok(mut snapshot) = serde_json::from_str::<SedimentSnapshot>(payload_json) {
+        if reclassify_all_category_mass(&mut snapshot.state, from_category_id, DRIFT_CATEGORY_ID)
+            == 0
+        {
+            return Ok(None);
+        }
+        refresh_snapshot_source_revision(&mut snapshot)?;
+        return serde_json::to_string(&snapshot)
+            .map(Some)
+            .map_err(|error| error.to_string());
+    }
+
+    let mut state = serde_json::from_str::<SandState>(payload_json)
+        .map_err(|error| format!("sediment snapshot payload is invalid: {error}"))?;
+    if reclassify_all_category_mass(&mut state, from_category_id, DRIFT_CATEGORY_ID) == 0 {
+        return Ok(None);
+    }
+    serde_json::to_string(&state)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+fn reclassify_checkpoint_sediment(
+    payload_json: &str,
+    from_category_id: CategoryId,
+) -> Result<Option<String>, String> {
+    let mut checkpoint: serde_json::Value =
+        serde_json::from_str(payload_json).map_err(|error| error.to_string())?;
+    let Some(sand_state) = checkpoint.get("sand_state").cloned() else {
+        return Ok(None);
+    };
+    if sand_state.is_null() {
+        return Ok(None);
+    }
+    let mut state: SandState =
+        serde_json::from_value(sand_state).map_err(|error| error.to_string())?;
+    if reclassify_all_category_mass(&mut state, from_category_id, DRIFT_CATEGORY_ID) == 0 {
+        return Ok(None);
+    }
+    checkpoint["sand_state"] = serde_json::to_value(state).map_err(|error| error.to_string())?;
+    serde_json::to_string(&checkpoint)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
 pub(crate) fn delete_category_permanently(
     database_path: &Path,
     category_id: CategoryId,
@@ -574,6 +643,74 @@ pub(crate) fn delete_category_permanently(
         .map_err(|error| error.to_string())?;
     if active_category_id == Some(category_id) {
         return Err("the active category cannot be deleted".to_string());
+    }
+
+    let category_id_value =
+        u64::try_from(category_id).map_err(|_| format!("category ID {category_id} is invalid"))?;
+    let category_id_typed = CategoryId::new(category_id_value);
+
+    if let Some(payload_json) = transaction
+        .query_row(
+            "SELECT payload_json FROM sand_state WHERE singleton = 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?
+    {
+        let mut state: SandState =
+            serde_json::from_str(&payload_json).map_err(|error| error.to_string())?;
+        if reclassify_all_category_mass(&mut state, category_id_typed, DRIFT_CATEGORY_ID) > 0 {
+            let updated = serde_json::to_string(&state).map_err(|error| error.to_string())?;
+            transaction
+                .execute(
+                    "UPDATE sand_state SET payload_json = ?1, updated_at_utc = ?2
+                     WHERE singleton = 1",
+                    params![updated, timestamp(Utc::now())],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+    }
+
+    let snapshot_payloads = {
+        let mut statement = transaction
+            .prepare("SELECT id, payload_json FROM sand_snapshots ORDER BY id")
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|error| error.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?
+    };
+    for (snapshot_id, payload_json) in snapshot_payloads {
+        if let Some(updated) = reclassify_snapshot_payload(&payload_json, category_id_typed)? {
+            transaction
+                .execute(
+                    "UPDATE sand_snapshots SET payload_json = ?1 WHERE id = ?2",
+                    params![updated, snapshot_id],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+    }
+
+    if let Some(payload_json) = transaction
+        .query_row(
+            "SELECT payload_json FROM runtime_checkpoint WHERE singleton = 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?
+        && let Some(updated) = reclassify_checkpoint_sediment(&payload_json, category_id_typed)?
+    {
+        transaction
+            .execute(
+                "UPDATE runtime_checkpoint SET payload_json = ?1 WHERE singleton = 1",
+                params![updated],
+            )
+            .map_err(|error| error.to_string())?;
     }
 
     transaction
@@ -3370,7 +3507,7 @@ mod tests {
     }
 
     #[test]
-    fn permanent_category_delete_removes_history_and_tags_without_touching_sand_snapshots() {
+    fn permanent_category_delete_reclassifies_current_and_historical_sediment_as_idle() {
         let path = repository_file("category-delete");
         let mut repository = SqliteRepository::open(&path).unwrap();
         repository
@@ -3396,20 +3533,104 @@ mod tests {
                 [],
             )
             .unwrap();
+        drop(repository);
+
+        let state = SandState {
+            version: SandState::PROVENANCE_COMPATIBILITY_VERSION,
+            grid_width: 3,
+            grid_height: 3,
+            grains: vec![
+                SandStateGrain {
+                    x: 0,
+                    y: 2,
+                    category_id: 1,
+                },
+                SandStateGrain {
+                    x: 1,
+                    y: 2,
+                    category_id: 0,
+                },
+            ],
+            frame_count: 3,
+            sweep_left_to_right: true,
+            rng_state: 9,
+            ingress_focus_x: None,
+            pending_grains: Vec::new(),
+            pending_runs: vec![
+                PendingGrainRun {
+                    category_id: 1,
+                    count: 2,
+                },
+                PendingGrainRun {
+                    category_id: 0,
+                    count: 1,
+                },
+            ],
+            active_avalanche_columns: Vec::new(),
+            mobilized_grains: Vec::new(),
+            classic_runtime: None,
+        };
+        save_sand_state(&path, &state).unwrap();
+        let snapshot =
+            SedimentSnapshot::day_end_checkpoint("2026-09-28".to_string(), state.clone());
+        save_day_end_snapshot(&path, "2026-09-28", &snapshot, Utc::now()).unwrap();
+        let checkpoint_json = serde_json::json!({
+            "active_category_id": 0,
+            "sand_state": state,
+        })
+        .to_string();
+        let repository = open_cli_repository(&path).unwrap();
         repository
             .connection
             .execute(
-                "INSERT INTO sand_snapshots (
-                    id, formation_id, snapshot_kind, operational_day, quantum_seconds,
-                    payload_json, captured_at_utc
-                 ) VALUES (1, 'formation', 'daily', '2026-09-28', 60, '{}',
-                    '2026-09-28T23:59:59Z')",
-                [],
+                "INSERT INTO runtime_checkpoint (
+                    singleton, status, detached_at_utc, simulation_time_utc,
+                    active_session_stable_id, payload_json
+                 ) VALUES (1, 'pending', '2026-09-28T13:00:00Z',
+                    '2026-09-28T13:00:00Z', NULL, ?1)",
+                params![checkpoint_json],
             )
             .unwrap();
         drop(repository);
 
         delete_category_permanently(&path, CategoryId::new(1)).unwrap();
+
+        let current = load_sand_state(&path).unwrap().unwrap();
+        assert_eq!(current.version, SandState::VERSION);
+        assert!(current.grains.iter().all(|grain| grain.category_id != 1));
+        assert!(
+            current
+                .pending_grains
+                .iter()
+                .all(|category_id| *category_id != 1)
+        );
+        assert!(current.pending_runs.iter().all(|run| run.category_id != 1));
+        assert_eq!(
+            current
+                .grains
+                .iter()
+                .filter(|grain| grain.category_id == 0)
+                .count(),
+            2
+        );
+
+        let historical = load_day_end_snapshot(&path, "2026-09-28").unwrap().unwrap();
+        assert_eq!(historical.state.version, SandState::VERSION);
+        assert!(
+            historical
+                .state
+                .grains
+                .iter()
+                .all(|grain| grain.category_id != 1)
+        );
+        assert!(
+            historical
+                .state
+                .pending_runs
+                .iter()
+                .all(|run| run.category_id != 1)
+        );
+        assert_ne!(historical.source_revision, snapshot.source_revision);
 
         let repository = open_cli_repository(&path).unwrap();
         let tombstone: (String, Option<String>, i64) = repository
@@ -3436,20 +3657,35 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let snapshots: i64 = repository
+        let checkpoint_json: String = repository
             .connection
             .query_row(
-                "SELECT COUNT(*) FROM sand_snapshots WHERE id = 1",
+                "SELECT payload_json FROM runtime_checkpoint WHERE singleton = 1",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
+        let checkpoint: serde_json::Value = serde_json::from_str(&checkpoint_json).unwrap();
+        let checkpoint_state: SandState =
+            serde_json::from_value(checkpoint["sand_state"].clone()).unwrap();
+        assert_eq!(checkpoint_state.version, SandState::VERSION);
+        assert!(
+            checkpoint_state
+                .grains
+                .iter()
+                .all(|grain| grain.category_id != 1)
+        );
+        assert!(
+            checkpoint_state
+                .pending_runs
+                .iter()
+                .all(|run| run.category_id != 1)
+        );
         assert_eq!(tombstone.0, "__strata_deleted_layer_1__");
         assert!(tombstone.1.is_some());
         assert_eq!(tombstone.2, 0);
         assert_eq!(sessions, 0);
         assert_eq!(tags, 0);
-        assert_eq!(snapshots, 1);
         drop(repository);
         std::fs::remove_file(path).ok();
     }

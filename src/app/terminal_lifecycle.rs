@@ -7,7 +7,7 @@ use std::{
 };
 
 use crossterm::{
-    cursor::Show,
+    cursor::{SetCursorStyle, Show},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -67,8 +67,8 @@ impl TerminalCleanup {
         if leave_alternate_screen && let Err(error) = execute!(stdout, LeaveAlternateScreen) {
             failures.push(format!("leave alternate screen: {error}"));
         }
-        if let Err(error) = execute!(stdout, Show) {
-            failures.push(format!("show cursor: {error}"));
+        if let Err(error) = execute!(stdout, SetCursorStyle::DefaultUserShape, Show) {
+            failures.push(format!("restore cursor: {error}"));
         }
         if let Err(error) = stdout.flush() {
             failures.push(format!("flush terminal restoration: {error}"));
@@ -143,6 +143,12 @@ impl TerminalSession {
         cleanup.mark_alternate_screen_attempted();
         let mut stdout = io::stdout();
         if let Err(primary) = execute!(stdout, EnterAlternateScreen) {
+            return Err(startup_failure(primary, &cleanup));
+        }
+        // Editing surfaces use the real terminal cursor as their input affordance.
+        // Unsupported cursor-shape sequences are harmless terminal presentation hints;
+        // restoration always returns ownership to the user's configured cursor shape.
+        if let Err(primary) = execute!(stdout, SetCursorStyle::BlinkingBar) {
             return Err(startup_failure(primary, &cleanup));
         }
 
