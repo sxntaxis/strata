@@ -9,6 +9,7 @@
 | STRATA-D010 | Migration and activation are explicit, not automatic startup mutation. | Implemented and documented. |
 | STRATA-D011 | Authority failures fail closed with visible recovery; no writable empty or stale-file fallback. | Implemented and fault-certified. |
 | STRATA-D012 | Legacy evidence uses archive-first, exact-provenance, separately confirmed removal. | Implemented in SQLITE-012. |
+| STRATA-D076 | Layer identity owns sediment classification across time: recolor changes current/historical presentation, while permanent delete reclassifies that Layer sediment to Idle without moving mass; input fields expose the real terminal cursor; transient filter chrome cannot resize Layer Detail. | Owner-accepted implementation candidate; native validation pending in INTERACTION-GRAMMAR-001. |
 
 ## Candidate
 

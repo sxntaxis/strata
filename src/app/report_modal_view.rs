@@ -16,6 +16,7 @@ use super::{
 };
 
 const LEDGER_INLINE_EDITOR_MIN_WIDTH: usize = 84;
+const CONFIRMATION_CARD_WIDTH: u16 = 62;
 const EMPTY_TAG_DISPLAY: &str = "—";
 
 fn summary_border_color(
@@ -225,7 +226,7 @@ impl App {
                 .map_or(summary.entries.len(), |logs| logs.len())
         };
         if self.report_layer_delete_confirmation.is_some() {
-            body_row_count = body_row_count.max(3);
+            body_row_count = body_row_count.max(7);
         }
         if layer_detail {
             if logs_for_view.as_ref().is_some_and(|logs| !logs.is_empty())
@@ -254,20 +255,15 @@ impl App {
                 0
             });
 
-        let delete_confirmation_width = self
-            .report_layer_delete_confirmation
-            .map(|category_id| {
-                self.report_layer_display_name(category_id)
-                    .chars()
-                    .count()
-                    .saturating_add("Delete  and all Balance history?".chars().count())
-            })
-            .unwrap_or(0);
         let summary_content_width = preferred_inner_width
             .max(usize::from(
                 balance_instrument::preferred_summary_inner_width(),
             ))
-            .max(delete_confirmation_width)
+            .max(if self.report_layer_delete_confirmation.is_some() {
+                usize::from(CONFIRMATION_CARD_WIDTH)
+            } else {
+                0
+            })
             .min(u16::MAX as usize) as u16;
         let summary_content_height =
             balance_instrument::preferred_summary_inner_height(body_row_count);
@@ -489,31 +485,10 @@ impl App {
         logs_for_view: Option<&[CategoryLogEntry]>,
     ) -> usize {
         if let Some(logs) = logs_for_view {
-            let filter_detail = self
-                .report_filter_label()
-                .map(|label| {
-                    "filter  "
-                        .chars()
-                        .count()
-                        .saturating_add(label.chars().count())
-                })
-                .unwrap_or(0);
-            let columns = self.preferred_ledger_columns(logs);
-            let is_none = self.report_logs_category_id == Some(DRIFT_CATEGORY_ID);
-            let metric_floor = if is_none {
-                REPORT_MODAL_SETTINGS.detail_metric_width_drift
-            } else {
-                REPORT_MODAL_SETTINGS.detail_metric_width_default
-            };
-            let detail_floor = REPORT_MODAL_SETTINGS.detail_date_preview_width
-                + 1
-                + REPORT_MODAL_SETTINGS.log_detail_preferred_width
-                + 1
-                + metric_floor;
-            columns
+            // Geometry is owned by the ledger values themselves. Transient chrome
+            // such as filter labels/focus brackets must never resize the overlay.
+            self.preferred_ledger_columns(logs)
                 .required_proportional_total()
-                .max(detail_floor)
-                .max(filter_detail.saturating_add(2))
         } else {
             let max_name = summary
                 .entries
@@ -542,12 +517,9 @@ impl App {
             REPORT_MODAL_SETTINGS.detail_metric_width_default
         };
 
-        for (index, row) in logs.iter().enumerate() {
-            let tag = ledger_display_tag_with_focus(
-                &row.description,
-                &fallback_tag,
-                self.report_filter_focus_for_row(index),
-            );
+        for row in logs {
+            // Measure undecorated data, not transient `[facet]` filter chrome.
+            let tag = ledger_display_tag(&row.description, &fallback_tag);
             tag_width = tag_width.max(tag.chars().count().saturating_add(2));
             show_date |= row.date != row.end_date;
             let date = ledger_date_span_label(&row.date, &row.end_date);
@@ -739,7 +711,7 @@ impl App {
             return;
         }
 
-        let desired_width = 62u16.min(area.width);
+        let desired_width = CONFIRMATION_CARD_WIDTH.min(area.width);
         let x = area.x + area.width.saturating_sub(desired_width) / 2;
         let card = Rect::new(x, area.y, desired_width, area.height);
         let title = if confirmation.changes.len() == 1 {
@@ -1303,6 +1275,158 @@ impl App {
         Line::from(spans)
     }
 
+    fn ledger_edit_cursor_column(
+        &self,
+        edit: &LedgerEntryEditState,
+        widths: LedgerColumnWidths,
+        marker: &str,
+    ) -> usize {
+        let row_width = widths.total();
+        if row_width < 52 {
+            let marker_prefix = format!("{marker} ");
+            return match edit.active_field {
+                LedgerEntryField::Description => marker_prefix
+                    .chars()
+                    .count()
+                    .saturating_add("Tag [".chars().count())
+                    .saturating_add(edit.description.trim().chars().count()),
+                LedgerEntryField::StartDate => marker_prefix
+                    .chars()
+                    .count()
+                    .saturating_add("From [".chars().count())
+                    .saturating_add(edit.start_date.chars().count()),
+                LedgerEntryField::StartTime => marker_prefix
+                    .chars()
+                    .count()
+                    .saturating_add("From ".chars().count())
+                    .saturating_add(self.ledger_date_label(&edit.start_date).chars().count())
+                    .saturating_add(" [".chars().count())
+                    .saturating_add(edit.start_time.chars().count()),
+                LedgerEntryField::EndDate => marker_prefix
+                    .chars()
+                    .count()
+                    .saturating_add("To [".chars().count())
+                    .saturating_add(ledger_edit_effective_end_date(edit).chars().count()),
+                LedgerEntryField::EndTime => marker_prefix
+                    .chars()
+                    .count()
+                    .saturating_add("To ".chars().count())
+                    .saturating_add(
+                        self.ledger_date_label(&ledger_edit_effective_end_date(edit))
+                            .chars()
+                            .count(),
+                    )
+                    .saturating_add(" [".chars().count())
+                    .saturating_add(edit.end_time.chars().count()),
+            };
+        }
+
+        let tag_start = marker.chars().count().saturating_add(1);
+        if edit.active_field == LedgerEntryField::Description {
+            return tag_start
+                .saturating_add(1)
+                .saturating_add(edit.description.trim().chars().count());
+        }
+
+        let effective_end_date = ledger_edit_effective_end_date(edit);
+        let start_date_label = if edit.active_field == LedgerEntryField::StartDate {
+            edit.start_date.clone()
+        } else {
+            self.ledger_date_label(&edit.start_date)
+        };
+        let end_date_label = if edit.active_field == LedgerEntryField::EndDate {
+            effective_end_date.clone()
+        } else {
+            self.ledger_date_label(&effective_end_date)
+        };
+        let start_date = ledger_edit_token(
+            &start_date_label,
+            edit.active_field == LedgerEntryField::StartDate,
+        );
+        let end_date = ledger_edit_token(
+            &end_date_label,
+            edit.active_field == LedgerEntryField::EndDate,
+        );
+        let date_value = if matches!(
+            edit.active_field,
+            LedgerEntryField::StartDate | LedgerEntryField::EndDate
+        ) {
+            format!("{start_date}-{end_date}")
+        } else {
+            ledger_date_span_label(&edit.start_date, &effective_end_date)
+        };
+
+        let start_time = ledger_edit_time_token(
+            &edit.start_time,
+            edit.active_field == LedgerEntryField::StartTime,
+            edit.select_all,
+        );
+        let end_time = ledger_edit_time_token(
+            &edit.end_time,
+            edit.active_field == LedgerEntryField::EndTime,
+            edit.select_all,
+        );
+        let time_value = format!("{start_time}–{end_time}");
+
+        if widths.show_date
+            && matches!(
+                edit.active_field,
+                LedgerEntryField::StartDate | LedgerEntryField::EndDate
+            )
+        {
+            let cell_start = widths.tag.saturating_add(1);
+            let left_pad = widths.date.saturating_sub(date_value.chars().count()) / 2;
+            let within = if edit.active_field == LedgerEntryField::StartDate {
+                1usize.saturating_add(start_date_label.chars().count())
+            } else {
+                start_date
+                    .chars()
+                    .count()
+                    .saturating_add(1)
+                    .saturating_add(1)
+                    .saturating_add(end_date_label.chars().count())
+            };
+            return cell_start.saturating_add(left_pad).saturating_add(within);
+        }
+
+        if matches!(
+            edit.active_field,
+            LedgerEntryField::StartTime | LedgerEntryField::EndTime
+        ) {
+            let cell_start = widths.tag.saturating_add(1).saturating_add(if widths.show_date {
+                widths.date.saturating_add(1)
+            } else {
+                0
+            });
+            let left_pad = widths.time.saturating_sub(time_value.chars().count()) / 2;
+            let start_display = if edit.active_field == LedgerEntryField::StartTime
+                && !edit.select_all
+            {
+                edit.start_time.clone()
+            } else {
+                super::ledger_state::format_ledger_time_input(&edit.start_time)
+            };
+            let end_display = if edit.active_field == LedgerEntryField::EndTime && !edit.select_all {
+                edit.end_time.clone()
+            } else {
+                super::ledger_state::format_ledger_time_input(&edit.end_time)
+            };
+            let within = if edit.active_field == LedgerEntryField::StartTime {
+                1usize.saturating_add(start_display.chars().count())
+            } else {
+                start_time
+                    .chars()
+                    .count()
+                    .saturating_add(1)
+                    .saturating_add(1)
+                    .saturating_add(end_display.chars().count())
+            };
+            return cell_start.saturating_add(left_pad).saturating_add(within);
+        }
+
+        0
+    }
+
     fn render_report_logs_view(
         &self,
         f: &mut Frame,
@@ -1443,38 +1567,87 @@ impl App {
         });
         list_state.select(visual_selected_index);
         f.render_stateful_widget(List::new(items), list_area, &mut list_state);
+
+        if let (Some(edit), Some(visual_index)) =
+            (self.ledger_entry_edit.as_ref(), visual_selected_index)
+            && edit.confirmation.is_none()
+        {
+            let visible_row = visual_index.saturating_sub(list_state.offset());
+            if visible_row < usize::from(list_area.height) && list_area.width > 0 {
+                let marker = if edit.is_add() {
+                    "+"
+                } else {
+                    balance_marker(balance_effect)
+                };
+                let relative_x = self.ledger_edit_cursor_column(edit, columns, marker);
+                let cursor_x = list_area.x.saturating_add(
+                    u16::try_from(relative_x)
+                        .unwrap_or(u16::MAX)
+                        .min(list_area.width.saturating_sub(1)),
+                );
+                let cursor_y = list_area.y.saturating_add(visible_row as u16);
+                #[allow(deprecated)]
+                f.set_cursor(cursor_x, cursor_y);
+            }
+        }
     }
 
     fn render_report_layer_delete_confirmation(&self, f: &mut Frame, area: Rect) {
         let Some(category_id) = self.report_layer_delete_confirmation else {
             return;
         };
+        if area.width < 4 || area.height < 3 {
+            return;
+        }
+
         let name = self.report_layer_display_name(category_id);
-        let lines = vec![
-            Line::from(Span::styled(
-                format!("Delete {name} and all Balance history?"),
+        let desired_width = CONFIRMATION_CARD_WIDTH.min(area.width);
+        let desired_height = 7u16.min(area.height);
+        let x = area.x + area.width.saturating_sub(desired_width) / 2;
+        let y = area.y + area.height.saturating_sub(desired_height) / 2;
+        let card = Rect::new(x, y, desired_width, desired_height);
+        let block = Block::default()
+            .title(Line::from(Span::styled(
+                format!("Delete {name}?"),
                 Style::default()
                     .fg(self.theme_error())
                     .add_modifier(Modifier::BOLD),
-            ))
+            )))
+            .title_alignment(Alignment::Center)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(self.theme_error()))
+            .style(Style::default().bg(self.theme_background()));
+        f.render_widget(block.clone(), card);
+        let inner = block.inner(card);
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
+
+        let lines = vec![
+            Line::from(vec![
+                Span::styled("Balance history", Style::default().fg(self.theme_foreground())),
+                Span::styled("  delete", Style::default().fg(self.theme_error())),
+            ])
             .alignment(Alignment::Center),
-            Line::from(Span::styled(
-                "Sand remains unchanged.",
-                Style::default().fg(self.theme_status()),
-            ))
+            Line::from(vec![
+                Span::styled("Sediment", Style::default().fg(self.theme_foreground())),
+                Span::styled("  → Idle", Style::default().fg(self.theme_status())),
+            ])
             .alignment(Alignment::Center),
+            Line::default(),
             Line::from(vec![
                 Span::styled(
                     "Enter delete",
                     Style::default()
-                        .fg(self.theme_accent())
+                        .fg(self.theme_error())
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(" · Esc cancel", Style::default().fg(self.theme_status())),
+                Span::styled(" · Esc back", Style::default().fg(self.theme_status())),
             ])
             .alignment(Alignment::Center),
         ];
-        f.render_widget(Paragraph::new(lines), area);
+        f.render_widget(Paragraph::new(lines), inner);
     }
 
     fn render_report_summary_with_instrument(

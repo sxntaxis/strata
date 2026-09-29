@@ -22,7 +22,7 @@ Idle is reserved category ID `0`.
 
 ## Appearance relationship
 
-Category identity and category color choice are durable domain state; resolved RGB presentation is not. The persisted color anchor survives theme changes. The active theme maps that anchor to its nearest eligible sand swatch for rendering, while `Ctrl+←` / `Ctrl+→` chooses a new anchor from the active theme's perceptually ordered sand palette. Themes never name or own concrete user categories. See `docs/APPEARANCE_AUTHORITY.md`.
+Category identity and category color choice are durable domain state; resolved RGB presentation is not. The persisted color anchor survives theme changes. The active theme maps that anchor to its nearest eligible sand swatch for rendering, while `Ctrl+←` / `Ctrl+→` chooses a new anchor from the active theme's perceptually ordered sand palette. Themes never name or own concrete user categories. See `docs/APPEARANCE_AUTHORITY.md`. The current color anchor belongs to the stable Layer identity across time: changing it immediately changes current and historical sediment presentation for that CategoryId without moving grains. Permanent Balance deletion is the explicit identity-lifecycle exception and reclassifies retained current/historical sediment from that CategoryId to Idle.
 
 ## Archive and restore
 
