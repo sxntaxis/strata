@@ -1,6 +1,6 @@
 # Report and export authority
 
-Status: accepted authority; STRATA-D071/D072/D073/D074 behavior is natively certified; STRATA-D075 owner corrections are implemented as a candidate pending native validation
+Status: accepted authority; STRATA-D071/D072/D073/D074/D075 behavior is natively certified
 Last reviewed: 2026-09-28
 
 ## Purpose

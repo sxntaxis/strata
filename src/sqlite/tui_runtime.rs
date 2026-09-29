@@ -12,7 +12,7 @@ use crate::{
     appearance::{decode_color_anchor, encode_color_anchor},
     domain::{
         Category, CategoryId, DRIFT_CATEGORY_CONFIG_NAME, DRIFT_CATEGORY_ID, OperationalDayPolicy,
-        Session, day_boundary_config, runtime_settings,
+        Session, day_boundary_config, deleted_layer_tombstone_name, runtime_settings,
     },
     sand::{
         DailySedimentSlice, SandState, SedimentSnapshot, daily_contribution_from_slices,
@@ -577,7 +577,10 @@ pub(crate) fn delete_category_permanently(
     }
 
     transaction
-        .execute("DELETE FROM sessions WHERE category_id = ?1", params![category_id])
+        .execute(
+            "DELETE FROM sessions WHERE category_id = ?1",
+            params![category_id],
+        )
         .map_err(|error| error.to_string())?;
     transaction
         .execute(
@@ -585,7 +588,9 @@ pub(crate) fn delete_category_permanently(
             params![category_id],
         )
         .map_err(|error| error.to_string())?;
-    let tombstone_name = format!("__strata_deleted_layer_{category_id}__");
+    let tombstone_name = deleted_layer_tombstone_name(CategoryId::new(
+        u64::try_from(category_id).map_err(|_| "category ID is invalid".to_string())?,
+    ));
     let changed = transaction
         .execute(
             "UPDATE categories

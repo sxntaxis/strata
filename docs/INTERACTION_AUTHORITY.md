@@ -1,6 +1,6 @@
 # Interaction authority
 
-Status: accepted authority; STRATA-D071/D072/D073/D074 are natively certified; STRATA-D075 owner corrections are implemented as a candidate and await native validation
+Status: accepted authority; STRATA-D071/D072/D073/D074/D075 are natively certified
 Program: INTERACTION-001 + INTERACTION-002 convergence
 Current completed unit: INTERACTION-002; PLATEAU-001H H1 presentation hardening certified
 Issues completed: #19, #20, #24
@@ -104,6 +104,8 @@ STRATA-D074 makes modifier meaning contextual but consistent:
 - `Ctrl+x` is the contextual destructive chord: archive the selected Layer in Layer, delete the selected persisted entry in Layer Detail, and open permanent-Layer deletion confirmation from the Balance summary. Plain `x` remains ordinary Tag/name text.
 
 Layer rename is an isolated sub-editor. `Ctrl+e` starts from the current layer name; printable text plus Backspace/Delete edit the draft; Enter validates and saves it; Esc cancels. Empty names, reserved Idle names, and case-insensitive duplicates remain in edit mode with visible feedback. Idle cannot be renamed. Rename preserves the stable CategoryId, existing sessions, current session Tag, and legacy category-description data. The legacy description field is not exposed as an editing or command-palette search surface.
+
+The active Layer Tag is previewed immediately but remains a draft until Enter. Esc restores the Tag captured when Layer opened, including after intervening immediate structural operations. Mandatory Ctrl-C also restores that opening Tag before emergency finalization; it never accepts an uncommitted preview.
 
 The ordinary Layer Tag is a live preview, not an immediate persistence boundary. Opening Layer snapshots the current active Tag. Typing, Backspace, or Tag cycling on the active layer updates the running presentation immediately; Enter accepts that preview, while Esc restores the opening Tag before closing. A Tag drafted on an inactive layer remains prospective until Enter switches to that layer. Structural Layer mutations—color, order, polarity, rename, and archive—remain immediate and are not rolled back by Esc.
 

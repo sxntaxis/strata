@@ -5,7 +5,7 @@ Last reviewed: 2026-09-06
 
 ## Purpose
 
-Category authority preserves the meaning of recorded time and sediment across active use, archive/restore, restart, recovery, and interchange. Missing category identity must never be reinterpreted as intentional idle.
+Category authority preserves the meaning of recorded time and sediment across active use, archive/restore, permanent deletion, restart, recovery, and interchange. Missing category identity must never be reinterpreted as intentional idle.
 
 ## Canonical identity
 
@@ -38,7 +38,7 @@ Archived categories are hidden from ordinary new-session selection but remain au
 
 Restore reactivates the same SQLite row and stable ID. Category allocation advances beyond the maximum category ID still present in the catalog. Because archive does not physically delete rows, archived identities are not reused.
 
-Strata does not currently implement category merge or permanent deletion. The prerelease reviewed-lifecycle machinery for revision-bound merge/deletion, retired-ID receipts, and destructive confirmation was speculative and has been retired rather than kept as dormant architecture.
+Category merge and its prerelease reviewed-lifecycle machinery for revision-bound merge, retired-ID receipts, and collision confirmation remain retired. STRATA-D075 adds permanent Layer deletion without merge semantics: the operation removes canonical sessions and reusable tags, but leaves existing sand and historical snapshots unchanged. The SQLite category row becomes a hidden, non-restorable identity/color tombstone so canonical sand CategoryIds remain resolvable and cannot be reused. Tombstones remain storage/interchange compatibility state, not an active or archived user-facing Layer.
 
 ## SQLite authority
 

@@ -195,8 +195,8 @@ impl App {
         }
 
         if self.keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
-            if self.in_category_modal() && !self.persist_modal_active_description() {
-                return false;
+            if self.in_category_modal() {
+                self.cancel_modal();
             }
             return true;
         }
@@ -1582,6 +1582,22 @@ impl App {
             return false;
         }
 
+        if self.report_range_boundary.is_some()
+            && !matches!(
+                action,
+                Action::Cancel
+                    | Action::Confirm
+                    | Action::Left
+                    | Action::Right
+                    | Action::ShiftLeft
+                    | Action::ShiftRight
+                    | Action::ReportRangeStart
+                    | Action::ReportRangeEnd
+            )
+        {
+            self.cancel_report_range_boundary();
+        }
+
         let in_logs_view = self.report_logs_category_id.is_some();
         let summary = if in_logs_view {
             self.report_rows()
@@ -1718,7 +1734,10 @@ impl App {
                 handled = in_logs_view && self.toggle_selected_report_filter();
             }
             Action::DeleteCategory => {
-                if in_logs_view && self.report_log_selected_index < logs.len() {
+                if self.report_range_boundary.is_some() {
+                    self.cancel_report_range_boundary();
+                    handled = false;
+                } else if in_logs_view && self.report_log_selected_index < logs.len() {
                     handled = self.delete_selected_report_session();
                 } else if !in_logs_view {
                     handled = self.begin_report_layer_delete_confirmation(&summary);

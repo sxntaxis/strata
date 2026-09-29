@@ -5,13 +5,15 @@ state: active
 created: 2026-08-01
 updated: 2026-09-28
 authority: working
-summary: "INTERACTION-GRAMMAR-001 D075 finalizes Layer Tag commit/cancel, contextual Ctrl+X deletion, zero-row Balance projection, transactional boundaries, neutral empty Tags, and equal-cell Layer Detail widening."
-next: Natively validate and owner-test the D075 candidate on the populated profile, especially Layer Tag Esc rollback, Ctrl+X context, boundary Enter/Esc rollback, zero-row hiding, and equal-cell long-tag/cross-day layout; keep Settings/palette and SEDIMENT-016 separate.
+summary: "INTERACTION-GRAMMAR-001 D075 finalizes Layer Tag commit/cancel, contextual Ctrl+X deletion, zero-row Balance projection, transactional boundaries, neutral empty Tags, and equal-cell Layer Detail widening; native validation passes."
+next: Review the validated D075 build on the populated test profile and decide promote or revise; keep Settings/palette and SEDIMENT-016 separate.
 ---
 
 ## INTERACTION-GRAMMAR-001 coherent keyboard ownership — 2026-09-28
 
 **OWNER-ACCEPTED D075 / IMPLEMENTATION CANDIDATE / NATIVE VALIDATION PENDING:** on owner-corrections head `1ce73f3688556e918fe359f1b9707d94f4d0928e`, active-Layer Tag edits now preview live but Enter accepts and Esc restores the opening Tag; leading `+ = - _` remain polarity controls until Tag editing begins; empty Tags render as `—`; `Ctrl+x` archives in Layer, permanently deletes a confirmed Layer from Balance summary without rewriting sand, and deletes only the selected persisted entry in Layer Detail. Balance hides exact-zero rows, `[`/`]` boundary editing becomes one Enter-commit/Esc-rollback transaction, and Layer Detail restores equal full-row 1:1:1 / 1:1:1:1 cells while widening the modal until visible values fit. The hidden SQLite deletion tombstone preserves only CategoryId/color custody for existing sediment. This authorship environment has no Rust toolchain, so native validation remains pending. See `notebook/work/INTERACTION-GRAMMAR-001.md`.
+
+**D075 VALIDATION UPDATE — NATIVE-GREEN:** Rust 1.98.1 passed format check, strict Clippy, all-feature tests (591 library + 25 integration/process; 20 ignored), and CLI help. The PTY suite verifies Tag preview live updates, Esc rollback, Enter acceptance, Ctrl-C rollback before finalization, and confirmed/cancelled Ctrl+x deletion with Category history/tags removed while the persisted sand state remains byte-equivalent. Unit and SQLite tests cover exact-zero visibility, equal-cell column sizing, hidden tombstone custody, and no sand snapshot rewrite. Settings/palette remains deferred.
 
 **OWNER-ACCEPTED D074 / IMPLEMENTATION CANDIDATE / NATIVE VALIDATION PENDING:** starting from validated D073 head `0dc12cf476316486852475c0999f38d40d5fe681`, the next pass makes printable Layer input text-first; moves metadata to `Ctrl+E`; moves existing-Layer reorder/color to Ctrl+arrows; assigns Main Backspace/Delete to Idle/all-sand clearing; removes Shift-arrow period cycling; unbinds redundant `r` and `l` defaults; changes Date/boundary Shift acceleration from a week to one civil month while Time remains one hour; simplifies multi-tag `f` selection; pins Balance selection by Layer ID; and widens Layer responsively for active text. Settings/palette internals remain deferred. This authored environment has no Rust toolchain, so no formatter/Clippy/test claim is made yet. See `notebook/work/INTERACTION-GRAMMAR-001.md`.
 

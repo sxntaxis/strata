@@ -509,7 +509,10 @@ impl App {
         let restored = self
             .archived_categories
             .iter()
-            .position(|category| category.name.eq_ignore_ascii_case(requested_name))
+            .position(|category| {
+                !crate::domain::is_deleted_layer_tombstone(category)
+                    && category.name.eq_ignore_ascii_case(requested_name)
+            })
             .and_then(|index| {
                 let category = self.archived_categories[index].clone();
                 self.time_tracker

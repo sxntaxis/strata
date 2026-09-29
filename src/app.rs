@@ -1414,12 +1414,16 @@ impl App {
     }
 
     fn cancel_modal(&mut self) {
-        if self.modal_active_description_dirty {
+        let cancelled_active_preview = self.modal_active_description_dirty;
+        if cancelled_active_preview {
             self.time_tracker
                 .set_active_description(self.modal_active_description_snapshot.clone());
             self.modal_active_description_dirty = false;
         }
         self.close_modal();
+        if cancelled_active_preview && !self.has_persistence_recovery() {
+            self.refresh_active_runtime_checkpoint();
+        }
     }
 
     fn close_modal(&mut self) {
@@ -1676,8 +1680,7 @@ impl App {
         self.show_settings = !self.show_settings;
         if self.show_settings {
             if self.in_balance_modal() {
-                self.report_range_boundary = None;
-                self.report_range_boundary_original = None;
+                self.cancel_report_range_boundary();
                 self.report_filter_tag_index = None;
             }
             self.settings_selected_index = 0;
@@ -1698,8 +1701,7 @@ impl App {
         self.show_command_palette = !self.show_command_palette;
         if self.show_command_palette {
             if self.in_balance_modal() {
-                self.report_range_boundary = None;
-                self.report_range_boundary_original = None;
+                self.cancel_report_range_boundary();
                 self.report_filter_tag_index = None;
             }
             self.command_palette_query.clear();

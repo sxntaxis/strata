@@ -8,8 +8,7 @@ use ratatui::{prelude::Line, style::Color};
 
 use crate::domain::{
     BalanceReportEntry, BalanceReportSummary, Category, CategoryId, CategoryLogEntry,
-    DRIFT_CATEGORY_ID,
-    LiveSessionPreview, OperationalDayPolicy, ReportPeriod, ReportWindow,
+    DRIFT_CATEGORY_ID, LiveSessionPreview, OperationalDayPolicy, ReportPeriod, ReportWindow,
     build_balance_report_with_live_for_window, build_category_logs_for_window, day_boundary_config,
     operational_day_key_now, report_period_window_with_offset, session_slices,
 };
@@ -634,6 +633,9 @@ impl App {
     }
 
     pub(super) fn set_report_period(&mut self, period: ReportPeriod) {
+        if self.report_range_boundary.is_some() {
+            self.cancel_report_range_boundary();
+        }
         self.report_filter_tag_index = None;
         self.report_period = period;
         self.report_period_offset = 0;
@@ -647,6 +649,9 @@ impl App {
     }
 
     pub(super) fn begin_report_range_edit(&mut self) {
+        if self.report_range_boundary.is_some() {
+            self.cancel_report_range_boundary();
+        }
         self.report_filter_tag_index = None;
         let window = self.current_report_window();
         self.report_range_boundary = None;
@@ -1003,6 +1008,9 @@ impl App {
     }
 
     pub(super) fn begin_selected_layer_ledger_add(&mut self) -> bool {
+        if self.report_range_boundary.is_some() {
+            self.cancel_report_range_boundary();
+        }
         if let Some(category_id) = self.report_logs_category_id {
             return self.begin_ledger_add_edit(category_id);
         }
@@ -1510,14 +1518,14 @@ mod report_edit_state_tests {
     use super::{
         build_historical_preview, filtered_layer_balance, parse_report_range,
         report_entry_is_visible, report_log_matches_tag_filter, report_range_edit_state,
-        shifted_custom_window_newer,
-        shifted_custom_window_older, shifted_report_boundary, shifted_report_boundary_month,
+        shifted_custom_window_newer, shifted_custom_window_older, shifted_report_boundary,
+        shifted_report_boundary_month,
     };
     use crate::{
         app::{ReportRangeBoundary, ReportTagFacet, ui_helpers},
         domain::{
-            BalanceReportEntry, Category, CategoryId, CategoryLogEntry, OperationalDayPolicy,
-            ReportWindow, DRIFT_CATEGORY_ID,
+            BalanceReportEntry, Category, CategoryId, CategoryLogEntry, DRIFT_CATEGORY_ID,
+            OperationalDayPolicy, ReportWindow,
         },
         sand::{SandState, SandStateGrain, SedimentSnapshot},
     };

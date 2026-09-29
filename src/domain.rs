@@ -44,6 +44,20 @@ pub struct Category {
     pub balance_effect: i8,
 }
 
+pub fn deleted_layer_tombstone_name(category_id: CategoryId) -> String {
+    format!("__strata_deleted_layer_{}__", category_id.0)
+}
+
+pub fn is_deleted_layer_tombstone(category: &Category) -> bool {
+    category.name == deleted_layer_tombstone_name(category.id)
+}
+
+fn is_reserved_deleted_layer_name(name: &str) -> bool {
+    name.trim()
+        .to_ascii_lowercase()
+        .starts_with("__strata_deleted_layer_")
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OperationalDayPolicy {
     pub utc_offset_seconds: i32,
@@ -431,7 +445,7 @@ impl CategoryStore {
         color: Color,
     ) -> Option<CategoryId> {
         let trimmed = name.trim();
-        if trimmed.is_empty() {
+        if trimmed.is_empty() || is_reserved_deleted_layer_name(trimmed) {
             return None;
         }
 
@@ -462,7 +476,11 @@ impl CategoryStore {
 
     pub fn restore_category(&mut self, mut category: Category) -> bool {
         let trimmed = category.name.trim();
-        if category.id == DRIFT_CATEGORY_ID || trimmed.is_empty() {
+        if category.id == DRIFT_CATEGORY_ID
+            || trimmed.is_empty()
+            || is_reserved_deleted_layer_name(trimmed)
+            || is_deleted_layer_tombstone(&category)
+        {
             return false;
         }
         if self.by_id.contains_key(&category.id)
@@ -502,6 +520,9 @@ impl CategoryStore {
         }
         if is_drift_name(trimmed) {
             return Err("That name is reserved for Idle");
+        }
+        if is_reserved_deleted_layer_name(trimmed) {
+            return Err("That name is reserved for deleted-layer identity");
         }
         let Some(id) = self.id_at_index(index) else {
             return Err("No layer is selected");
@@ -1375,6 +1396,22 @@ mod tests {
         assert!(tracker.rename_category_by_index(0, "Rest").is_err());
         assert!(tracker.rename_category_by_index(1, "idle").is_err());
         assert!(tracker.rename_category_by_index(1, " ").is_err());
+        assert!(
+            tracker
+                .add_category(
+                    "__strata_deleted_layer_3__".to_string(),
+                    String::new(),
+                    None,
+                )
+                .is_none()
+        );
+        assert!(!tracker.restore_category(Category {
+            id: CategoryId::new(3),
+            name: deleted_layer_tombstone_name(CategoryId::new(3)),
+            color: Color::White,
+            description: String::new(),
+            balance_effect: 0,
+        }));
     }
 
     #[test]

@@ -55,7 +55,7 @@ Core responsibilities:
 - Restore reactivates the same row/ID.
 - Archived identity and legacy metadata remain available to sessions, reports, sediment, snapshots, tags, recovery, and interchange. The legacy category-description field is retained for round-trip compatibility, not exposed as a current editing/search feature.
 - Unknown category references fail closed and are never coerced to idle.
-- Category merge/permanent deletion is not a current product capability.
+- Category merge and its speculative revision/receipt machinery are not current product capabilities. STRATA-D075 adds a distinct permanent-delete operation: history and tags are removed, sediment is untouched, and a hidden tombstone preserves existing sand CategoryId/color authority without a restorable Layer.
 
 ## TUI interaction
 
