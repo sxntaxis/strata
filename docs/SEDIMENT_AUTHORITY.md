@@ -124,13 +124,13 @@ Recovery follows:
 
 1. claim and validate evidence;
 2. persist a fixed recovery target;
-3. restore checkpoint topology and engine metadata directly;
-4. calculate due mass and remainders with checked integer arithmetic;
-5. append missed mass as compressed pending runs;
-6. publish recovered authority;
+3. restore only the durable checkpoint topology/engine metadata;
+4. if the process was absent for a nonzero interval, hold that interval as an unclassified recovery gap and ask the owner whether to reconstruct it as the prior Layer, as Idle, or account it as Idle while keeping sediment unchanged;
+5. derive any chosen missed mass and accumulator remainders with checked integer arithmetic;
+6. atomically publish the chosen chronology/sediment authority before installing it as recovered runtime state;
 7. retain or replace checkpoint evidence according to commit state.
 
-Missed physics frames are counted but never replayed. Recovery never installs a relaxed replacement topology. Work is independent of detached duration apart from validation and compact run changes.
+Missed physics frames are counted but never replayed. Recovery never installs a relaxed replacement topology and never silently assumes that a previously active Layer remained active while Strata was absent. The `Keep sediment unchanged` choice deliberately preserves the durable pile while accounting the unobserved interval as Idle. Work is independent of detached duration apart from validation and compact run changes.
 
 The same bounded settlement primitive is used for long live catch-up. Backlog of eight seconds or less may use the short accelerated visual path; backlog beyond eight seconds settles directly to the current UTC boundary with checked periodic arithmetic instead of replaying physics frames. A user mutation during catch-up first settles to that mutation's exact UTC timestamp and then applies immediately, so current runtime no longer needs an in-memory queued-mutation path merely to wait for visual catch-up.
 
