@@ -403,6 +403,36 @@ pub(crate) fn reset_active_session(
     .map_err(|error| error.to_string())
 }
 
+pub(crate) fn reset_active_session_to(
+    database_path: &Path,
+    expected_active_stable_id: &str,
+    operation_id: &str,
+    next_stable_id: &str,
+    category_id: CategoryId,
+    description: &str,
+    started_at_utc: DateTime<Utc>,
+    applied_at_utc: DateTime<Utc>,
+) -> Result<runtime_coordination::RuntimeTransitionReceipt, String> {
+    let mut repository = open_cli_repository(database_path)?;
+    let started = timestamp(started_at_utc);
+    let applied = timestamp(applied_at_utc);
+    runtime_coordination::reset_active_session(
+        &mut repository,
+        expected_active_stable_id,
+        operation_id,
+        &NewActiveSession {
+            stable_id: next_stable_id,
+            category_id: as_i64(category_id.0, "category ID")?,
+            description,
+            started_at_utc: &started,
+            recovery_kind: "live",
+        },
+        &applied,
+        "tui-runtime",
+    )
+    .map_err(|error| error.to_string())
+}
+
 pub(crate) fn sync_categories(
     database_path: &Path,
     categories: &[Category],

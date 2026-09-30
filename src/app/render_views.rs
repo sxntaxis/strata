@@ -162,6 +162,7 @@ impl App {
         }
 
         if self.has_persistence_recovery() {
+            self.render_persistence_status(f, size);
             self.render_persistence_recovery(f, size);
         }
     }

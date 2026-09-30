@@ -42,6 +42,7 @@ pub(crate) use tui_runtime::{
     load_day_end_snapshot as load_tui_day_end_snapshot, load_sand_state as load_tui_sand_state,
     load_state as load_tui_state, quarantine_checkpoint as quarantine_tui_checkpoint,
     replace_recovering_checkpoint as replace_tui_recovering_checkpoint,
+    reset_active_session_to,
     save_checkpoint as save_tui_checkpoint, save_daily_snapshot as save_tui_daily_snapshot,
     save_day_end_snapshot as save_tui_day_end_snapshot,
     save_latest_day_checkpoint as save_tui_latest_day_checkpoint,

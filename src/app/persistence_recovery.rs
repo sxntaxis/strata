@@ -3,16 +3,17 @@ use std::{
     fs::OpenOptions,
     io::Write,
     path::{Path, PathBuf},
+    time::{Duration, Instant},
 };
 
-use chrono::{SecondsFormat, Utc};
+use chrono::{DateTime, Local, SecondsFormat, Utc};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
+    widgets::Paragraph,
 };
 use serde::Serialize;
 
@@ -71,6 +72,12 @@ impl fmt::Display for PersistenceOperation {
             Self::CheckpointClear => "checkpoint cleanup",
             Self::CheckpointRecovery => "checkpoint recovery commit",
         })
+    }
+}
+
+impl PersistenceOperation {
+    fn records_durable_progress(self) -> bool {
+        !matches!(self, Self::StateReload)
     }
 }
 
@@ -165,7 +172,12 @@ pub(super) struct PersistenceRecoveryState {
     pub action: RecoveryAction,
     pub exported_path: Option<PathBuf>,
     pub export_error: Option<String>,
-    pub exit_without_saving_armed: bool,
+    pub dialog_open: bool,
+    pub dismissed: bool,
+    pub last_durable_at_utc: DateTime<Utc>,
+    pub automatic_retries_remaining: u8,
+    pub retry_stage: u8,
+    pub next_retry_at: Instant,
 }
 
 fn emergency_categories(
@@ -214,15 +226,26 @@ impl App {
         result: Result<T, String>,
     ) -> Option<T> {
         match result {
-            Ok(value) => Some(value),
+            Ok(value) => {
+                if operation.records_durable_progress() {
+                    self.last_durable_save_utc = Utc::now();
+                }
+                Some(value)
+            }
             Err(detail) => {
                 if self.persistence_recovery.is_none() {
+                    let last_durable_at_utc = self.last_durable_save_utc;
                     self.persistence_recovery = Some(PersistenceRecoveryState {
                         failure: PersistenceFailure::new(self, operation, detail),
                         action,
                         exported_path: None,
                         export_error: None,
-                        exit_without_saving_armed: false,
+                        dialog_open: false,
+                        dismissed: false,
+                        last_durable_at_utc,
+                        automatic_retries_remaining: 3,
+                        retry_stage: 0,
+                        next_retry_at: Instant::now() + Duration::from_millis(100),
                     });
                     self.render_needed = true;
                 }
@@ -251,95 +274,129 @@ impl App {
         }
     }
 
+    pub(super) fn persistence_recovery_dialog_open(&self) -> bool {
+        self.persistence_recovery
+            .as_ref()
+            .is_some_and(|recovery| recovery.dialog_open)
+    }
+
+    pub(super) fn reopen_persistence_recovery_dialog(&mut self) {
+        if let Some(recovery) = self.persistence_recovery.as_mut() {
+            recovery.dialog_open = true;
+            self.system_dialog_selected_index = 0;
+            self.render_needed = true;
+        }
+    }
+
     pub(super) fn request_persistence_recovery_quit(&mut self) -> bool {
         self.export_current_recovery(true);
         self.recovery_exit_requested
     }
 
+    fn continue_with_degraded_persistence(&mut self) {
+        if let Some(recovery) = self.persistence_recovery.as_mut() {
+            recovery.dialog_open = false;
+            recovery.dismissed = true;
+            recovery.automatic_retries_remaining = 0;
+            recovery.retry_stage = 0;
+            recovery.next_retry_at = Instant::now() + Duration::from_secs(5);
+            recovery.action = RecoveryAction::FlushCurrentState;
+        }
+        self.render_needed = true;
+    }
+
     pub(super) fn handle_persistence_recovery_key(&mut self, key: KeyEvent) -> bool {
+        if !self.persistence_recovery_dialog_open() {
+            return false;
+        }
         match key.code {
-            KeyCode::Char('r' | 'R') => {
-                self.retry_persistence_failure();
-                self.recovery_exit_requested
-            }
-            KeyCode::Char('e' | 'E') => {
-                self.export_current_recovery(false);
-                false
-            }
-            KeyCode::Char('q' | 'Q') => self.request_persistence_recovery_quit(),
-            KeyCode::Char('x' | 'X') => {
-                let armed = self
-                    .persistence_recovery
-                    .as_ref()
-                    .is_some_and(|recovery| recovery.exit_without_saving_armed);
-                if armed {
+            KeyCode::Up => self.move_system_dialog_selection(-1, 4),
+            KeyCode::Down => self.move_system_dialog_selection(1, 4),
+            KeyCode::Esc => self.continue_with_degraded_persistence(),
+            KeyCode::Enter => match self.system_dialog_selected_index.min(3) {
+                0 => self.continue_with_degraded_persistence(),
+                1 => self.retry_persistence_failure(true),
+                2 => self.export_current_recovery(false),
+                3 => {
                     self.recovery_exit_requested = true;
                     self.recovery_exit_error = Some(
-                        "exited without confirming authoritative persistence after explicit user confirmation"
-                            .to_string(),
+                        "exited without saving after an acknowledged persistence failure".to_string(),
                     );
-                    true
-                } else {
-                    if let Some(recovery) = self.persistence_recovery.as_mut() {
-                        recovery.exit_without_saving_armed = true;
-                        recovery.export_error = None;
-                    }
-                    self.render_needed = true;
-                    false
+                    return true;
                 }
-            }
-            _ => false,
+                _ => unreachable!(),
+            },
+            _ => {}
+        }
+        self.recovery_exit_requested
+    }
+
+    fn retry_delay_for_stage(stage: u8) -> Duration {
+        match stage {
+            0 => Duration::from_millis(100),
+            1 => Duration::from_millis(300),
+            2 => Duration::from_millis(700),
+            3 => Duration::from_secs(5),
+            4 => Duration::from_secs(15),
+            _ => Duration::from_secs(60),
         }
     }
 
-    fn retry_persistence_failure(&mut self) {
-        let Some(previous) = self.persistence_recovery.take() else {
+    pub(super) fn service_persistence_recovery(&mut self) {
+        let Some(recovery) = self.persistence_recovery.as_ref() else {
             return;
         };
-        let operation = previous.failure.operation;
-        let action = previous.action;
-        let exported_path = previous.exported_path;
-        let result = match action {
-            RecoveryAction::FlushCurrentState => self.try_flush_current_state(),
-            RecoveryAction::ReloadAuthority => self.try_reload_authority(),
-            RecoveryAction::FinishAndExit => self.try_finish_and_exit(),
-            RecoveryAction::DetachAndExit => self.try_detach_and_exit(),
-            RecoveryAction::CommitCheckpointRecovery => self.try_commit_checkpoint_recovery(),
-        };
+        if recovery.dialog_open || Instant::now() < recovery.next_retry_at {
+            return;
+        }
+        self.retry_persistence_failure(false);
+    }
 
-        if let Some(recovery) = self.persistence_recovery.as_mut() {
-            if recovery.exported_path.is_none() {
-                recovery.exported_path = exported_path;
-            }
-            recovery.export_error = None;
-            recovery.exit_without_saving_armed = false;
+    fn retry_persistence_failure(&mut self, manual: bool) {
+        let Some(mut state) = self.persistence_recovery.take() else {
+            return;
+        };
+        let was_dismissed = state.dismissed;
+        let result = self.try_flush_current_state();
+        if result.is_ok() {
+            self.last_durable_save_utc = Utc::now();
+            self.persistence_recovery = None;
             self.render_needed = true;
             return;
         }
+        let detail = result.err().unwrap_or_else(|| "persistence retry failed".to_string());
+        state.failure = PersistenceFailure::new(self, state.failure.operation, detail);
+        state.action = RecoveryAction::FlushCurrentState;
+        state.export_error = None;
 
-        match result {
-            Ok(()) => {
-                self.persistence_recovery = None;
-                self.render_needed = true;
-                if matches!(
-                    action,
-                    RecoveryAction::FinishAndExit | RecoveryAction::DetachAndExit
-                ) {
-                    self.recovery_exit_requested = true;
-                    self.recovery_exit_error = None;
-                }
+        if manual {
+            state.dialog_open = true;
+            state.dismissed = false;
+            state.automatic_retries_remaining = 0;
+            state.next_retry_at = Instant::now() + Duration::from_secs(5);
+        } else if state.automatic_retries_remaining > 0 {
+            state.automatic_retries_remaining -= 1;
+            state.retry_stage = state.retry_stage.saturating_add(1);
+            if state.automatic_retries_remaining == 0 {
+                state.dialog_open = true;
+                state.dismissed = false;
+                self.system_dialog_selected_index = 0;
+            } else {
+                state.next_retry_at =
+                    Instant::now() + Self::retry_delay_for_stage(state.retry_stage);
             }
-            Err(detail) => {
-                self.persistence_recovery = Some(PersistenceRecoveryState {
-                    failure: PersistenceFailure::new(self, operation, detail),
-                    action,
-                    exported_path,
-                    export_error: None,
-                    exit_without_saving_armed: false,
-                });
-                self.render_needed = true;
-            }
+        } else if was_dismissed {
+            state.dismissed = true;
+            state.dialog_open = false;
+            state.retry_stage = state.retry_stage.saturating_add(1);
+            state.next_retry_at =
+                Instant::now() + Self::retry_delay_for_stage(3 + state.retry_stage);
+        } else {
+            state.dialog_open = true;
+            self.system_dialog_selected_index = 0;
         }
+        self.persistence_recovery = Some(state);
+        self.render_needed = true;
     }
 
     pub(super) fn try_flush_current_state(&mut self) -> Result<(), String> {
@@ -380,6 +437,7 @@ impl App {
         } else {
             sqlite::delete_tui_daily_snapshot(&database_path, &operational_day)?;
         }
+        self.try_write_runtime_checkpoint()?;
         Ok(())
     }
 
@@ -506,7 +564,6 @@ impl App {
                 if let Some(recovery) = self.persistence_recovery.as_mut() {
                     recovery.exported_path = Some(path);
                     recovery.export_error = None;
-                    recovery.exit_without_saving_armed = false;
                 }
                 if exit_after_export {
                     self.recovery_exit_requested = true;
@@ -516,7 +573,7 @@ impl App {
             Err(error) => {
                 if let Some(recovery) = self.persistence_recovery.as_mut() {
                     recovery.export_error = Some(error);
-                    recovery.exit_without_saving_armed = false;
+                    recovery.dialog_open = true;
                 }
             }
         }
@@ -593,88 +650,87 @@ impl App {
         Ok(path)
     }
 
+    pub(super) fn render_persistence_status(&self, frame: &mut Frame, size: Rect) {
+        let Some(recovery) = self.persistence_recovery.as_ref() else {
+            return;
+        };
+        if recovery.dialog_open || size.width < 18 || size.height < 3 {
+            return;
+        }
+        let label = "Saving paused";
+        let width = u16::try_from(label.chars().count()).unwrap_or(13);
+        let area = Rect::new(
+            size.x.saturating_add(2),
+            size.y.saturating_add(size.height.saturating_sub(2)),
+            width.min(size.width.saturating_sub(4)),
+            1,
+        );
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                label,
+                Style::default()
+                    .fg(self.theme_warning())
+                    .add_modifier(Modifier::BOLD),
+            ))),
+            area,
+        );
+    }
+
     pub(super) fn render_persistence_recovery(&self, frame: &mut Frame, size: Rect) {
         let Some(recovery) = self.persistence_recovery.as_ref() else {
             return;
         };
-        let width = size.width.saturating_sub(4).clamp(36, 96);
-        let height = size.height.saturating_sub(4).clamp(14, 22);
-        let area = centered_rect(width, height, size);
-        frame.render_widget(Clear, area);
-
-        let mut lines = vec![
-            Line::from(Span::styled(
-                "AUTHORITATIVE PERSISTENCE FAILED",
-                Style::default()
-                    .fg(self.theme_error())
-                    .add_modifier(Modifier::BOLD),
+        if !recovery.dialog_open {
+            return;
+        }
+        let last_local = recovery.last_durable_at_utc.with_timezone(&Local);
+        let last_label = last_local.format("%H:%M").to_string();
+        let at_risk_seconds = (Utc::now() - recovery.last_durable_at_utc)
+            .num_seconds()
+            .max(0);
+        let at_risk = self.format_time(usize::try_from(at_risk_seconds).unwrap_or(usize::MAX));
+        let timeline = Line::from(Span::styled(
+            "●────────────────?",
+            Style::default().fg(self.theme_error()),
+        ));
+        let values = Line::from(format!("{last_label}    {at_risk}    now"));
+        let mut body = vec![
+            timeline,
+            values,
+            Line::default(),
+            Line::from(format!(
+                "Changes since {last_label} are still held in memory."
             )),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("Operation: ", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(recovery.failure.operation.to_string()),
-            ]),
-            Line::from(vec![
-                Span::styled("Class: ", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(recovery.failure.class.to_string()),
-            ]),
-            Line::from(vec![
-                Span::styled("Authority: ", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(
-                    recovery
-                        .failure
-                        .authority_path
-                        .as_ref()
-                        .map(|path| path.display().to_string())
-                        .unwrap_or_else(|| "SQLite database".to_string()),
-                ),
-            ]),
-            Line::from(""),
-            Line::from(recovery.failure.detail.clone()),
-            Line::from(""),
-            Line::from(Span::styled(
-                "Normal controls are disabled. The visible state is not claimed durable.",
-                Style::default().fg(self.theme_warning()),
-            )),
-            Line::from(format!("[R] {}", recovery.action.label())),
-            Line::from("[E] write emergency recovery JSON and remain open"),
-            Line::from("[Q] write emergency recovery JSON and exit"),
         ];
-        if recovery.exit_without_saving_armed {
-            lines.push(Line::from(Span::styled(
-                "[X] press again to exit without a recovery export",
-                Style::default()
-                    .fg(self.theme_error())
-                    .add_modifier(Modifier::BOLD),
-            )));
-        } else {
-            lines.push(Line::from("[X] arm exit without saving"));
+        if let Some(path) = recovery.exported_path.as_ref() {
+            body.push(Line::from(format!("Recovery exported: {}", path.display())));
         }
-        if let Some(path) = &recovery.exported_path {
-            lines.push(Line::from(Span::styled(
-                format!("Exported: {}", path.display()),
-                Style::default().fg(self.theme_success()),
-            )));
-        }
-        if let Some(error) = &recovery.export_error {
-            lines.push(Line::from(Span::styled(
-                format!("Export failed: {error}"),
+        if let Some(error) = recovery.export_error.as_ref() {
+            body.push(Line::from(Span::styled(
+                format!("Recovery export failed: {error}"),
                 Style::default().fg(self.theme_error()),
             )));
         }
-
-        let block = Block::default()
-            .style(Style::default().bg(self.theme_background()))
-            .title(" Persistence recovery ")
-            .title_alignment(Alignment::Center)
-            .borders(Borders::ALL)
-            .border_type(BorderType::Double)
-            .border_style(Style::default().fg(self.theme_error()));
-        let paragraph = Paragraph::new(lines)
-            .block(block)
-            .wrap(Wrap { trim: false });
-        frame.render_widget(paragraph, area);
+        self.render_system_dialog(
+            frame,
+            size,
+            super::SystemDialogSeverity::Error,
+            Line::from(Span::styled(
+                "Saving failed",
+                Style::default().add_modifier(Modifier::BOLD),
+            )),
+            body,
+            vec![
+                Line::from("Continue"),
+                Line::from("Retry now"),
+                Line::from("Export recovery"),
+                Line::from("Exit without saving"),
+            ],
+            self.system_dialog_selected_index,
+            42,
+        );
     }
+
 }
 
 fn write_private_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
@@ -748,24 +804,7 @@ fn classify_failure(detail: &str) -> PersistenceFailureClass {
     }
 }
 
-fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
-    let vertical = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(area.height.saturating_sub(height) / 2),
-            Constraint::Length(height.min(area.height)),
-            Constraint::Min(0),
-        ])
-        .split(area);
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(area.width.saturating_sub(width) / 2),
-            Constraint::Length(width.min(area.width)),
-            Constraint::Min(0),
-        ])
-        .split(vertical[1])[1]
-}
+
 
 #[derive(Serialize)]
 struct EmergencyRecoveryBundle {
