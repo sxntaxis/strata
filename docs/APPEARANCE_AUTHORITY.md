@@ -1,7 +1,7 @@
 # Appearance authority
 
 Status: accepted; APPEARANCE-001 implementation candidate
-Last reviewed: 2026-09-06
+Last reviewed: 2026-09-30
 
 ## Purpose
 
@@ -23,7 +23,9 @@ If `[sand]` is omitted, all palette swatches are eligible category colors. The p
 
 `default` is reserved as presentation semantics, not a palette key. It means Strata leaves that color under external terminal/environment authority rather than claiming an RGB value.
 
-The `idle` sand/UI role currently requires an explicit RGB swatch because idle grains participate in the same Braille color-reduction path as category grains. Background/foreground and non-sand UI roles may use `default`.
+The `idle` sand/UI role currently requires an explicit RGB swatch because idle grains participate in the same Braille color-reduction path as category grains. Background/foreground and most non-sand UI roles may use `default`.
+
+`[ui].selection` is an optional semantic selector background and must name an RGB palette swatch when supplied. It owns the shared selected-row/value appearance across Strata rather than inheriting the selected Layer color. If omitted, Strata uses the resolved theme foreground when that is an RGB color; a terminal-owned `default` foreground falls back to the built-in selection color. Selected content is resolved automatically to a contrasting foreground, so a theme can use a light, dark, or colored selector without producing same-color text. Cursor shape/color remains under the host terminal's real hardware-cursor presentation rather than introducing a fake painted cursor role.
 
 ## Category color ownership
 
@@ -74,10 +76,7 @@ Classic presentation defaults remain:
 
 Theme selection must not change either physics or Braille dot geometry.
 
-Strata-owned solid selection and highlight backgrounds use one shared foreground-contrast resolver. Named Ratatui colors
-and equivalent RGB colors pass through the same appearance color normalization and luma rule. `Reset` and indexed colors
-remain under terminal authority and use the active theme foreground as the caller fallback. This rule does not implement
-the deferred automatic light/dark adaptation program.
+Strata-owned solid selection and highlight backgrounds use the theme's shared `ui.selection` semantic role plus one foreground-contrast resolver. Named Ratatui colors and equivalent RGB colors pass through the same appearance color normalization and luma rule. `Reset` and indexed colors remain under terminal authority and use the active theme foreground as the caller fallback. This rule does not implement the deferred automatic light/dark adaptation program.
 
 ## Deferred work
 

@@ -103,3 +103,20 @@ Layer recolor is retroactive presentation rather than historical geometry mutati
 The owner-approved review bundle `f1027ffd24042545621ba775470ef067f0ae852f` adds alignment-first Layer Detail geometry, canonical-entry identity editing, permissive civil-time normalization and overflow carry, a shared centered warning/error overlay, and explicit offline/live persistence recovery choices. D076 sediment identity and permanent-delete reclassification remain intact. D077 replaces the earlier blinking-bar request with the native blinking block cursor and replaces literal focus brackets with highlight.
 
 **D077-D081 VALIDATION UPDATE — NATIVE-GREEN:** Rust 1.98.1 passed formatting, strict Clippy, `cargo test --all-features` (593 library + 25 integration/process tests; 20 ignored), CLI help, and SQLite doctor on `/mnt/Tokyo/Lab/.tmp/opencode/strata-balance-behavior-coherence-001-test-profile-final`. Terminal lifecycle tests pass cursor acquisition/restoration, conservative warning selection, canonical entry deletion, recovery lifecycle, and D076 sediment reclassification. Owner visual review remains for alignment-first populated-profile presentation and cursor placement. Settings/palette behavior remains deferred.
+
+## Owner visual follow-up — STRATA-D077-D081 presentation correction
+
+The staged D077-D081 owner-review handoff was subsequently integrated and natively validated by the local agent (CI green; 593 library + 25 integration/process tests passing, 20 ignored; SQLite doctor healthy). The owner then reviewed the populated Layer Detail directly and approved this narrower follow-up authority:
+
+- empty Tag remains the neutral presentation-only `—`; it does not fall back to the Layer name and must not be persisted as Tag text;
+- keep the corrected stable 3/4-cell anchors, but add a small bounded golden-ratio-derived gutter after the measured Tag region. The ratio owns breathing room only, never anchor placement;
+- selection is one universal semantic state supplied by the active theme rather than Layer/category color. Selected content must use automatically contrast-safe foreground. The optional `ui.selection` theme role owns the solid selector background; when absent, an RGB foreground is the natural fallback;
+- editing uses the real terminal blinking block caret. Entering edit mode does not independently turn field content white or otherwise replace the row's contrast-safe selection treatment;
+- Right-arrow ghost-completion acceptance places the caret at the end of the accepted current Tag token;
+- complete ledger values are the ordinary contract. The modal widens for actual draft data when the terminal has room. Ellipsis is permitted only as a true hard-width fallback for inactive display cells; an active editable field is never ellipsized and instead becomes a caret-following viewport if the terminal physically cannot show the whole value;
+- the entry-delete WARNING must render the same selected ledger row, one line, with the same row geometry/order/format as Layer Detail rather than reconstructing a narrower one-row approximation;
+- user-facing `Day start` / `Operational day` vocabulary is cleaned to `Reporting cutoff` / `Reporting cycle`; internal/schema identifiers are not renamed in this pass.
+
+The owner explicitly approved implementation of this follow-up. Native formatting, linting, tests, CLI smoke, and SQLite doctor now pass; populated-profile owner visual review remains the next gate.
+
+**VISUAL FOLLOW-UP VALIDATION UPDATE — NATIVE-GREEN:** The owner-approved visual bundle `c507dc99af1c5e5e4eca21b5adacf562e73611b7` is integrated. Rust 1.98.1 passed formatting, strict Clippy, `cargo test --all-features` (596 library + 25 integration/process tests; 20 ignored), CLI help, and SQLite doctor on the isolated loaded profile. Coverage now includes theme-owned selection colors, bounded Tag gutters, caret-following active-field viewports, completion-caret placement, Reporting cutoff/cycle vocabulary, and exact selected-row delete previews. Final owner PTY review remains for the populated-profile presentation.

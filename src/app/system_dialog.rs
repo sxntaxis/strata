@@ -95,15 +95,14 @@ impl App {
         let selected = selected.min(actions.len().saturating_sub(1));
         for (index, mut action) in actions.into_iter().enumerate() {
             if index == selected {
-                let foreground =
-                    crate::appearance::contrasting_text_color(semantic, self.theme_foreground());
+                let foreground = self.theme_selection_text();
                 let padding = usize::from(inner.width).saturating_sub(action.width());
                 if padding > 0 {
                     action.spans.push(Span::raw(" ".repeat(padding)));
                 }
                 lines.push(
                     action
-                        .style(Style::default().fg(foreground).bg(semantic))
+                        .style(Style::default().fg(foreground).bg(self.theme_selection()))
                         .alignment(Alignment::Left),
                 );
             } else {

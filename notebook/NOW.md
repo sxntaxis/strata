@@ -5,9 +5,13 @@ state: active
 created: 2026-08-01
 updated: 2026-09-30
 authority: working
-summary: "INTERACTION-GRAMMAR-001 D076-D081 implements owner-approved Layer Detail, ledger chronology, warning-overlay, recovery, and sediment identity semantics; native validation passes."
-next: Owner visual review of D077 alignment-first Layer Detail geometry and blinking block cursor on the populated test profile; keep Settings/palette and SEDIMENT-016 separate.
+summary: "INTERACTION-GRAMMAR-001 D077-D081 visual follow-up implements theme-owned selection, complete-value editing, bounded ledger gutters, caret placement, and exact delete-row preview; native validation passes."
+next: "Owner visual review of the populated profile: bounded Tag gutter and stable anchors, contrast-safe selectors, blinking block caret, Right-accepted completion caret placement, no active-field ellipsis, exact ledger-row delete preview, and Reporting cutoff/cycle vocabulary."
 ---
+
+## INTERACTION-GRAMMAR-001 coherent keyboard ownership — 2026-09-30
+
+**OWNER-APPROVED VISUAL FOLLOW-UP / IMPLEMENTED / NATIVE VALIDATION GREEN:** the previous D077-D081 handoff was integrated by the local agent with CI green, 596 library + 25 integration/process tests passing (20 ignored), healthy SQLite doctor, and a clean worktree. Owner runtime review then refined presentation without changing ledger semantics: empty Tag remains `—`; aligned Tag/Date/Time/Effect anchors remain; Tag receives a small bounded golden-ratio-derived gutter; selectors use one theme-owned semantic background with contrast-safe text rather than Layer color; active editing does not arbitrarily recolor content; Right-accepted Tag completion leaves the caret at the end of the accepted token; ledger values remain complete whenever the terminal can fit them; and an active field is never ellipsized, using a caret-following viewport only under genuine physical pressure. Entry-delete WARNING previews the actual selected ledger-row geometry. User-facing vocabulary is Reporting cutoff / Reporting cycle while internal/schema identifiers may remain unchanged. Owner PTY review remains for the final populated-profile visual gate.
 
 ## INTERACTION-GRAMMAR-001 coherent keyboard ownership — 2026-09-28
 
@@ -15,7 +19,9 @@ next: Owner visual review of D077 alignment-first Layer Detail geometry and blin
 
 **D076 VALIDATION UPDATE — NATIVE-GREEN:** Rust 1.98.1 passed format check, strict Clippy, all-feature tests (591 library + 25 integration/process; 20 ignored), and CLI help. Deletion tests cover SandState v6 normalization to v5, all persisted sediment representations reclassified to Idle with mass/geometry/FIFO preserved, and source revision refresh. PTY checks cover cursor style acquisition/restoration plus the full D075 preview/delete flows. See `notebook/work/INTERACTION-GRAMMAR-001.md`.
 
-**D077-D081 VALIDATION UPDATE — NATIVE-GREEN:** The owner-approved follow-up bundle at `f1027ffd` is integrated. Rust 1.98.1 passed formatting, strict Clippy, all-feature tests (593 library + 25 integration/process; 20 ignored), and CLI help. Terminal lifecycle coverage passes with the native blinking-block cursor and conservative warning selection; the loaded isolated test profile passes SQLite doctor with 8 categories, 7 tags, 624 sessions, and 73 snapshots. D077 alignment and cursor presentation remain an owner visual gate.
+**D077-D081 VALIDATION UPDATE — NATIVE-GREEN:** The owner-approved follow-up bundle at `f1027ffd` is integrated. Rust 1.98.1 passed formatting, strict Clippy, all-feature tests (593 library + 25 integration/process; 20 ignored), and CLI help. Terminal lifecycle coverage passes with the native blinking-block cursor and conservative warning selection; the loaded isolated test profile passes SQLite doctor. D077 alignment and cursor presentation remain an owner visual gate.
+
+**VISUAL FOLLOW-UP VALIDATION UPDATE — NATIVE-GREEN:** The owner-approved visual bundle at `c507dc9` is integrated. Native formatting, strict Clippy, all-feature tests (596 library + 25 integration/process; 20 ignored), CLI help, and SQLite doctor pass. New coverage includes theme-owned selection swatches, bounded gutter sizing, caret-following active-field viewports, completion-caret placement, and exact selected-row delete previews. Final owner PTY review remains.
 
 **D075 VALIDATION UPDATE — NATIVE-GREEN:** Rust 1.98.1 passed format check, strict Clippy, all-feature tests (591 library + 25 integration/process; 20 ignored), and CLI help. The PTY suite verifies Tag preview live updates, Esc rollback, Enter acceptance, Ctrl-C rollback before finalization, and confirmed/cancelled Ctrl+x deletion with Category history/tags removed while the persisted sand state remains byte-equivalent. Unit and SQLite tests cover exact-zero visibility, equal-cell column sizing, hidden tombstone custody, and no sand snapshot rewrite. Settings/palette remains deferred.
 

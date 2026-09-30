@@ -32,6 +32,7 @@ fn theme_supports_arbitrary_named_palette_and_sand_subset() {
     assert_eq!(theme.name, "Odd Palette");
     assert_eq!(theme.sand_color_count(), 4);
     assert_eq!(theme.ui.background, UiColorRef::Default);
+    assert_eq!(theme.ui.selection, Color::Rgb(238, 238, 238));
 }
 
 #[test]
@@ -127,6 +128,7 @@ fn built_in_ui_palette_preserves_pre_theme_runtime_colors() {
     assert_eq!(theme.ui.warning, UiColorRef::Color(Color::Yellow));
     assert_eq!(theme.ui.error, UiColorRef::Color(Color::Red));
     assert_eq!(theme.ui.success, UiColorRef::Color(Color::Rgb(0, 176, 80)));
+    assert_eq!(theme.ui.selection, Color::Rgb(255, 255, 255));
 }
 
 #[test]
@@ -228,6 +230,27 @@ fn theme_can_offer_more_than_the_historical_twelve_sand_colors() {
     }
     let theme = Theme::parse("wide", &source).unwrap();
     assert_eq!(theme.sand_color_count(), 17);
+}
+
+#[test]
+fn selection_is_theme_owned_and_requires_a_palette_swatch() {
+    let source = r##"
+schema = 1
+[theme]
+name = "Selection"
+[palette]
+sand = "#cc5500"
+selector = "#f0f0f0"
+[sand]
+colors = ["sand"]
+[ui]
+selection = "selector"
+"##;
+    let theme = Theme::parse("selection", source).unwrap();
+    assert_eq!(theme.ui.selection, Color::Rgb(240, 240, 240));
+
+    let invalid = source.replace("selection = \"selector\"", "selection = \"default\"");
+    assert!(Theme::parse("selection-default", &invalid).is_err());
 }
 
 #[test]
