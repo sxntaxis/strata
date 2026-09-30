@@ -3,11 +3,15 @@ id: NOW-001
 kind: status
 state: active
 created: 2026-08-01
-updated: 2026-09-28
+updated: 2026-09-30
 authority: working
-summary: "INTERACTION-GRAMMAR-001 D076 refines Layer Detail geometry, real editing cursors, semantic delete confirmation, and retroactive Layer sediment identity/color behavior."
-next: Natively validate and owner-test the D076 candidate on the populated profile, especially geometry-neutral `f`, content-driven Layer Detail width, blinking input cursor placement, themed delete confirmation, current/historical Layer→Idle reclassification, and retroactive recolor; keep Settings/palette and SEDIMENT-016 separate.
+summary: "INTERACTION-GRAMMAR-001 D077-D081 is locally native-green; the active owner-approved visual follow-up refines Layer Detail spacing, theme-owned selection, complete-value editing, autocomplete caret placement, and exact delete-row preview."
+next: Natively validate and owner-test the visual follow-up on the populated profile: bounded Tag gutter with stable anchors, theme-owned contrast-safe selectors, terminal blinking block caret, Right-accepted completion caret placement, no active-field ellipsis, full values whenever width permits, exact ledger-row delete preview, and Reporting cutoff/cycle user vocabulary.
 ---
+
+## INTERACTION-GRAMMAR-001 coherent keyboard ownership — 2026-09-30
+
+**OWNER-APPROVED VISUAL FOLLOW-UP / IMPLEMENTATION CANDIDATE / NATIVE VALIDATION PENDING:** the previous D077-D081 handoff was integrated by the local agent with CI green, 593 library + 25 integration/process tests passing (20 ignored), healthy SQLite doctor, and a clean worktree. Owner runtime review then refined presentation without changing ledger semantics: empty Tag remains `—`; aligned Tag/Date/Time/Effect anchors remain; Tag receives a small bounded golden-ratio-derived gutter; selectors use one theme-owned semantic background with contrast-safe text rather than Layer color; active editing does not arbitrarily recolor content; Right-accepted Tag completion leaves the caret at the end of the accepted token; ledger values remain complete whenever the terminal can fit them; and an active field is never ellipsized, using a caret-following viewport only under genuine physical pressure. Entry-delete WARNING previews the actual selected ledger-row geometry. User-facing vocabulary is Reporting cutoff / Reporting cycle while internal/schema identifiers may remain unchanged. This authored follow-up still needs the repository-declared native gates and owner PTY review.
 
 ## INTERACTION-GRAMMAR-001 coherent keyboard ownership — 2026-09-28
 

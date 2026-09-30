@@ -4,7 +4,7 @@ kind: work
 state: candidate
 authority: working
 created: 2026-09-28
-updated: 2026-09-28
+updated: 2026-09-30
 summary: "Unify Strata keyboard ownership and modifier meaning across Main, Layer, Balance boundaries, ledger editing, and multi-tag filtering."
 ---
 
@@ -89,3 +89,18 @@ Text-editing surfaces now expose the real terminal cursor at the insertion point
 Permanent Layer deletion reuses the existing rounded collateral-confirmation visual language. Destructive title, border, and Enter action use the theme error role; secondary guidance uses theme status rather than a hard-coded or generic accent color. More importantly, deletion no longer leaves deleted-Layer sediment identity behind: current canonical sand, persisted historical snapshots, and checkpoint-carried sand state are atomically reclassified from the deleted CategoryId to Idle while preserving coordinates, mass, topology, pending order/count, chronology, and simulation metadata. Staged in-memory day-end snapshots receive the same rewrite before later persistence. The tombstone remains only to prevent CategoryId reuse.
 
 Layer recolor is retroactive presentation rather than historical geometry mutation: historical snapshots retain CategoryId and resolve that identity through the Layer's current color, so changing color updates live and historical rendering without rewriting grain positions. D076 is authored without a Rust toolchain; formatter/Clippy/tests and populated-profile owner verification remain pending.
+
+## Owner visual follow-up — STRATA-D077-D081 presentation correction
+
+The staged D077-D081 owner-review handoff was subsequently integrated and natively validated by the local agent (CI green; 593 library + 25 integration/process tests passing, 20 ignored; SQLite doctor healthy). The owner then reviewed the populated Layer Detail directly and approved this narrower follow-up authority:
+
+- empty Tag remains the neutral presentation-only `—`; it does not fall back to the Layer name and must not be persisted as Tag text;
+- keep the corrected stable 3/4-cell anchors, but add a small bounded golden-ratio-derived gutter after the measured Tag region. The ratio owns breathing room only, never anchor placement;
+- selection is one universal semantic state supplied by the active theme rather than Layer/category color. Selected content must use automatically contrast-safe foreground. The optional `ui.selection` theme role owns the solid selector background; when absent, an RGB foreground is the natural fallback;
+- editing uses the real terminal blinking block caret. Entering edit mode does not independently turn field content white or otherwise replace the row's contrast-safe selection treatment;
+- Right-arrow ghost-completion acceptance places the caret at the end of the accepted current Tag token;
+- complete ledger values are the ordinary contract. The modal widens for actual draft data when the terminal has room. Ellipsis is permitted only as a true hard-width fallback for inactive display cells; an active editable field is never ellipsized and instead becomes a caret-following viewport if the terminal physically cannot show the whole value;
+- the entry-delete WARNING must render the same selected ledger row, one line, with the same row geometry/order/format as Layer Detail rather than reconstructing a narrower one-row approximation;
+- user-facing `Day start` / `Operational day` vocabulary is cleaned to `Reporting cutoff` / `Reporting cycle`; internal/schema identifiers are not renamed in this pass.
+
+The owner explicitly approved implementation of this follow-up. The authorship environment still lacks Rust tooling, so the new delta must be natively formatted, linted, tested, CLI-smoked, and visually exercised before certification.
