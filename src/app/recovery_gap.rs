@@ -1,6 +1,6 @@
 use std::{collections::HashSet, time::Duration};
 
-use chrono::{Local, Utc};
+use chrono::Local;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
@@ -10,7 +10,7 @@ use ratatui::{
 };
 
 use crate::{
-    domain::{DRIFT_CATEGORY_ID, operational_day_key_for_utc},
+    domain::DRIFT_CATEGORY_ID,
     sand::{RecoveryTiming, recover_detached_sediment},
     sqlite,
 };
@@ -29,15 +29,28 @@ impl App {
         if self.recovery_gap.is_none() {
             return false;
         }
+        let previous_is_idle = self
+            .recovery_gap
+            .as_ref()
+            .is_some_and(|gap| gap.active_category_id == DRIFT_CATEGORY_ID);
+        let action_count = if previous_is_idle { 2 } else { 3 };
         match key.code {
-            KeyCode::Up => self.move_system_dialog_selection(-1, 3),
-            KeyCode::Down => self.move_system_dialog_selection(1, 3),
+            KeyCode::Up => self.move_system_dialog_selection(-1, action_count),
+            KeyCode::Down => self.move_system_dialog_selection(1, action_count),
             KeyCode::Enter => {
-                let choice = match self.system_dialog_selected_index.min(2) {
-                    0 => RecoveryGapChoice::ActiveLayer,
-                    1 => RecoveryGapChoice::IdleWithSediment,
-                    2 => RecoveryGapChoice::IdleWithoutSediment,
-                    _ => unreachable!(),
+                let choice = if previous_is_idle {
+                    match self.system_dialog_selected_index.min(1) {
+                        0 => RecoveryGapChoice::ActiveLayer,
+                        1 => RecoveryGapChoice::IdleWithoutSediment,
+                        _ => unreachable!(),
+                    }
+                } else {
+                    match self.system_dialog_selected_index.min(2) {
+                        0 => RecoveryGapChoice::ActiveLayer,
+                        1 => RecoveryGapChoice::IdleWithSediment,
+                        2 => RecoveryGapChoice::IdleWithoutSediment,
+                        _ => unreachable!(),
+                    }
                 };
                 self.apply_recovery_gap_choice(choice);
             }
@@ -138,8 +151,13 @@ impl App {
         self.simulation.catchup_progress_anchor = None;
         self.simulation.catchup_was_active = false;
 
+        let preserves_active_identity = matches!(choice, RecoveryGapChoice::ActiveLayer)
+            || (gap.active_category_id == DRIFT_CATEGORY_ID
+                && matches!(choice, RecoveryGapChoice::IdleWithoutSediment));
+
         match choice {
-            RecoveryGapChoice::ActiveLayer => {
+            RecoveryGapChoice::ActiveLayer
+            | RecoveryGapChoice::IdleWithoutSediment if preserves_active_identity => {
                 if let Err(error) = self.begin_active_session_at(gap.active_started_at_utc, true) {
                     self.record_storage_result_for::<()>(
                         super::PersistenceOperation::CheckpointRecovery,
@@ -221,6 +239,21 @@ impl App {
         let layer = self.report_layer_display_name(gap.active_category_id);
         let layer_color = self.category_color_for_id(gap.active_category_id);
 
+        let actions = if gap.active_category_id == DRIFT_CATEGORY_ID {
+            vec![
+                Line::from("Reconstruct as Idle"),
+                Line::from("Keep sediment unchanged"),
+            ]
+        } else {
+            vec![
+                Line::from(vec![
+                    Span::raw("Reconstruct as "),
+                    Span::styled(layer, Style::default().fg(layer_color)),
+                ]),
+                Line::from("Reconstruct as Idle"),
+                Line::from("Keep sediment unchanged"),
+            ]
+        };
         self.render_system_dialog(
             frame,
             size,
@@ -238,14 +271,7 @@ impl App {
                 Line::default(),
                 Line::from("Choose how to reconstruct the missing time."),
             ],
-            vec![
-                Line::from(vec![
-                    Span::raw("Reconstruct as "),
-                    Span::styled(layer, Style::default().fg(layer_color)),
-                ]),
-                Line::from("Reconstruct as Idle"),
-                Line::from("Keep sediment unchanged"),
-            ],
+            actions,
             self.system_dialog_selected_index,
             42,
         );
