@@ -161,6 +161,10 @@ impl App {
             self.render_recovery_statement(f, size);
         }
 
+        if self.recovery_gap.is_some() {
+            self.render_recovery_gap(f, size);
+        }
+
         if self.has_persistence_recovery() {
             self.render_persistence_status(f, size);
             self.render_persistence_recovery(f, size);

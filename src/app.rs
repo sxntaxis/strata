@@ -308,7 +308,6 @@ impl PostTargetClass {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[derive(Clone, Debug)]
 struct RecoveryGapState {
     checkpoint: DetachedRuntimeCheckpoint,
@@ -2420,6 +2419,14 @@ impl App {
         #[cfg(debug_assertions)]
         self.advance_testing_cheats_wall_time(wall_delta);
 
+        // A detached/offline interval is intentionally unclassified until the
+        // owner chooses how to reconstruct it. Do not let ordinary runtime
+        // catch-up silently make that decision while the warning is open.
+        if self.recovery_gap.is_some() {
+            self.render_needed = true;
+            return;
+        }
+
         let was_catching = self.simulation.catchup_was_active;
         let cadence = Duration::from_millis(CATCHUP_SETTINGS.cadence_ms);
         self.simulation.catchup_cadence_accumulator = self
@@ -3661,6 +3668,7 @@ fn run_application_loop(
 
             app.service_persistence_recovery();
             if !app.has_persistence_recovery()
+                && app.recovery_gap.is_none()
                 && last_save.elapsed() >= save_rate
                 && !app.is_catching_up()
             {
