@@ -347,15 +347,19 @@ impl LedgerEntryEditState {
     }
 
     fn effective_naive_bounds(&self) -> Option<(NaiveDateTime, NaiveDateTime)> {
-        let start_date = NaiveDate::parse_from_str(self.start_date.trim(), "%Y-%m-%d").ok()?;
+        let start_base_date =
+            NaiveDate::parse_from_str(self.start_date.trim(), "%Y-%m-%d").ok()?;
         let start_normalized = normalize_ledger_time_input(&self.start_time)?;
-        let start_date = start_date.checked_add_signed(ChronoDuration::days(
+        let start_date = start_base_date.checked_add_signed(ChronoDuration::days(
             start_normalized.day_carry,
         ))?;
         let start = start_date.and_time(start_normalized.time);
 
+        // A linked end follows any carry introduced by the start value. This is
+        // what makes permissive inputs such as `99:` update the civil Date rather
+        // than leaving End several days behind the normalized Start.
         let end_base_date = if self.dates_linked {
-            NaiveDate::parse_from_str(self.start_date.trim(), "%Y-%m-%d").ok()?
+            start_date
         } else {
             NaiveDate::parse_from_str(self.end_date.trim(), "%Y-%m-%d").ok()?
         };
