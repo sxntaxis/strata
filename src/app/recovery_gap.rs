@@ -135,10 +135,116 @@ impl App {
             )
         };
 
-        if let Err(error) = self.sand_engine.restore_state(&state, &valid_category_ids) {
+        let preserves_active_identity = matches!(choice, RecoveryGapChoice::ActiveLayer)
+            || (gap.active_category_id == DRIFT_CATEGORY_ID
+                && matches!(choice, RecoveryGapChoice::IdleWithoutSediment));
+
+        if preserves_active_identity {
+            // The existing checkpoint-commit path derives its durable receipt from the
+            // installed runtime state. Treat that installation as a transaction preview:
+            // a failed SQLite commit must leave the unresolved recovery gap exactly as it
+            // was so the owner can retry or choose a different classification.
+            let previous_sand = self.sand_engine.snapshot_state();
+            let previous_tracker = self.time_tracker.clone();
+            let previous_session = self.session.clone();
+            let previous_simulation_time = self.simulation.simulation_time_utc;
+            let previous_spawn = self.simulation.spawn_accumulator;
+            let previous_physics = self.simulation.physics_accumulator;
+
+            if let Err(error) = self.sand_engine.restore_state(&state, &valid_category_ids) {
+                self.record_storage_result_for::<()>(
+                    super::PersistenceOperation::CheckpointRecovery,
+                    RecoveryAction::CommitCheckpointRecovery,
+                    Err(error),
+                );
+                return;
+            }
+            self.simulation.simulation_time_utc = gap.target_utc;
+            self.simulation.spawn_accumulator = spawn_remainder;
+            self.simulation.physics_accumulator = physics_remainder;
+            self.simulation.catchup_cadence_accumulator = Duration::ZERO;
+            self.simulation.catchup_visual_engine = None;
+            self.simulation.catchup_progress_anchor = None;
+            self.simulation.catchup_was_active = false;
+
+            if let Err(error) = self.begin_active_session_at(gap.active_started_at_utc, true) {
+                let _ = self
+                    .sand_engine
+                    .restore_state(&previous_sand, &valid_category_ids);
+                self.time_tracker = previous_tracker;
+                self.session = previous_session;
+                self.simulation.simulation_time_utc = previous_simulation_time;
+                self.simulation.spawn_accumulator = previous_spawn;
+                self.simulation.physics_accumulator = previous_physics;
+                self.record_storage_result_for::<()>(
+                    super::PersistenceOperation::CheckpointRecovery,
+                    RecoveryAction::CommitCheckpointRecovery,
+                    Err(error),
+                );
+                return;
+            }
+
+            self.recovery_gap = None;
+            self.recovery_statement = None;
+            self.commit_checkpoint_recovery_if_ready();
+            if self.checkpoint_recovery_active {
+                let _ = self
+                    .sand_engine
+                    .restore_state(&previous_sand, &valid_category_ids);
+                self.time_tracker = previous_tracker;
+                self.session = previous_session;
+                self.simulation.simulation_time_utc = previous_simulation_time;
+                self.simulation.spawn_accumulator = previous_spawn;
+                self.simulation.physics_accumulator = previous_physics;
+                self.recovery_gap = Some(gap);
+            }
+            self.render_needed = true;
+            return;
+        }
+
+        let Some(database_path) = self.sqlite_database_path.clone() else {
             self.record_storage_result_for::<()>(
                 super::PersistenceOperation::CheckpointRecovery,
                 RecoveryAction::CommitCheckpointRecovery,
+                Err("SQLite authority is unavailable".to_string()),
+            );
+            return;
+        };
+        let next_stable_id = sqlite::initial_tui_active_stable_id(gap.target_utc);
+        let result = sqlite::commit_tui_recovery_gap_as_idle(
+            &database_path,
+            sqlite::TuiRecoveryGapIdleRequest {
+                expected_active_stable_id: &gap.expected_stable_id,
+                previous_category_id: gap.active_category_id,
+                active_started_at_utc: gap.active_started_at_utc,
+                durable_until_utc: gap.checkpoint.simulation_time_utc,
+                target_utc: gap.target_utc,
+                next_active_stable_id: &next_stable_id,
+                state: &state,
+            },
+        );
+        if self
+            .record_storage_result_for(
+                super::PersistenceOperation::CheckpointRecovery,
+                RecoveryAction::CommitCheckpointRecovery,
+                result,
+            )
+            .is_none()
+        {
+            return;
+        }
+
+        // The idle-classification helper publishes the chosen sand and chronology in
+        // one SQLite transaction. Install only after that commit succeeds so a failed
+        // write never mutates the in-memory recovery preview.
+        self.recovery_gap = None;
+        self.recovery_statement = None;
+        self.checkpoint_recovery_active = false;
+        self.checkpoint_recovery_payload = None;
+        if let Err(error) = self.try_reload_authority() {
+            self.record_storage_result_for::<()>(
+                super::PersistenceOperation::StateReload,
+                RecoveryAction::ReloadAuthority,
                 Err(error),
             );
             return;
@@ -150,74 +256,7 @@ impl App {
         self.simulation.catchup_visual_engine = None;
         self.simulation.catchup_progress_anchor = None;
         self.simulation.catchup_was_active = false;
-
-        let preserves_active_identity = matches!(choice, RecoveryGapChoice::ActiveLayer)
-            || (gap.active_category_id == DRIFT_CATEGORY_ID
-                && matches!(choice, RecoveryGapChoice::IdleWithoutSediment));
-
-        match choice {
-            RecoveryGapChoice::ActiveLayer
-            | RecoveryGapChoice::IdleWithoutSediment if preserves_active_identity => {
-                if let Err(error) = self.begin_active_session_at(gap.active_started_at_utc, true) {
-                    self.record_storage_result_for::<()>(
-                        super::PersistenceOperation::CheckpointRecovery,
-                        RecoveryAction::CommitCheckpointRecovery,
-                        Err(error),
-                    );
-                    return;
-                }
-                self.recovery_gap = None;
-                self.recovery_statement = None;
-                self.commit_checkpoint_recovery_if_ready();
-            }
-            RecoveryGapChoice::IdleWithSediment | RecoveryGapChoice::IdleWithoutSediment => {
-                let Some(database_path) = self.sqlite_database_path.clone() else {
-                    self.record_storage_result_for::<()>(
-                        super::PersistenceOperation::CheckpointRecovery,
-                        RecoveryAction::CommitCheckpointRecovery,
-                        Err("SQLite authority is unavailable".to_string()),
-                    );
-                    return;
-                };
-                let next_stable_id = sqlite::initial_tui_active_stable_id(gap.target_utc);
-                let result = sqlite::commit_tui_recovery_gap_as_idle(
-                    &database_path,
-                    sqlite::TuiRecoveryGapIdleRequest {
-                        expected_active_stable_id: &gap.expected_stable_id,
-                        previous_category_id: gap.active_category_id,
-                        active_started_at_utc: gap.active_started_at_utc,
-                        durable_until_utc: gap.checkpoint.simulation_time_utc,
-                        target_utc: gap.target_utc,
-                        next_active_stable_id: &next_stable_id,
-                        state: &state,
-                    },
-                );
-                if self
-                    .record_storage_result_for(
-                        super::PersistenceOperation::CheckpointRecovery,
-                        RecoveryAction::CommitCheckpointRecovery,
-                        result,
-                    )
-                    .is_none()
-                {
-                    return;
-                }
-
-                self.recovery_gap = None;
-                self.recovery_statement = None;
-                self.checkpoint_recovery_active = false;
-                self.checkpoint_recovery_payload = None;
-                if let Err(error) = self.try_reload_authority() {
-                    self.record_storage_result_for::<()>(
-                        super::PersistenceOperation::StateReload,
-                        RecoveryAction::ReloadAuthority,
-                        Err(error),
-                    );
-                    return;
-                }
-                self.reconcile_all_daily_contributions();
-            }
-        }
+        self.reconcile_all_daily_contributions();
         self.render_needed = true;
     }
 
