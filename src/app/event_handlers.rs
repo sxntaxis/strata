@@ -7,7 +7,10 @@ use crate::{
 use chrono::{Duration as ChronoDuration, Local, NaiveDate};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
-use super::{App, PaletteCommand, ReportRangeBoundary, RuntimeMutation, ui_helpers};
+use super::{
+    App, PaletteCommand, PersistenceOperation, RecoveryAction, ReportRangeBoundary, RuntimeMutation,
+    ui_helpers,
+};
 
 #[cfg(debug_assertions)]
 const TESTING_FILL_CATEGORY_SPECS: [(&str, usize); 6] = [
@@ -166,7 +169,9 @@ fn resolve_report_range_edit_key(
             ReportRangeEditKeyIntent::PreviousField
         }
         KeyCode::Tab => ReportRangeEditKeyIntent::NextField,
-        KeyCode::Char(character) if character.is_ascii_digit() || character == '-' => {
+        KeyCode::Char(character)
+            if super::date_input::date_candidate_accepts_character(character) =>
+        {
             ReportRangeEditKeyIntent::Append(character)
         }
         _ => ReportRangeEditKeyIntent::Ignore,
@@ -195,6 +200,16 @@ impl App {
             return false;
         }
 
+        if self.system_notice.is_some() {
+            if self.keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
+                return true;
+            }
+            if matches!(key.code, KeyCode::Enter | KeyCode::Esc) {
+                self.dismiss_system_notice();
+            }
+            return false;
+        }
+
         if self.persistence_recovery_dialog_open() {
             if self.keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
                 return self.request_persistence_recovery_quit();
@@ -219,8 +234,8 @@ impl App {
         }
 
         if self.keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
-            if self.in_category_modal() && !self.persist_modal_active_description() {
-                return false;
+            if self.in_category_modal() {
+                self.cancel_modal();
             }
             return true;
         }
@@ -356,17 +371,13 @@ impl App {
                                 self.render_needed = true;
                             }
                             Ok(_) => self.close_command_palette(),
-                            Err(error) => {
-                                self.command_palette_feedback = Some(format!("Error: {error}"));
-                                self.render_needed = true;
-                            }
+                            Err(error) => self.present_command_failure(error),
                         }
                         return false;
                     }
                     Ok(None) => {}
                     Err(error) => {
-                        self.command_palette_feedback = Some(format!("Error: {error}"));
-                        self.render_needed = true;
+                        self.present_warning("Invalid command", error);
                         return false;
                     }
                 }
@@ -464,6 +475,19 @@ impl App {
 
     fn remember_tag_for_layer(&mut self, layer_id: CategoryId, tag: &str) {
         self.remember_description_tags_for_category(layer_id, tag);
+    }
+
+    fn present_command_failure(&mut self, error: String) {
+        if self.has_persistence_recovery() {
+            // Persistence recovery already owns the universal ERROR surface and
+            // its recovery choices. Do not stack a redundant generic error over it.
+            return;
+        }
+        if error.starts_with("Storage failure:") || error.starts_with("Runtime failure:") {
+            self.present_error("Command failed", error);
+        } else {
+            self.present_warning("Command rejected", error);
+        }
     }
 
     pub(super) fn execute_command(&mut self, command: CommandIntent) -> Result<String, String> {
@@ -897,16 +921,33 @@ impl App {
         let description = canonical_tag.clone().unwrap_or_default();
         if self.time_tracker.active_category_id() == category.id {
             if !description.is_empty() {
-                let database_path = self
-                    .sqlite_database_path
-                    .clone()
-                    .ok_or_else(|| "SQLite authority is unavailable".to_string())?;
-                let stable_id = self
-                    .session
-                    .active_session_stable_id
-                    .clone()
-                    .ok_or_else(|| "active session has no stable identity".to_string())?;
-                sqlite::update_tui_active_description(&database_path, &stable_id, &description)?;
+                let Some(database_path) = self.sqlite_database_path.clone() else {
+                    self.record_storage_result_for::<()>(
+                        PersistenceOperation::ActiveDescription,
+                        RecoveryAction::ReloadAuthority,
+                        Err("SQLite authority is unavailable".to_string()),
+                    );
+                    return Err("Storage failure: SQLite authority is unavailable".to_string());
+                };
+                let Some(stable_id) = self.session.active_session_stable_id.clone() else {
+                    return Err(
+                        "Runtime failure: active session has no stable identity".to_string(),
+                    );
+                };
+                let result =
+                    sqlite::update_tui_active_description(&database_path, &stable_id, &description);
+                if self
+                    .record_storage_result_for(
+                        PersistenceOperation::ActiveDescription,
+                        RecoveryAction::ReloadAuthority,
+                        result,
+                    )
+                    .is_none()
+                {
+                    return Err(
+                        "Storage failure: active-session description was not saved".to_string(),
+                    );
+                }
                 self.time_tracker
                     .set_active_description(description.clone());
                 self.refresh_active_runtime_checkpoint();
@@ -1117,12 +1158,28 @@ impl App {
             .max_by_key(|session| session.id)
             .map(|session| session.id)
             .ok_or_else(|| "No matching session found".to_string())?;
-        let database_path = self
-            .sqlite_database_path
-            .clone()
-            .ok_or_else(|| "SQLite authority is unavailable".to_string())?;
-        sqlite::delete_tui_session(&database_path, session_id)?;
-        self.reload_sqlite_sessions();
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::SessionDelete,
+                RecoveryAction::ReloadAuthority,
+                Err("SQLite authority is unavailable".to_string()),
+            );
+            return Err("Storage failure: SQLite authority is unavailable".to_string());
+        };
+        let result = sqlite::delete_tui_session(&database_path, session_id);
+        if self
+            .record_storage_result_for(
+                PersistenceOperation::SessionDelete,
+                RecoveryAction::ReloadAuthority,
+                result,
+            )
+            .is_none()
+        {
+            return Err("Storage failure: session deletion was not saved".to_string());
+        }
+        if !self.reload_sqlite_sessions() {
+            return Err("Storage failure: session authority could not be reloaded".to_string());
+        }
         Ok(format!(
             "Deleted last session for layer '{}'",
             self.display_layer_name(&category.name)
@@ -1241,8 +1298,7 @@ impl App {
                         self.close_settings_overlay();
                     }
                     Err(err) => {
-                        self.keymap_error = Some(err);
-                        self.close_settings_overlay();
+                        self.present_error("Settings could not be saved", err);
                     }
                 }
             }
@@ -1254,8 +1310,7 @@ impl App {
                         self.close_settings_overlay();
                     }
                     Err(err) => {
-                        self.keymap_error = Some(err);
-                        self.close_settings_overlay();
+                        self.present_error("Settings could not be saved", err);
                     }
                 }
             }
@@ -1272,8 +1327,7 @@ impl App {
                             self.close_settings_overlay();
                         }
                         Err(err) => {
-                            self.keymap_error = Some(err);
-                            self.close_settings_overlay();
+                            self.present_error("Settings could not be saved", err);
                         }
                     }
                 }
@@ -1319,8 +1373,9 @@ impl App {
                         self.render_needed = true;
                     }
                     Err(error) => {
-                        self.keymap_error = Some(format!("appearance: {error}"));
-                        self.close_settings_overlay();
+                        self.settings_overlay =
+                            Some(super::SettingsOverlay::SelectTheme { selected });
+                        self.present_error("Theme could not be applied", error);
                     }
                 }
                 return;
@@ -1364,8 +1419,9 @@ impl App {
                         self.close_settings_overlay();
                     }
                     Err(err) => {
-                        self.keymap_error = Some(err);
-                        self.close_settings_overlay();
+                        self.settings_overlay =
+                            Some(super::SettingsOverlay::SelectWeekStartDay { selected });
+                        self.present_error("Settings could not be saved", err);
                     }
                 }
                 return;
@@ -1485,8 +1541,7 @@ impl App {
             Action::ShiftLeft | Action::ShiftRight => {}
             Action::Confirm => {
                 if self.is_on_insert_space() {
-                    if !self.new_category_name.is_empty() {
-                        self.add_category();
+                    if !self.new_category_name.is_empty() && self.add_category() {
                         self.close_modal();
                     }
                 } else {
@@ -1565,7 +1620,6 @@ impl App {
         if let KeyCode::Char(c) = key.code {
             if self.modal_renaming_category {
                 self.modal_category_name_draft.push(c);
-                self.modal_category_name_error = None;
                 self.render_needed = true;
             } else if self.is_on_insert_space() {
                 self.new_category_name.push(c);
@@ -1584,7 +1638,6 @@ impl App {
     fn handle_modal_text_delete(&mut self) {
         if self.modal_renaming_category {
             self.modal_category_name_draft.pop();
-            self.modal_category_name_error = None;
         } else if self.is_on_insert_space() {
             self.new_category_name.pop();
         } else if self.selected_index < self.time_tracker.category_count() {
@@ -1867,9 +1920,20 @@ impl App {
                 }
             }
             ReportRangeEditKeyIntent::NextField | ReportRangeEditKeyIntent::PreviousField => {
-                if let Some(edit) = self.report_range_edit.as_mut() {
-                    edit.switch_field();
-                    self.render_needed = true;
+                let current = self.current_civil_date();
+                let normalized = self
+                    .report_range_edit
+                    .as_mut()
+                    .map(|edit| edit.normalize_active(current));
+                match normalized {
+                    Some(Ok(())) => {
+                        if let Some(edit) = self.report_range_edit.as_mut() {
+                            edit.switch_field();
+                        }
+                        self.render_needed = true;
+                    }
+                    Some(Err(error)) => self.present_warning("Invalid date", error),
+                    None => {}
                 }
             }
             ReportRangeEditKeyIntent::Commit => {
@@ -1954,15 +2018,37 @@ impl App {
                 }
             }
             LedgerEntryEditKeyIntent::NextField => {
-                if let Some(edit) = self.ledger_entry_edit.as_mut() {
-                    edit.next_field();
-                    self.render_needed = true;
+                let current = self.current_civil_date();
+                let normalized = self
+                    .ledger_entry_edit
+                    .as_mut()
+                    .map(|edit| edit.normalize_active_input(current));
+                match normalized {
+                    Some(Ok(())) => {
+                        if let Some(edit) = self.ledger_entry_edit.as_mut() {
+                            edit.next_field();
+                        }
+                        self.render_needed = true;
+                    }
+                    Some(Err(error)) => self.present_warning("Invalid date or time", error),
+                    None => {}
                 }
             }
             LedgerEntryEditKeyIntent::PreviousField => {
-                if let Some(edit) = self.ledger_entry_edit.as_mut() {
-                    edit.previous_field();
-                    self.render_needed = true;
+                let current = self.current_civil_date();
+                let normalized = self
+                    .ledger_entry_edit
+                    .as_mut()
+                    .map(|edit| edit.normalize_active_input(current));
+                match normalized {
+                    Some(Ok(())) => {
+                        if let Some(edit) = self.ledger_entry_edit.as_mut() {
+                            edit.previous_field();
+                        }
+                        self.render_needed = true;
+                    }
+                    Some(Err(error)) => self.present_warning("Invalid date or time", error),
+                    None => {}
                 }
             }
             LedgerEntryEditKeyIntent::Left | LedgerEntryEditKeyIntent::Right => {
@@ -1977,10 +2063,23 @@ impl App {
                     .is_some_and(|edit| edit.active_field == super::LedgerEntryField::Description);
                 if description_active {
                     self.cycle_ledger_tag(direction as isize);
-                } else if let Some(edit) = self.ledger_entry_edit.as_mut()
-                    && edit.adjust_active_temporal(direction, false)
-                {
-                    self.render_needed = true;
+                } else {
+                    let current = self.current_civil_date();
+                    let normalized = self
+                        .ledger_entry_edit
+                        .as_mut()
+                        .map(|edit| edit.normalize_active_input(current));
+                    match normalized {
+                        Some(Ok(())) => {
+                            if let Some(edit) = self.ledger_entry_edit.as_mut()
+                                && edit.adjust_active_temporal(direction, false)
+                            {
+                                self.render_needed = true;
+                            }
+                        }
+                        Some(Err(error)) => self.present_warning("Invalid date or time", error),
+                        None => {}
+                    }
                 }
             }
             LedgerEntryEditKeyIntent::Up | LedgerEntryEditKeyIntent::Down => {}
@@ -1994,11 +2093,23 @@ impl App {
                     .ledger_entry_edit
                     .as_ref()
                     .is_some_and(|edit| edit.active_field == super::LedgerEntryField::Description);
-                if !description_active
-                    && let Some(edit) = self.ledger_entry_edit.as_mut()
-                    && edit.adjust_active_temporal(direction, true)
-                {
-                    self.render_needed = true;
+                if !description_active {
+                    let current = self.current_civil_date();
+                    let normalized = self
+                        .ledger_entry_edit
+                        .as_mut()
+                        .map(|edit| edit.normalize_active_input(current));
+                    match normalized {
+                        Some(Ok(())) => {
+                            if let Some(edit) = self.ledger_entry_edit.as_mut()
+                                && edit.adjust_active_temporal(direction, true)
+                            {
+                                self.render_needed = true;
+                            }
+                        }
+                        Some(Err(error)) => self.present_warning("Invalid date or time", error),
+                        None => {}
+                    }
                 }
             }
             LedgerEntryEditKeyIntent::Commit => {

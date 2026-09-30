@@ -46,13 +46,15 @@ fn build_historical_preview(
     })
 }
 
-fn parse_report_range(from: &str, to: &str) -> Result<ReportWindow, String> {
-    let parse = |label: &str, value: &str| {
-        NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d")
-            .map_err(|_| format!("{label} must use YYYY-MM-DD"))
-    };
-    let start = parse("From", from)?;
-    let end_exclusive = parse("To", to)?;
+fn parse_report_range(
+    from: &str,
+    to: &str,
+    current: NaiveDate,
+) -> Result<ReportWindow, String> {
+    let start = super::date_input::normalize_date_input(from, current)
+        .map_err(|error| format!("From: {error}"))?;
+    let end_exclusive = super::date_input::normalize_date_input(to, current)
+        .map_err(|error| format!("To: {error}"))?;
     if start >= end_exclusive {
         return Err("From must be before To".to_string());
     }
@@ -124,19 +126,14 @@ fn shifted_report_boundary(
 }
 
 fn report_range_edit_state(window: &ReportWindow) -> super::ReportRangeEditState {
-    let (to, error) = match ui_helpers::report_window_end_exclusive(window) {
-        Some(end) => (end.format("%Y-%m-%d").to_string(), None),
-        None => (
-            String::new(),
-            Some("To boundary is outside the supported date range".to_string()),
-        ),
-    };
+    let to = ui_helpers::report_window_end_exclusive(window)
+        .map(|end| end.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| window.end.format("%Y-%m-%d").to_string());
     super::ReportRangeEditState {
         from: window.start.format("%Y-%m-%d").to_string(),
         to,
         active_field: super::ReportRangeField::From,
         select_all: true,
-        error,
     }
 }
 
@@ -715,7 +712,18 @@ impl App {
         Ok(())
     }
 
+    pub(super) fn current_civil_date(&self) -> NaiveDate {
+        let now = Utc::now();
+        let policy = OperationalDayPolicy::from_config(day_boundary_config());
+        temporal::civil_from_policy(now, policy)
+            .map(|civil| civil.date_naive())
+            .unwrap_or_else(|_| now.date_naive())
+    }
+
     pub(super) fn set_report_period(&mut self, period: ReportPeriod) {
+        if self.report_range_boundary.is_some() {
+            self.cancel_report_range_boundary();
+        }
         self.report_filter_tag_index = None;
         self.report_period = period;
         self.report_period_offset = 0;
@@ -729,6 +737,9 @@ impl App {
     }
 
     pub(super) fn begin_report_range_edit(&mut self) {
+        if self.report_range_boundary.is_some() {
+            self.cancel_report_range_boundary();
+        }
         self.report_filter_tag_index = None;
         let window = self.current_report_window();
         self.report_range_boundary = None;
@@ -744,16 +755,18 @@ impl App {
     }
 
     pub(super) fn commit_report_range_edit(&mut self) -> bool {
-        let Some(edit) = self.report_range_edit.clone() else {
+        let Some(mut edit) = self.report_range_edit.clone() else {
             return false;
         };
-        let window = match parse_report_range(&edit.from, &edit.to) {
+        let current_date = self.current_civil_date();
+        if let Err(error) = edit.normalize_all(current_date) {
+            self.present_warning("Invalid date", error);
+            return false;
+        }
+        let window = match parse_report_range(&edit.from, &edit.to, current_date) {
             Ok(window) => window,
             Err(error) => {
-                if let Some(current) = self.report_range_edit.as_mut() {
-                    current.error = Some(error);
-                }
-                self.render_needed = true;
+                self.present_warning("Invalid reporting range", error);
                 return false;
             }
         };
@@ -1237,6 +1250,9 @@ impl App {
     }
 
     pub(super) fn begin_selected_layer_ledger_add(&mut self) -> bool {
+        if self.report_range_boundary.is_some() {
+            self.cancel_report_range_boundary();
+        }
         if let Some(category_id) = self.report_logs_category_id {
             return self.begin_ledger_add_edit(category_id);
         }
@@ -1362,7 +1378,6 @@ impl App {
         edit.caret = edit.description.chars().count();
         edit.tag_cycle_prefix = Some(cycle.prefix);
         edit.select_all = false;
-        edit.error = None;
         edit.confirmation = None;
         self.render_needed = true;
         true
@@ -1376,7 +1391,6 @@ impl App {
     pub(super) fn dismiss_ledger_entry_confirmation(&mut self) {
         if let Some(edit) = self.ledger_entry_edit.as_mut() {
             edit.confirmation = None;
-            edit.error = None;
             self.render_needed = true;
         }
     }
@@ -1384,12 +1398,13 @@ impl App {
     fn ledger_edit_bounds(
         edit: &super::LedgerEntryEditState,
         policy: OperationalDayPolicy,
+        active_end_utc: DateTime<Utc>,
     ) -> Result<(DateTime<Utc>, DateTime<Utc>), String> {
         let (start, mut end) = edit
             .preview_naive_bounds()
             .ok_or_else(|| "date/time could not be normalized".to_string())?;
         if edit.is_active() {
-            end = temporal::civil_from_policy(Utc::now(), policy)
+            end = temporal::civil_from_policy(active_end_utc, policy)
                 .map_err(|error| format!("active end cannot be represented: {error}"))?
                 .naive_local();
         }
@@ -1433,7 +1448,7 @@ impl App {
         edit: &super::LedgerEntryEditState,
     ) -> Option<(usize, isize)> {
         let policy = self.ledger_edit_policy(edit);
-        let (from, to) = Self::ledger_edit_bounds(edit, policy).ok()?;
+        let (from, to) = Self::ledger_edit_bounds(edit, policy, Utc::now()).ok()?;
         let elapsed = usize::try_from((to - from).num_seconds()).ok()?;
         if elapsed == 0 {
             return Some((0, 0));
@@ -1481,13 +1496,10 @@ impl App {
         edit: &super::LedgerEntryEditState,
         from: DateTime<Utc>,
         policy: OperationalDayPolicy,
+        now: DateTime<Utc>,
     ) -> bool {
-        let now = Utc::now();
         if from >= now {
-            if let Some(current) = self.ledger_entry_edit.as_mut() {
-                current.error = Some("active start must be before now".to_string());
-            }
-            self.render_needed = true;
+            self.present_warning("Invalid active entry", "Active start must be before now.");
             return false;
         }
         // Re-basing a live generation across completed history would require the
@@ -1496,16 +1508,21 @@ impl App {
             session.ended_at_utc.is_some_and(|ended| ended > from)
                 && session.started_at_utc.is_some_and(|started| started < now)
         }) {
-            if let Some(current) = self.ledger_entry_edit.as_mut() {
-                current.error = Some("active start overlaps completed history".to_string());
-            }
-            self.render_needed = true;
+            self.present_warning(
+                "History overlap",
+                "Active start overlaps completed history.",
+            );
             return false;
         }
         let Some(database_path) = self.sqlite_database_path.clone() else {
+            self.present_error("Storage unavailable", "SQLite authority is unavailable.");
             return false;
         };
         let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
+            self.present_error(
+                "Active session unavailable",
+                "The active session has no stable identity.",
+            );
             return false;
         };
         let old_start = self.session.active_session_started_at_utc.unwrap_or(from);
@@ -1592,25 +1609,29 @@ impl App {
         let Some(mut edit) = self.ledger_entry_edit.clone() else {
             return false;
         };
+        let current_date = self.current_civil_date();
+        if let Err(error) = edit.normalize_all_temporal(current_date) {
+            self.present_warning("Invalid date or time", error);
+            return false;
+        }
         edit.description =
             self.canonicalize_description_for_category(edit.category_id, &edit.description);
-        if let Err(error) = self.settle_transition_boundary(Utc::now()) {
-            if let Some(current) = self.ledger_entry_edit.as_mut() {
-                current.error = Some(error);
-            }
-            self.render_needed = true;
+        let settle_at = Utc::now();
+        if let Err(error) = self.settle_transition_boundary(settle_at) {
+            self.present_error("Runtime update failed", error);
             return false;
         }
         let active_preview = match self.historical_correction_active_preview() {
             Ok(preview) => preview,
             Err(error) => {
-                if let Some(current) = self.ledger_entry_edit.as_mut() {
-                    current.error = Some(error);
-                }
-                self.render_needed = true;
+                self.present_error("Runtime authority unavailable", error);
                 return false;
             }
         };
+        // The preview endpoint is the single authoritative `now` for this edit
+        // transaction. Active End, future-bound validation, persistence, and
+        // elapsed rebasing all consume exactly this same instant.
+        let commit_now = active_preview.ended_at_utc;
         let policy = match edit.kind {
             super::LedgerEntryEditKind::Existing { session_id } => self
                 .time_tracker
@@ -1623,14 +1644,10 @@ impl App {
                 active_preview.operational_day_policy
             }
         };
-        let (mut from, mut to) = match Self::ledger_edit_bounds(&edit, policy) {
+        let (mut from, mut to) = match Self::ledger_edit_bounds(&edit, policy, commit_now) {
             Ok(bounds) => bounds,
             Err(error) => {
-                if let Some(current) = self.ledger_entry_edit.as_mut() {
-                    current.error = Some(error);
-                    current.confirmation = None;
-                }
-                self.render_needed = true;
+                self.present_warning("Invalid ledger entry", error);
                 return false;
             }
         };
@@ -1648,45 +1665,35 @@ impl App {
                 to = Self::preserve_hidden_subseconds(to, original, policy);
             }
         }
-        if to > active_preview.ended_at_utc {
-            if let Some(current) = self.ledger_entry_edit.as_mut() {
-                current.error = Some("end cannot be later than now".to_string());
-                current.confirmation = None;
-            }
-            self.render_needed = true;
+        if to > commit_now {
+            self.present_warning("Invalid ledger entry", "End cannot be later than now.");
             return false;
         }
         if edit.is_active() {
-            return self.commit_active_ledger_entry_edit(&edit, from, policy);
+            return self.commit_active_ledger_entry_edit(&edit, from, policy, commit_now);
         }
         if edit.is_add() && self.time_tracker.category_by_id(edit.category_id).is_none() {
-            if let Some(current) = self.ledger_entry_edit.as_mut() {
-                current.error = Some("archived layer cannot receive new entries".to_string());
-                current.confirmation = None;
-            }
-            self.render_needed = true;
+            self.present_warning(
+                "Archived layer",
+                "Archived layers cannot receive new entries.",
+            );
             return false;
         }
         let Some(database_path) = self.sqlite_database_path.clone() else {
+            self.present_error("Storage unavailable", "SQLite authority is unavailable.");
             return false;
         };
         let checkpoint = match self.build_runtime_checkpoint() {
             Ok(checkpoint) => checkpoint,
             Err(error) => {
-                if let Some(current) = self.ledger_entry_edit.as_mut() {
-                    current.error = Some(error);
-                }
-                self.render_needed = true;
+                self.present_error("Checkpoint failed", error);
                 return false;
             }
         };
         let checkpoint_json = match serde_json::to_string(&checkpoint) {
             Ok(value) => value,
             Err(error) => {
-                if let Some(current) = self.ledger_entry_edit.as_mut() {
-                    current.error = Some(error.to_string());
-                }
-                self.render_needed = true;
+                self.present_error("Checkpoint failed", error.to_string());
                 return false;
             }
         };
@@ -1727,7 +1734,6 @@ impl App {
                         plan_token,
                         changes,
                     });
-                    current.error = None;
                 }
                 self.system_dialog_selected_index = 1;
                 self.render_needed = true;
@@ -1735,10 +1741,7 @@ impl App {
             }
             crate::sqlite::TuiHistoricalCorrectionOutcome::Applied(receipt) => {
                 if let Err(error) = self.install_historical_correction_receipt(receipt) {
-                    if let Some(current) = self.ledger_entry_edit.as_mut() {
-                        current.error = Some(error);
-                    }
-                    self.render_needed = true;
+                    self.present_error("History reload failed", error);
                     return false;
                 }
                 self.remember_description_tags_for_category(
@@ -2008,15 +2011,20 @@ mod report_edit_state_tests {
 
     #[test]
     fn custom_range_editor_uses_exclusive_to_boundary() {
-        let window = parse_report_range("2026-08-01", "2026-08-28").unwrap();
+        let current = NaiveDate::from_ymd_opt(2026, 9, 30).unwrap();
+        let window = parse_report_range("2026-08-01", "2026-08-28", current).unwrap();
         assert_eq!(window.label, "2026-08-01..2026-08-27");
         assert_eq!(
             ui_helpers::report_window_end_exclusive(&window),
             NaiveDate::from_ymd_opt(2026, 8, 28)
         );
-        assert!(parse_report_range("08/01/2026", "2026-08-28").is_err());
-        assert!(parse_report_range("2026-08-27", "2026-08-27").is_err());
-        assert!(parse_report_range("2026-08-28", "2026-08-27").is_err());
+        assert!(parse_report_range("08/01/2026", "2026-08-28", current).is_err());
+        assert!(parse_report_range("2026-08-27", "2026-08-27", current).is_err());
+        assert!(parse_report_range("2026-08-28", "2026-08-27", current).is_err());
+        assert_eq!(
+            parse_report_range("Sep", "Oct", current).unwrap().label,
+            "2026-09-01..2026-09-30"
+        );
     }
 
     #[test]
@@ -2031,7 +2039,6 @@ mod report_edit_state_tests {
         assert_eq!(edit.to, "2026-09-22");
         assert_eq!(edit.active_field, crate::app::ReportRangeField::From);
         assert!(edit.select_all);
-        assert_eq!(edit.error, None);
     }
 
     #[test]

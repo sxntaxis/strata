@@ -25,7 +25,7 @@ impl App {
         let footer = if let Some(feedback) = self.command_palette_feedback.as_ref() {
             Line::from(Span::styled(
                 feedback.clone(),
-                Style::default().fg(self.theme_error()),
+                Style::default().fg(self.theme_status()),
             ))
             .alignment(Alignment::Right)
         } else {

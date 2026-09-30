@@ -289,7 +289,6 @@ impl App {
     pub(super) fn sync_modal_description_from_selection(&mut self) {
         self.modal_renaming_category = false;
         self.modal_category_name_draft.clear();
-        self.modal_category_name_error = None;
         if self.is_on_insert_space() {
             self.modal_description.clear();
         } else if self.time_tracker.active_category_index() == Some(self.selected_index) {
@@ -324,7 +323,6 @@ impl App {
             return;
         };
         self.modal_category_name_draft = category.name.clone();
-        self.modal_category_name_error = None;
         self.modal_renaming_category = true;
     }
 
@@ -334,7 +332,6 @@ impl App {
         }
         self.modal_renaming_category = false;
         self.modal_category_name_draft.clear();
-        self.modal_category_name_error = None;
     }
 
     pub(super) fn commit_category_rename(&mut self) {
@@ -348,7 +345,7 @@ impl App {
                     self.leave_category_rename();
                 }
             }
-            Err(error) => self.modal_category_name_error = Some(error.to_string()),
+            Err(error) => self.present_warning("Cannot rename Layer", error),
         }
     }
 
@@ -500,16 +497,24 @@ impl App {
         self.selected_index == self.time_tracker.category_count()
     }
 
-    pub(super) fn add_category(&mut self) {
+    pub(super) fn add_category(&mut self) -> bool {
         let requested_name = self.new_category_name.trim();
         if requested_name.is_empty() {
-            return;
+            self.present_warning("Cannot create Layer", "Layer name cannot be empty.");
+            return false;
+        }
+        if crate::domain::is_drift_name(requested_name) {
+            self.present_warning("Cannot create Layer", "That name is reserved for Idle.");
+            return false;
         }
 
         let restored = self
             .archived_categories
             .iter()
-            .position(|category| category.name.eq_ignore_ascii_case(requested_name))
+            .position(|category| {
+                !crate::domain::is_deleted_layer_tombstone(category)
+                    && category.name.eq_ignore_ascii_case(requested_name)
+            })
             .and_then(|index| {
                 let category = self.archived_categories[index].clone();
                 self.time_tracker
@@ -531,7 +536,7 @@ impl App {
 
         if let Some(added_id) = added_id {
             if !self.persist_modal_active_description() {
-                return;
+                return false;
             }
             self.persist_categories();
             self.switch_active_category_at(
@@ -541,7 +546,14 @@ impl App {
                 super::SessionClockMode::LiveMonotonic,
             );
             self.sync_modal_description_from_selection();
+            return true;
         }
+
+        self.present_warning(
+            "Cannot create Layer",
+            "A Layer with that name already exists.",
+        );
+        false
     }
 
     pub(super) fn delete_category(&mut self) {

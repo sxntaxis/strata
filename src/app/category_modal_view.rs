@@ -25,7 +25,7 @@ impl App {
         let insert_label_width = if self.new_category_name.is_empty() {
             "+ Forge new layer...".chars().count()
         } else {
-            self.new_category_name.chars().count()
+            self.new_category_name.chars().count().saturating_add(1)
         };
         let insert_width = 2usize.saturating_add(insert_label_width);
         let selected_width = categories
@@ -38,26 +38,25 @@ impl App {
                 };
                 let layer_width = 2usize.saturating_add(layer_name.chars().count());
                 if self.modal_renaming_category {
-                    self.modal_category_name_error
-                        .as_deref()
-                        .map(|error| layer_width.saturating_add(3 + error.chars().count()))
-                        .unwrap_or(layer_width)
+                    layer_width.saturating_add(1)
                 } else if let Some(completion) =
                     self.tag_completion_for_category(category.id, &self.modal_description)
                 {
                     let suffix_width = completion.tag.chars().skip(completion.typed_chars).count();
-                    self.modal_description
-                        .chars()
-                        .count()
-                        .saturating_add(suffix_width)
-                } else if self.modal_description.is_empty() {
                     layer_width
+                        .saturating_add(1)
+                        .saturating_add(self.modal_description.chars().count())
+                        .saturating_add(suffix_width)
+                        .saturating_add(if self.modal_tag_text_editing { 1 } else { 0 })
+                } else if self.modal_description.is_empty() {
+                    layer_width.saturating_add(if self.modal_tag_text_editing { 2 } else { 0 })
                 } else {
                     self.modal_description
                         .chars()
                         .count()
                         .saturating_add(layer_width)
                         .saturating_add(1)
+                        .saturating_add(if self.modal_tag_text_editing { 1 } else { 0 })
                 }
             })
             .unwrap_or(0);
@@ -90,7 +89,14 @@ impl App {
                 };
 
                 if is_selected {
-                    let text_color = self.theme_selection_text();
+                    let selection_background = cat.color;
+                    let text_color = crate::appearance::contrasting_text_color(
+                        selection_background,
+                        self.theme_foreground(),
+                    );
+                    let input_style = Style::default()
+                        .fg(self.theme_selection_text())
+                        .bg(self.theme_selection());
                     let layer_name = if self.modal_renaming_category {
                         self.modal_category_name_draft.clone()
                     } else {
@@ -99,43 +105,60 @@ impl App {
                     let description_style = Style::default()
                         .fg(text_color)
                         .add_modifier(ratatui::style::Modifier::ITALIC);
-                    let mut line_spans = vec![
-                        Span::raw(dot).fg(text_color),
-                        Span::raw(layer_name).fg(text_color),
-                    ];
-                    if self.modal_renaming_category
-                        && let Some(error) = self.modal_category_name_error.as_deref()
-                    {
-                        line_spans.push(Span::styled(
-                            format!(" · {error}"),
-                            Style::default().fg(self.theme_error()),
-                        ));
-                    }
-                    if !self.modal_renaming_category
-                        && let Some(completion) =
+                    let mut line_spans = vec![Span::raw(dot).fg(text_color)];
+                    if self.modal_renaming_category {
+                        line_spans.push(Span::styled(format!("{layer_name} "), input_style));
+                    } else {
+                        line_spans.push(Span::raw(layer_name).fg(text_color));
+                        if let Some(completion) =
                             self.tag_completion_for_category(cat.id, &self.modal_description)
-                    {
-                        let suffix = completion
-                            .tag
-                            .chars()
-                            .skip(completion.typed_chars)
-                            .collect::<String>();
-                        line_spans.push(Span::styled(
-                            format!(" {}", self.modal_description),
-                            description_style,
-                        ));
-                        line_spans.push(Span::styled(
-                            suffix,
-                            description_style.add_modifier(ratatui::style::Modifier::DIM),
-                        ));
-                    } else if !self.modal_renaming_category && !self.modal_description.is_empty() {
-                        line_spans.push(Span::styled(
-                            format!(" {}", self.modal_description),
-                            description_style,
-                        ));
+                        {
+                            let suffix = completion
+                                .tag
+                                .chars()
+                                .skip(completion.typed_chars)
+                                .collect::<String>();
+                            if self.modal_tag_text_editing {
+                                line_spans.push(Span::raw(" ").fg(text_color));
+                                line_spans.push(Span::styled(
+                                    self.modal_description.clone(),
+                                    input_style,
+                                ));
+                                line_spans.push(Span::styled(
+                                    suffix,
+                                    input_style.add_modifier(ratatui::style::Modifier::DIM),
+                                ));
+                                line_spans.push(Span::styled(" ", input_style));
+                            } else {
+                                line_spans.push(Span::styled(
+                                    format!(" {}", self.modal_description),
+                                    description_style,
+                                ));
+                                line_spans.push(Span::styled(
+                                    suffix,
+                                    description_style.add_modifier(ratatui::style::Modifier::DIM),
+                                ));
+                            }
+                        } else if !self.modal_description.is_empty() {
+                            if self.modal_tag_text_editing {
+                                line_spans.push(Span::raw(" ").fg(text_color));
+                                line_spans.push(Span::styled(
+                                    format!("{} ", self.modal_description),
+                                    input_style,
+                                ));
+                            } else {
+                                line_spans.push(Span::styled(
+                                    format!(" {}", self.modal_description),
+                                    description_style,
+                                ));
+                            }
+                        } else if self.modal_tag_text_editing {
+                            line_spans.push(Span::raw(" ").fg(text_color));
+                            line_spans.push(Span::styled(" ", input_style));
+                        }
                     }
                     ListItem::new(Line::from(line_spans))
-                        .style(Style::default().fg(text_color).bg(self.theme_selection()))
+                        .style(Style::default().fg(text_color).bg(selection_background))
                 } else {
                     let layer_name = self.display_layer_name(&cat.name);
                     ListItem::new(Line::from(vec![
@@ -151,19 +174,23 @@ impl App {
                     .sand_color_at(self.new_category_color_cursor);
 
                 if is_selected {
+                    let text_color = crate::appearance::contrasting_text_color(
+                        cycling_color,
+                        self.theme_foreground(),
+                    );
+                    let input_style = Style::default()
+                        .fg(self.theme_selection_text())
+                        .bg(self.theme_selection());
+                    let input = if self.new_category_name.is_empty() {
+                        "+ Forge new layer...".to_string()
+                    } else {
+                        format!("{} ", self.new_category_name)
+                    };
                     ListItem::new(Line::from(vec![
-                        Span::raw("● ").fg(cycling_color),
-                        Span::raw(if self.new_category_name.is_empty() {
-                            "+ Forge new layer..."
-                        } else {
-                            &self.new_category_name
-                        }),
+                        Span::raw("● ").fg(text_color),
+                        Span::styled(input, input_style),
                     ]))
-                    .style(
-                        Style::default()
-                            .fg(self.theme_selection_text())
-                            .bg(self.theme_selection()),
-                    )
+                    .style(Style::default().fg(text_color).bg(cycling_color))
                 } else {
                     ListItem::new(Line::from(vec![
                         Span::raw("● ").fg(cycling_color),

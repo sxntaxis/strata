@@ -281,6 +281,75 @@ fn tag_completion_suffix(completion: &super::tagging::TagCompletion) -> String {
 }
 
 impl App {
+    fn layer_detail_list_capacity(area_height: u16) -> usize {
+        usize::from(if area_height >= 6 {
+            area_height.saturating_sub(5)
+        } else if area_height >= 5 {
+            area_height.saturating_sub(4)
+        } else if area_height >= 3 {
+            area_height.saturating_sub(2)
+        } else {
+            area_height
+        })
+    }
+
+    fn visible_ledger_logs_for_geometry<'a>(
+        &self,
+        logs: &'a [CategoryLogEntry],
+        list_capacity: usize,
+    ) -> &'a [CategoryLogEntry] {
+        if logs.is_empty() {
+            return logs;
+        }
+        let capacity = list_capacity.max(1);
+        if logs.len() <= capacity {
+            return logs;
+        }
+        let can_add = self
+            .report_logs_category_id
+            .is_some_and(|category_id| self.report_layer_can_add(category_id));
+        let row_count = logs.len().saturating_add(usize::from(can_add));
+        let selected = self
+            .report_log_selected_index
+            .min(row_count.saturating_sub(1));
+        let offset = selected.saturating_add(1).saturating_sub(capacity);
+        let start = offset.min(logs.len().saturating_sub(1));
+        let end = start.saturating_add(capacity).min(logs.len());
+        &logs[start..end]
+    }
+
+    fn render_report_range_editor(&self, f: &mut Frame, area: Rect) {
+        let Some(edit) = self.report_range_edit.as_ref() else {
+            return;
+        };
+        let active_style = Style::default()
+            .fg(self.theme_selection_text())
+            .bg(self.theme_selection())
+            .add_modifier(Modifier::BOLD);
+        let inactive_style = Style::default().fg(self.theme_foreground());
+        let line = Line::from(vec![
+            Span::styled("From ", Style::default().fg(self.theme_status())),
+            Span::styled(
+                edit.from.clone(),
+                if edit.active_field == super::ReportRangeField::From {
+                    active_style
+                } else {
+                    inactive_style
+                },
+            ),
+            Span::styled(" · To ", Style::default().fg(self.theme_status())),
+            Span::styled(
+                edit.to.clone(),
+                if edit.active_field == super::ReportRangeField::To {
+                    active_style
+                } else {
+                    inactive_style
+                },
+            ),
+        ]);
+        f.render_widget(Paragraph::new(line), area);
+    }
+
     pub(super) fn render_report_modal(&self, f: &mut Frame, terminal_size: Rect) {
         let layer_detail = self.report_logs_category_id.is_some();
         let summary = if layer_detail {
@@ -311,27 +380,59 @@ impl App {
             }
         }
 
+        let mut summary_content_height =
+            balance_instrument::preferred_summary_inner_height(body_row_count);
+        if self.report_range_edit.is_some() {
+            summary_content_height = summary_content_height.saturating_add(1);
+        }
+
+        // Width follows the rows the terminal can actually show. Hidden ledger
+        // entries do not make the whole overlay wide merely because they exist.
+        let logs_for_geometry = if layer_detail {
+            logs_for_view.as_deref().map(|logs| {
+                let provisional = overlay_layout::centered_overlay_rect(
+                    terminal_size,
+                    balance_instrument::preferred_summary_inner_width().saturating_add(2),
+                    summary_content_height,
+                    1,
+                    3,
+                    crate::constants::APP_LAYOUT_SETTINGS.frame_margin,
+                );
+                let provisional_inner = Rect::new(
+                    provisional.x.saturating_add(1),
+                    provisional.y.saturating_add(1),
+                    provisional.width.saturating_sub(2),
+                    provisional.height.saturating_sub(2),
+                );
+                let content = overlay_layout::modal_content_rect(
+                    provisional_inner,
+                    summary_content_height,
+                    false,
+                );
+                let range_rows = if self.report_range_edit.is_some() { 1 } else { 0 };
+                let capacity = Self::layer_detail_list_capacity(
+                    content.height.saturating_sub(range_rows),
+                );
+                self.visible_ledger_logs_for_geometry(logs, capacity)
+            })
+        } else {
+            logs_for_view.as_deref()
+        };
+        let range_editor_width = self.report_range_edit.as_ref().map_or(0, |edit| {
+            "From ".chars().count()
+                .saturating_add(edit.from.chars().count())
+                .saturating_add(" · To ".chars().count())
+                .saturating_add(edit.to.chars().count())
+        });
         let preferred_inner_width = self
-            .preferred_report_inner_width(&summary, logs_for_view.as_deref())
-            .max(if self.report_range_edit.is_some() {
-                if self.report_logs_category_id.is_some() {
-                    REPORT_MODAL_SETTINGS
-                        .range_editor_min_width
-                        .saturating_add(12)
-                } else {
-                    REPORT_MODAL_SETTINGS.range_editor_min_width
-                }
-            } else {
-                0
-            });
+            .preferred_report_inner_width(&summary, logs_for_geometry)
+            .max(range_editor_width);
 
         let summary_content_width = preferred_inner_width
             .max(usize::from(
                 balance_instrument::preferred_summary_inner_width(),
             ))
             .min(u16::MAX as usize) as u16;
-        let summary_content_height =
-            balance_instrument::preferred_summary_inner_height(body_row_count);
 
         let modal_rect = if default_summary || layer_detail {
             overlay_layout::centered_overlay_rect(
@@ -425,62 +526,6 @@ impl App {
             Span::styled(" →", newer_chevron_style),
         ])
         .alignment(Alignment::Center);
-        let interaction_bottom_title = if let Some(edit) = self.report_range_edit.as_ref() {
-            let active_style = Style::default()
-                .fg(self.theme_accent())
-                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
-            let inactive_style = Style::default().fg(self.theme_foreground());
-            let mut spans = vec![
-                Span::styled("from ", Style::default().fg(self.theme_status())),
-                Span::styled(
-                    edit.from.clone(),
-                    if edit.active_field == super::ReportRangeField::From {
-                        active_style
-                    } else {
-                        inactive_style
-                    },
-                ),
-                Span::styled(" · to ", Style::default().fg(self.theme_status())),
-                Span::styled(
-                    edit.to.clone(),
-                    if edit.active_field == super::ReportRangeField::To {
-                        active_style
-                    } else {
-                        inactive_style
-                    },
-                ),
-            ];
-            if let Some(error) = edit.error.as_ref() {
-                spans.push(Span::styled(
-                    format!(" · {error}"),
-                    Style::default().fg(self.theme_error()),
-                ));
-                spans.push(Span::styled(
-                    " · Enter retry · Esc cancel",
-                    Style::default().fg(self.theme_status()),
-                ));
-            } else {
-                spans.push(Span::styled(
-                    " · Tab next · Enter apply · Esc cancel",
-                    Style::default().fg(self.theme_status()),
-                ));
-            }
-            Some(Line::from(spans).alignment(Alignment::Right))
-        } else if let Some(edit) = self.ledger_entry_edit.as_ref() {
-            edit.error.as_ref().map(|error| {
-                Line::from(vec![
-                    Span::styled(error.clone(), Style::default().fg(self.theme_error())),
-                    Span::styled(
-                        " · Enter retry · Esc cancel",
-                        Style::default().fg(self.theme_status()),
-                    ),
-                ])
-                .alignment(Alignment::Right)
-            })
-        } else {
-            None
-        };
-
         let mut frame_block = if default_summary || layer_detail {
             Block::default()
                 .style(Style::default().bg(self.theme_background()))
@@ -499,11 +544,8 @@ impl App {
                 .border_style(Style::default().fg(border_color))
         };
 
-        if default_summary || (layer_detail && self.report_range_edit.is_none()) {
+        if default_summary || layer_detail || self.report_range_edit.is_some() {
             frame_block = frame_block.title_bottom(period_bottom_title);
-        }
-        if let Some(interaction_bottom_title) = interaction_bottom_title {
-            frame_block = frame_block.title_bottom(interaction_bottom_title);
         }
 
         f.render_widget(ratatui::widgets::Clear, modal_rect);
@@ -513,11 +555,25 @@ impl App {
         }
 
         let frame_inner = frame_block.inner(modal_rect);
-        let list_area = if default_summary || layer_detail {
+        let content_area = if default_summary || layer_detail {
             overlay_layout::modal_content_rect(frame_inner, summary_content_height, false)
         } else {
             frame_inner
         };
+        let (range_editor_area, list_area) = if self.report_range_edit.is_some()
+            && content_area.height > 0
+        {
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(1), Constraint::Min(0)])
+                .split(content_area);
+            (Some(rows[0]), rows[1])
+        } else {
+            (None, content_area)
+        };
+        if let Some(area) = range_editor_area {
+            self.render_report_range_editor(f, area);
+        }
 
         if layer_detail {
             if let Some(category_id) = self.report_logs_category_id {
@@ -670,15 +726,17 @@ impl App {
         } else {
             super::ledger_state::format_ledger_time_input(&edit.start_time)
         };
-        let time = if edit.is_active() {
-            format!("{start_time}–now")
+        let end_time = if edit.is_active() {
+            "now".to_string()
+        } else if edit.active_field == LedgerEntryField::EndTime {
+            edit.end_time.clone()
         } else {
-            let end_time = if edit.active_field == LedgerEntryField::EndTime {
-                edit.end_time.clone()
-            } else {
-                super::ledger_state::format_ledger_time_input(&edit.end_time)
-            };
-            format!("{start_time}–{end_time}")
+            super::ledger_state::format_ledger_time_input(&edit.end_time)
+        };
+        let time = match edit.active_field {
+            LedgerEntryField::StartTime => format!("{start_time} –{end_time}"),
+            LedgerEntryField::EndTime => format!("{start_time}–{end_time} "),
+            _ => format!("{start_time}–{end_time}"),
         };
         let is_none = edit.category_id == DRIFT_CATEGORY_ID;
         let metric = self.ledger_edit_metric(edit, is_none).0;
@@ -1215,15 +1273,17 @@ impl App {
         } else {
             super::ledger_state::format_ledger_time_input(&edit.start_time)
         };
-        let time_value = if edit.is_active() {
-            format!("{start_time}–now")
+        let end_time = if edit.is_active() {
+            "now".to_string()
+        } else if edit.active_field == LedgerEntryField::EndTime {
+            edit.end_time.clone()
         } else {
-            let end_time = if edit.active_field == LedgerEntryField::EndTime {
-                edit.end_time.clone()
-            } else {
-                super::ledger_state::format_ledger_time_input(&edit.end_time)
-            };
-            format!("{start_time}–{end_time}")
+            super::ledger_state::format_ledger_time_input(&edit.end_time)
+        };
+        let time_value = match edit.active_field {
+            LedgerEntryField::StartTime => format!("{start_time} –{end_time}"),
+            LedgerEntryField::EndTime => format!("{start_time}–{end_time} "),
+            _ => format!("{start_time}–{end_time}"),
         };
         let is_none = edit.category_id == DRIFT_CATEGORY_ID;
         let (metric, default_metric_color) = self.ledger_edit_metric(edit, is_none);
@@ -1232,6 +1292,9 @@ impl App {
             .unwrap_or_else(|| self.category_color_for_id(edit.category_id));
         let temporal_color = selected_text.unwrap_or_else(|| self.theme_status());
         let metric_color = selected_text.unwrap_or(default_metric_color);
+        let input_style = Style::default()
+            .fg(self.theme_selection_text())
+            .bg(self.theme_selection());
 
         let marker_text = format!("{marker} ");
         let marker_width = marker_text.chars().count().min(widths.tag);
@@ -1243,9 +1306,9 @@ impl App {
         if edit.active_field == LedgerEntryField::Description {
             let view = ledger_edit_cell_view(&tag, edit.caret, value_width, false);
             if view.viewported {
-                spans.push(Span::styled(view.rendered, Style::default().fg(text_color)));
+                spans.push(Span::styled(view.rendered, input_style));
             } else {
-                spans.push(Span::styled(tag.clone(), Style::default().fg(text_color)));
+                spans.push(Span::styled(tag.clone(), input_style));
                 let mut remaining = value_width.saturating_sub(tag.chars().count());
                 if remaining > 0
                     && let Some(completion) =
@@ -1258,15 +1321,11 @@ impl App {
                     remaining = remaining.saturating_sub(suffix.chars().count());
                     spans.push(Span::styled(
                         suffix,
-                        Style::default().fg(if selected_text.is_some() {
-                            text_color
-                        } else {
-                            self.theme_status()
-                        }).add_modifier(Modifier::DIM),
+                        input_style.add_modifier(Modifier::DIM),
                     ));
                 }
                 if remaining > 0 {
-                    spans.push(Span::styled(" ".repeat(remaining), Style::default().fg(text_color)));
+                    spans.push(Span::styled(" ".repeat(remaining), input_style));
                 }
             }
         } else {
@@ -1286,20 +1345,23 @@ impl App {
             } else {
                 self.ledger_center_cell(&date_value, widths.date)
             };
-            spans.push(Span::styled(date_cell, Style::default().fg(temporal_color)));
+            spans.push(Span::styled(
+                date_cell,
+                if matches!(
+                    edit.active_field,
+                    LedgerEntryField::StartDate | LedgerEntryField::EndDate
+                ) {
+                    input_style
+                } else {
+                    Style::default().fg(temporal_color)
+                },
+            ));
         }
         spans.push(Span::raw(" ".repeat(widths.gap)));
         let time_cell = if matches!(
             edit.active_field,
             LedgerEntryField::StartTime | LedgerEntryField::EndTime
         ) {
-            let end_display = if edit.is_active() {
-                "now".to_string()
-            } else if edit.active_field == LedgerEntryField::EndTime {
-                edit.end_time.clone()
-            } else {
-                super::ledger_state::format_ledger_time_input(&edit.end_time)
-            };
             let absolute_caret = if edit.active_field == LedgerEntryField::StartTime {
                 edit.caret.min(start_time.chars().count())
             } else {
@@ -1307,13 +1369,23 @@ impl App {
                     .chars()
                     .count()
                     .saturating_add(1)
-                    .saturating_add(edit.caret.min(end_display.chars().count()))
+                    .saturating_add(edit.caret.min(end_time.chars().count()))
             };
             ledger_edit_cell_view(&time_value, absolute_caret, widths.time, true).rendered
         } else {
             self.ledger_center_cell(&time_value, widths.time)
         };
-        spans.push(Span::styled(time_cell, Style::default().fg(temporal_color)));
+        spans.push(Span::styled(
+            time_cell,
+            if matches!(
+                edit.active_field,
+                LedgerEntryField::StartTime | LedgerEntryField::EndTime
+            ) {
+                input_style
+            } else {
+                Style::default().fg(temporal_color)
+            },
+        ));
         spans.push(Span::raw(" ".repeat(widths.gap)));
         spans.push(Span::styled(
             self.ledger_right_cell(&metric, widths.metric),
@@ -1369,15 +1441,17 @@ impl App {
             } else {
                 super::ledger_state::format_ledger_time_input(&edit.start_time)
             };
-            let time_value = if edit.is_active() {
-                format!("{start_display}–now")
+            let end_display = if edit.is_active() {
+                "now".to_string()
+            } else if edit.active_field == LedgerEntryField::EndTime {
+                edit.end_time.clone()
             } else {
-                let end_display = if edit.active_field == LedgerEntryField::EndTime {
-                    edit.end_time.clone()
-                } else {
-                    super::ledger_state::format_ledger_time_input(&edit.end_time)
-                };
-                format!("{start_display}–{end_display}")
+                super::ledger_state::format_ledger_time_input(&edit.end_time)
+            };
+            let time_value = if edit.active_field == LedgerEntryField::StartTime {
+                format!("{start_display} –{end_display}")
+            } else {
+                format!("{start_display}–{end_display} ")
             };
             let absolute_caret = if edit.active_field == LedgerEntryField::StartTime {
                 edit.caret.min(start_display.chars().count())
@@ -1386,7 +1460,7 @@ impl App {
                     .chars()
                     .count()
                     .saturating_add(1)
-                    .saturating_add(edit.caret.min(edit.end_time.chars().count()))
+                    .saturating_add(edit.caret.min(end_display.chars().count()))
             };
             let view = ledger_edit_cell_view(&time_value, absolute_caret, widths.time, true);
             return cell_start.saturating_add(view.cursor);
@@ -1418,9 +1492,14 @@ impl App {
             .map(|entry| entry.balance_effect)
             .unwrap_or(0);
         let row_width = list_area.width as usize;
-        let columns = self.preferred_ledger_columns(logs).fit(row_width);
-        let selection_background = self.theme_selection();
-        let text_color = self.theme_selection_text();
+        let geometry_logs =
+            self.visible_ledger_logs_for_geometry(logs, usize::from(list_area.height));
+        let columns = self.preferred_ledger_columns(geometry_logs).fit(row_width);
+        let selection_background = border_color;
+        let text_color = crate::appearance::contrasting_text_color(
+            selection_background,
+            self.theme_foreground(),
+        );
 
         let mut items = logs
             .iter()
@@ -1637,14 +1716,34 @@ impl App {
         if !logs.is_empty() && self.report_layer_can_add(category_id) {
             body_row_count = body_row_count.saturating_add(1);
         }
-        let preferred_inner_width = self.preferred_report_inner_width(&summary, Some(&logs));
+        let summary_content_height =
+            balance_instrument::preferred_summary_inner_height(body_row_count);
+        let provisional = overlay_layout::centered_overlay_rect(
+            terminal,
+            balance_instrument::preferred_summary_inner_width().saturating_add(2),
+            summary_content_height,
+            1,
+            3,
+            crate::constants::APP_LAYOUT_SETTINGS.frame_margin,
+        );
+        let provisional_inner = Rect::new(
+            provisional.x.saturating_add(1),
+            provisional.y.saturating_add(1),
+            provisional.width.saturating_sub(2),
+            provisional.height.saturating_sub(2),
+        );
+        let provisional_content =
+            overlay_layout::modal_content_rect(provisional_inner, summary_content_height, false);
+        let visible_logs = self.visible_ledger_logs_for_geometry(
+            &logs,
+            Self::layer_detail_list_capacity(provisional_content.height),
+        );
+        let preferred_inner_width = self.preferred_report_inner_width(&summary, Some(visible_logs));
         let summary_content_width = preferred_inner_width
             .max(usize::from(
                 balance_instrument::preferred_summary_inner_width(),
             ))
             .min(u16::MAX as usize) as u16;
-        let summary_content_height =
-            balance_instrument::preferred_summary_inner_height(body_row_count);
         let underlying_modal = overlay_layout::centered_overlay_rect(
             terminal,
             summary_content_width.saturating_add(2),
@@ -1662,18 +1761,22 @@ impl App {
         let underlying_list =
             overlay_layout::modal_content_rect(frame_inner, summary_content_height, false);
         let row_width = usize::from(underlying_list.width);
-        let widths = self.preferred_ledger_columns(&logs).fit(row_width);
+        let widths = self.preferred_ledger_columns(visible_logs).fit(row_width);
         let balance_effect = summary
             .entries
             .iter()
             .find(|entry| entry.category_id == category_id)
             .map(|entry| entry.balance_effect)
             .unwrap_or(0);
-        let selected_text = self.theme_selection_text();
+        let selection_background = self.category_color_for_id(category_id);
+        let selected_text = crate::appearance::contrasting_text_color(
+            selection_background,
+            self.theme_foreground(),
+        );
         let filtered_out = self.report_tag_filter_active() && !self.report_log_matches_filter(row);
         let selection_style = Style::default()
             .fg(selected_text)
-            .bg(self.theme_selection());
+            .bg(selection_background);
         let line = self
             .ledger_normal_line(
                 row,
@@ -1813,18 +1916,17 @@ impl App {
                 };
 
                 if is_selected {
-                    let text_color = self.theme_selection_text();
+                    let text_color = crate::appearance::contrasting_text_color(
+                        entry.color,
+                        self.theme_foreground(),
+                    );
                     ListItem::new(Line::from(vec![
                         Span::raw(dot).fg(text_color),
                         Span::raw(name).fg(text_color),
                         Span::raw(" ".repeat(pad)).fg(text_color),
                         Span::raw(metric_value).fg(text_color),
                     ]))
-                    .style(
-                        Style::default()
-                            .fg(text_color)
-                            .bg(self.theme_selection()),
-                    )
+                    .style(Style::default().fg(text_color).bg(entry.color))
                 } else {
                     ListItem::new(Line::from(vec![
                         Span::raw(dot).fg(entry.color),
