@@ -148,7 +148,7 @@ impl TerminalSession {
         // Editing surfaces use the real terminal cursor as their input affordance.
         // Unsupported cursor-shape sequences are harmless terminal presentation hints;
         // restoration always returns ownership to the user's configured cursor shape.
-        if let Err(primary) = execute!(stdout, SetCursorStyle::BlinkingBar) {
+        if let Err(primary) = execute!(stdout, SetCursorStyle::BlinkingBlock) {
             return Err(startup_failure(primary, &cleanup));
         }
 

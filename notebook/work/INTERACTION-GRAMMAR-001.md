@@ -4,7 +4,7 @@ kind: work
 state: candidate
 authority: working
 created: 2026-09-28
-updated: 2026-09-29
+updated: 2026-09-30
 summary: "Unify Strata keyboard ownership and modifier meaning across Main, Layer, Balance boundaries, ledger editing, and multi-tag filtering."
 ---
 
@@ -97,3 +97,9 @@ Permanent Layer deletion reuses the existing rounded collateral-confirmation vis
 Layer recolor is retroactive presentation rather than historical geometry mutation: historical snapshots retain CategoryId and resolve that identity through the Layer's current color, so changing color updates live and historical rendering without rewriting grain positions.
 
 **D076 VALIDATION UPDATE — NATIVE-GREEN:** Rust 1.98.1 passed formatting, strict Clippy, all-feature tests (591 library + 25 integration/process; 20 ignored), and CLI help. A permanent-delete regression now seeds v6 state, day-end snapshot, and checkpoint state, then proves every retained representation is reclassified to Idle with placed coordinates, pending sequence/count, and total mass preserved; snapshot source revision is refreshed and canonical writes normalize to SandState v5. The terminal process test checks confirmation/cancellation and current sand-state reclassification. Terminal lifecycle tests also verify the blinking-bar cursor request and restoration to the user's default cursor style. A loaded-profile owner TUI pass remains for the no-floor width/cursor visuals and live/historical color semantics. Settings/palette behavior remains deferred.
+
+## Owner-approved follow-up — STRATA-D077 through STRATA-D081
+
+The owner-approved review bundle `f1027ffd24042545621ba775470ef067f0ae852f` adds alignment-first Layer Detail geometry, canonical-entry identity editing, permissive civil-time normalization and overflow carry, a shared centered warning/error overlay, and explicit offline/live persistence recovery choices. D076 sediment identity and permanent-delete reclassification remain intact. D077 replaces the earlier blinking-bar request with the native blinking block cursor and replaces literal focus brackets with highlight.
+
+**D077-D081 VALIDATION UPDATE — NATIVE-GREEN:** Rust 1.98.1 passed formatting, strict Clippy, `cargo test --all-features` (593 library + 25 integration/process tests; 20 ignored), CLI help, and SQLite doctor on `/mnt/Tokyo/Lab/.tmp/opencode/strata-balance-behavior-coherence-001-test-profile-final`. Terminal lifecycle tests pass cursor acquisition/restoration, conservative warning selection, canonical entry deletion, recovery lifecycle, and D076 sediment reclassification. Owner visual review remains for alignment-first populated-profile presentation and cursor placement. Settings/palette behavior remains deferred.

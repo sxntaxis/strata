@@ -137,6 +137,7 @@ pub struct BalanceReportSummary {
 #[derive(Debug, Clone)]
 pub struct CategoryLogEntry {
     pub session_id: Option<usize>,
+    pub active_stable_id: Option<String>,
     pub date: String,
     pub end_date: String,
     pub start_time: String,
@@ -149,6 +150,7 @@ pub struct CategoryLogEntry {
 
 #[derive(Debug, Clone)]
 pub struct LiveSessionPreview {
+    pub active_stable_id: String,
     pub category_id: CategoryId,
     pub description: String,
     pub elapsed_seconds: usize,
@@ -1274,18 +1276,42 @@ pub fn build_category_logs_for_window(
                 .into_iter()
                 .filter(|slice| slice.operational_day >= start && slice.operational_day <= end)
                 .collect::<Vec<_>>();
-            let first = slices.first()?;
-            let last = slices.last()?;
+            if slices.is_empty() {
+                return None;
+            }
             let elapsed_seconds = slices
                 .iter()
                 .map(|slice| slice.elapsed_seconds)
                 .sum::<usize>();
+            let (date, end_date, start_time, end_time) = match (
+                session.started_at_utc,
+                session.ended_at_utc,
+                session.operational_day_policy,
+            ) {
+                (Some(started_at_utc), Some(ended_at_utc), Some(policy)) => {
+                    let start = crate::temporal::civil_from_policy(started_at_utc, policy).ok()?;
+                    let end = crate::temporal::civil_from_policy(ended_at_utc, policy).ok()?;
+                    (
+                        start.format("%Y-%m-%d").to_string(),
+                        end.format("%Y-%m-%d").to_string(),
+                        start.format("%H:%M:%S").to_string(),
+                        end.format("%H:%M:%S").to_string(),
+                    )
+                }
+                _ => (
+                    session.date.clone(),
+                    session.date.clone(),
+                    session.start_time.clone(),
+                    session.end_time.clone(),
+                ),
+            };
             Some(CategoryLogEntry {
                 session_id: Some(session.id),
-                date: first.operational_day.format("%Y-%m-%d").to_string(),
-                end_date: last.operational_day.format("%Y-%m-%d").to_string(),
-                start_time: first.start_time.clone(),
-                end_time: last.end_time.clone(),
+                active_stable_id: None,
+                date,
+                end_date,
+                start_time,
+                end_time,
                 description: session.description.clone(),
                 elapsed_seconds,
                 balance_effect,
@@ -1301,22 +1327,31 @@ pub fn build_category_logs_for_window(
             .into_iter()
             .filter(|slice| slice.operational_day >= start && slice.operational_day <= end)
             .collect::<Vec<_>>();
-        if let (Some(first), Some(last)) = (slices.first(), slices.last()) {
+        if !slices.is_empty() {
             let elapsed_seconds = slices
                 .iter()
                 .map(|slice| slice.elapsed_seconds)
                 .sum::<usize>();
-            logs.push(CategoryLogEntry {
-                session_id: None,
-                date: first.operational_day.format("%Y-%m-%d").to_string(),
-                end_date: last.operational_day.format("%Y-%m-%d").to_string(),
-                start_time: first.start_time.clone(),
-                end_time: last.end_time.clone(),
-                description: live.description.clone(),
-                elapsed_seconds,
-                balance_effect,
-                balance_seconds: elapsed_seconds as isize * balance_effect as isize,
-            });
+            if let (Ok(start), Ok(end)) = (
+                crate::temporal::civil_from_policy(
+                    live.started_at_utc,
+                    live.operational_day_policy,
+                ),
+                crate::temporal::civil_from_policy(live.ended_at_utc, live.operational_day_policy),
+            ) {
+                logs.push(CategoryLogEntry {
+                    session_id: None,
+                    active_stable_id: Some(live.active_stable_id.clone()),
+                    date: start.format("%Y-%m-%d").to_string(),
+                    end_date: end.format("%Y-%m-%d").to_string(),
+                    start_time: start.format("%H:%M:%S").to_string(),
+                    end_time: end.format("%H:%M:%S").to_string(),
+                    description: live.description.clone(),
+                    elapsed_seconds,
+                    balance_effect,
+                    balance_seconds: elapsed_seconds as isize * balance_effect as isize,
+                });
+            }
         }
     }
 
@@ -1327,6 +1362,7 @@ pub fn build_category_logs_for_window(
             .then(a.end_date.cmp(&b.end_date))
             .then(a.end_time.cmp(&b.end_time))
             .then(a.session_id.cmp(&b.session_id))
+            .then(a.active_stable_id.cmp(&b.active_stable_id))
     });
     logs
 }

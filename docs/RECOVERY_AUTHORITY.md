@@ -81,21 +81,27 @@ Before a switch, finish, reset/clear, detach, or live mutation at a known timest
 
 ## Bounded checkpoint recovery
 
-Recovery uses one persisted cutoff target. It restores canonical topology, derives missed sediment contribution with bounded arithmetic, publishes recovered authority, and does not replay missed physics frame-by-frame.
+Recovery uses one persisted cutoff target and bounded arithmetic; it never replays missed physics frame-by-frame. STRATA-D081 separates **unobserved process/offline time** from a live database write failure.
 
-The user-visible recovery statement distinguishes:
+When startup finds a recoverable checkpoint whose durable simulation time precedes the fixed recovery target, that interval is a **recovery gap** rather than automatically classified work. Strata restores only the durable checkpoint evidence, pauses new simulation classification at the gap boundary, and presents the universal `WARNING` overlay before any missing-time chronology/sediment is published. The instrument shows `●────────?────────▶`: the left value is the durable save time, the center value is the gap duration, and the right value is `now`. The prompt is `Choose how to reconstruct the missing time.`
 
-- durable checkpoint evidence;
-- reconstructed interval through the persisted recovery target;
-- later provisional live time.
+The owner chooses one of:
 
-Retry reuses the same target instead of moving recovered history forward with wall time.
+- `Reconstruct as <Layer>` — classify the gap as the previously active Layer and catch sediment up with that identity;
+- `Reconstruct as Idle` — classify the gap as Idle and catch sediment up as Idle;
+- `Keep sediment unchanged` — account the missing interval as Idle while retaining the durable sediment state without adding catch-up sediment.
+
+If the previously active Layer already is Idle, the duplicate first/second choice collapses to one `Reconstruct as Idle` action. A classification is committed before the recovered in-memory authority is installed; failed persistence leaves the same unresolved warning and original checkpoint state available for another decision/retry. Retry retains the fixed target rather than moving reconstructed history forward with wall time.
+
+## Live persistence degradation
+
+A database write failure while Strata remains alive is not an unobserved gap. Runtime/session time and sediment continue because Strata is still observing that interval; only durability is degraded. Short automatic retries occur before interruption. If they remain unsuccessful, Strata shows one universal `ERROR` for that incident with the last durable-save time and elapsed at-risk duration on `●────────────────?`, plus `Continue`, `Retry now`, `Export recovery`, and `Exit without saving`.
+
+`Continue` dismisses the dialog into visible degraded-saving state and background retries continue with bounded backoff without repeatedly reopening the same incident. A successful retry flushes current authority and clears degraded state. A later independent failure may open a new incident. `Exit without saving` is deliberately available from the already-explicit error surface and does not add a second confirmation dialog. Emergency custody export remains a structured JSON evidence artifact, not a second runtime authority or supported portable import format.
 
 ## Terminal/runtime failure
 
 Draw, poll, and read failures attempt one emergency checkpoint before terminal restoration. The original runtime error remains primary; checkpoint/cleanup results are context. Panic restoration returns the terminal to normal state without claiming persistence success.
-
-During visible persistence recovery, ordinary mutation remains frozen. Emergency custody export is a structured JSON evidence artifact, not a second runtime authority or supported portable import format.
 
 ## Unsupported historical/future extension
 

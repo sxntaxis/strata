@@ -12,6 +12,7 @@ use crate::domain::{
     build_balance_report_with_live_for_window, build_category_logs_for_window, day_boundary_config,
     operational_day_key_now, report_period_window_with_offset, session_slices,
 };
+use crate::runtime_identity::transition_identity;
 use crate::sand::{
     ClassicProductionEngine, DailySedimentSlice, SedimentSnapshot, daily_contribution_from_slices,
     derived_preview_from_slices, select_historical_visual_artifact,
@@ -19,8 +20,8 @@ use crate::sand::{
 use crate::temporal;
 
 use super::{
-    App, HistoricalPreviewState, PersistenceOperation, RecoveryAction, ReportRangeBoundary,
-    ReportTagFacet, tagging, ui_helpers,
+    App, HistoricalPreviewState, LedgerSelectionIdentity, PersistenceOperation, RecoveryAction,
+    ReportRangeBoundary, ReportTagFacet, tagging, ui_helpers,
 };
 
 fn build_historical_preview(
@@ -317,6 +318,7 @@ impl App {
         }
         self.clear_report_range_boundary();
         self.report_layer_delete_confirmation = Some(entry.category_id);
+        self.system_dialog_selected_index = 1;
         self.render_needed = true;
         true
     }
@@ -445,6 +447,58 @@ impl App {
             return Vec::new();
         };
         self.report_logs_for_category(category_id)
+    }
+
+    fn ledger_identity_for_row(row: &CategoryLogEntry) -> Option<LedgerSelectionIdentity> {
+        if let Some(session_id) = row.session_id {
+            Some(LedgerSelectionIdentity::Session(session_id))
+        } else {
+            row.active_stable_id
+                .as_ref()
+                .map(|stable_id| LedgerSelectionIdentity::Active(stable_id.clone()))
+        }
+    }
+
+    pub(super) fn remember_report_log_selection(&mut self) {
+        let logs = self.report_current_logs();
+        let can_add = self
+            .report_logs_category_id
+            .is_some_and(|category_id| self.report_layer_can_add(category_id));
+        self.report_log_selected_identity = if self.report_log_selected_index < logs.len() {
+            logs.get(self.report_log_selected_index)
+                .and_then(Self::ledger_identity_for_row)
+        } else if can_add && self.report_log_selected_index == logs.len() {
+            Some(LedgerSelectionIdentity::Add)
+        } else {
+            None
+        };
+    }
+
+    pub(super) fn sync_report_log_selection_to_identity(&mut self) {
+        let logs = self.report_current_logs();
+        let can_add = self
+            .report_logs_category_id
+            .is_some_and(|category_id| self.report_layer_can_add(category_id));
+        if let Some(identity) = self.report_log_selected_identity.clone() {
+            let found = match identity {
+                LedgerSelectionIdentity::Session(session_id) => logs
+                    .iter()
+                    .position(|row| row.session_id == Some(session_id)),
+                LedgerSelectionIdentity::Active(stable_id) => logs
+                    .iter()
+                    .position(|row| row.active_stable_id.as_deref() == Some(stable_id.as_str())),
+                LedgerSelectionIdentity::Add if can_add => Some(logs.len()),
+                LedgerSelectionIdentity::Add => None,
+            };
+            if let Some(index) = found {
+                self.report_log_selected_index = index;
+                return;
+            }
+        }
+
+        let row_count = logs.len().saturating_add(usize::from(can_add));
+        self.clamp_report_log_selection(row_count);
+        self.remember_report_log_selection();
     }
 
     pub(super) fn report_tag_facets_for_log(&self, row: &CategoryLogEntry) -> Vec<ReportTagFacet> {
@@ -585,6 +639,7 @@ impl App {
         let started_at_utc = self.session.active_session_started_at_utc?;
         let ended_at_utc = started_at_utc + ChronoDuration::seconds(elapsed_seconds as i64);
         Some(LiveSessionPreview {
+            active_stable_id: self.session.active_session_stable_id.clone()?,
             category_id,
             description,
             elapsed_seconds,
@@ -888,40 +943,58 @@ impl App {
         self.report_interval_end_day() < operational_day_key_now()
     }
 
-    pub(super) fn delete_selected_report_session(&mut self) -> bool {
-        let logs = self.report_current_logs();
-        if logs.is_empty() {
-            return false;
-        }
+    fn fallback_identity_after_removing(
+        logs: &[CategoryLogEntry],
+        removed_index: usize,
+    ) -> Option<LedgerSelectionIdentity> {
+        logs.get(removed_index.saturating_add(1))
+            .and_then(Self::ledger_identity_for_row)
+            .or_else(|| {
+                removed_index
+                    .checked_sub(1)
+                    .and_then(|index| logs.get(index))
+                    .and_then(Self::ledger_identity_for_row)
+            })
+    }
 
-        if self.report_log_selected_index >= logs.len() {
+    pub(super) fn begin_report_entry_delete_confirmation(&mut self) -> bool {
+        let logs = self.report_current_logs();
+        let Some(row) = logs.get(self.report_log_selected_index) else {
             return false;
+        };
+        let Some(identity) = Self::ledger_identity_for_row(row) else {
+            return false;
+        };
+        self.report_entry_delete_confirmation = Some(identity);
+        self.system_dialog_selected_index = 1;
+        self.render_needed = true;
+        true
+    }
+
+    pub(super) fn cancel_report_entry_delete_confirmation(&mut self) {
+        if self.report_entry_delete_confirmation.take().is_some() {
+            self.render_needed = true;
         }
-        let selected = self.report_log_selected_index;
-        let Some(row) = logs.get(selected) else {
-            return false;
-        };
-        let Some(session_id) = row.session_id else {
-            return false;
-        };
+    }
+
+    fn delete_report_session_by_id(&mut self, session_id: usize) -> bool {
         let Some(category_id) = self.report_logs_category_id else {
             return false;
         };
-        let (removed_seconds, affected_days) = self
+        let Some(session) = self
             .time_tracker
             .sessions
             .iter()
             .find(|session| session.id == session_id)
-            .map(|session| {
-                (
-                    session.elapsed_seconds,
-                    session_slices(session)
-                        .into_iter()
-                        .map(|slice| slice.operational_day)
-                        .collect::<BTreeSet<_>>(),
-                )
-            })
-            .unwrap_or((row.elapsed_seconds, BTreeSet::new()));
+            .cloned()
+        else {
+            return false;
+        };
+        let removed_seconds = session.elapsed_seconds;
+        let affected_days = session_slices(&session)
+            .into_iter()
+            .map(|slice| slice.operational_day)
+            .collect::<BTreeSet<_>>();
 
         if let Some(database_path) = self.sqlite_database_path.clone() {
             let result = crate::sqlite::delete_tui_session(&database_path, session_id);
@@ -944,13 +1017,121 @@ impl App {
             self.sand_engine
                 .remove_category_grains(category_id, removed_seconds);
         }
-
         for day in affected_days {
             self.reconcile_daily_contribution(day);
         }
         self.clear_report_snapshot_cache();
+        true
+    }
 
-        self.clamp_report_log_selection(self.report_ledger_row_count());
+    fn delete_active_report_generation(&mut self, expected_stable_id: &str) -> bool {
+        if self.session.active_session_stable_id.as_deref() != Some(expected_stable_id) {
+            return false;
+        }
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            return false;
+        };
+        let now = Utc::now();
+        if let Err(error) = self.settle_transition_boundary(now) {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::SessionDelete,
+                RecoveryAction::ReloadAuthority,
+                Err(error),
+            );
+            return false;
+        }
+        let previous_category = self.time_tracker.active_category_id();
+        let removed_seconds = usize::try_from(
+            self.time_tracker
+                .current_elapsed()
+                .unwrap_or_default()
+                .as_secs(),
+        )
+        .unwrap_or(usize::MAX);
+        let affected_days = self
+            .live_preview_session()
+            .map(|session| {
+                session_slices(&session)
+                    .into_iter()
+                    .map(|slice| slice.operational_day)
+                    .collect::<BTreeSet<_>>()
+            })
+            .unwrap_or_default();
+        let identity = transition_identity("delete-active", expected_stable_id, now, "idle");
+        let next_stable_id = identity.tui_active_stable_id();
+        let Some(receipt) = self.record_storage_result_for(
+            PersistenceOperation::SessionDelete,
+            RecoveryAction::ReloadAuthority,
+            crate::sqlite::reset_active_session_to(
+                &database_path,
+                expected_stable_id,
+                &identity.operation_id,
+                &next_stable_id,
+                DRIFT_CATEGORY_ID,
+                "",
+                now,
+                now,
+            ),
+        ) else {
+            return false;
+        };
+
+        if !self
+            .time_tracker
+            .set_active_category_by_id(DRIFT_CATEGORY_ID)
+        {
+            return false;
+        }
+        self.time_tracker.set_active_description(String::new());
+        self.time_tracker.start_session();
+        self.session.active_session_stable_id = receipt.resulting_active_stable_id;
+        self.session.active_session_started_at_utc = Some(now);
+        if previous_category != DRIFT_CATEGORY_ID && removed_seconds > 0 {
+            self.sand_engine
+                .remove_category_grains(previous_category, removed_seconds);
+        }
+        for day in affected_days {
+            self.reconcile_daily_contribution(day);
+        }
+        self.refresh_active_runtime_checkpoint();
+        self.clear_report_snapshot_cache();
+        !self.has_persistence_recovery()
+    }
+
+    pub(super) fn confirm_report_entry_delete(&mut self) -> bool {
+        let Some(identity) = self.report_entry_delete_confirmation.clone() else {
+            return false;
+        };
+        let logs = self.report_current_logs();
+        let removed_index = logs.iter().position(|row| match &identity {
+            LedgerSelectionIdentity::Session(session_id) => row.session_id == Some(*session_id),
+            LedgerSelectionIdentity::Active(stable_id) => {
+                row.active_stable_id.as_deref() == Some(stable_id.as_str())
+            }
+            LedgerSelectionIdentity::Add => false,
+        });
+        let fallback =
+            removed_index.and_then(|index| Self::fallback_identity_after_removing(&logs, index));
+        let deleted = match &identity {
+            LedgerSelectionIdentity::Session(session_id) => {
+                self.delete_report_session_by_id(*session_id)
+            }
+            LedgerSelectionIdentity::Active(stable_id) => {
+                self.delete_active_report_generation(stable_id)
+            }
+            LedgerSelectionIdentity::Add => false,
+        };
+        if !deleted {
+            return false;
+        }
+        self.report_entry_delete_confirmation = None;
+        self.report_log_selected_identity = fallback.or_else(|| {
+            self.report_logs_category_id
+                .filter(|category_id| self.report_layer_can_add(*category_id))
+                .map(|_| LedgerSelectionIdentity::Add)
+        });
+        self.sync_report_log_selection_to_identity();
+        self.render_needed = true;
         true
     }
 
@@ -994,6 +1175,33 @@ impl App {
         ) else {
             return false;
         };
+        if row.active_stable_id.as_deref() == self.session.active_session_stable_id.as_deref()
+            && row.active_stable_id.is_some()
+        {
+            let Some(started_at_utc) = self.session.active_session_started_at_utc else {
+                return false;
+            };
+            let policy = OperationalDayPolicy::from_config(day_boundary_config());
+            let Ok(start) = temporal::civil_from_policy(started_at_utc, policy) else {
+                return false;
+            };
+            let Ok(end) = temporal::civil_from_policy(Utc::now(), policy) else {
+                return false;
+            };
+            self.report_filter_tag_index = None;
+            self.ledger_entry_edit = Some(super::LedgerEntryEditState::active(
+                category_id,
+                self.time_tracker.active_description().to_string(),
+                start.format("%Y-%m-%d").to_string(),
+                start.format("%H:%M:%S").to_string(),
+                end.format("%Y-%m-%d").to_string(),
+                end.format("%H:%M:%S").to_string(),
+            ));
+            self.report_range_boundary = None;
+            self.report_range_boundary_original = None;
+            self.render_needed = true;
+            return true;
+        }
         let Some(session_id) = row.session_id else {
             return false;
         };
@@ -1088,6 +1296,7 @@ impl App {
             to_civil.format("%H:%M:%S").to_string(),
         ));
         self.report_log_selected_index = self.report_current_logs().len();
+        self.report_log_selected_identity = Some(LedgerSelectionIdentity::Add);
         self.report_range_boundary = None;
         self.report_range_boundary_original = None;
         self.render_needed = true;
@@ -1181,28 +1390,23 @@ impl App {
         edit: &super::LedgerEntryEditState,
         policy: OperationalDayPolicy,
     ) -> Result<(DateTime<Utc>, DateTime<Utc>), String> {
-        let start_date = NaiveDate::parse_from_str(edit.start_date.trim(), "%Y-%m-%d")
-            .map_err(|_| "date must use YYYY-MM-DD".to_string())?;
-        let start_time = super::ledger_state::parse_ledger_time_input(edit.start_time.trim())
-            .ok_or_else(|| "start time must be a valid time".to_string())?;
-        let mut end_date = NaiveDate::parse_from_str(edit.end_date.trim(), "%Y-%m-%d")
-            .map_err(|_| "end date must use YYYY-MM-DD".to_string())?;
-        let end_time = super::ledger_state::parse_ledger_time_input(edit.end_time.trim())
-            .ok_or_else(|| "end time must be a valid time".to_string())?;
-        if edit.dates_linked && end_time < start_time {
-            end_date = start_date
-                .checked_add_signed(ChronoDuration::days(1))
-                .ok_or_else(|| "end date overflowed".to_string())?;
+        let (start, mut end) = edit
+            .preview_naive_bounds()
+            .ok_or_else(|| "date/time could not be normalized".to_string())?;
+        if edit.is_active() {
+            end = temporal::civil_from_policy(Utc::now(), policy)
+                .map_err(|error| format!("active end cannot be represented: {error}"))?
+                .naive_local();
         }
         let offset = FixedOffset::east_opt(policy.utc_offset_seconds)
             .ok_or_else(|| "ledger entry has an invalid UTC offset".to_string())?;
         let from = offset
-            .from_local_datetime(&start_date.and_time(start_time))
+            .from_local_datetime(&start)
             .single()
             .ok_or_else(|| "ledger entry start is not unique".to_string())?
             .with_timezone(&Utc);
         let to = offset
-            .from_local_datetime(&end_date.and_time(end_time))
+            .from_local_datetime(&end)
             .single()
             .ok_or_else(|| "ledger entry end is not unique".to_string())?
             .with_timezone(&Utc);
@@ -1210,6 +1414,51 @@ impl App {
             return Err("start must be before end".to_string());
         }
         Ok((from, to))
+    }
+
+    pub(super) fn ledger_edit_policy(
+        &self,
+        edit: &super::LedgerEntryEditState,
+    ) -> OperationalDayPolicy {
+        if let Some(session_id) = edit.session_id()
+            && let Some(policy) = self
+                .time_tracker
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .and_then(|session| session.operational_day_policy)
+        {
+            return policy;
+        }
+        OperationalDayPolicy::from_config(day_boundary_config())
+    }
+
+    pub(super) fn ledger_edit_report_contribution(
+        &self,
+        edit: &super::LedgerEntryEditState,
+    ) -> Option<(usize, isize)> {
+        let policy = self.ledger_edit_policy(edit);
+        let (from, to) = Self::ledger_edit_bounds(edit, policy).ok()?;
+        let elapsed = usize::try_from((to - from).num_seconds()).ok()?;
+        if elapsed == 0 {
+            return Some((0, 0));
+        }
+        let window = self.current_report_window();
+        let visible = temporal::allocate_operational_day_slices(from, to, elapsed, policy)
+            .ok()?
+            .into_iter()
+            .filter(|slice| {
+                slice.operational_day >= window.start && slice.operational_day <= window.end
+            })
+            .map(|slice| slice.elapsed_seconds)
+            .sum::<usize>();
+        let effect = self
+            .report_categories()
+            .into_iter()
+            .find(|category| category.id == edit.category_id)
+            .map(|category| category.balance_effect)
+            .unwrap_or(0);
+        Some((visible, visible as isize * effect as isize))
     }
 
     fn preserve_hidden_subseconds(
@@ -1230,6 +1479,122 @@ impl App {
         } else {
             requested
         }
+    }
+
+    fn commit_active_ledger_entry_edit(
+        &mut self,
+        edit: &super::LedgerEntryEditState,
+        from: DateTime<Utc>,
+        policy: OperationalDayPolicy,
+    ) -> bool {
+        let now = Utc::now();
+        if from >= now {
+            if let Some(current) = self.ledger_entry_edit.as_mut() {
+                current.error = Some("active start must be before now".to_string());
+            }
+            self.render_needed = true;
+            return false;
+        }
+        // Re-basing a live generation across completed history would require the
+        // collateral-history planner. Fail closed rather than silently overlap it.
+        if self.time_tracker.sessions.iter().any(|session| {
+            session.ended_at_utc.is_some_and(|ended| ended > from)
+                && session.started_at_utc.is_some_and(|started| started < now)
+        }) {
+            if let Some(current) = self.ledger_entry_edit.as_mut() {
+                current.error = Some("active start overlaps completed history".to_string());
+            }
+            self.render_needed = true;
+            return false;
+        }
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            return false;
+        };
+        let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
+            return false;
+        };
+        let old_start = self.session.active_session_started_at_utc.unwrap_or(from);
+        let old_elapsed = usize::try_from(
+            self.time_tracker
+                .current_elapsed()
+                .unwrap_or_default()
+                .as_secs(),
+        )
+        .unwrap_or(usize::MAX);
+        let old_days = self
+            .live_preview_session()
+            .map(|session| {
+                session_slices(&session)
+                    .into_iter()
+                    .map(|slice| slice.operational_day)
+                    .collect::<BTreeSet<_>>()
+            })
+            .unwrap_or_default();
+        let identity = transition_identity(
+            "rebase-active",
+            &expected_stable_id,
+            now,
+            &edit.category_id.0.to_string(),
+        );
+        let next_stable_id = identity.tui_active_stable_id();
+        let Some(receipt) = self.record_storage_result_for(
+            PersistenceOperation::ActiveReset,
+            RecoveryAction::ReloadAuthority,
+            crate::sqlite::reset_active_session_to(
+                &database_path,
+                &expected_stable_id,
+                &identity.operation_id,
+                &next_stable_id,
+                edit.category_id,
+                &edit.description,
+                from,
+                now,
+            ),
+        ) else {
+            return false;
+        };
+
+        self.time_tracker
+            .set_active_description(edit.description.clone());
+        if let Err(error) = self.begin_active_session_at(from, true) {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::ActiveReset,
+                RecoveryAction::ReloadAuthority,
+                Err(error),
+            );
+            return false;
+        }
+        self.session.active_session_stable_id = receipt.resulting_active_stable_id.clone();
+        self.session.active_session_started_at_utc = Some(from);
+        let new_elapsed = usize::try_from((now - from).num_seconds().max(0)).unwrap_or(usize::MAX);
+        if old_elapsed > new_elapsed {
+            self.sand_engine
+                .remove_category_grains(edit.category_id, old_elapsed - new_elapsed);
+        }
+        let mut affected_days = old_days;
+        if let Some(new_preview) = self.live_preview_session() {
+            affected_days.extend(
+                session_slices(&new_preview)
+                    .into_iter()
+                    .map(|slice| slice.operational_day),
+            );
+        }
+        // A backward start extends ledger truth into a true gap; consistent with
+        // historical correction, that added time does not synthesize current grains.
+        let _ = old_start;
+        let _ = policy;
+        for day in affected_days {
+            self.reconcile_daily_contribution(day);
+        }
+        self.remember_description_tags_for_category(edit.category_id, &edit.description);
+        self.report_log_selected_identity = receipt
+            .resulting_active_stable_id
+            .map(LedgerSelectionIdentity::Active);
+        self.ledger_entry_edit = None;
+        self.clear_report_snapshot_cache();
+        self.refresh_active_runtime_checkpoint();
+        self.sync_report_selection_for_interval();
+        !self.has_persistence_recovery()
     }
 
     pub(super) fn commit_ledger_entry_edit(&mut self) -> bool {
@@ -1263,7 +1628,9 @@ impl App {
                 .find(|session| session.id == session_id)
                 .and_then(|session| session.operational_day_policy)
                 .unwrap_or(active_preview.operational_day_policy),
-            super::LedgerEntryEditKind::Add => active_preview.operational_day_policy,
+            super::LedgerEntryEditKind::Active | super::LedgerEntryEditKind::Add => {
+                active_preview.operational_day_policy
+            }
         };
         let (mut from, mut to) = match Self::ledger_edit_bounds(&edit, policy) {
             Ok(bounds) => bounds,
@@ -1297,6 +1664,9 @@ impl App {
             }
             self.render_needed = true;
             return false;
+        }
+        if edit.is_active() {
+            return self.commit_active_ledger_entry_edit(&edit, from, policy);
         }
         if edit.is_add() && self.time_tracker.category_by_id(edit.category_id).is_none() {
             if let Some(current) = self.ledger_entry_edit.as_mut() {
@@ -1368,6 +1738,7 @@ impl App {
                     });
                     current.error = None;
                 }
+                self.system_dialog_selected_index = 1;
                 self.render_needed = true;
                 false
             }
@@ -1392,8 +1763,7 @@ impl App {
 
     fn sync_report_selection_for_interval(&mut self) {
         if self.report_logs_category_id.is_some() {
-            let row_count = self.report_ledger_row_count();
-            self.clamp_report_log_selection(row_count);
+            self.sync_report_log_selection_to_identity();
         } else {
             let summary = self.report_visible_rows();
             self.sync_report_selection_to_summary(&summary);
@@ -1570,6 +1940,7 @@ mod report_edit_state_tests {
     fn tagged_log(description: &str, balance_seconds: isize) -> CategoryLogEntry {
         CategoryLogEntry {
             session_id: Some(1),
+            active_stable_id: None,
             date: "2026-09-28".to_string(),
             end_date: "2026-09-28".to_string(),
             start_time: "10:00:00".to_string(),

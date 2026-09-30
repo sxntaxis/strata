@@ -3,10 +3,10 @@ id: NOW-001
 kind: status
 state: active
 created: 2026-08-01
-updated: 2026-09-29
+updated: 2026-09-30
 authority: working
-summary: "INTERACTION-GRAMMAR-001 D076 implements retroactive Layer sediment identity/color semantics, cursor/input polish, and data-driven Layer Detail geometry; native validation passes."
-next: Owner-review D076 on the populated test profile, especially retroactive Layer recolor/deletion across current and historical sediment, cursor placement, and Layer Detail geometry; keep Settings/palette and SEDIMENT-016 separate.
+summary: "INTERACTION-GRAMMAR-001 D076-D081 implements owner-approved Layer Detail, ledger chronology, warning-overlay, recovery, and sediment identity semantics; native validation passes."
+next: Owner visual review of D077 alignment-first Layer Detail geometry and blinking block cursor on the populated test profile; keep Settings/palette and SEDIMENT-016 separate.
 ---
 
 ## INTERACTION-GRAMMAR-001 coherent keyboard ownership — 2026-09-28
@@ -14,6 +14,8 @@ next: Owner-review D076 on the populated test profile, especially retroactive La
 **OWNER-ACCEPTED D076 / IMPLEMENTED / NATIVE VALIDATION GREEN:** D075 interaction semantics remain, with four owner corrections: Layer Detail width is now data-driven with no extra fixed detail floor and transient filter chrome cannot resize it; real text inputs expose a blinking terminal cursor; permanent Layer deletion uses the existing rounded confirmation-card language with semantic theme error/status roles; and Layer identity now owns sediment classification/color across time. Recoloring a Layer changes live and historical presentation for the same CategoryId, while permanent deletion atomically reclassifies that Layer's current and persisted historical sediment to Idle without moving mass/topology. The hidden SQLite tombstone exists only to prevent ID reuse. Rust formatting, strict Clippy, all-feature tests, CLI help, deletion persistence coverage, cursor lifecycle coverage, and SQLite doctor pass on the isolated test profile. Final owner visual review remains for populated-profile width, cursor placement, and live/historical color presentation. See `notebook/work/INTERACTION-GRAMMAR-001.md`.
 
 **D076 VALIDATION UPDATE — NATIVE-GREEN:** Rust 1.98.1 passed format check, strict Clippy, all-feature tests (591 library + 25 integration/process; 20 ignored), and CLI help. Deletion tests cover SandState v6 normalization to v5, all persisted sediment representations reclassified to Idle with mass/geometry/FIFO preserved, and source revision refresh. PTY checks cover cursor style acquisition/restoration plus the full D075 preview/delete flows. See `notebook/work/INTERACTION-GRAMMAR-001.md`.
+
+**D077-D081 VALIDATION UPDATE — NATIVE-GREEN:** The owner-approved follow-up bundle at `f1027ffd` is integrated. Rust 1.98.1 passed formatting, strict Clippy, all-feature tests (593 library + 25 integration/process; 20 ignored), and CLI help. Terminal lifecycle coverage passes with the native blinking-block cursor and conservative warning selection; the loaded isolated test profile passes SQLite doctor with 8 categories, 7 tags, 624 sessions, and 73 snapshots. D077 alignment and cursor presentation remain an owner visual gate.
 
 **D075 VALIDATION UPDATE — NATIVE-GREEN:** Rust 1.98.1 passed format check, strict Clippy, all-feature tests (591 library + 25 integration/process; 20 ignored), and CLI help. The PTY suite verifies Tag preview live updates, Esc rollback, Enter acceptance, Ctrl-C rollback before finalization, and confirmed/cancelled Ctrl+x deletion with Category history/tags removed while the persisted sand state remains byte-equivalent. Unit and SQLite tests cover exact-zero visibility, equal-cell column sizing, hidden tombstone custody, and no sand snapshot rewrite. Settings/palette remains deferred.
 

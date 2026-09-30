@@ -163,8 +163,8 @@ fn assert_terminal_restored(output: &PtyOutput) {
         output
             .bytes
             .windows(5)
-            .any(|sequence| sequence == b"\x1b[5 q"),
-        "editable TUI should request a blinking bar cursor"
+            .any(|sequence| sequence == b"\x1b[1 q"),
+        "editable TUI should request a blinking block cursor"
     );
     assert!(
         output
@@ -697,8 +697,8 @@ fn ctrl_x_balance_delete_reclassifies_sand_without_changing_geometry_or_mass() {
         .unwrap();
     assert_eq!(still_present, "Work");
 
-    tui.write_all(b"\x18\r")
-        .expect("Ctrl+x then Enter should confirm permanent Layer deletion");
+    tui.write_all(b"\x18\x1b[B\r")
+        .expect("Ctrl+x, Down, then Enter should confirm permanent Layer deletion");
     let mut deleted = false;
     for _ in 0..80 {
         let connection = Connection::open(profile.database_path()).unwrap();

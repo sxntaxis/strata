@@ -403,6 +403,37 @@ pub(crate) fn reset_active_session(
     .map_err(|error| error.to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn reset_active_session_to(
+    database_path: &Path,
+    expected_active_stable_id: &str,
+    operation_id: &str,
+    next_stable_id: &str,
+    category_id: CategoryId,
+    description: &str,
+    started_at_utc: DateTime<Utc>,
+    applied_at_utc: DateTime<Utc>,
+) -> Result<runtime_coordination::RuntimeTransitionReceipt, String> {
+    let mut repository = open_cli_repository(database_path)?;
+    let started = timestamp(started_at_utc);
+    let applied = timestamp(applied_at_utc);
+    runtime_coordination::reset_active_session(
+        &mut repository,
+        expected_active_stable_id,
+        operation_id,
+        &NewActiveSession {
+            stable_id: next_stable_id,
+            category_id: as_i64(category_id.0, "category ID")?,
+            description,
+            started_at_utc: &started,
+            recovery_kind: "live",
+        },
+        &applied,
+        "tui-runtime",
+    )
+    .map_err(|error| error.to_string())
+}
+
 pub(crate) fn sync_categories(
     database_path: &Path,
     categories: &[Category],
@@ -3094,6 +3125,230 @@ pub(crate) fn replace_recovering_checkpoint<T: Serialize>(
 pub(crate) fn quarantine_checkpoint(database_path: &Path) -> Result<(), String> {
     let mut repository = open_cli_repository(database_path)?;
     runtime_coordination::quarantine_checkpoint(&mut repository).map_err(|error| error.to_string())
+}
+
+#[derive(Debug)]
+pub(crate) struct RecoveryGapIdleRequest<'a> {
+    pub expected_active_stable_id: &'a str,
+    pub previous_category_id: CategoryId,
+    pub active_started_at_utc: DateTime<Utc>,
+    pub durable_until_utc: DateTime<Utc>,
+    pub target_utc: DateTime<Utc>,
+    pub next_active_stable_id: &'a str,
+    pub state: &'a SandState,
+}
+
+pub(crate) fn commit_recovery_gap_as_idle(
+    database_path: &Path,
+    request: RecoveryGapIdleRequest<'_>,
+) -> Result<(), String> {
+    if request.previous_category_id == DRIFT_CATEGORY_ID {
+        return Err("recovery gap previous Layer is already Idle".to_string());
+    }
+    if request.active_started_at_utc > request.durable_until_utc
+        || request.durable_until_utc > request.target_utc
+    {
+        return Err("recovery gap timestamps are not monotonic".to_string());
+    }
+    if request.next_active_stable_id.trim().is_empty()
+        || request.next_active_stable_id == request.expected_active_stable_id
+    {
+        return Err("recovery gap requires a new active stable identity".to_string());
+    }
+
+    let mut repository = open_cli_repository(database_path)?;
+    let existing = repository.sand_state().map_err(|error| error.to_string())?;
+    let formation_id = existing
+        .as_ref()
+        .map(|record| record.formation_id.clone())
+        .unwrap_or_else(|| "default".to_string());
+    let quantum_seconds = existing
+        .as_ref()
+        .map(|record| record.quantum_seconds)
+        .unwrap_or(1);
+    let policy = OperationalDayPolicy::from_config(day_boundary_config());
+    let transaction = repository
+        .connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+
+    let checkpoint_status: Option<String> = transaction
+        .query_row(
+            "SELECT status FROM runtime_checkpoint WHERE singleton = 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    if checkpoint_status.as_deref() != Some("recovering") {
+        return Err(format!(
+            "recovery gap expected a recovering checkpoint, found {}",
+            checkpoint_status.unwrap_or_else(|| "missing".to_string())
+        ));
+    }
+
+    let active: Option<(String, i64, String, String)> = transaction
+        .query_row(
+            "SELECT stable_id, category_id, description, started_at_utc
+             FROM active_session WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let Some((stable_id, category_id, description, started_at_text)) = active else {
+        return Err("recovery gap has no active session to classify".to_string());
+    };
+    if stable_id != request.expected_active_stable_id {
+        return Err(format!(
+            "recovery gap active identity changed; expected {}, found {stable_id}",
+            request.expected_active_stable_id
+        ));
+    }
+    let expected_category = as_i64(request.previous_category_id.0, "category ID")?;
+    if category_id != expected_category {
+        return Err(format!(
+            "recovery gap Layer changed; expected {}, found {category_id}",
+            request.previous_category_id.0
+        ));
+    }
+    let stored_started_at = parse_utc(&started_at_text)?;
+    if stored_started_at != request.active_started_at_utc {
+        return Err("recovery gap active start changed concurrently".to_string());
+    }
+
+    let previous_elapsed = (request.durable_until_utc - request.active_started_at_utc)
+        .to_std()
+        .map_err(|error| format!("invalid pre-gap active interval: {error}"))?
+        .as_secs();
+    if previous_elapsed > 0 {
+        let operational_day =
+            temporal::operational_day_from_policy(request.durable_until_utc, policy)?
+                .format("%Y-%m-%d")
+                .to_string();
+        transaction
+            .execute(
+                "INSERT INTO sessions (
+                    stable_id, category_id, description, started_at_utc, ended_at_utc,
+                    operational_day, elapsed_seconds, source,
+                    boundary_utc_offset_seconds, boundary_start_minutes
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'tui-recovery-gap', ?8, ?9)",
+                params![
+                    request.expected_active_stable_id,
+                    expected_category,
+                    description,
+                    started_at_text,
+                    timestamp(request.durable_until_utc),
+                    operational_day,
+                    i64::try_from(previous_elapsed)
+                        .map_err(|_| "pre-gap active interval is too large".to_string())?,
+                    policy.utc_offset_seconds,
+                    policy.start_minutes,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+
+    let gap_elapsed = (request.target_utc - request.durable_until_utc)
+        .to_std()
+        .map_err(|error| format!("invalid Idle recovery interval: {error}"))?
+        .as_secs();
+    if gap_elapsed > 0 {
+        let idle_operational_day =
+            temporal::operational_day_from_policy(request.target_utc, policy)?
+                .format("%Y-%m-%d")
+                .to_string();
+        let idle_stable_id = format!(
+            "recovery-idle:{}:{}",
+            request.expected_active_stable_id,
+            request
+                .durable_until_utc
+                .to_rfc3339_opts(SecondsFormat::Nanos, true)
+        );
+        transaction
+            .execute(
+                "INSERT INTO sessions (
+                    stable_id, category_id, description, started_at_utc, ended_at_utc,
+                    operational_day, elapsed_seconds, source,
+                    boundary_utc_offset_seconds, boundary_start_minutes
+                 ) VALUES (?1, 0, '', ?2, ?3, ?4, ?5, 'tui-recovery-gap', ?6, ?7)",
+                params![
+                    idle_stable_id,
+                    timestamp(request.durable_until_utc),
+                    timestamp(request.target_utc),
+                    idle_operational_day,
+                    i64::try_from(gap_elapsed)
+                        .map_err(|_| "Idle recovery interval is too large".to_string())?,
+                    policy.utc_offset_seconds,
+                    policy.start_minutes,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+
+    let deleted = transaction
+        .execute(
+            "DELETE FROM active_session WHERE singleton = 1 AND stable_id = ?1",
+            params![request.expected_active_stable_id],
+        )
+        .map_err(|error| error.to_string())?;
+    if deleted != 1 {
+        return Err("recovery gap active session changed concurrently".to_string());
+    }
+    transaction
+        .execute(
+            "INSERT INTO active_session (
+                singleton, stable_id, category_id, description, started_at_utc, recovery_kind
+             ) VALUES (1, ?1, ?2, ?3, ?4, 'recovered')",
+            params![
+                request.next_active_stable_id,
+                expected_category,
+                description,
+                timestamp(request.target_utc),
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+
+    let now = timestamp(Utc::now());
+    let payload_json = serde_json::to_string(request.state).map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "INSERT INTO sand_state (
+                singleton, formation_id, quantum_seconds, grid_width, grid_height,
+                payload_json, updated_at_utc
+             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(singleton) DO UPDATE SET
+                formation_id = excluded.formation_id,
+                quantum_seconds = excluded.quantum_seconds,
+                grid_width = excluded.grid_width,
+                grid_height = excluded.grid_height,
+                payload_json = excluded.payload_json,
+                updated_at_utc = excluded.updated_at_utc",
+            params![
+                formation_id,
+                quantum_seconds,
+                i64::try_from(request.state.grid_width)
+                    .map_err(|_| "sand width is too large".to_string())?,
+                i64::try_from(request.state.grid_height)
+                    .map_err(|_| "sand height is too large".to_string())?,
+                payload_json,
+                now,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    let changed = transaction
+        .execute(
+            "UPDATE runtime_checkpoint SET status = 'committed'
+             WHERE singleton = 1 AND status = 'recovering'",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    if changed != 1 {
+        return Err("recovery gap checkpoint changed concurrently".to_string());
+    }
+    runtime_coordination::maybe_inject_test_fault("checkpoint-recovery", "commit")
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
 }
 
 pub(crate) fn commit_checkpoint_recovery(

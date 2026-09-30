@@ -1,15 +1,15 @@
 # Report and export authority
 
-Status: accepted authority; STRATA-D071/D072/D073/D074/D075/D076 behavior is natively certified
-Last reviewed: 2026-09-28
+Status: accepted authority; STRATA-D071/D072/D073/D074/D075/D076/D077/D078/D079/D080/D081 behavior is natively certified; D077 owner visual review remains
+Last reviewed: 2026-09-30
 
 ## Purpose
 
-Reports and exports are projections over Strata's canonical chronological ledger. They expose active uncertainty and operational-day allocation without rewriting canonical sessions.
+Reports and exports are projections over Strata's canonical chronological ledger. Reporting-cycle allocation may slice contribution accounting, but it never replaces the canonical civil identity of a session.
 
 ## Current product vocabulary
 
-The interactive historical/report surface is named **Balance**. Day, week, and month are presets over report windows; arbitrary inclusive operational-day windows are already valid reporting semantics and HISTORY-001 exposes them directly in the TUI rather than creating a second report engine.
+The interactive historical/report surface is named **Balance**. Day, week, and month are presets over report windows; arbitrary inclusive reporting-cycle windows are already valid reporting semantics and HISTORY-001 exposes them directly in the TUI rather than creating a second report engine. The configured fixed boundary is user-facing **Reporting cutoff**; the buckets it defines are **Reporting cycles**. Internal persisted operational-day vocabulary remains schema/implementation terminology.
 
 ## Range semantics
 
@@ -25,19 +25,11 @@ A canonical session remains one row. Exact overlap slices contribute only the se
 
 ## Balance layer-detail ledger projection
 
-Entering one Balance layer projects the selected report window as an editable ledger without creating a second report
-engine. Completed sessions that cross operational-day boundaries remain one row: all slices of the same canonical
-session that intersect the selected window are aggregated for row display, with the first included boundary and last
-included boundary retained for temporal presentation. The provisional active generation may also project as a row,
-but because it has no completed persisted session identity it is not an existing-entry edit target.
+Entering one Balance layer projects the selected report window as an editable ledger without creating a second report engine. A visible row represents one **canonical entry identity**, never a disposable reporting slice. If a completed session intersects several reporting cycles it may therefore appear in each relevant view with the same full canonical civil Date/Time, while its signed Effect in each view is only the exact overlap contribution to that selected report window. Edit or delete from any occurrence operates on that same canonical entry everywhere. The provisional active generation is also a first-class stable ledger identity; it renders its civil start through open-ended `now`, permits Tag/start-boundary editing, and deleting it removes that active generation before immediately returning Strata to Idle.
 
-The row presentation is deliberately responsive to interval scope. A single-operational-day window uses three equal full-row cells: Tag, Time, and signed Effect. A multi-day window uses four equal full-row cells: Tag, Date, Time, and signed Effect. Date remains adjacent to Time rather than becoming a leading identity column. A cross-day row keeps that same 1:1:1:1 geometry: Date compresses the span (for example `Sep 10-11`) and Time shows the separate start/end times (for example `23:50–06:00`). It does not merge date and time into one displaced temporal cell. The overlay widens until all visible values fit their assigned equal cells, within terminal/margin bounds; only a true terminal-width constraint permits truncation.
+Row geometry is alignment-first rather than equal-cell. A single-day ordinary row uses Tag · Time · Effect with Time exactly centered and mirrored outer regions. A row that shows Date uses Tag · Date · Time · Effect with Date/Time as a symmetric inner pair and Tag/Effect mirrored outside them. Cross-day civil entries retain separate Date and Time spans. Actual data may widen the overlay within terminal/margin bounds; a long Tag does not force all other cells to its width. Edit state, focus highlight, cursor, completion, and filter chrome do not resize the modal. During a single-day edit only the active row may expose Date while surrounding rows retain their ordinary three-cell form.
 
-Each ordinary ledger row begins with the layer marker in the first cell. If the persisted Tag is empty, presentation uses the neutral `—` placeholder without writing it into storage. The synthetic `+ Add entry…` row uses
-`+` itself in that exact marker column. Add and existing-entry Edit reuse the same single-row geometry: the active field
-is bracketed in place, dates remain visible when the selected period needs them, cross-civil-date edits keep the date
-span and time span in their respective columns, and Effect remains blank while chronology is being edited rather than
-showing stale data.
+Each ordinary ledger row begins with the layer marker in the first region. If the persisted Tag is empty, presentation uses the neutral `—` placeholder without writing it into storage. The synthetic `+ Add entry…` row uses `+` itself in that exact marker position. Text editing uses the real blinking block caret rather than literal bracket characters, and non-text selection/focus uses the same highlight language as Layer/Balance navigation. The Effect cell never disappears merely because editing begins: it previews the draft overlap against the current report window and falls back to a dim `—` only when the draft is genuinely uninterpretable.
 
 A non-empty Tag field may carry multiple independent attribution tags. The existing session description remains the
 only persisted field; canonical serialization trims/deduplicates tags case-insensitively and writes them as an ordered
@@ -67,16 +59,13 @@ be fully attributable to both tags separately, while a combined `Renzo OR Anibal
 that one ledger row as one hour rather than two. The selected tag filter persists while the user navigates report
 periods inside the same layer.
 
-The active filter label is separate instrument chrome below the meter and serializes selected tags with the same `; `
-grammar used by Tag input. De-emphasis is semantic presentation: nonmatches reuse theme-derived secondary/status color
-roles plus terminal dimming rather than assuming a particular gray RGB value. The ledger remains chronological, with a
-presentation-only blank row before `+ Add entry…` when vertical room permits. Layer Detail width is solved from the undecorated Tag, date-span, time-span, and effect values under the fixed proportional geometry: 1:1:1 for single-day rows and 1:1:1:1 when Date is present. Filter-focus brackets and the separate filter label are transient chrome and never participate in width calculation, so pressing `f` cannot resize the modal. No independent preferred-detail-width floor exists beyond the ordinary Balance instrument and Strata comfort floor. The overlay grows only as needed for visible data, then clamps to terminal bounds/margins. Tag remains left-aligned, Date/Time centered, and Effect right-aligned. Ellipsis is therefore a physical-terminal fallback, not the ordinary response to a long Tag.
+The active filter label is separate instrument chrome below the meter and serializes selected tags with the same `; ` grammar used by Tag input. De-emphasis is semantic presentation: nonmatches reuse theme-derived secondary/status color roles plus terminal dimming rather than assuming a particular gray RGB value. The ledger remains chronological, with a presentation-only blank row before `+ Add entry…` when vertical room permits. Layer Detail width is solved from undecorated data under the symmetric alignment geometry above. Filter focus uses ordinary selection highlight rather than bracket characters, so activating `f` neither changes modal width nor steals cells from a Tag that previously fit. No editor-specific preferred-detail-width floor exists beyond the ordinary Balance/Strata comfort rules. Tag remains left-aligned, temporal values centered on their prescribed anchors, and Effect right-aligned. Ellipsis is therefore a physical-terminal fallback, not the ordinary response to a long Tag.
 
 ## Balance summary visibility and Layer deletion
 
 Balance summary omits exact-zero rows as presentation only: an ordinary Layer appears only when its displayed `balance_seconds` is non-zero for the selected period, while Idle appears only when its elapsed seconds are non-zero. Changing the report window may therefore reveal or hide Layers without mutating them. Selection follows stable Layer identity when possible and falls to a remaining visible row when the selected identity disappears from the projection.
 
-`Ctrl+x` on the Balance summary requests permanent deletion of the selected non-Idle Layer. Enter confirms and Esc cancels through the same rounded confirmation-card language used by collateral ledger changes; destructive title/border/action presentation comes from the theme error role rather than a fixed color. A confirmed deletion removes that Layer's canonical sessions and Tag history and removes it from normal active/archived product surfaces; an active target is first switched safely to Idle. Every retained current and persisted historical sediment representation of that CategoryId is reclassified to Idle in the same authority operation. Coordinates, mass, topology, pending FIFO/counts, chronology, and simulation metadata are preserved; only Layer classification changes, and snapshot source identity is refreshed after the rewrite. SQLite retains a hidden non-restorable tombstone only to prevent CategoryId reuse. In Layer Detail, `Ctrl+x` deletes only the selected persisted ledger entry and does nothing on the synthetic `+ Add entry…` row.
+`Ctrl+x` on the Balance summary requests permanent deletion of the selected non-Idle Layer through the universal `WARNING` overlay. `Go back` is selected by default; Enter executes the selected row and Esc takes the safe exit. Layer deletion, exact-row ledger-entry deletion, and collateral-overlap decisions share this overlay language instead of bespoke cards or accent-blue action text. A confirmed deletion removes that Layer's canonical sessions and Tag history and removes it from normal active/archived product surfaces; an active target is first switched safely to Idle. Every retained current and persisted historical sediment representation of that CategoryId is reclassified to Idle in the same authority operation. Coordinates, mass, topology, pending FIFO/counts, chronology, and simulation metadata are preserved; only Layer classification changes, and snapshot source identity is refreshed after the rewrite. SQLite retains a hidden non-restorable tombstone only to prevent CategoryId reuse. In Layer Detail, `Ctrl+x` deletes only the selected persisted ledger entry and does nothing on the synthetic `+ Add entry…` row.
 
 Layer color is presentation attached to stable Layer identity rather than a frozen property of each sediment photo. Recoloring an existing Layer therefore changes how that CategoryId renders in both live and historical sediment without changing stored grain coordinates or mass. Permanent deletion is the explicit exception that changes classification itself: the deleted CategoryId becomes Idle everywhere it still appears in sediment authority.
 

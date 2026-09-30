@@ -51,12 +51,19 @@ fn ensure_testing_fill_categories_in_tracker(
 enum LedgerEntryEditKeyIntent {
     Append(char),
     Backspace,
+    DeleteForward,
     NextField,
     PreviousField,
     Left,
     Right,
     ShiftLeft,
     ShiftRight,
+    Up,
+    Down,
+    CaretLeft,
+    CaretRight,
+    CaretHome,
+    CaretEnd,
     Commit,
     Cancel,
     EmergencyQuit,
@@ -94,21 +101,27 @@ fn resolve_ledger_entry_edit_key(
     key: KeyEvent,
     keymap: &crate::keybindings::Keymap,
 ) -> LedgerEntryEditKeyIntent {
-    if key
-        .modifiers
-        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-    {
-        return if keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
-            LedgerEntryEditKeyIntent::EmergencyQuit
-        } else {
-            LedgerEntryEditKeyIntent::Ignore
+    if keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
+        return LedgerEntryEditKeyIntent::EmergencyQuit;
+    }
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        return match key.code {
+            KeyCode::Left => LedgerEntryEditKeyIntent::CaretLeft,
+            KeyCode::Right => LedgerEntryEditKeyIntent::CaretRight,
+            _ => LedgerEntryEditKeyIntent::Ignore,
         };
+    }
+    if key.modifiers.contains(KeyModifiers::ALT) {
+        return LedgerEntryEditKeyIntent::Ignore;
     }
 
     match key.code {
         KeyCode::Esc => LedgerEntryEditKeyIntent::Cancel,
         KeyCode::Enter => LedgerEntryEditKeyIntent::Commit,
-        KeyCode::Backspace | KeyCode::Delete => LedgerEntryEditKeyIntent::Backspace,
+        KeyCode::Backspace => LedgerEntryEditKeyIntent::Backspace,
+        KeyCode::Delete => LedgerEntryEditKeyIntent::DeleteForward,
+        KeyCode::Home => LedgerEntryEditKeyIntent::CaretHome,
+        KeyCode::End => LedgerEntryEditKeyIntent::CaretEnd,
         KeyCode::BackTab => LedgerEntryEditKeyIntent::PreviousField,
         KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
             LedgerEntryEditKeyIntent::PreviousField
@@ -122,6 +135,8 @@ fn resolve_ledger_entry_edit_key(
         }
         KeyCode::Left => LedgerEntryEditKeyIntent::Left,
         KeyCode::Right => LedgerEntryEditKeyIntent::Right,
+        KeyCode::Up => LedgerEntryEditKeyIntent::Up,
+        KeyCode::Down => LedgerEntryEditKeyIntent::Down,
         KeyCode::Char(character) => LedgerEntryEditKeyIntent::Append(character),
         _ => LedgerEntryEditKeyIntent::Ignore,
     }
@@ -180,11 +195,20 @@ impl App {
             return false;
         }
 
-        if self.has_persistence_recovery() {
+        if self.persistence_recovery_dialog_open() {
             if self.keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
                 return self.request_persistence_recovery_quit();
             }
             return self.handle_persistence_recovery_key(key);
+        }
+
+        if self.recovery_gap.is_some() {
+            if self.keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
+                self.recovery_exit_requested = true;
+                self.recovery_exit_error = None;
+                return true;
+            }
+            return self.handle_recovery_gap_key(key);
         }
 
         if self.recovery_statement.is_some() {
@@ -1576,10 +1600,34 @@ impl App {
     fn handle_report_modal_action(&mut self, action: Action) -> bool {
         if self.report_layer_delete_confirmation.is_some() {
             match action {
+                Action::Up => self.move_system_dialog_selection(-1, 2),
+                Action::Down => self.move_system_dialog_selection(1, 2),
                 Action::Confirm => {
-                    self.confirm_report_layer_delete();
+                    if self.system_dialog_selected_index == 0 {
+                        self.confirm_report_layer_delete();
+                    } else {
+                        self.cancel_report_layer_delete_confirmation();
+                    }
                 }
                 Action::Cancel => self.cancel_report_layer_delete_confirmation(),
+                Action::Quit => return true,
+                _ => {}
+            }
+            return false;
+        }
+
+        if self.report_entry_delete_confirmation.is_some() {
+            match action {
+                Action::Up => self.move_system_dialog_selection(-1, 2),
+                Action::Down => self.move_system_dialog_selection(1, 2),
+                Action::Confirm => {
+                    if self.system_dialog_selected_index == 0 {
+                        self.confirm_report_entry_delete();
+                    } else {
+                        self.cancel_report_entry_delete_confirmation();
+                    }
+                }
+                Action::Cancel => self.cancel_report_entry_delete_confirmation(),
                 Action::Quit => return true,
                 _ => {}
             }
@@ -1591,15 +1639,20 @@ impl App {
                 action,
                 Action::Cancel
                     | Action::Confirm
+                    | Action::Up
+                    | Action::Down
                     | Action::Left
                     | Action::Right
                     | Action::ShiftLeft
                     | Action::ShiftRight
                     | Action::ReportRangeStart
                     | Action::ReportRangeEnd
+                    | Action::Quit
             )
         {
-            self.cancel_report_range_boundary();
+            // Boundary editing is an explicit transaction. Unrelated commands do
+            // not get an implicit Esc-equivalent rollback.
+            return false;
         }
 
         let in_logs_view = self.report_logs_category_id.is_some();
@@ -1615,7 +1668,9 @@ impl App {
         } else {
             0
         };
-        self.clamp_report_log_selection(ledger_row_count);
+        if in_logs_view {
+            self.sync_report_log_selection_to_identity();
+        }
 
         let mut handled = true;
 
@@ -1628,6 +1683,7 @@ impl App {
                         self.ledger_entry_edit = None;
                         self.report_logs_category_id = None;
                         self.report_log_selected_index = 0;
+                        self.report_log_selected_identity = None;
                     }
                 } else {
                     self.close_report_modal();
@@ -1646,6 +1702,8 @@ impl App {
                     self.ledger_entry_edit = None;
                     self.report_logs_category_id = Some(entry.category_id);
                     self.report_log_selected_index = 0;
+                    self.report_log_selected_identity = None;
+                    self.remember_report_log_selection();
                 }
             }
             Action::Up => {
@@ -1657,6 +1715,7 @@ impl App {
                             self.report_log_selected_index,
                             ledger_row_count,
                         );
+                        self.remember_report_log_selection();
                     }
                 } else if !summary.entries.is_empty() {
                     let index = ui_helpers::wrap_prev_index(
@@ -1675,6 +1734,7 @@ impl App {
                             self.report_log_selected_index,
                             ledger_row_count,
                         );
+                        self.remember_report_log_selection();
                     }
                 } else if !summary.entries.is_empty() {
                     let index = ui_helpers::wrap_next_index(
@@ -1738,11 +1798,8 @@ impl App {
                 handled = in_logs_view && self.toggle_selected_report_filter();
             }
             Action::DeleteCategory => {
-                if self.report_range_boundary.is_some() {
-                    self.cancel_report_range_boundary();
-                    handled = false;
-                } else if in_logs_view && self.report_log_selected_index < logs.len() {
-                    handled = self.delete_selected_report_session();
+                if in_logs_view && self.report_log_selected_index < logs.len() {
+                    handled = self.begin_report_entry_delete_confirmation();
                 } else if !in_logs_view {
                     handled = self.begin_report_layer_delete_confirmation(&summary);
                 } else {
@@ -1835,8 +1892,14 @@ impl App {
             .is_some_and(|edit| edit.confirmation.is_some())
         {
             match intent {
+                LedgerEntryEditKeyIntent::Up => self.move_system_dialog_selection(-1, 2),
+                LedgerEntryEditKeyIntent::Down => self.move_system_dialog_selection(1, 2),
                 LedgerEntryEditKeyIntent::Commit => {
-                    self.commit_ledger_entry_edit();
+                    if self.system_dialog_selected_index == 0 {
+                        self.commit_ledger_entry_edit();
+                    } else {
+                        self.dismiss_ledger_entry_confirmation();
+                    }
                 }
                 LedgerEntryEditKeyIntent::Cancel => {
                     self.dismiss_ledger_entry_confirmation();
@@ -1857,6 +1920,36 @@ impl App {
             LedgerEntryEditKeyIntent::Backspace => {
                 if let Some(edit) = self.ledger_entry_edit.as_mut() {
                     edit.backspace();
+                    self.render_needed = true;
+                }
+            }
+            LedgerEntryEditKeyIntent::DeleteForward => {
+                if let Some(edit) = self.ledger_entry_edit.as_mut() {
+                    edit.delete_forward();
+                    self.render_needed = true;
+                }
+            }
+            LedgerEntryEditKeyIntent::CaretLeft => {
+                if let Some(edit) = self.ledger_entry_edit.as_mut() {
+                    edit.move_caret(-1);
+                    self.render_needed = true;
+                }
+            }
+            LedgerEntryEditKeyIntent::CaretRight => {
+                if let Some(edit) = self.ledger_entry_edit.as_mut() {
+                    edit.move_caret(1);
+                    self.render_needed = true;
+                }
+            }
+            LedgerEntryEditKeyIntent::CaretHome => {
+                if let Some(edit) = self.ledger_entry_edit.as_mut() {
+                    edit.caret_home();
+                    self.render_needed = true;
+                }
+            }
+            LedgerEntryEditKeyIntent::CaretEnd => {
+                if let Some(edit) = self.ledger_entry_edit.as_mut() {
+                    edit.caret_end();
                     self.render_needed = true;
                 }
             }
@@ -1890,6 +1983,7 @@ impl App {
                     self.render_needed = true;
                 }
             }
+            LedgerEntryEditKeyIntent::Up | LedgerEntryEditKeyIntent::Down => {}
             LedgerEntryEditKeyIntent::ShiftLeft | LedgerEntryEditKeyIntent::ShiftRight => {
                 let direction: i64 = if matches!(intent, LedgerEntryEditKeyIntent::ShiftLeft) {
                     -1
@@ -2063,7 +2157,7 @@ mod report_edit_tests {
         );
         assert_eq!(
             resolve_ledger_entry_edit_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), &keymap,),
-            LedgerEntryEditKeyIntent::Ignore
+            LedgerEntryEditKeyIntent::Up
         );
     }
 

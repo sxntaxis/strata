@@ -1,4 +1,4 @@
-use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, Utc};
+use chrono::{DateTime, Utc};
 use ratatui::prelude::{Line, Span};
 use ratatui::{
     Frame,
@@ -15,7 +15,6 @@ use super::{
     overlay_layout, ui_helpers, view_style,
 };
 
-const LEDGER_INLINE_EDITOR_MIN_WIDTH: usize = 84;
 const CONFIRMATION_CARD_WIDTH: u16 = 62;
 const EMPTY_TAG_DISPLAY: &str = "—";
 
@@ -51,6 +50,7 @@ struct LedgerColumnWidths {
 }
 
 impl LedgerColumnWidths {
+    #[allow(dead_code)]
     fn total(self) -> usize {
         self.tag
             .saturating_add(self.date)
@@ -60,43 +60,76 @@ impl LedgerColumnWidths {
     }
 
     fn required_proportional_total(self) -> usize {
-        let gaps = if self.show_date { 3 } else { 2 };
-        let widest = if self.show_date {
-            self.tag.max(self.date).max(self.time).max(self.metric)
+        // Alignment owns geometry. Three-cell rows are outer/middle/outer so Time
+        // stays exactly centered; four-cell rows are outer/inner/inner/outer so
+        // Date and Time remain a symmetric inner pair. Content only grows its
+        // mirrored region instead of forcing every cell to the widest value.
+        let outer = self.tag.max(self.metric);
+        if self.show_date {
+            let inner = self.date.max(self.time);
+            outer
+                .saturating_mul(2)
+                .saturating_add(inner.saturating_mul(2))
+                .saturating_add(3)
         } else {
-            self.tag.max(self.time).max(self.metric)
-        };
-        widest
-            .saturating_mul(if self.show_date { 4 } else { 3 })
-            .saturating_add(gaps)
+            outer
+                .saturating_mul(2)
+                .saturating_add(self.time)
+                .saturating_add(2)
+        }
     }
 
     fn fit(self, row_width: usize) -> Self {
         let gaps = if self.show_date { 3 } else { 2 };
         let available = row_width.saturating_sub(gaps);
-        let cell_count = if self.show_date { 4 } else { 3 };
-        let base = available / cell_count;
-        let mut remainder = available % cell_count;
-        let mut next_width = || {
-            let extra = usize::from(remainder > 0);
-            remainder = remainder.saturating_sub(extra);
-            base.saturating_add(extra)
-        };
-
         if self.show_date {
+            let natural_outer = self.tag.max(self.metric);
+            let natural_inner = self.date.max(self.time);
+            let natural = natural_outer
+                .saturating_mul(2)
+                .saturating_add(natural_inner.saturating_mul(2));
+            let (outer, inner) = if available >= natural {
+                let pair_surplus = (available - natural) / 2;
+                let outer_extra = pair_surplus / 2;
+                let inner_extra = pair_surplus.saturating_sub(outer_extra);
+                (
+                    natural_outer.saturating_add(outer_extra),
+                    natural_inner.saturating_add(inner_extra),
+                )
+            } else {
+                let pair_budget = available / 2;
+                let natural_pair = natural_outer.saturating_add(natural_inner).max(1);
+                let outer = pair_budget
+                    .saturating_mul(natural_outer)
+                    .checked_div(natural_pair)
+                    .unwrap_or(0);
+                (outer, pair_budget.saturating_sub(outer))
+            };
             Self {
-                tag: next_width(),
-                date: next_width(),
-                time: next_width(),
-                metric: next_width(),
+                tag: outer,
+                date: inner,
+                time: inner,
+                metric: outer,
                 show_date: true,
             }
         } else {
+            let natural_outer = self.tag.max(self.metric);
+            let natural = natural_outer.saturating_mul(2).saturating_add(self.time);
+            let (outer, middle) = if available >= natural {
+                let surplus = available - natural;
+                (
+                    natural_outer.saturating_add(surplus / 2),
+                    self.time.saturating_add(surplus % 2),
+                )
+            } else {
+                let middle = self.time.min(available);
+                ((available.saturating_sub(middle)) / 2, middle)
+            };
             Self {
-                tag: next_width(),
+                tag: outer,
                 date: 0,
-                time: next_width(),
-                metric: next_width(),
+                time: middle,
+                metric: outer,
                 show_date: false,
             }
         }
@@ -124,42 +157,15 @@ fn ledger_time_span_label(start: &str, end: &str) -> String {
 }
 
 fn ledger_edit_effective_end_date(edit: &LedgerEntryEditState) -> String {
-    if edit.dates_linked
-        && let (Ok(start), Ok(end), Ok(date)) = (
-            super::ledger_state::parse_ledger_time_input(&edit.start_time).ok_or(()),
-            super::ledger_state::parse_ledger_time_input(&edit.end_time).ok_or(()),
-            NaiveDate::parse_from_str(&edit.start_date, "%Y-%m-%d"),
-        )
-        && end < start
-    {
-        date.checked_add_signed(ChronoDuration::days(1))
-            .map(|date| date.format("%Y-%m-%d").to_string())
-            .unwrap_or_else(|| edit.end_date.clone())
-    } else if edit.dates_linked {
-        edit.start_date.clone()
-    } else {
-        edit.end_date.clone()
-    }
-}
-
-fn ledger_edit_token(value: &str, active: bool) -> String {
-    if !active {
-        return value.to_string();
-    }
-    if value.is_empty() {
-        "[        ]".to_string()
-    } else {
-        format!("[{value}]")
-    }
-}
-
-fn ledger_edit_time_token(value: &str, active: bool, select_all: bool) -> String {
-    let display = if active && !select_all {
-        value.to_string()
-    } else {
-        super::ledger_state::format_ledger_time_input(value)
-    };
-    ledger_edit_token(&display, active)
+    edit.preview_naive_bounds()
+        .map(|(_, end)| end.date().format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| {
+            if edit.dates_linked {
+                edit.start_date.clone()
+            } else {
+                edit.end_date.clone()
+            }
+        })
 }
 
 fn ledger_display_tag(description: &str, _fallback_tag: &str) -> String {
@@ -169,31 +175,6 @@ fn ledger_display_tag(description: &str, _fallback_tag: &str) -> String {
     } else {
         description.to_string()
     }
-}
-
-fn ledger_display_tag_with_focus(
-    description: &str,
-    fallback_tag: &str,
-    focus: Option<usize>,
-) -> String {
-    let Some(focus) = focus else {
-        return ledger_display_tag(description, fallback_tag);
-    };
-    let tags = super::tagging::parse_tags(description);
-    if tags.is_empty() {
-        return format!("[{EMPTY_TAG_DISPLAY}]");
-    }
-    tags.into_iter()
-        .enumerate()
-        .map(|(index, tag)| {
-            if index == focus {
-                format!("[{tag}]")
-            } else {
-                tag
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("; ")
 }
 
 fn tag_completion_suffix(completion: &super::tagging::TagCompletion) -> String {
@@ -225,18 +206,13 @@ impl App {
                 .as_ref()
                 .map_or(summary.entries.len(), |logs| logs.len())
         };
-        if self.report_layer_delete_confirmation.is_some() {
-            body_row_count = body_row_count.max(7);
-        }
-        if layer_detail {
-            if logs_for_view.as_ref().is_some_and(|logs| !logs.is_empty())
-                && self
-                    .report_logs_category_id
-                    .is_some_and(|category_id| self.report_layer_can_add(category_id))
-            {
-                body_row_count = body_row_count.saturating_add(1);
-            }
-            body_row_count = body_row_count.saturating_add(self.ledger_confirmation_extra_height());
+        if layer_detail
+            && logs_for_view.as_ref().is_some_and(|logs| !logs.is_empty())
+            && self
+                .report_logs_category_id
+                .is_some_and(|category_id| self.report_layer_can_add(category_id))
+        {
+            body_row_count = body_row_count.saturating_add(1);
         }
 
         let preferred_inner_width = self
@@ -249,8 +225,6 @@ impl App {
                 } else {
                     REPORT_MODAL_SETTINGS.range_editor_min_width
                 }
-            } else if self.ledger_entry_edit.is_some() {
-                LEDGER_INLINE_EDITOR_MIN_WIDTH
             } else {
                 0
             });
@@ -259,11 +233,6 @@ impl App {
             .max(usize::from(
                 balance_instrument::preferred_summary_inner_width(),
             ))
-            .max(if self.report_layer_delete_confirmation.is_some() {
-                usize::from(CONFIRMATION_CARD_WIDTH)
-            } else {
-                0
-            })
             .min(u16::MAX as usize) as u16;
         let summary_content_height =
             balance_instrument::preferred_summary_inner_height(body_row_count);
@@ -334,22 +303,30 @@ impl App {
         };
         let start_selected = self.report_range_boundary == Some(ReportRangeBoundary::Start);
         let end_selected = self.report_range_boundary == Some(ReportRangeBoundary::End);
-        let start_text = if start_selected {
-            format!("[{interval_start}]")
-        } else {
-            interval_start
-        };
-        let end_text = if end_selected {
-            format!("[{interval_end}]")
-        } else {
-            interval_end
-        };
+        let selected_boundary_style = Style::default()
+            .fg(self.theme_background())
+            .bg(self.theme_foreground())
+            .add_modifier(Modifier::BOLD);
         let period_bottom_title = Line::from(vec![
-            Span::styled("< ", Style::default().fg(self.theme_status())),
-            Span::styled(start_text, Style::default().fg(self.theme_foreground())),
+            Span::styled("← ", Style::default().fg(self.theme_status())),
+            Span::styled(
+                interval_start,
+                if start_selected {
+                    selected_boundary_style
+                } else {
+                    Style::default().fg(self.theme_foreground())
+                },
+            ),
             Span::styled(" – ", Style::default().fg(self.theme_foreground())),
-            Span::styled(end_text, Style::default().fg(self.theme_foreground())),
-            Span::styled(" >", newer_chevron_style),
+            Span::styled(
+                interval_end,
+                if end_selected {
+                    selected_boundary_style
+                } else {
+                    Style::default().fg(self.theme_foreground())
+                },
+            ),
+            Span::styled(" →", newer_chevron_style),
         ])
         .alignment(Alignment::Center);
         let interaction_bottom_title = if let Some(edit) = self.report_range_edit.as_ref() {
@@ -477,6 +454,21 @@ impl App {
         } else {
             self.render_report_summary_view(f, list_area, &summary, selected_summary_index);
         }
+
+        // System dialogs are rendered last so they are true overlays over the
+        // current surface, including over Balance/Layer Detail itself.
+        if self.report_layer_delete_confirmation.is_some() {
+            self.render_report_layer_delete_confirmation(f, terminal_size);
+        } else if self.report_entry_delete_confirmation.is_some() {
+            self.render_report_entry_delete_confirmation(f, terminal_size);
+        } else if self
+            .ledger_entry_edit
+            .as_ref()
+            .and_then(|edit| edit.confirmation.as_ref())
+            .is_some()
+        {
+            self.render_ledger_confirmation_dialog(f, terminal_size);
+        }
     }
 
     fn preferred_report_inner_width(
@@ -510,7 +502,7 @@ impl App {
         let mut show_date = report_window.start != report_window.end;
         let mut tag_width = EMPTY_TAG_DISPLAY.chars().count().saturating_add(2);
         let mut date_width = 0;
-        let mut time_width = 0;
+        let mut time_width = 11;
         let mut metric_width = if is_none {
             REPORT_MODAL_SETTINGS.detail_metric_width_drift
         } else {
@@ -518,83 +510,20 @@ impl App {
         };
 
         for row in logs {
-            // Measure undecorated data, not transient `[facet]` filter chrome.
+            // Geometry is measured only from durable/display data. Focus, cursor,
+            // autocomplete, and editor chrome are deliberately absent here.
             let tag = ledger_display_tag(&row.description, &fallback_tag);
             tag_width = tag_width.max(tag.chars().count().saturating_add(2));
             show_date |= row.date != row.end_date;
             let date = ledger_date_span_label(&row.date, &row.end_date);
             date_width = date_width.max(date.chars().count());
-            let time = ledger_time_span_label(&row.start_time, &row.end_time);
+            let time = if row.active_stable_id.is_some() {
+                format!("{}–now", row.start_time.get(..5).unwrap_or(&row.start_time))
+            } else {
+                ledger_time_span_label(&row.start_time, &row.end_time)
+            };
             time_width = time_width.max(time.chars().count());
             metric_width = metric_width.max(self.ledger_metric_value(row, is_none).chars().count());
-        }
-
-        if let Some(edit) = self.ledger_entry_edit.as_ref() {
-            let description = edit.description.trim();
-            let tag = if edit.active_field == LedgerEntryField::Description {
-                if let Some(completion) =
-                    self.tag_completion_for_category(edit.category_id, &edit.description)
-                {
-                    format!("[{}]", completion.tag)
-                } else {
-                    ledger_edit_token(description, true)
-                }
-            } else {
-                ledger_display_tag(description, &fallback_tag)
-            };
-            tag_width = tag_width.max(tag.chars().count().saturating_add(2));
-
-            let end_date = ledger_edit_effective_end_date(edit);
-            show_date |= edit.start_date != end_date;
-            if show_date {
-                let start_date_label = if edit.active_field == LedgerEntryField::StartDate {
-                    edit.start_date.clone()
-                } else {
-                    self.ledger_date_label(&edit.start_date)
-                };
-                let end_date_label = if edit.active_field == LedgerEntryField::EndDate {
-                    end_date.clone()
-                } else {
-                    self.ledger_date_label(&end_date)
-                };
-                let date = if matches!(
-                    edit.active_field,
-                    LedgerEntryField::StartDate | LedgerEntryField::EndDate
-                ) {
-                    format!(
-                        "{}-{}",
-                        ledger_edit_token(
-                            &start_date_label,
-                            edit.active_field == LedgerEntryField::StartDate
-                        ),
-                        ledger_edit_token(
-                            &end_date_label,
-                            edit.active_field == LedgerEntryField::EndDate
-                        )
-                    )
-                } else {
-                    ledger_date_span_label(&edit.start_date, &end_date)
-                };
-                date_width = date_width.max(date.chars().count());
-            }
-
-            let start_time = ledger_edit_time_token(
-                &edit.start_time,
-                edit.active_field == LedgerEntryField::StartTime,
-                edit.select_all,
-            );
-            let end_time = ledger_edit_time_token(
-                &edit.end_time,
-                edit.active_field == LedgerEntryField::EndTime,
-                edit.select_all,
-            );
-            time_width = time_width.max(
-                start_time
-                    .chars()
-                    .count()
-                    .saturating_add(1)
-                    .saturating_add(end_time.chars().count()),
-            );
         }
 
         if !show_date {
@@ -603,10 +532,43 @@ impl App {
         LedgerColumnWidths {
             tag: tag_width,
             date: date_width,
-            time: time_width.max(11),
+            time: time_width,
             metric: metric_width,
             show_date,
         }
+    }
+
+    fn ledger_edit_columns(
+        &self,
+        edit: &LedgerEntryEditState,
+        base: LedgerColumnWidths,
+        row_width: usize,
+    ) -> LedgerColumnWidths {
+        if base.show_date {
+            return base.fit(row_width);
+        }
+        // A single-day ledger stays three-cell in ordinary presentation. Only the
+        // active edit row exposes Date, using a symmetric four-cell projection
+        // inside the already-established modal width.
+        let fallback_tag = self.report_layer_display_name(edit.category_id);
+        let tag = ledger_display_tag(edit.description.trim(), &fallback_tag);
+        let end_date = ledger_edit_effective_end_date(edit);
+        let date = ledger_date_span_label(&edit.start_date, &end_date);
+        let start_time = super::ledger_state::format_ledger_time_input(&edit.start_time);
+        let time = if edit.is_active() {
+            format!("{}–now", start_time)
+        } else {
+            let end_time = super::ledger_state::format_ledger_time_input(&edit.end_time);
+            format!("{start_time}–{end_time}")
+        };
+        LedgerColumnWidths {
+            tag: base.tag.max(tag.chars().count().saturating_add(2)),
+            date: date.chars().count(),
+            time: base.time.max(time.chars().count()),
+            metric: base.metric,
+            show_date: true,
+        }
+        .fit(row_width)
     }
 
     fn render_report_navigation_arrows(&self, f: &mut Frame, modal_rect: Rect) {
@@ -642,30 +604,6 @@ impl App {
         f.render_widget(right_arrow, right_rect);
     }
 
-    fn ledger_confirmation_card_height(&self) -> u16 {
-        let row_count = self
-            .ledger_entry_edit
-            .as_ref()
-            .and_then(|edit| edit.confirmation.as_ref())
-            .map(|confirmation| {
-                confirmation
-                    .changes
-                    .iter()
-                    .map(|change| change.after.len().max(1))
-                    .sum::<usize>()
-            })
-            .unwrap_or(0);
-        if row_count == 0 {
-            0
-        } else {
-            row_count.saturating_add(6).min(u16::MAX as usize) as u16
-        }
-    }
-
-    fn ledger_confirmation_extra_height(&self) -> usize {
-        usize::from(self.ledger_confirmation_card_height().saturating_sub(4))
-    }
-
     fn ledger_confirmation_interval(
         &self,
         started_at_utc: DateTime<Utc>,
@@ -699,7 +637,7 @@ impl App {
         )
     }
 
-    fn render_ledger_confirmation_card(&self, f: &mut Frame, area: Rect) {
+    fn render_ledger_confirmation_dialog(&self, f: &mut Frame, terminal: Rect) {
         let Some(confirmation) = self
             .ledger_entry_edit
             .as_ref()
@@ -707,36 +645,14 @@ impl App {
         else {
             return;
         };
-        if confirmation.changes.is_empty() || area.width < 4 || area.height < 3 {
+        if confirmation.changes.is_empty() {
             return;
         }
-
-        let desired_width = CONFIRMATION_CARD_WIDTH.min(area.width);
-        let x = area.x + area.width.saturating_sub(desired_width) / 2;
-        let card = Rect::new(x, area.y, desired_width, area.height);
-        let title = if confirmation.changes.len() == 1 {
+        let subtitle = if confirmation.changes.len() == 1 {
             "Another entry will change".to_string()
         } else {
             format!("{} other entries will change", confirmation.changes.len())
         };
-        let block = Block::default()
-            .title(Line::from(Span::styled(
-                title,
-                Style::default()
-                    .fg(self.theme_warning())
-                    .add_modifier(Modifier::BOLD),
-            )))
-            .title_alignment(Alignment::Center)
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(self.theme_warning()))
-            .style(Style::default().bg(self.theme_background()));
-        f.render_widget(block.clone(), card);
-        let inner = block.inner(card);
-        if inner.height == 0 || inner.width == 0 {
-            return;
-        }
-
         let show_date = {
             let window = self.current_report_window();
             window.start != window.end
@@ -753,26 +669,7 @@ impl App {
                         != end.ok().map(|value| value.date_naive())
                 })
         };
-
-        let columns_total = usize::from(inner.width);
-        let widths = Self::ledger_weighted_widths(columns_total, &[1, 2, 2]);
-        let header = Line::from(vec![
-            Span::raw(self.ledger_left_cell("", widths[0])),
-            Span::styled(
-                self.ledger_center_cell("BEFORE", widths[1]),
-                Style::default()
-                    .fg(self.theme_status())
-                    .add_modifier(Modifier::DIM),
-            ),
-            Span::styled(
-                self.ledger_right_cell("AFTER", widths[2]),
-                Style::default()
-                    .fg(self.theme_status())
-                    .add_modifier(Modifier::DIM),
-            ),
-        ]);
-
-        let mut lines = vec![header, Line::default()];
+        let mut body = Vec::new();
         for change in &confirmation.changes {
             let name = self.report_layer_display_name(change.category_id);
             let before = self.ledger_confirmation_interval(
@@ -798,43 +695,42 @@ impl App {
                     .collect::<Vec<_>>()
             };
             for (index, after_value) in after.iter().enumerate() {
-                let name_value = if index == 0 { name.as_str() } else { "" };
-                let before_value = if index == 0 { before.as_str() } else { "" };
-                let after_color = if after_value == "removed" {
-                    self.theme_error()
-                } else {
-                    self.theme_foreground()
-                };
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        self.ledger_left_cell(name_value, widths[0]),
+                let mut spans = Vec::new();
+                if index == 0 {
+                    spans.push(Span::styled(
+                        name.clone(),
                         Style::default().fg(self.category_color_for_id(change.category_id)),
-                    ),
-                    Span::styled(
-                        self.ledger_center_cell(before_value, widths[1]),
-                        Style::default().fg(self.theme_foreground()),
-                    ),
-                    Span::styled(
-                        self.ledger_right_cell(after_value, widths[2]),
-                        Style::default().fg(after_color),
-                    ),
-                ]));
+                    ));
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::raw(before.clone()));
+                    spans.push(Span::raw("  →  "));
+                } else {
+                    spans.push(Span::raw("→  "));
+                }
+                spans.push(Span::styled(
+                    after_value.clone(),
+                    Style::default().fg(if after_value == "removed" {
+                        self.theme_warning()
+                    } else {
+                        self.theme_foreground()
+                    }),
+                ));
+                body.push(Line::from(spans));
             }
         }
-        lines.push(Line::default());
-        lines.push(
-            Line::from(vec![
-                Span::styled(
-                    "Enter apply",
-                    Style::default()
-                        .fg(self.theme_accent())
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(" · Esc back", Style::default().fg(self.theme_status())),
-            ])
-            .alignment(Alignment::Center),
+        self.render_system_dialog(
+            f,
+            terminal,
+            super::SystemDialogSeverity::Warning,
+            Line::from(Span::styled(
+                subtitle,
+                Style::default().add_modifier(Modifier::BOLD),
+            )),
+            body,
+            vec![Line::from("Apply change"), Line::from("Go back")],
+            self.system_dialog_selected_index,
+            CONFIRMATION_CARD_WIDTH,
         );
-        f.render_widget(Paragraph::new(lines), inner);
     }
 
     fn render_layer_detail_with_instrument(
@@ -846,29 +742,6 @@ impl App {
         category_id: CategoryId,
         border_color: Color,
     ) {
-        if self
-            .ledger_entry_edit
-            .as_ref()
-            .and_then(|edit| edit.confirmation.as_ref())
-            .is_some()
-        {
-            let desired_card_height = self.ledger_confirmation_card_height();
-            let card_height = desired_card_height
-                .min(area.height.saturating_sub(3))
-                .max(3.min(area.height));
-            let rows = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(card_height),
-                    Constraint::Length(u16::from(area.height > card_height)),
-                    Constraint::Min(0),
-                ])
-                .split(area);
-            self.render_ledger_confirmation_card(f, rows[0]);
-            self.render_report_logs_view(f, rows[2], logs, category_id, border_color);
-            return;
-        }
-
         let filter_active = self.report_tag_filter_active();
         let (total_area, meter_area, filter_area, list_area) = if area.height >= 6 {
             let rows = Layout::default()
@@ -944,6 +817,7 @@ impl App {
         self.render_report_logs_view(f, list_area, logs, category_id, border_color);
     }
 
+    #[allow(dead_code)]
     fn ledger_weighted_widths(total: usize, weights: &[usize]) -> Vec<usize> {
         let weight_sum = weights.iter().sum::<usize>().max(1);
         let mut widths = weights
@@ -991,6 +865,7 @@ impl App {
         format!("{}{}", " ".repeat(remaining), text)
     }
 
+    #[allow(dead_code)]
     fn ledger_date_label(&self, raw: &str) -> String {
         ui_helpers::format_report_interval_label(raw)
     }
@@ -1026,18 +901,70 @@ impl App {
         }
     }
 
+    fn ledger_tag_cell_spans(
+        &self,
+        description: &str,
+        fallback_tag: &str,
+        focus: Option<usize>,
+        width: usize,
+        color: Color,
+    ) -> Vec<Span<'static>> {
+        if width == 0 {
+            return Vec::new();
+        }
+        let Some(focus) = focus else {
+            return vec![Span::styled(
+                self.ledger_left_cell(&ledger_display_tag(description, fallback_tag), width),
+                Style::default().fg(color),
+            )];
+        };
+
+        let tags = super::tagging::parse_tags(description);
+        let values = if tags.is_empty() {
+            vec![EMPTY_TAG_DISPLAY.to_string()]
+        } else {
+            tags
+        };
+        let mut spans = Vec::new();
+        let mut remaining = width;
+        for (index, value) in values.iter().enumerate() {
+            if index > 0 && remaining > 0 {
+                let separator = self.truncate_label("; ", remaining);
+                remaining = remaining.saturating_sub(separator.chars().count());
+                spans.push(Span::styled(separator, Style::default().fg(color)));
+            }
+            if remaining == 0 {
+                break;
+            }
+            let visible = self.truncate_label(value, remaining);
+            remaining = remaining.saturating_sub(visible.chars().count());
+            let style = if index == focus {
+                Style::default().fg(color).add_modifier(Modifier::REVERSED)
+            } else {
+                Style::default().fg(color)
+            };
+            spans.push(Span::styled(visible, style));
+        }
+        if remaining > 0 {
+            spans.push(Span::styled(
+                " ".repeat(remaining),
+                Style::default().fg(color),
+            ));
+        }
+        spans
+    }
+
     fn ledger_normal_line(
         &self,
         row: &CategoryLogEntry,
         widths: LedgerColumnWidths,
         presentation: LedgerRowPresentation<'_>,
     ) -> Line<'static> {
-        let tag = ledger_display_tag_with_focus(
-            &row.description,
-            presentation.fallback_tag,
-            presentation.filter_focus,
-        );
-        let time = ledger_time_span_label(&row.start_time, &row.end_time);
+        let time = if row.active_stable_id.is_some() {
+            format!("{}–now", row.start_time.get(..5).unwrap_or(&row.start_time))
+        } else {
+            ledger_time_span_label(&row.start_time, &row.end_time)
+        };
         let metric = self.ledger_metric_value(row, presentation.is_none_category);
         let metric_color = presentation
             .selected_text
@@ -1057,57 +984,81 @@ impl App {
         } else {
             (tag_color, marker_color, temporal_color, metric_color)
         };
-        let (cell_widths, values): (Vec<usize>, Vec<(String, Color)>) = if widths.show_date {
-            (
-                vec![widths.tag, widths.date, widths.time, widths.metric],
-                vec![
-                    (tag, tag_color),
-                    (
-                        ledger_date_span_label(&row.date, &row.end_date),
-                        temporal_color,
-                    ),
-                    (time, temporal_color),
-                    (metric, metric_color),
-                ],
-            )
-        } else {
-            (
-                vec![widths.tag, widths.time, widths.metric],
-                vec![
-                    (tag, tag_color),
-                    (time, temporal_color),
-                    (metric, metric_color),
-                ],
-            )
-        };
 
-        let last = values.len().saturating_sub(1);
-        let mut spans = Vec::with_capacity(values.len().saturating_add(1));
-        for (idx, ((value, color), width)) in values.into_iter().zip(cell_widths).enumerate() {
-            if idx > 0 {
-                spans.push(Span::raw(" "));
-            }
-            if idx == 0 {
-                let marker = format!("{} ", balance_marker(presentation.balance_effect));
-                let marker_width = marker.chars().count().min(width);
-                spans.push(Span::styled(
-                    self.truncate_label(&marker, marker_width),
-                    Style::default().fg(marker_color),
-                ));
-                spans.push(Span::styled(
-                    self.ledger_left_cell(&value, width.saturating_sub(marker_width)),
-                    Style::default().fg(tag_color),
-                ));
-            } else {
-                let aligned = if idx == last {
-                    self.ledger_right_cell(&value, width)
-                } else {
-                    self.ledger_center_cell(&value, width)
-                };
-                spans.push(Span::styled(aligned, Style::default().fg(color)));
-            }
+        let marker = format!("{} ", balance_marker(presentation.balance_effect));
+        let marker_width = marker.chars().count().min(widths.tag);
+        let value_width = widths.tag.saturating_sub(marker_width);
+        let mut spans = vec![Span::styled(
+            self.truncate_label(&marker, marker_width),
+            Style::default().fg(marker_color),
+        )];
+        spans.extend(self.ledger_tag_cell_spans(
+            &row.description,
+            presentation.fallback_tag,
+            presentation.filter_focus,
+            value_width,
+            tag_color,
+        ));
+
+        if widths.show_date {
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(
+                self.ledger_center_cell(
+                    &ledger_date_span_label(&row.date, &row.end_date),
+                    widths.date,
+                ),
+                Style::default().fg(temporal_color),
+            ));
         }
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            self.ledger_center_cell(&time, widths.time),
+            Style::default().fg(temporal_color),
+        ));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            self.ledger_right_cell(&metric, widths.metric),
+            Style::default().fg(metric_color),
+        ));
         Line::from(spans)
+    }
+
+    fn ledger_edit_metric(
+        &self,
+        edit: &LedgerEntryEditState,
+        is_none_category: bool,
+    ) -> (String, Color) {
+        let Some((elapsed, balance)) = self.ledger_edit_report_contribution(edit) else {
+            return ("—".to_string(), self.theme_status());
+        };
+        if is_none_category {
+            return (self.format_time(elapsed), self.theme_status());
+        }
+        let value = if balance == 0 {
+            let effect = self
+                .report_rows()
+                .entries
+                .iter()
+                .find(|entry| entry.category_id == edit.category_id)
+                .map(|entry| entry.balance_effect)
+                .unwrap_or(0);
+            if effect < 0 {
+                "-00:00:00".to_string()
+            } else {
+                self.format_balance_time(balance)
+            }
+        } else {
+            self.format_balance_time(balance)
+        };
+        (
+            value,
+            view_style::balance_color(
+                balance,
+                self.theme_error(),
+                self.theme_success(),
+                self.theme_status(),
+            ),
+        )
     }
 
     fn ledger_edit_line(
@@ -1117,161 +1068,91 @@ impl App {
         marker: &str,
         fallback_tag: &str,
     ) -> Line<'static> {
-        let row_width = widths.total();
-        if row_width < 52 {
-            let effective_end_date = ledger_edit_effective_end_date(edit);
-            if edit.active_field == LedgerEntryField::Description
-                && let Some(completion) =
-                    self.tag_completion_for_category(edit.category_id, &edit.description)
-            {
-                let suffix = tag_completion_suffix(&completion);
-                let prefix = format!("{marker} Tag [{}", edit.description.trim());
-                let full_width = prefix
-                    .chars()
-                    .count()
-                    .saturating_add(suffix.chars().count())
-                    .saturating_add(1);
-                if full_width <= row_width {
-                    let padding = row_width.saturating_sub(full_width);
-                    return Line::from(vec![
-                        Span::raw(prefix),
-                        Span::styled(suffix, Style::default().add_modifier(Modifier::DIM)),
-                        Span::raw(format!("]{}", " ".repeat(padding))),
-                    ]);
-                }
-            }
-            let active_value = match edit.active_field {
-                LedgerEntryField::Description => {
-                    format!("Tag {}", ledger_edit_token(edit.description.trim(), true))
-                }
-                LedgerEntryField::StartDate => {
-                    format!("From {}", ledger_edit_token(&edit.start_date, true))
-                }
-                LedgerEntryField::StartTime => format!(
-                    "From {} {}",
-                    self.ledger_date_label(&edit.start_date),
-                    ledger_edit_time_token(&edit.start_time, true, edit.select_all)
-                ),
-                LedgerEntryField::EndDate => {
-                    format!("To {}", ledger_edit_token(&effective_end_date, true))
-                }
-                LedgerEntryField::EndTime => format!(
-                    "To {} {}",
-                    self.ledger_date_label(&effective_end_date),
-                    ledger_edit_time_token(&edit.end_time, true, edit.select_all)
-                ),
-            };
-            return Line::from(Span::raw(
-                self.ledger_left_cell(&format!("{marker} {active_value}"), row_width),
-            ));
-        }
-
         let description = edit.description.trim();
         let tag = if edit.active_field == LedgerEntryField::Description {
-            ledger_edit_token(description, true)
+            description.to_string()
         } else {
             ledger_display_tag(description, fallback_tag)
         };
-
         let effective_end_date = ledger_edit_effective_end_date(edit);
-        let start_date_label = if edit.active_field == LedgerEntryField::StartDate {
-            edit.start_date.clone()
-        } else {
-            self.ledger_date_label(&edit.start_date)
+        let date_value = match edit.active_field {
+            LedgerEntryField::StartDate => edit.start_date.clone(),
+            LedgerEntryField::EndDate => effective_end_date.clone(),
+            _ => ledger_date_span_label(&edit.start_date, &effective_end_date),
         };
-        let end_date_label = if edit.active_field == LedgerEntryField::EndDate {
-            effective_end_date.clone()
+        let start_time = if edit.active_field == LedgerEntryField::StartTime {
+            edit.start_time.clone()
         } else {
-            self.ledger_date_label(&effective_end_date)
+            super::ledger_state::format_ledger_time_input(&edit.start_time)
         };
-        let start_date = ledger_edit_token(
-            &start_date_label,
-            edit.active_field == LedgerEntryField::StartDate,
-        );
-        let end_date = ledger_edit_token(
-            &end_date_label,
-            edit.active_field == LedgerEntryField::EndDate,
-        );
-        let start_time = ledger_edit_time_token(
-            &edit.start_time,
-            edit.active_field == LedgerEntryField::StartTime,
-            edit.select_all,
-        );
-        let end_time = ledger_edit_time_token(
-            &edit.end_time,
-            edit.active_field == LedgerEntryField::EndTime,
-            edit.select_all,
-        );
-
-        let date_value = if edit.active_field == LedgerEntryField::StartDate
-            || edit.active_field == LedgerEntryField::EndDate
-        {
-            format!("{start_date}-{end_date}")
+        let time_value = if edit.is_active() {
+            format!("{start_time}–now")
         } else {
-            ledger_date_span_label(&edit.start_date, &effective_end_date)
-        };
-        let (cell_widths, values): (Vec<usize>, Vec<String>) = if widths.show_date {
-            (
-                vec![widths.tag, widths.date, widths.time, widths.metric],
-                vec![
-                    tag,
-                    date_value,
-                    format!("{start_time}–{end_time}"),
-                    String::new(),
-                ],
-            )
-        } else {
-            (
-                vec![widths.tag, widths.time, widths.metric],
-                vec![tag, format!("{start_time}–{end_time}"), String::new()],
-            )
-        };
-
-        let last = values.len().saturating_sub(1);
-        let mut spans = Vec::with_capacity(values.len().saturating_add(1));
-        for (idx, (value, width)) in values.into_iter().zip(cell_widths).enumerate() {
-            if idx > 0 {
-                spans.push(Span::raw(" "));
-            }
-            if idx == 0 {
-                let marker = format!("{marker} ");
-                let marker_width = marker.chars().count().min(width);
-                spans.push(Span::raw(self.truncate_label(&marker, marker_width)));
-                let value_width = width.saturating_sub(marker_width);
-                if edit.active_field == LedgerEntryField::Description
-                    && let Some(completion) =
-                        self.tag_completion_for_category(edit.category_id, &edit.description)
-                {
-                    let suffix = tag_completion_suffix(&completion);
-                    let prefix = format!("[{}", edit.description.trim());
-                    let autocomplete_width = prefix
-                        .chars()
-                        .count()
-                        .saturating_add(suffix.chars().count())
-                        .saturating_add(1);
-                    if autocomplete_width <= value_width {
-                        spans.push(Span::raw(prefix));
-                        spans.push(Span::styled(
-                            suffix,
-                            Style::default().add_modifier(Modifier::DIM),
-                        ));
-                        spans.push(Span::raw(format!(
-                            "]{}",
-                            " ".repeat(value_width.saturating_sub(autocomplete_width))
-                        )));
-                        continue;
-                    }
-                }
-                spans.push(Span::raw(self.ledger_left_cell(&value, value_width)));
+            let end_time = if edit.active_field == LedgerEntryField::EndTime {
+                edit.end_time.clone()
             } else {
-                let aligned = if idx == last {
-                    self.ledger_right_cell(&value, width)
-                } else {
-                    self.ledger_center_cell(&value, width)
-                };
-                spans.push(Span::raw(aligned));
+                super::ledger_state::format_ledger_time_input(&edit.end_time)
+            };
+            format!("{start_time}–{end_time}")
+        };
+        let is_none = edit.category_id == DRIFT_CATEGORY_ID;
+        let (metric, metric_color) = self.ledger_edit_metric(edit, is_none);
+
+        let marker_text = format!("{marker} ");
+        let marker_width = marker_text.chars().count().min(widths.tag);
+        let value_width = widths.tag.saturating_sub(marker_width);
+        let mut spans = vec![Span::styled(
+            self.truncate_label(&marker_text, marker_width),
+            Style::default().fg(self.category_color_for_id(edit.category_id)),
+        )];
+        if edit.active_field == LedgerEntryField::Description {
+            let visible = self.truncate_label(&tag, value_width);
+            let used = visible.chars().count();
+            spans.push(Span::styled(
+                visible,
+                Style::default().fg(self.theme_foreground()),
+            ));
+            let mut remaining = value_width.saturating_sub(used);
+            if remaining > 0
+                && let Some(completion) =
+                    self.tag_completion_for_category(edit.category_id, &edit.description)
+            {
+                let suffix = self.truncate_label(&tag_completion_suffix(&completion), remaining);
+                remaining = remaining.saturating_sub(suffix.chars().count());
+                spans.push(Span::styled(
+                    suffix,
+                    Style::default()
+                        .fg(self.theme_status())
+                        .add_modifier(Modifier::DIM),
+                ));
             }
+            if remaining > 0 {
+                spans.push(Span::raw(" ".repeat(remaining)));
+            }
+        } else {
+            spans.push(Span::styled(
+                self.ledger_left_cell(&tag, value_width),
+                Style::default().fg(self.theme_foreground()),
+            ));
         }
+
+        if widths.show_date {
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(
+                self.ledger_center_cell(&date_value, widths.date),
+                Style::default().fg(self.theme_status()),
+            ));
+        }
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            self.ledger_center_cell(&time_value, widths.time),
+            Style::default().fg(self.theme_status()),
+        ));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            self.ledger_right_cell(&metric, widths.metric),
+            Style::default().fg(metric_color),
+        ));
         Line::from(spans)
     }
 
@@ -1281,118 +1162,31 @@ impl App {
         widths: LedgerColumnWidths,
         marker: &str,
     ) -> usize {
-        let row_width = widths.total();
-        if row_width < 52 {
-            let marker_prefix = format!("{marker} ");
-            return match edit.active_field {
-                LedgerEntryField::Description => marker_prefix
-                    .chars()
-                    .count()
-                    .saturating_add("Tag [".chars().count())
-                    .saturating_add(edit.description.trim().chars().count()),
-                LedgerEntryField::StartDate => marker_prefix
-                    .chars()
-                    .count()
-                    .saturating_add("From [".chars().count())
-                    .saturating_add(edit.start_date.chars().count()),
-                LedgerEntryField::StartTime => marker_prefix
-                    .chars()
-                    .count()
-                    .saturating_add("From ".chars().count())
-                    .saturating_add(self.ledger_date_label(&edit.start_date).chars().count())
-                    .saturating_add(" [".chars().count())
-                    .saturating_add(edit.start_time.chars().count()),
-                LedgerEntryField::EndDate => marker_prefix
-                    .chars()
-                    .count()
-                    .saturating_add("To [".chars().count())
-                    .saturating_add(ledger_edit_effective_end_date(edit).chars().count()),
-                LedgerEntryField::EndTime => marker_prefix
-                    .chars()
-                    .count()
-                    .saturating_add("To ".chars().count())
-                    .saturating_add(
-                        self.ledger_date_label(&ledger_edit_effective_end_date(edit))
-                            .chars()
-                            .count(),
-                    )
-                    .saturating_add(" [".chars().count())
-                    .saturating_add(edit.end_time.chars().count()),
-            };
-        }
-
-        let tag_start = marker.chars().count().saturating_add(1);
+        let marker_width = format!("{marker} ").chars().count().min(widths.tag);
         if edit.active_field == LedgerEntryField::Description {
-            return tag_start
-                .saturating_add(1)
-                .saturating_add(edit.description.trim().chars().count());
+            return marker_width
+                .saturating_add(edit.caret.min(widths.tag.saturating_sub(marker_width)));
         }
 
-        let effective_end_date = ledger_edit_effective_end_date(edit);
-        let start_date_label = if edit.active_field == LedgerEntryField::StartDate {
-            edit.start_date.clone()
-        } else {
-            self.ledger_date_label(&edit.start_date)
-        };
-        let end_date_label = if edit.active_field == LedgerEntryField::EndDate {
-            effective_end_date.clone()
-        } else {
-            self.ledger_date_label(&effective_end_date)
-        };
-        let start_date = ledger_edit_token(
-            &start_date_label,
-            edit.active_field == LedgerEntryField::StartDate,
-        );
-        let end_date = ledger_edit_token(
-            &end_date_label,
-            edit.active_field == LedgerEntryField::EndDate,
-        );
-        let date_value = if matches!(
-            edit.active_field,
-            LedgerEntryField::StartDate | LedgerEntryField::EndDate
-        ) {
-            format!("{start_date}-{end_date}")
-        } else {
-            ledger_date_span_label(&edit.start_date, &effective_end_date)
-        };
-
-        let start_time = ledger_edit_time_token(
-            &edit.start_time,
-            edit.active_field == LedgerEntryField::StartTime,
-            edit.select_all,
-        );
-        let end_time = ledger_edit_time_token(
-            &edit.end_time,
-            edit.active_field == LedgerEntryField::EndTime,
-            edit.select_all,
-        );
-        let time_value = format!("{start_time}–{end_time}");
-
-        if widths.show_date
-            && matches!(
-                edit.active_field,
-                LedgerEntryField::StartDate | LedgerEntryField::EndDate
-            )
+        if edit.active_field == LedgerEntryField::StartDate
+            || edit.active_field == LedgerEntryField::EndDate
         {
-            let cell_start = widths.tag.saturating_add(1);
-            let left_pad = widths.date.saturating_sub(date_value.chars().count()) / 2;
-            let within = if edit.active_field == LedgerEntryField::StartDate {
-                1usize.saturating_add(start_date_label.chars().count())
+            let value = if edit.active_field == LedgerEntryField::StartDate {
+                edit.start_date.as_str()
             } else {
-                start_date
-                    .chars()
-                    .count()
-                    .saturating_add(1)
-                    .saturating_add(1)
-                    .saturating_add(end_date_label.chars().count())
+                edit.end_date.as_str()
             };
-            return cell_start.saturating_add(left_pad).saturating_add(within);
+            let cell_start = widths.tag.saturating_add(1);
+            let visible_len = value.chars().count().min(widths.date);
+            let left_pad = widths.date.saturating_sub(visible_len) / 2;
+            return cell_start
+                .saturating_add(left_pad)
+                .saturating_add(edit.caret.min(visible_len));
         }
 
-        if matches!(
-            edit.active_field,
-            LedgerEntryField::StartTime | LedgerEntryField::EndTime
-        ) {
+        if edit.active_field == LedgerEntryField::StartTime
+            || edit.active_field == LedgerEntryField::EndTime
+        {
             let cell_start = widths
                 .tag
                 .saturating_add(1)
@@ -1401,32 +1195,36 @@ impl App {
                 } else {
                     0
                 });
-            let left_pad = widths.time.saturating_sub(time_value.chars().count()) / 2;
-            let start_display =
-                if edit.active_field == LedgerEntryField::StartTime && !edit.select_all {
-                    edit.start_time.clone()
-                } else {
-                    super::ledger_state::format_ledger_time_input(&edit.start_time)
-                };
-            let end_display = if edit.active_field == LedgerEntryField::EndTime && !edit.select_all
-            {
-                edit.end_time.clone()
+            let start_display = if edit.active_field == LedgerEntryField::StartTime {
+                edit.start_time.clone()
             } else {
-                super::ledger_state::format_ledger_time_input(&edit.end_time)
+                super::ledger_state::format_ledger_time_input(&edit.start_time)
             };
-            let within = if edit.active_field == LedgerEntryField::StartTime {
-                1usize.saturating_add(start_display.chars().count())
+            let time_value = if edit.is_active() {
+                format!("{start_display}–now")
             } else {
-                start_time
+                let end_display = if edit.active_field == LedgerEntryField::EndTime {
+                    edit.end_time.clone()
+                } else {
+                    super::ledger_state::format_ledger_time_input(&edit.end_time)
+                };
+                format!("{start_display}–{end_display}")
+            };
+            let visible_len = time_value.chars().count().min(widths.time);
+            let left_pad = widths.time.saturating_sub(visible_len) / 2;
+            let within = if edit.active_field == LedgerEntryField::StartTime {
+                edit.caret.min(start_display.chars().count())
+            } else {
+                start_display
                     .chars()
                     .count()
                     .saturating_add(1)
-                    .saturating_add(1)
-                    .saturating_add(end_display.chars().count())
+                    .saturating_add(edit.caret.min(edit.end_time.chars().count()))
             };
-            return cell_start.saturating_add(left_pad).saturating_add(within);
+            return cell_start
+                .saturating_add(left_pad)
+                .saturating_add(within.min(visible_len));
         }
-
         0
     }
 
@@ -1463,24 +1261,29 @@ impl App {
             .enumerate()
             .map(|(idx, row)| {
                 let is_selected = selected_log_index == Some(idx);
-                let editing_this_row = self
-                    .ledger_entry_edit
-                    .as_ref()
-                    .is_some_and(|edit| edit.session_id() == row.session_id);
+                let editing_this_row = self.ledger_entry_edit.as_ref().is_some_and(|edit| {
+                    edit.session_id() == row.session_id && row.session_id.is_some()
+                        || edit.is_active()
+                            && row.active_stable_id.as_deref()
+                                == self.session.active_session_stable_id.as_deref()
+                });
                 let filtered_out = self.report_tag_filter_active()
                     && !editing_this_row
                     && !self.report_log_matches_filter(row);
                 let item = if editing_this_row {
-                    ListItem::new(
+                    ListItem::new({
+                        let edit = self
+                            .ledger_entry_edit
+                            .as_ref()
+                            .expect("editing row has ledger edit state");
+                        let edit_columns = self.ledger_edit_columns(edit, columns, row_width);
                         self.ledger_edit_line(
-                            self.ledger_entry_edit
-                                .as_ref()
-                                .expect("editing row has ledger edit state"),
-                            columns,
+                            edit,
+                            edit_columns,
                             balance_marker(balance_effect),
                             &layer_display_name,
-                        ),
-                    )
+                        )
+                    })
                 } else {
                     ListItem::new(self.ledger_normal_line(
                         row,
@@ -1524,16 +1327,14 @@ impl App {
                 .as_ref()
                 .is_some_and(|edit| edit.is_add());
             let item = if editing_add {
-                ListItem::new(
-                    self.ledger_edit_line(
-                        self.ledger_entry_edit
-                            .as_ref()
-                            .expect("adding row has ledger edit state"),
-                        columns,
-                        "+",
-                        &layer_display_name,
-                    ),
-                )
+                ListItem::new({
+                    let edit = self
+                        .ledger_entry_edit
+                        .as_ref()
+                        .expect("adding row has ledger edit state");
+                    let edit_columns = self.ledger_edit_columns(edit, columns, row_width);
+                    self.ledger_edit_line(edit, edit_columns, "+", &layer_display_name)
+                })
             } else {
                 let label = "+ Add entry…";
                 let padded = self.ledger_left_cell(label, row_width);
@@ -1574,6 +1375,8 @@ impl App {
         if let (Some(edit), Some(visual_index)) =
             (self.ledger_entry_edit.as_ref(), visual_selected_index)
             && edit.confirmation.is_none()
+            && self.report_layer_delete_confirmation.is_none()
+            && self.report_entry_delete_confirmation.is_none()
         {
             let visible_row = visual_index.saturating_sub(list_state.offset());
             if visible_row < usize::from(list_area.height) && list_area.width > 0 {
@@ -1582,7 +1385,8 @@ impl App {
                 } else {
                     balance_marker(balance_effect)
                 };
-                let relative_x = self.ledger_edit_cursor_column(edit, columns, marker);
+                let edit_columns = self.ledger_edit_columns(edit, columns, row_width);
+                let relative_x = self.ledger_edit_cursor_column(edit, edit_columns, marker);
                 let cursor_x = list_area.x.saturating_add(
                     u16::try_from(relative_x)
                         .unwrap_or(u16::MAX)
@@ -1595,65 +1399,90 @@ impl App {
         }
     }
 
-    fn render_report_layer_delete_confirmation(&self, f: &mut Frame, area: Rect) {
+    fn render_report_layer_delete_confirmation(&self, f: &mut Frame, terminal: Rect) {
         let Some(category_id) = self.report_layer_delete_confirmation else {
             return;
         };
-        if area.width < 4 || area.height < 3 {
-            return;
-        }
-
         let name = self.report_layer_display_name(category_id);
-        let desired_width = CONFIRMATION_CARD_WIDTH.min(area.width);
-        let desired_height = 7u16.min(area.height);
-        let x = area.x + area.width.saturating_sub(desired_width) / 2;
-        let y = area.y + area.height.saturating_sub(desired_height) / 2;
-        let card = Rect::new(x, y, desired_width, desired_height);
-        let block = Block::default()
-            .title(Line::from(Span::styled(
-                format!("Delete {name}?"),
-                Style::default()
-                    .fg(self.theme_error())
-                    .add_modifier(Modifier::BOLD),
-            )))
-            .title_alignment(Alignment::Center)
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(self.theme_error()))
-            .style(Style::default().bg(self.theme_background()));
-        f.render_widget(block.clone(), card);
-        let inner = block.inner(card);
-        if inner.width == 0 || inner.height == 0 {
-            return;
-        }
+        self.render_system_dialog(
+            f,
+            terminal,
+            super::SystemDialogSeverity::Warning,
+            Line::from(vec![
+                Span::raw("Delete "),
+                Span::styled(
+                    name,
+                    Style::default().fg(self.category_color_for_id(category_id)),
+                ),
+                Span::raw("?"),
+            ])
+            .style(Style::default().add_modifier(Modifier::BOLD)),
+            vec![
+                Line::from("Balance history will be permanently removed."),
+                Line::from("Existing sediment becomes Idle."),
+            ],
+            vec![Line::from("Delete Layer"), Line::from("Go back")],
+            self.system_dialog_selected_index,
+            48,
+        );
+    }
 
-        let lines = vec![
-            Line::from(vec![
-                Span::styled(
-                    "Balance history",
-                    Style::default().fg(self.theme_foreground()),
-                ),
-                Span::styled("  delete", Style::default().fg(self.theme_error())),
-            ])
-            .alignment(Alignment::Center),
-            Line::from(vec![
-                Span::styled("Sediment", Style::default().fg(self.theme_foreground())),
-                Span::styled("  → Idle", Style::default().fg(self.theme_status())),
-            ])
-            .alignment(Alignment::Center),
-            Line::default(),
-            Line::from(vec![
-                Span::styled(
-                    "Enter delete",
-                    Style::default()
-                        .fg(self.theme_error())
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(" · Esc back", Style::default().fg(self.theme_status())),
-            ])
-            .alignment(Alignment::Center),
-        ];
-        f.render_widget(Paragraph::new(lines), inner);
+    fn render_report_entry_delete_confirmation(&self, f: &mut Frame, terminal: Rect) {
+        let Some(identity) = self.report_entry_delete_confirmation.as_ref() else {
+            return;
+        };
+        let Some(category_id) = self.report_logs_category_id else {
+            return;
+        };
+        let logs = self.report_current_logs();
+        let row = logs.iter().find(|row| match identity {
+            super::LedgerSelectionIdentity::Session(session_id) => {
+                row.session_id == Some(*session_id)
+            }
+            super::LedgerSelectionIdentity::Active(stable_id) => {
+                row.active_stable_id.as_deref() == Some(stable_id.as_str())
+            }
+            super::LedgerSelectionIdentity::Add => false,
+        });
+        let Some(row) = row else {
+            return;
+        };
+        let base = self.preferred_ledger_columns(std::slice::from_ref(row));
+        let natural_width = base.required_proportional_total().max(24);
+        let widths = base.fit(natural_width);
+        let balance_effect = self
+            .report_rows()
+            .entries
+            .iter()
+            .find(|entry| entry.category_id == category_id)
+            .map(|entry| entry.balance_effect)
+            .unwrap_or(0);
+        let line = self.ledger_normal_line(
+            row,
+            widths,
+            LedgerRowPresentation {
+                selected_text: None,
+                filter_focus: None,
+                is_none_category: category_id == DRIFT_CATEGORY_ID,
+                balance_effect,
+                marker_color: self.category_color_for_id(category_id),
+                fallback_tag: &self.report_layer_display_name(category_id),
+                deemphasized: false,
+            },
+        );
+        self.render_system_dialog(
+            f,
+            terminal,
+            super::SystemDialogSeverity::Warning,
+            Line::from(Span::styled(
+                "Delete entry?",
+                Style::default().add_modifier(Modifier::BOLD),
+            )),
+            vec![line],
+            vec![Line::from("Delete entry"), Line::from("Go back")],
+            self.system_dialog_selected_index,
+            u16::try_from(natural_width.saturating_add(2)).unwrap_or(u16::MAX),
+        );
     }
 
     fn render_report_summary_with_instrument(
@@ -1663,11 +1492,6 @@ impl App {
         summary: &BalanceReportSummary,
         selected_summary_index: Option<usize>,
     ) {
-        if self.report_layer_delete_confirmation.is_some() {
-            self.render_report_layer_delete_confirmation(f, area);
-            return;
-        }
-
         let (totals_area, meter_area, list_area) = if area.height >= 6 {
             let rows = Layout::default()
                 .direction(Direction::Vertical)
@@ -1811,13 +1635,12 @@ mod hardening_tests {
     use super::super::{LedgerEntryEditState, LedgerEntryField};
     use super::{
         App, LedgerColumnWidths, balance_marker, ledger_date_span_label, ledger_display_tag,
-        ledger_edit_effective_end_date, ledger_edit_token, ledger_time_span_label,
-        summary_border_color,
+        ledger_edit_effective_end_date, ledger_time_span_label, summary_border_color,
     };
     use crate::domain::{BalanceReportEntry, BalanceReportSummary, CategoryId};
 
     #[test]
-    fn ledger_data_regions_split_evenly_for_three_and_four_bit_rows() {
+    fn ledger_data_regions_keep_symmetric_three_and_four_cell_anchors() {
         assert_eq!(
             App::ledger_weighted_widths(60, &[1, 1, 1]),
             vec![20, 20, 20]
@@ -1851,18 +1674,18 @@ mod hardening_tests {
             show_date: true,
         };
         assert_eq!(natural.total(), 55);
-        assert_eq!(natural.required_proportional_total(), 95);
+        assert_eq!(natural.required_proportional_total(), 71);
         let fitted = natural.fit(natural.required_proportional_total());
-        assert_eq!(fitted.total(), 95);
+        assert_eq!(fitted.total(), 71);
         assert_eq!(fitted.tag, 23);
-        assert_eq!(fitted.date, 23);
-        assert_eq!(fitted.time, 23);
+        assert_eq!(fitted.date, 11);
+        assert_eq!(fitted.time, 11);
         assert_eq!(fitted.metric, 23);
         assert!(natural.fit(24).total() <= 24);
     }
 
     #[test]
-    fn single_day_ledger_width_expands_equal_cells_for_long_tags() {
+    fn single_day_ledger_keeps_time_centered_without_widening_every_cell() {
         let natural = LedgerColumnWidths {
             tag: 40,
             date: 0,
@@ -1870,11 +1693,11 @@ mod hardening_tests {
             metric: 9,
             show_date: false,
         };
-        assert_eq!(natural.required_proportional_total(), 122);
+        assert_eq!(natural.required_proportional_total(), 93);
         let fitted = natural.fit(natural.required_proportional_total());
-        assert_eq!(fitted.total(), 122);
+        assert_eq!(fitted.total(), 93);
         assert_eq!(fitted.tag, 40);
-        assert_eq!(fitted.time, 40);
+        assert_eq!(fitted.time, 11);
         assert_eq!(fitted.metric, 40);
     }
 
@@ -1893,7 +1716,7 @@ mod hardening_tests {
     }
 
     #[test]
-    fn ledger_edit_tokens_keep_overnight_end_date_and_active_field_visible() {
+    fn ledger_edit_keeps_overnight_end_date_without_bracket_chrome() {
         let mut edit = LedgerEntryEditState::existing(
             7,
             CategoryId::new(2),
@@ -1904,14 +1727,7 @@ mod hardening_tests {
             "00:20:00".to_string(),
         );
         edit.active_field = LedgerEntryField::EndTime;
-
         assert_eq!(ledger_edit_effective_end_date(&edit), "2026-09-28");
-        assert_eq!(
-            ledger_edit_token("UX detail smoke", false),
-            "UX detail smoke"
-        );
-        assert_eq!(ledger_edit_token("00:20:00", true), "[00:20:00]");
-        assert_eq!(ledger_edit_token("", true), "[        ]");
     }
 
     #[test]
