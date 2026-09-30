@@ -562,7 +562,10 @@ impl LedgerEntryEditState {
         if delta < 0 {
             self.caret = self.caret.saturating_sub(delta.unsigned_abs());
         } else {
-            self.caret = self.caret.saturating_add(delta as usize).min(len);
+            self.caret = self
+                .caret
+                .saturating_add(usize::try_from(delta).unwrap_or(usize::MAX))
+                .min(len);
         }
         self.reset_tag_cycle();
     }

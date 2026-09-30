@@ -1036,7 +1036,10 @@ impl App {
             return false;
         }
         let previous_category = self.time_tracker.active_category_id();
-        let removed_seconds = self.time_tracker.current_elapsed().unwrap_or_default().as_secs() as usize;
+        let removed_seconds = usize::try_from(
+            self.time_tracker.current_elapsed().unwrap_or_default().as_secs(),
+        )
+        .unwrap_or(usize::MAX);
         let affected_days = self
             .live_preview_session()
             .map(|session| {
@@ -1124,17 +1127,6 @@ impl App {
         self.sync_report_log_selection_to_identity();
         self.render_needed = true;
         true
-    }
-
-    pub(super) fn delete_selected_report_session(&mut self) -> bool {
-        let logs = self.report_current_logs();
-        let Some(row) = logs.get(self.report_log_selected_index) else {
-            return false;
-        };
-        let Some(session_id) = row.session_id else {
-            return false;
-        };
-        self.delete_report_session_by_id(session_id)
     }
 
     pub(super) fn report_layer_display_name(&self, category_id: CategoryId) -> String {
@@ -1513,7 +1505,10 @@ impl App {
             return false;
         };
         let old_start = self.session.active_session_started_at_utc.unwrap_or(from);
-        let old_elapsed = self.time_tracker.current_elapsed().unwrap_or_default().as_secs() as usize;
+        let old_elapsed = usize::try_from(
+            self.time_tracker.current_elapsed().unwrap_or_default().as_secs(),
+        )
+        .unwrap_or(usize::MAX);
         let old_days = self
             .live_preview_session()
             .map(|session| {

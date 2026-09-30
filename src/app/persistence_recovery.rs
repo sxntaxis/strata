@@ -90,17 +90,6 @@ pub(super) enum RecoveryAction {
     CommitCheckpointRecovery,
 }
 
-impl RecoveryAction {
-    fn label(self) -> &'static str {
-        match self {
-            Self::FlushCurrentState => "retry current state",
-            Self::ReloadAuthority => "reload SQLite authority",
-            Self::FinishAndExit => "retry finish and exit",
-            Self::DetachAndExit => "retry detach and exit",
-            Self::CommitCheckpointRecovery => "retry checkpoint completion",
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
