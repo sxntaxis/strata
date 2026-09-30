@@ -813,6 +813,25 @@ mod tests {
     }
 
     #[test]
+    fn linked_start_time_overflow_moves_the_linked_interval_with_it() {
+        let mut edit = LedgerEntryEditState::existing(
+            7,
+            CategoryId::new(2),
+            "tag".to_string(),
+            "2026-09-27".to_string(),
+            "99:".to_string(),
+            "2026-09-27".to_string(),
+            "05:00".to_string(),
+        );
+        edit.active_field = LedgerEntryField::StartTime;
+        assert!(edit.adjust_active_temporal(1, false));
+        assert_eq!(edit.start_date, "2026-10-01");
+        assert_eq!(edit.start_time, "03:01");
+        assert_eq!(edit.end_date, "2026-10-01");
+        assert_eq!(edit.end_time, "05:00");
+    }
+
+    #[test]
     fn caret_edits_inside_values_without_stealing_plain_arrows() {
         let mut edit = LedgerEntryEditState::existing(
             7,
