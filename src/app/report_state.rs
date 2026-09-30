@@ -1356,6 +1356,10 @@ impl App {
             return false;
         };
         edit.description = cycle.value;
+        // Plain Right accepts/cycles the current ghost-completion token. Keep the
+        // caret at the end of that accepted token instead of stranded at the
+        // length of the typed prefix.
+        edit.caret = edit.description.chars().count();
         edit.tag_cycle_prefix = Some(cycle.prefix);
         edit.select_all = false;
         edit.error = None;

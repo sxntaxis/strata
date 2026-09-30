@@ -104,7 +104,7 @@ pub enum Cli {
             value_name = "YYYY-MM-DD",
             requires = "to",
             conflicts_with_all = ["today", "week", "month"],
-            help = "Inclusive first operational day"
+            help = "Inclusive first reporting cycle"
         )]
         from: Option<NaiveDate>,
 
@@ -113,7 +113,7 @@ pub enum Cli {
             value_name = "YYYY-MM-DD",
             requires = "from",
             conflicts_with_all = ["today", "week", "month"],
-            help = "Inclusive last operational day"
+            help = "Inclusive last reporting cycle"
         )]
         to: Option<NaiveDate>,
 

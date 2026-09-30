@@ -90,10 +90,7 @@ impl App {
                 };
 
                 if is_selected {
-                    let text_color = crate::appearance::contrasting_text_color(
-                        cat.color,
-                        self.theme_foreground(),
-                    );
+                    let text_color = self.theme_selection_text();
                     let layer_name = if self.modal_renaming_category {
                         self.modal_category_name_draft.clone()
                     } else {
@@ -138,7 +135,7 @@ impl App {
                         ));
                     }
                     ListItem::new(Line::from(line_spans))
-                        .style(Style::default().fg(text_color).bg(cat.color))
+                        .style(Style::default().fg(text_color).bg(self.theme_selection()))
                 } else {
                     let layer_name = self.display_layer_name(&cat.name);
                     ListItem::new(Line::from(vec![
@@ -164,11 +161,8 @@ impl App {
                     ]))
                     .style(
                         Style::default()
-                            .fg(crate::appearance::contrasting_text_color(
-                                self.theme_accent(),
-                                self.theme_foreground(),
-                            ))
-                            .bg(self.theme_accent()),
+                            .fg(self.theme_selection_text())
+                            .bg(self.theme_selection()),
                     )
                 } else {
                     ListItem::new(Line::from(vec![

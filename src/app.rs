@@ -1604,6 +1604,17 @@ impl App {
         self.resolve_ui_ref(self.appearance.success_ref())
     }
 
+    pub(super) fn theme_selection(&self) -> ratatui::style::Color {
+        self.appearance.selection_color()
+    }
+
+    pub(super) fn theme_selection_text(&self) -> ratatui::style::Color {
+        crate::appearance::contrasting_text_color(
+            self.theme_selection(),
+            self.theme_foreground(),
+        )
+    }
+
     fn settings_items(&self) -> Vec<SettingsSelectable> {
         let mut items = vec![SettingsSelectable::Theme, SettingsSelectable::WeekStartDay];
         items.extend(

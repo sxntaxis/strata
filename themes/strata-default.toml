@@ -44,3 +44,6 @@ colors = [
   "sand-sky",
   "sand-cyan",
 ]
+
+[ui]
+selection = "white"

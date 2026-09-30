@@ -2,7 +2,7 @@ use ratatui::prelude::{Line, Span};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     widgets::{Block, BorderType, Borders, Paragraph},
 };
 
@@ -121,7 +121,7 @@ impl App {
                 .enumerate()
                 .map(|(idx, entry)| {
                     let is_selected = selected_index == Some(idx);
-                    self.command_palette_line(entry, row_width, is_selected, accent)
+                    self.command_palette_line(entry, row_width, is_selected)
                 })
                 .collect()
         };
@@ -332,7 +332,6 @@ impl App {
         entry: &PaletteEntry,
         row_width: usize,
         is_selected: bool,
-        accent: Color,
     ) -> Line<'static> {
         let max_hint_width = row_width
             .saturating_div(COMMAND_PALETTE_SETTINGS.hint_width_divisor)
@@ -357,20 +356,20 @@ impl App {
         };
 
         if is_selected {
-            let text_color =
-                crate::appearance::contrasting_text_color(accent, self.theme_foreground());
+            let text_color = self.theme_selection_text();
+            let selection = self.theme_selection();
             Line::from(vec![
-                Span::styled(title, Style::default().fg(text_color).bg(accent)),
+                Span::styled(title, Style::default().fg(text_color).bg(selection)),
                 Span::styled(
                     " ".repeat(title_pad),
-                    Style::default().fg(text_color).bg(accent),
+                    Style::default().fg(text_color).bg(selection),
                 ),
-                Span::styled(spacer, Style::default().fg(text_color).bg(accent)),
+                Span::styled(spacer, Style::default().fg(text_color).bg(selection)),
                 Span::styled(
                     hint,
                     Style::default()
                         .fg(text_color)
-                        .bg(accent)
+                        .bg(selection)
                         .add_modifier(Modifier::BOLD),
                 ),
             ])

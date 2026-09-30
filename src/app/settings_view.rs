@@ -286,15 +286,15 @@ impl App {
         let is_selected = selectable == selected_item;
 
         let line = if is_selected {
-            let text_color =
-                crate::appearance::contrasting_text_color(accent, self.theme_foreground());
+            let text_color = self.theme_selection_text();
+            let selection = self.theme_selection();
             Line::from(vec![
-                Span::styled(left_text, Style::default().fg(text_color).bg(accent)),
+                Span::styled(left_text, Style::default().fg(text_color).bg(selection)),
                 Span::styled(
                     pad_column(&right_text, right_width),
                     Style::default()
                         .fg(text_color)
-                        .bg(accent)
+                        .bg(selection)
                         .add_modifier(Modifier::BOLD),
                 ),
             ])
@@ -383,11 +383,8 @@ impl App {
                             Line::from(Span::styled(
                                 label,
                                 Style::default()
-                                    .fg(crate::appearance::contrasting_text_color(
-                                        self.theme_accent(),
-                                        self.theme_foreground(),
-                                    ))
-                                    .bg(self.theme_accent())
+                                    .fg(self.theme_selection_text())
+                                    .bg(self.theme_selection())
                                     .add_modifier(Modifier::BOLD),
                             ))
                         } else {
@@ -430,11 +427,8 @@ impl App {
                             Line::from(Span::styled(
                                 format!("> {}", label),
                                 Style::default()
-                                    .fg(crate::appearance::contrasting_text_color(
-                                        self.settings_item_color(SettingsSelectable::WeekStartDay),
-                                        self.theme_foreground(),
-                                    ))
-                                    .bg(self.settings_item_color(SettingsSelectable::WeekStartDay))
+                                    .fg(self.theme_selection_text())
+                                    .bg(self.theme_selection())
                                     .add_modifier(Modifier::BOLD),
                             ))
                         } else {
