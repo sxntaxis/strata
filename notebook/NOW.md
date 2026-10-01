@@ -5,13 +5,13 @@ state: active
 created: 2026-08-01
 updated: 2026-09-27
 authority: working
-summary: "BALANCE-UX-004 now targets a fixed one-cell horizontal content inset after owner runtime review rejected width-growing side padding; vertical calm remains, and SEDIMENT-016 exact resize/restart mass proof is still open."
+summary: "BALANCE-UX-004 one-cell horizontal and exact Layer vertical insets passed isolated wide/normal/constrained TUI checks; the separate SEDIMENT-016 resize/restart mass proof remains open."
 next: Close SEDIMENT-016 exact persisted-mass comparison across resize and restart, then explicitly promote or revise the accepted resize doctrine.
 ---
 
 ## BALANCE-UX-004 one-cell modal inset — 2026-09-27
 
-**ONE-CELL CORRECTION VERIFIED:** keep the existing responsive modal geometry and vertical calm, but use exactly one horizontal content cell per side at ordinary modal sizes. The validated 1/2/4/6-cell candidate was rejected in runtime review because wide panes accumulated too much side padding; a large Balance name-to-metric gap is explicitly acceptable in preference to that padding. The correction passes formatter, strict Clippy, all tests, and isolated wide/normal/constrained TUI checks. No fixed-width Balance card or secondary content-width system is introduced. Settings, range gestures, report semantics, and sediment remain unchanged. See `notebook/work/BALANCE-UX-004.md`.
+**ONE-CELL HORIZONTAL AND VERTICAL INSETS VERIFIED:** keep the existing responsive modal geometry, use exactly one horizontal content cell per side at ordinary modal sizes, and give Layer exactly one top/bottom content cell whenever two spare rows exist. The validated 1/2/4/6-cell candidate was rejected in runtime review because wide panes accumulated too much side padding; a large Balance name-to-metric gap is explicitly acceptable in preference to that padding. The correction passes formatter, strict Clippy, all tests, and isolated wide/normal/constrained TUI checks. No fixed-width Balance card or secondary content-width system is introduced. Settings, range gestures, report semantics, and sediment remain unchanged. See `notebook/work/BALANCE-UX-004.md`.
 
 ## SEDIMENT-016 vertical physics corridor — 2026-09-27
 
