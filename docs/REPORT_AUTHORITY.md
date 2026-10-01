@@ -1,7 +1,7 @@
 # Report and export authority
 
-Status: accepted and certified
-Last reviewed: 2026-08-27
+Status: accepted authority; BALANCE-LAYER-DETAIL-UX-001 candidate natively validated, owner review pending
+Last reviewed: 2026-09-27
 
 ## Purpose
 
@@ -23,11 +23,34 @@ The inline `r` From/To editor uses the same visible boundary convention. It acce
 
 A canonical session remains one row. Exact overlap slices contribute only the seconds that belong inside the selected operational-day range.
 
+## Balance layer-detail ledger projection
+
+Entering one Balance layer projects the selected report window as an editable ledger without creating a second report
+engine. Completed sessions that cross operational-day boundaries remain one row: all slices of the same canonical
+session that intersect the selected window are aggregated for row display, with the first included boundary and last
+included boundary retained for temporal presentation. The provisional active generation may also project as a row,
+but because it has no completed persisted session identity it is not an existing-entry edit target.
+
+The row presentation is deliberately responsive to interval scope. A single-operational-day window uses three evenly
+distributed data regions: Tag, Time, and signed Effect. A multi-day window uses four evenly distributed regions: Tag,
+Date, Time, and signed Effect. Date remains adjacent to Time rather than becoming a leading identity column. If an
+entry crosses civil dates, the temporal middle region may expand to an explicit `start → end` pair so both date/time
+boundaries remain truthful.
+
+Above the ledger, the layer hero shows the selected layer's signed `balance_seconds` sum and a nested influence meter.
+The parent Balance meter supplies the displacement envelope. Let `P` be the absolute parent marker offset in cells;
+for a non-zero layer contribution `L`, let `S` be the aggregate magnitude of all contributions on `L`'s polarity side.
+The layer marker magnitude is the rounded, clamped `P * |L| / S`, and its direction is the sign of `L`. Therefore a
+layer marker can oppose the parent direction but can never exceed the parent's distance from equilibrium. When the
+parent marker is at equilibrium, layer influence also renders at equilibrium. This meter is a drill-down attribution
+of the parent displacement, not an independently normalized hypothetical Balance.
+
 ## Explicit historical correction
 
-Balance browsing and reporting remain read-only projections. Historical mutation occurs only through an explicit
-committed **Log past activity…** operation. The user states one past interval plus one existing target layer; canonical
-session boundaries are persistence detail rather than interaction authority.
+Balance browsing remains a projection until the user explicitly enters a ledger mutation. Historical mutation has
+two deliberate entry points: the Balance-wide **Log past activity…** assignment operation and the scoped layer-detail
+ledger editor. The global operation states one past interval plus one existing target layer; the layer ledger can also
+edit one completed canonical entry in place or add a new entry already scoped to the selected layer.
 
 HISTORY-001C established the first safe transactional primitive by reclassifying a positive sub-interval of one
 completed Idle session while conserving canonical whole seconds, regenerating affected `daily-contribution`
@@ -53,15 +76,23 @@ HISTORY-001D generalizes that primitive to arbitrary historical assignment with 
 - SQLite completed chronology, active-generation/checkpoint authority, affected `daily-contribution` artifacts,
   and the in-memory projection publish coherently.
 
+A layer-ledger **existing-entry edit** is narrower than generalized assignment: it preserves the selected completed
+session's layer and stable row identity while replacing its Tag and complete start/end boundary. It requires
+`start < end <= now`, rejects any overlap with another completed canonical session or the protected current activity,
+replaces affected daily-contribution projections atomically, and reloads memory only after SQLite commit. It does not
+silently carve neighboring history. A layer-ledger **Add entry** instead reuses generalized assignment, including its
+collision preview/replacement semantics, with the selected layer fixed and the ledger Tag persisted.
+
 The transaction rejects pre-existing overlapping canonical history rather than rewriting ambiguous double-counted
 authority. Whole-second allocation continues to use retained boundary provenance and the existing cumulative
 allocator, including fractional UTC boundaries and operational-day cuts.
 
 HISTORY-001D established ledger truth without changing sediment. HISTORY-001E extends that same assignment transaction with bounded current-pile reconciliation: canonical seconds reclassified from one existing category to another request an in-place transfer of retained source-category sediment into the target category. True-gap seconds create no current grains, and prior clears may limit how much source mass remains available. Missing visual mass never blocks the ledger correction and unrelated categories are never consumed to force the current pile to equal historical accounting. First-write authentic day-end snapshots remain immutable.
 
-The current inline editor assigns layer and From/To time. Historical descriptions/tags are not inferred from the
-currently active description; until an explicit historical Tag field is designed, newly inserted retroactive rows
-use an empty description. Active-generation rebasing preserves the persisted live description.
+The Balance-wide inline editor assigns layer and From/To time. It still does not infer or expose a historical Tag, so
+rows inserted through that global route use an empty description. The layer-detail ledger has a separate explicit Tag
+field for its add/edit row and persists exactly that description. Active-generation rebasing preserves the persisted
+live description.
 
 ## Provisional active time
 

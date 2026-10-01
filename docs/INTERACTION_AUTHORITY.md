@@ -1,10 +1,10 @@
 # Interaction authority
 
-Status: implemented and certified
+Status: accepted authority; BALANCE-LAYER-DETAIL-UX-001 candidate natively validated, owner review pending
 Program: INTERACTION-001 + INTERACTION-002 convergence
 Current completed unit: INTERACTION-002; PLATEAU-001H H1 presentation hardening certified
 Issues completed: #19, #20, #24
-Last reviewed: 2026-09-06
+Last reviewed: 2026-09-27
 
 ## Purpose
 
@@ -12,58 +12,42 @@ Interaction authority determines whether an input is navigation, a command, text
 
 ## View and edit ownership
 
-Report-log view mode is read-only. Navigation, report commands, deletion, modal cancellation, and quit remain commands.
+Balance layer detail is the layer's ledger surface, not a second report modal. Ordinary navigation, report-period commands, deletion, modal cancellation, and quit remain commands while no ledger entry is being edited.
 
-Historical description editing begins only after an explicit Confirm action on a selected persisted session row. Edit state owns:
+Confirm on a completed persisted entry opens an in-row ledger editor owned by that stable session ID. The editor copies the entry's Tag plus complete civil start/end boundaries; row ordering or later selection movement cannot retarget that draft. A synthetic final `+ Add entry…` row opens the same in-row grammar as a new historical entry already scoped to the current layer. A provisional live row has no completed stable session identity and is not directly editable as an existing ledger entry.
 
-- the stable session ID;
-- a complete draft copied from the current persisted description;
-- visible edit-mode status;
-- commit or cancellation responsibility.
+## Ledger edit-mode input
 
-Selection movement or row ordering does not change the draft's owning identity.
+The active ledger field exclusively owns ordinary text input:
 
-## Edit-mode input
+- Tag accepts unmodified character input;
+- date fields accept `YYYY-MM-DD` characters;
+- time fields accept `HH:MM:SS` characters;
+- Backspace/Delete edits the active field;
+- Tab/BackTab moves between fields and selects the destination value;
+- Enter validates and commits;
+- Esc cancels the draft, or dismisses an add-collision confirmation back to editing;
+- only mandatory `Ctrl-C` may escape as an application-level command.
 
-While report description edit mode is active:
+A same-day entry exposes one date plus start/end time; moving the end earlier than the start represents the next civil day. Entries already spanning distinct dates expose both complete date boundaries. No ordinary Balance command letter is interpreted while the row editor owns input.
 
-- unmodified character input, including ordinary command letters, spaces, and Unicode, appends to the draft;
-- Backspace and Delete remove one Unicode scalar from the draft;
-- Enter requests one commit;
-- Esc cancels the complete draft;
-- unrecognized modified input is ignored;
-- a modified key executes only when the mandatory key policy resolves it to emergency Quit.
+## Ledger persistence boundary
 
-No plain character is interpreted as a global or report command while editing. Outside edit mode, command routing follows the shared keymap resolver.
+A draft changes canonical history only after explicit commit. SQLite remains the sole runtime persistence authority.
 
-## Edit persistence boundary
+Editing an existing completed entry preserves its layer identity and stable row identity while allowing Tag and civil start/end correction. The transaction requires `start < end <= now`, rejects overlap with another completed canonical session or the protected current activity, replaces all affected daily-contribution projections atomically, and reloads the in-memory SQLite projection only after commit. A rejected overlap remains an edit error rather than silently carving unrelated history.
 
-A draft changes canonical history only after explicit commit.
+Adding through `+ Add entry…` uses the established HISTORY-001D/001E historical-assignment transaction with the layer fixed by the detail view. It can fill true gaps, replace Idle or same-layer chronology without confirmation, and uses the existing collision preview for a different explicit layer. Unlike the older Balance-wide Log past editor, this layer-scoped add row owns an explicit Tag field and persists that description with the inserted history.
 
-SQLite authority performs one fenced session-description update. Memory changes only after that transaction succeeds.
+A failed persistence attempt leaves the draft visible and canonical in-memory history unchanged under the existing recovery contract. A successful commit closes edit mode. Esc closes edit mode without a write.
 
-SQLite is the only runtime persistence authority. Portable exports are projections and cannot be edited as a
-second live session collection.
+## Visible ledger state
 
-A failed persistence attempt:
+The normal layer detail keeps the ledger itself as the interaction surface rather than showing a permanent instruction footer. Existing entries remain compact rows; the final `+ Add entry…` row is part of normal selection. During edit, the selected row changes in place and brackets the active field. Validation or collision text appears only when needed.
 
-- does not alter canonical in-memory history;
-- retains the complete draft and stable session ID;
-- enters the existing visible persistence-recovery state;
-- allows retry or authority reload under the established failure contract.
+Single-day rows distribute three data regions evenly: **Tag · Time · Effect**. Multi-day rows distribute four regions evenly: **Tag · Date · Time · Effect**, keeping date adjacent to time. A cross-day entry may use the two middle regions as one explicit `start → end` temporal span rather than pretending one date owns both boundaries.
 
-A successful commit closes edit mode. Cancel closes edit mode without a persistence write. Description edits do not invalidate daily sediment contributions because description text is not sediment-relevant chronology.
-
-## Visible edit state
-
-The report modal displays either:
-
-- `VIEW · Enter edit · Esc back`; or
-- `EDIT DESCRIPTION · Enter commit · Esc cancel`.
-
-The selected row renders the live draft with an explicit cursor marker. Closing the report modal, changing UI mode, or resetting report state discards any uncommitted draft.
-
-Deletion remains a separate configured command. Enter no longer exits the report-log view; it enters editing. Quit from report context returns an application exit decision instead of being silently ignored.
+Closing Balance, leaving layer detail, or replacing the edit with another explicit Balance editor discards the transient draft. Deletion remains a separate configured command and never applies to the synthetic Add row.
 
 ## Configured action state
 
@@ -138,9 +122,9 @@ After application, left/right shifts the whole custom window by its own inclusiv
 
 HISTORY-001C introduced the first historical editor from completed Idle detail rows. HISTORY-001D generalizes that
 interaction into one Balance-wide **Log past activity…** operation. The configurable `balance_log_activity` action
-defaults to `l`; it is available from Balance summary/detail views and through the command palette rather than
-depending on a selected source session. Existing session rows are bookkeeping material, not part of the user
-contract.
+defaults to `l`. From the Balance summary it opens the generalized layer/From/To editor; from a layer-detail ledger it
+is contextualized to that layer and opens the same new-entry row used by `+ Add entry…`. The command palette follows
+the same current-view semantics rather than escaping a layer ledger into a different editor.
 
 The inline editor owns three fields:
 
@@ -167,9 +151,31 @@ unchanged; changing what the user is doing now belongs to ordinary Main/Layer sw
 
 Persistence owns the mutation. SQLite publishes completed-history carving/insertion, active-generation rebasing when needed, every affected daily-contribution replacement, and any HISTORY-001E retained current-sediment recolor in one transaction. Runtime checkpoint sediment is updated to the same committed `SandState`, and memory installs that exact state only after commit. Recolor is category-composition reconciliation only: true gaps do not fabricate grains, cleared source mass may limit the applied amount, and captured canonical daily photographs remain unchanged.
 
-The current HISTORY-001D editor does not expose a historical Tag field. Newly inserted retroactive rows therefore
-use an empty description instead of borrowing the current live tag. If the active generation is rebased, its
-persisted live description is preserved.
+The Balance-wide HISTORY-001D editor still does not expose a historical Tag field and therefore inserts an empty
+description instead of borrowing the current live tag. Layer-detail `+ Add entry…` is the deliberate scoped exception:
+it exposes an explicit Tag field and persists exactly that draft description. If the active generation is rebased,
+its persisted live description remains protected.
+
+### Balance layer detail ledger
+
+Entering a Balance layer keeps the same modal geometry and visual hierarchy while changing the content from aggregate
+Balance to one layer's ledger. The frame title is the layer name; the global top-left interval, global net title,
+side-border arrows, and ordinary instruction footer are absent. The selected report interval remains the same centered
+bottom-border boundary object used by the parent Balance view.
+
+The layer hero contains only two objects: the layer's signed contribution for the selected interval and one
+centered influence meter. The meter reuses the parent Balance track/equilibrium grammar but is deliberately **not** an
+independently normalized meter. The parent Balance displacement defines the maximum visual envelope for that report
+window. A layer's marker uses its share of its own polarity-side aggregate inside that envelope, preserving the
+layer's sign; therefore a detail marker can pull to the opposite side of equilibrium but can never sit farther from
+center than the parent Balance marker. If the parent is at equilibrium, every layer influence marker collapses to
+center. This makes the detail meter answer how strongly the selected layer participates in the parent displacement,
+not where Balance would land if that layer existed alone.
+
+Below the hero, the body is the editable layer ledger described above. Multiple operational-day slices belonging to
+one canonical completed session project as one ledger row within the selected window, so cross-day sessions are not
+presented as unrelated editable records. The synthetic `+ Add entry…` row is the final ordinary row for active layer
+identities; archived layers remain browse/edit-only.
 
 ### Balance summary instrument
 

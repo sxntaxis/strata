@@ -63,6 +63,15 @@ pub(crate) struct HistoricalConflict {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct HistoricalSessionEditRequest {
+    pub session_id: usize,
+    pub description: String,
+    pub started_at_utc: DateTime<Utc>,
+    pub ended_at_utc: DateTime<Utc>,
+    pub active_preview: HistoricalActivePreview,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct HistoricalActivityRequest {
     pub target_category_id: CategoryId,
     pub started_at_utc: DateTime<Utc>,
@@ -687,6 +696,96 @@ pub(crate) fn update_session_description(
         return Err(format!("SQLite session {session_id} does not exist"));
     }
     runtime_coordination::maybe_inject_test_fault("session-edit", "commit")
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
+}
+
+pub(crate) fn edit_historical_session(
+    database_path: &Path,
+    request: HistoricalSessionEditRequest,
+) -> Result<(), String> {
+    runtime_coordination::maybe_inject_test_fault("session-ledger-edit", "before-write")
+        .map_err(|error| error.to_string())?;
+    if request.started_at_utc >= request.ended_at_utc {
+        return Err("ledger entry start must be before end".to_string());
+    }
+    if request.ended_at_utc > request.active_preview.ended_at_utc {
+        return Err("ledger entry cannot extend into the future".to_string());
+    }
+
+    let mut repository = open_cli_repository(database_path)?;
+    let transaction = repository
+        .connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    validate_historical_active_preview(&transaction, Some(&request.active_preview))?;
+
+    let sessions =
+        super::repository::query_all_sessions(&transaction).map_err(|error| error.to_string())?;
+    let session_id =
+        i64::try_from(request.session_id).map_err(|_| "session ID is too large".to_string())?;
+    let target = sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .cloned()
+        .ok_or_else(|| format!("SQLite session {session_id} does not exist"))?;
+    let policy = historical_session_policy(&target)?;
+    let (old_start, _, old_recorded_end, old_elapsed) = historical_session_bounds(&target)?;
+    let elapsed_i64 = (request.ended_at_utc - request.started_at_utc).num_seconds();
+    if elapsed_i64 <= 0 {
+        return Err("ledger entry must contain at least one whole second".to_string());
+    }
+    let elapsed_seconds = usize::try_from(elapsed_i64)
+        .map_err(|_| "ledger entry duration exceeds this platform's range".to_string())?;
+
+    for session in &sessions {
+        if session.id == session_id {
+            continue;
+        }
+        let (start, end, _, _) = historical_session_bounds(session)?;
+        if start < request.ended_at_utc && end > request.started_at_utc {
+            return Err(format!(
+                "ledger entry overlaps existing session {}",
+                session.id
+            ));
+        }
+    }
+    if request.active_preview.started_at_utc < request.ended_at_utc
+        && request.active_preview.ended_at_utc > request.started_at_utc
+    {
+        return Err("ledger entry overlaps current activity".to_string());
+    }
+
+    let category_id = CategoryId::new(
+        u64::try_from(target.category_id)
+            .map_err(|_| format!("session {} category identity is invalid", target.id))?,
+    );
+    let mut affected_days =
+        historical_affected_days(old_start, old_recorded_end, old_elapsed, policy)?;
+    affected_days.extend(historical_affected_days(
+        request.started_at_utc,
+        request.ended_at_utc,
+        elapsed_seconds,
+        policy,
+    )?);
+
+    write_history_fragment(
+        &transaction,
+        Some(target.id),
+        &target.stable_id,
+        category_id,
+        &request.description,
+        request.started_at_utc,
+        request.ended_at_utc,
+        elapsed_seconds,
+        policy,
+    )?;
+    replace_daily_contributions_in_transaction(
+        &transaction,
+        &affected_days,
+        Some(&request.active_preview),
+    )?;
+    runtime_coordination::maybe_inject_test_fault("session-ledger-edit", "commit")
         .map_err(|error| error.to_string())?;
     transaction.commit().map_err(|error| error.to_string())
 }
@@ -4160,6 +4259,198 @@ mod clear_all_additional_transaction_tests {
             Utc.with_ymd_and_hms(2026, 8, 2, 11, 0, 0).unwrap()
         );
         assert_eq!(normalized[1].category_id, reading);
+    }
+
+    #[test]
+    fn ledger_entry_edit_preserves_identity_and_rewrites_chronology_atomically() {
+        let path = repository_file("ledger-edit-existing");
+        seed_history_session(
+            &path,
+            1,
+            "work-ledger-edit",
+            "2026-08-02T10:00:00Z",
+            "2026-08-02T11:00:00Z",
+            "2026-08-02",
+            3600,
+        );
+        let active = seed_history_active(
+            &path,
+            "active-ledger-edit",
+            1,
+            "live",
+            "2026-08-02T12:00:00Z",
+            "2026-08-02T12:30:00Z",
+        );
+        let session_id = {
+            let repository = open_cli_repository(&path).unwrap();
+            let id = usize::try_from(repository.list_sessions().unwrap()[0].id).unwrap();
+            drop(repository);
+            id
+        };
+
+        edit_historical_session(
+            &path,
+            HistoricalSessionEditRequest {
+                session_id,
+                description: "Anibal".to_string(),
+                started_at_utc: parse_utc("2026-08-02T10:15:00Z").unwrap(),
+                ended_at_utc: parse_utc("2026-08-02T11:20:00Z").unwrap(),
+                active_preview: active,
+            },
+        )
+        .unwrap();
+
+        let repository = open_cli_repository(&path).unwrap();
+        let rows = repository.list_sessions().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].stable_id, "work-ledger-edit");
+        assert_eq!(rows[0].category_id, 1);
+        assert_eq!(rows[0].description, "Anibal");
+        assert_eq!(rows[0].started_at_utc, "2026-08-02T10:15:00.000Z");
+        assert_eq!(rows[0].ended_at_utc, "2026-08-02T11:20:00.000Z");
+        assert_eq!(rows[0].elapsed_seconds, 3900);
+        drop(repository);
+        remove_database(&path);
+    }
+
+    #[test]
+    fn ledger_entry_edit_rejects_overlap_without_mutating_source_session() {
+        let path = repository_file("ledger-edit-overlap");
+        seed_history_session(
+            &path,
+            1,
+            "work-ledger-a",
+            "2026-08-02T10:00:00Z",
+            "2026-08-02T11:00:00Z",
+            "2026-08-02",
+            3600,
+        );
+        seed_history_session(
+            &path,
+            0,
+            "idle-ledger-b",
+            "2026-08-02T11:00:00Z",
+            "2026-08-02T11:30:00Z",
+            "2026-08-02",
+            1800,
+        );
+        let active = seed_history_active(
+            &path,
+            "active-ledger-overlap",
+            1,
+            "live",
+            "2026-08-02T12:00:00Z",
+            "2026-08-02T12:30:00Z",
+        );
+        let session_id = {
+            let repository = open_cli_repository(&path).unwrap();
+            let id = usize::try_from(
+                repository
+                    .list_sessions()
+                    .unwrap()
+                    .into_iter()
+                    .find(|row| row.stable_id == "work-ledger-a")
+                    .unwrap()
+                    .id,
+            )
+            .unwrap();
+            drop(repository);
+            id
+        };
+
+        let error = edit_historical_session(
+            &path,
+            HistoricalSessionEditRequest {
+                session_id,
+                description: "changed".to_string(),
+                started_at_utc: parse_utc("2026-08-02T10:00:00Z").unwrap(),
+                ended_at_utc: parse_utc("2026-08-02T11:15:00Z").unwrap(),
+                active_preview: active,
+            },
+        )
+        .unwrap_err();
+        assert!(error.contains("overlaps existing session"));
+
+        let repository = open_cli_repository(&path).unwrap();
+        let rows = repository.list_sessions().unwrap();
+        let source = rows
+            .iter()
+            .find(|row| row.stable_id == "work-ledger-a")
+            .unwrap();
+        assert_eq!(source.description, "");
+        assert_eq!(source.started_at_utc, "2026-08-02T10:00:00Z");
+        assert_eq!(source.ended_at_utc, "2026-08-02T11:00:00Z");
+        assert_eq!(source.elapsed_seconds, 3600);
+        drop(repository);
+        remove_database(&path);
+    }
+
+    #[test]
+    fn ledger_entry_edit_commit_fault_rolls_back_session_and_daily_projection() {
+        let path = repository_file("ledger-edit-commit-fault");
+        seed_history_session(
+            &path,
+            1,
+            "work-ledger-edit-fault",
+            "2026-08-02T10:00:00Z",
+            "2026-08-02T11:00:00Z",
+            "2026-08-02",
+            3600,
+        );
+        let active = seed_history_active(
+            &path,
+            "active-ledger-edit-fault",
+            1,
+            "live",
+            "2026-08-02T12:00:00Z",
+            "2026-08-02T12:30:00Z",
+        );
+        let session_id = {
+            let repository = open_cli_repository(&path).unwrap();
+            let id = usize::try_from(repository.list_sessions().unwrap()[0].id).unwrap();
+            drop(repository);
+            id
+        };
+
+        let result = runtime_coordination::with_test_fault(
+            "session-ledger-edit",
+            "commit",
+            "commit",
+            || {
+                edit_historical_session(
+                    &path,
+                    HistoricalSessionEditRequest {
+                        session_id,
+                        description: "must roll back".to_string(),
+                        started_at_utc: parse_utc("2026-08-02T10:15:00Z").unwrap(),
+                        ended_at_utc: parse_utc("2026-08-02T11:20:00Z").unwrap(),
+                        active_preview: active,
+                    },
+                )
+            },
+        );
+        assert!(result.is_err());
+
+        let repository = open_cli_repository(&path).unwrap();
+        let rows = repository.list_sessions().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].stable_id, "work-ledger-edit-fault");
+        assert_eq!(rows[0].description, "");
+        assert_eq!(rows[0].started_at_utc, "2026-08-02T10:00:00Z");
+        assert_eq!(rows[0].ended_at_utc, "2026-08-02T11:00:00Z");
+        assert_eq!(rows[0].elapsed_seconds, 3600);
+        let contribution_count = repository
+            .connection
+            .query_row(
+                "SELECT count(*) FROM sand_snapshots
+                 WHERE snapshot_kind = 'daily-contribution'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap();
+        assert_eq!(contribution_count, 0);
+        drop(repository);
+        remove_database(&path);
     }
 
     #[test]

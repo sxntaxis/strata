@@ -143,7 +143,53 @@ fn rounded_meter_offset(net: i128, polarized: i128, radius: i128) -> i128 {
     }
 }
 
-fn meter_cells(width: u16, totals: InstrumentTotals) -> Vec<MeterCell> {
+fn meter_offset(width: u16, totals: InstrumentTotals) -> i128 {
+    let width = usize::from(width);
+    if width < 3 {
+        return 0;
+    }
+    let center = width / 2;
+    let negative_abs = totals.negative.unsigned_abs() as i128;
+    let positive = totals.positive.max(0) as i128;
+    let polarized = negative_abs.saturating_add(positive);
+    let normalized_net = positive.saturating_sub(negative_abs);
+    let radius = center.saturating_sub(1) as i128;
+    rounded_meter_offset(normalized_net, polarized, radius).clamp(-radius, radius)
+}
+
+fn layer_influence_offset(
+    width: u16,
+    totals: InstrumentTotals,
+    layer_balance_seconds: isize,
+) -> i128 {
+    if layer_balance_seconds == 0 {
+        return 0;
+    }
+
+    let envelope = meter_offset(width, totals).unsigned_abs() as i128;
+    if envelope == 0 {
+        return 0;
+    }
+
+    let side_total = if layer_balance_seconds < 0 {
+        totals.negative.unsigned_abs() as i128
+    } else {
+        totals.positive.max(0) as i128
+    };
+    if side_total == 0 {
+        return 0;
+    }
+
+    let layer = (layer_balance_seconds.unsigned_abs() as i128).min(side_total);
+    let magnitude = (layer.saturating_mul(envelope) + side_total / 2) / side_total;
+    if layer_balance_seconds < 0 {
+        -magnitude
+    } else {
+        magnitude
+    }
+}
+
+fn meter_cells_for_offset(width: u16, offset: i128) -> Vec<MeterCell> {
     let width = usize::from(width);
     if width == 0 {
         return Vec::new();
@@ -175,12 +221,8 @@ fn meter_cells(width: u16, totals: InstrumentTotals) -> Vec<MeterCell> {
         role: MeterRole::Equilibrium,
     };
 
-    let negative_abs = totals.negative.unsigned_abs() as i128;
-    let positive = totals.positive as i128;
-    let polarized = negative_abs.saturating_add(positive);
-    let normalized_net = positive.saturating_sub(negative_abs);
     let radius = center.saturating_sub(1) as i128;
-    let offset = rounded_meter_offset(normalized_net, polarized, radius).clamp(-radius, radius);
+    let offset = offset.clamp(-radius, radius);
     let dot = (center as i128 + offset) as usize;
 
     if dot < center {
@@ -213,6 +255,33 @@ fn meter_cells(width: u16, totals: InstrumentTotals) -> Vec<MeterCell> {
     }
 
     cells
+}
+
+fn meter_cells(width: u16, totals: InstrumentTotals) -> Vec<MeterCell> {
+    meter_cells_for_offset(width, meter_offset(width, totals))
+}
+
+fn meter_line(
+    cells: Vec<MeterCell>,
+    inactive: Color,
+    negative: Color,
+    positive: Color,
+) -> Line<'static> {
+    let inactive_style = Style::default().fg(inactive).add_modifier(Modifier::DIM);
+    Line::from(
+        cells
+            .into_iter()
+            .map(|cell| {
+                let style = match cell.role {
+                    MeterRole::Inactive | MeterRole::Equilibrium => inactive_style,
+                    MeterRole::Negative | MeterRole::DotNegative => Style::default().fg(negative),
+                    MeterRole::Positive | MeterRole::DotPositive => Style::default().fg(positive),
+                    MeterRole::DotNeutral => Style::default().fg(inactive),
+                };
+                Span::styled(cell.glyph.to_string(), style)
+            })
+            .collect::<Vec<_>>(),
+    )
 }
 
 impl App {
@@ -290,28 +359,68 @@ impl App {
             );
         }
 
-        let inactive_style = Style::default()
-            .fg(self.theme_status())
-            .add_modifier(Modifier::DIM);
-        let spans = meter_cells(width, totals)
-            .into_iter()
-            .map(|cell| {
-                let style = match cell.role {
-                    MeterRole::Inactive => inactive_style,
-                    MeterRole::Negative | MeterRole::DotNegative => {
-                        Style::default().fg(self.theme_error())
-                    }
-                    MeterRole::Positive | MeterRole::DotPositive => {
-                        Style::default().fg(self.theme_success())
-                    }
-                    MeterRole::Equilibrium => inactive_style,
-                    MeterRole::DotNeutral => Style::default().fg(self.theme_status()),
-                };
-                Span::styled(cell.glyph.to_string(), style)
-            })
-            .collect::<Vec<_>>();
+        f.render_widget(
+            Paragraph::new(meter_line(
+                meter_cells(width, totals),
+                self.theme_status(),
+                self.theme_error(),
+                self.theme_success(),
+            )),
+            meter_rect,
+        );
+    }
 
-        f.render_widget(Paragraph::new(Line::from(spans)), meter_rect);
+    pub(super) fn render_layer_influence_instrument(
+        &self,
+        f: &mut Frame,
+        total_area: Rect,
+        meter_area: Rect,
+        summary: &BalanceReportSummary,
+        category_id: crate::domain::CategoryId,
+    ) {
+        let Some(entry) = summary
+            .entries
+            .iter()
+            .find(|entry| entry.category_id == category_id)
+        else {
+            return;
+        };
+
+        let totals = instrument_totals(summary);
+        let available = total_area.width.saturating_sub(2);
+        let width = instrument_width(available);
+        if width == 0 {
+            return;
+        }
+
+        let instrument_x = total_area.x + total_area.width.saturating_sub(width) / 2;
+        let total_rect = Rect::new(instrument_x, total_area.y, width, 1);
+        let meter_rect = Rect::new(instrument_x, meter_area.y, width, 1);
+        let contribution = entry.balance_seconds;
+
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                format_net_total(contribution),
+                Style::default().fg(view_style::balance_color(
+                    contribution,
+                    self.theme_error(),
+                    self.theme_success(),
+                    self.theme_status(),
+                )),
+            )))
+            .alignment(Alignment::Center),
+            total_rect,
+        );
+
+        f.render_widget(
+            Paragraph::new(meter_line(
+                meter_cells_for_offset(width, layer_influence_offset(width, totals, contribution)),
+                self.theme_status(),
+                self.theme_error(),
+                self.theme_success(),
+            )),
+            meter_rect,
+        );
     }
 }
 
@@ -323,8 +432,9 @@ mod tests {
 
     use super::{
         InstrumentTotals, MIN_THREE_COLUMN_WIDTH, MeterRole, format_negative_total,
-        format_net_total, format_positive_total, instrument_totals, instrument_width, meter_cells,
-        preferred_summary_inner_height, preferred_summary_inner_width, side_total_line,
+        format_net_total, format_positive_total, instrument_totals, instrument_width,
+        layer_influence_offset, meter_cells, meter_offset, preferred_summary_inner_height,
+        preferred_summary_inner_width, side_total_line,
     };
 
     fn entry(
@@ -502,5 +612,51 @@ mod tests {
                 .iter()
                 .all(|cell| cell.glyph == '━' && cell.role == MeterRole::Positive)
         );
+    }
+
+    #[test]
+    fn layer_influence_never_exceeds_parent_displacement_envelope() {
+        let width = 45;
+        let totals = totals(-100, 25);
+        let parent = meter_offset(width, totals);
+        assert!(parent < 0);
+        for layer in [-100, -75, -25, 25] {
+            let offset = layer_influence_offset(width, totals, layer);
+            assert!(offset.unsigned_abs() <= parent.unsigned_abs());
+        }
+    }
+
+    #[test]
+    fn layer_that_owns_a_side_reaches_the_parent_envelope() {
+        let width = 45;
+        let totals = totals(-100, 25);
+        let envelope = meter_offset(width, totals).unsigned_abs();
+        assert_eq!(
+            layer_influence_offset(width, totals, -100).unsigned_abs(),
+            envelope
+        );
+        assert_eq!(
+            layer_influence_offset(width, totals, 25).unsigned_abs(),
+            envelope
+        );
+    }
+
+    #[test]
+    fn opposing_layer_uses_its_own_polarity_inside_the_shared_envelope() {
+        let width = 45;
+        let totals = totals(-100, 25);
+        assert!(meter_offset(width, totals) < 0);
+        let positive_layer = layer_influence_offset(width, totals, 10);
+        assert!(positive_layer > 0);
+        assert!(positive_layer.unsigned_abs() <= meter_offset(width, totals).unsigned_abs());
+    }
+
+    #[test]
+    fn equilibrium_parent_collapses_layer_influence_to_center() {
+        let width = 45;
+        let totals = totals(-50, 50);
+        assert_eq!(meter_offset(width, totals), 0);
+        assert_eq!(layer_influence_offset(width, totals, -50), 0);
+        assert_eq!(layer_influence_offset(width, totals, 50), 0);
     }
 }

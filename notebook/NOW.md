@@ -5,9 +5,13 @@ state: active
 created: 2026-08-01
 updated: 2026-09-27
 authority: working
-summary: "BALANCE-RANGE-UX-001 bracket-boundary candidate passes native Rust checks and disposable PTY smoke with inclusive ReportWindow authority preserved; SEDIMENT-016 doctrine promotion remains explicit and separate."
-next: Publish the BALANCE-RANGE-UX-001 implementation as a stacked draft PR based on work/balance-range-ux-001-probe, then review CI and owner feedback without modifying PR #105 or promoting sediment doctrine.
+summary: "BALANCE-LAYER-DETAIL-UX-001 passes native checks and loaded-test-profile edit/add restart smoke, including complete constrained-pane boundary fields; bracket-boundary range authority is native-green and SEDIMENT-016 remains separate."
+next: Owner-review the populated layer-ledger edit/add flow, then explicitly promote or revise BALANCE-LAYER-DETAIL-UX-001 without coupling it to SEDIMENT-016 doctrine promotion.
 ---
+
+## BALANCE-LAYER-DETAIL-UX-001 editable layer ledger — 2026-09-27
+
+**NATIVELY VALIDATED CANDIDATE / OWNER REVIEW REMAINS:** Balance layer detail uses the layer name as its frame title, retains only the shared bottom interval chrome, and replaces inherited global-net/side-arrow/instruction chrome with a minimal layer hero: centered signed contribution plus a nested influence meter whose marker can never exceed the parent Balance displacement envelope. The ledger uses evenly distributed Tag/Time/Effect rows for single-day windows and Tag/Date/Time/Effect for multi-day windows, with explicit cross-day temporal spans. Existing completed rows edit in place; a synthetic `+ Add entry…` row uses the same inline grammar and scoped historical-assignment transaction. Formatting, strict Clippy, all-feature tests, loaded-profile TUI edit/add/restart smoke, and SQLite doctor pass. See `notebook/work/BALANCE-LAYER-DETAIL-UX-001.md`.
 
 ## BALANCE-UX-004 one-cell modal inset — 2026-09-27
 

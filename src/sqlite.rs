@@ -25,13 +25,16 @@ pub(crate) use tui_runtime::{
     ClearAllStateRequest as TuiClearAllStateRequest,
     HistoricalActivePreview as TuiHistoricalActivePreview,
     HistoricalActivityOutcome as TuiHistoricalActivityOutcome,
+    HistoricalActivityReceipt as TuiHistoricalActivityReceipt,
     HistoricalActivityRequest as TuiHistoricalActivityRequest,
     HistoricalConflict as TuiHistoricalConflict,
+    HistoricalSessionEditRequest as TuiHistoricalSessionEditRequest,
     InitialActiveGenerationRequest as TuiInitialActiveGenerationRequest,
     archive_category as archive_tui_category, clear_all_state as clear_tui_state,
     clear_checkpoint as clear_tui_checkpoint,
     commit_checkpoint_recovery as commit_tui_checkpoint_recovery,
     delete_daily_snapshot as delete_tui_daily_snapshot, delete_session as delete_tui_session,
+    edit_historical_session as edit_tui_historical_session,
     ensure_active_session as ensure_tui_active_session,
     finish_active_session as finish_tui_active_session,
     initial_active_stable_id as initial_tui_active_stable_id,
@@ -48,7 +51,6 @@ pub(crate) use tui_runtime::{
     switch_active_session as switch_tui_active_session, sync_categories as sync_tui_categories,
     sync_category_tags as sync_tui_category_tags, sync_sessions as sync_tui_sessions,
     update_active_description as update_tui_active_description,
-    update_session_description as update_tui_session_description,
 };
 
 pub(crate) fn inject_tui_test_fault(operation: &str, phase: &str) -> Result<(), String> {

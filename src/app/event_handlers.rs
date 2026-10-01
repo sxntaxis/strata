@@ -48,9 +48,11 @@ fn ensure_testing_fill_categories_in_tracker(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ReportEditKeyIntent {
+enum LedgerEntryEditKeyIntent {
     Append(char),
     Backspace,
+    NextField,
+    PreviousField,
     Commit,
     Cancel,
     EmergencyQuit,
@@ -98,27 +100,32 @@ fn direct_command_or_fuzzy_fallback(
     }
 }
 
-fn resolve_report_edit_key(
+fn resolve_ledger_entry_edit_key(
     key: KeyEvent,
     keymap: &crate::keybindings::Keymap,
-) -> ReportEditKeyIntent {
+) -> LedgerEntryEditKeyIntent {
     if key
         .modifiers
         .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
     {
         return if keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
-            ReportEditKeyIntent::EmergencyQuit
+            LedgerEntryEditKeyIntent::EmergencyQuit
         } else {
-            ReportEditKeyIntent::Ignore
+            LedgerEntryEditKeyIntent::Ignore
         };
     }
 
     match key.code {
-        KeyCode::Esc => ReportEditKeyIntent::Cancel,
-        KeyCode::Enter => ReportEditKeyIntent::Commit,
-        KeyCode::Backspace | KeyCode::Delete => ReportEditKeyIntent::Backspace,
-        KeyCode::Char(character) => ReportEditKeyIntent::Append(character),
-        _ => ReportEditKeyIntent::Ignore,
+        KeyCode::Esc => LedgerEntryEditKeyIntent::Cancel,
+        KeyCode::Enter => LedgerEntryEditKeyIntent::Commit,
+        KeyCode::Backspace | KeyCode::Delete => LedgerEntryEditKeyIntent::Backspace,
+        KeyCode::BackTab => LedgerEntryEditKeyIntent::PreviousField,
+        KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            LedgerEntryEditKeyIntent::PreviousField
+        }
+        KeyCode::Tab => LedgerEntryEditKeyIntent::NextField,
+        KeyCode::Char(character) => LedgerEntryEditKeyIntent::Append(character),
+        _ => LedgerEntryEditKeyIntent::Ignore,
     }
 }
 
@@ -239,8 +246,8 @@ impl App {
             return self.handle_report_range_edit_key(key);
         }
 
-        if self.report_log_edit.is_some() {
-            return self.handle_report_log_edit_key(key);
+        if self.ledger_entry_edit.is_some() {
+            return self.handle_ledger_entry_edit_key(key);
         }
 
         if self.show_command_palette {
@@ -1141,7 +1148,7 @@ impl App {
                 } else {
                     self.report_logs_category_id = None;
                     self.report_log_selected_index = 0;
-                    self.report_log_edit = None;
+                    self.ledger_entry_edit = None;
                 }
                 self.select_report_range_boundary(ReportRangeBoundary::Start);
                 false
@@ -1152,7 +1159,7 @@ impl App {
                 } else {
                     self.report_logs_category_id = None;
                     self.report_log_selected_index = 0;
-                    self.report_log_edit = None;
+                    self.ledger_entry_edit = None;
                 }
                 self.select_report_range_boundary(ReportRangeBoundary::End);
                 false
@@ -1168,7 +1175,11 @@ impl App {
                 if !self.in_balance_modal() {
                     self.open_report_modal();
                 }
-                self.begin_historical_activity_edit();
+                if let Some(category_id) = self.report_logs_category_id {
+                    self.begin_ledger_add_edit(category_id);
+                } else {
+                    self.begin_historical_activity_edit();
+                }
                 false
             }
             PaletteCommand::Action(action) => self.handle_main_action(action),
@@ -1594,8 +1605,13 @@ impl App {
         let summary = self.report_rows();
         self.clamp_report_selection(summary.entries.len());
         let logs = self.report_current_logs();
-        self.clamp_report_log_selection(logs.len());
         let in_logs_view = self.report_logs_category_id.is_some();
+        let ledger_row_count = if in_logs_view {
+            self.report_ledger_row_count()
+        } else {
+            0
+        };
+        self.clamp_report_log_selection(ledger_row_count);
 
         let mut handled = true;
 
@@ -1604,6 +1620,7 @@ impl App {
                 if self.report_range_boundary.is_some() && !in_logs_view {
                     self.clear_report_range_boundary();
                 } else if in_logs_view {
+                    self.ledger_entry_edit = None;
                     self.report_logs_category_id = None;
                     self.report_log_selected_index = 0;
                 } else {
@@ -1612,18 +1629,21 @@ impl App {
             }
             Action::Confirm => {
                 if in_logs_view {
-                    handled = self.begin_report_log_edit();
+                    handled = self.begin_ledger_entry_edit();
                 } else if let Some(entry) = summary.entries.get(self.report_selected_index) {
                     self.clear_report_range_boundary();
+                    self.ledger_entry_edit = None;
                     self.report_logs_category_id = Some(entry.category_id);
                     self.report_log_selected_index = 0;
                 }
             }
             Action::Up => {
                 if in_logs_view {
-                    if !logs.is_empty() {
-                        self.report_log_selected_index =
-                            ui_helpers::wrap_prev_index(self.report_log_selected_index, logs.len());
+                    if ledger_row_count > 0 {
+                        self.report_log_selected_index = ui_helpers::wrap_prev_index(
+                            self.report_log_selected_index,
+                            ledger_row_count,
+                        );
                     }
                 } else if !summary.entries.is_empty() {
                     self.report_selected_index = ui_helpers::wrap_prev_index(
@@ -1634,9 +1654,11 @@ impl App {
             }
             Action::Down => {
                 if in_logs_view {
-                    if !logs.is_empty() {
-                        self.report_log_selected_index =
-                            ui_helpers::wrap_next_index(self.report_log_selected_index, logs.len());
+                    if ledger_row_count > 0 {
+                        self.report_log_selected_index = ui_helpers::wrap_next_index(
+                            self.report_log_selected_index,
+                            ledger_row_count,
+                        );
                     }
                 } else if !summary.entries.is_empty() {
                     self.report_selected_index = ui_helpers::wrap_next_index(
@@ -1673,18 +1695,10 @@ impl App {
                     self.set_report_period(ui_helpers::report_period_next(self.report_period));
                 }
             }
-            Action::ReportToday => {
-                self.set_report_period(ReportPeriod::Today);
-            }
-            Action::ReportWeek => {
-                self.set_report_period(ReportPeriod::Week);
-            }
-            Action::ReportMonth => {
-                self.set_report_period(ReportPeriod::Month);
-            }
-            Action::ReportRange => {
-                self.begin_report_range_edit();
-            }
+            Action::ReportToday => self.set_report_period(ReportPeriod::Today),
+            Action::ReportWeek => self.set_report_period(ReportPeriod::Week),
+            Action::ReportMonth => self.set_report_period(ReportPeriod::Month),
+            Action::ReportRange => self.begin_report_range_edit(),
             Action::ReportRangeStart => {
                 if in_logs_view {
                     handled = false;
@@ -1701,10 +1715,14 @@ impl App {
             }
             Action::LogActivity => {
                 self.clear_report_range_boundary();
-                handled = self.begin_historical_activity_edit();
+                handled = if let Some(category_id) = self.report_logs_category_id {
+                    self.begin_ledger_add_edit(category_id)
+                } else {
+                    self.begin_historical_activity_edit()
+                };
             }
             Action::DeleteCategory => {
-                if in_logs_view {
+                if in_logs_view && self.report_log_selected_index < logs.len() {
                     handled = self.delete_selected_report_session();
                 } else {
                     handled = false;
@@ -1863,28 +1881,59 @@ impl App {
         false
     }
 
-    fn handle_report_log_edit_key(&mut self, key: KeyEvent) -> bool {
-        match resolve_report_edit_key(key, &self.keymap) {
-            ReportEditKeyIntent::Append(character) => {
-                if let Some(edit) = self.report_log_edit.as_mut() {
-                    edit.draft.push(character);
+    fn handle_ledger_entry_edit_key(&mut self, key: KeyEvent) -> bool {
+        let intent = resolve_ledger_entry_edit_key(key, &self.keymap);
+        if self
+            .ledger_entry_edit
+            .as_ref()
+            .is_some_and(|edit| edit.confirmation.is_some())
+        {
+            match intent {
+                LedgerEntryEditKeyIntent::Commit => {
+                    self.commit_ledger_entry_edit();
+                }
+                LedgerEntryEditKeyIntent::Cancel => {
+                    self.dismiss_ledger_entry_confirmation();
+                }
+                LedgerEntryEditKeyIntent::EmergencyQuit => return true,
+                _ => {}
+            }
+            return false;
+        }
+
+        match intent {
+            LedgerEntryEditKeyIntent::Append(character) => {
+                if let Some(edit) = self.ledger_entry_edit.as_mut() {
+                    edit.append(character);
                     self.render_needed = true;
                 }
             }
-            ReportEditKeyIntent::Backspace => {
-                if let Some(edit) = self.report_log_edit.as_mut() {
-                    edit.draft.pop();
+            LedgerEntryEditKeyIntent::Backspace => {
+                if let Some(edit) = self.ledger_entry_edit.as_mut() {
+                    edit.backspace();
                     self.render_needed = true;
                 }
             }
-            ReportEditKeyIntent::Commit => {
-                self.commit_report_log_edit();
+            LedgerEntryEditKeyIntent::NextField => {
+                if let Some(edit) = self.ledger_entry_edit.as_mut() {
+                    edit.next_field();
+                    self.render_needed = true;
+                }
             }
-            ReportEditKeyIntent::Cancel => {
-                self.cancel_report_log_edit();
+            LedgerEntryEditKeyIntent::PreviousField => {
+                if let Some(edit) = self.ledger_entry_edit.as_mut() {
+                    edit.previous_field();
+                    self.render_needed = true;
+                }
             }
-            ReportEditKeyIntent::EmergencyQuit => return true,
-            ReportEditKeyIntent::Ignore => {}
+            LedgerEntryEditKeyIntent::Commit => {
+                self.commit_ledger_entry_edit();
+            }
+            LedgerEntryEditKeyIntent::Cancel => {
+                self.cancel_ledger_entry_edit();
+            }
+            LedgerEntryEditKeyIntent::EmergencyQuit => return true,
+            LedgerEntryEditKeyIntent::Ignore => {}
         }
         false
     }
@@ -1893,9 +1942,9 @@ impl App {
 #[cfg(test)]
 mod report_edit_tests {
     use super::{
-        HistoricalActivityEditKeyIntent, ReportEditKeyIntent, ReportRangeEditKeyIntent,
+        HistoricalActivityEditKeyIntent, LedgerEntryEditKeyIntent, ReportRangeEditKeyIntent,
         direct_command_or_fuzzy_fallback, resolve_historical_activity_edit_key,
-        resolve_report_edit_key, resolve_report_range_edit_key,
+        resolve_ledger_entry_edit_key, resolve_report_range_edit_key,
     };
     use crate::keybindings::default_keymap;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -1981,11 +2030,11 @@ mod report_edit_tests {
         let keymap = default_keymap();
         for character in ['q', 'w', 'm', 't', 'k', 'd', 'x'] {
             assert_eq!(
-                resolve_report_edit_key(
+                resolve_ledger_entry_edit_key(
                     KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
                     &keymap,
                 ),
-                ReportEditKeyIntent::Append(character)
+                LedgerEntryEditKeyIntent::Append(character)
             );
         }
     }
@@ -1994,18 +2043,18 @@ mod report_edit_tests {
     fn unicode_and_spaces_are_supported() {
         let keymap = default_keymap();
         assert_eq!(
-            resolve_report_edit_key(
+            resolve_ledger_entry_edit_key(
                 KeyEvent::new(KeyCode::Char('界'), KeyModifiers::NONE),
                 &keymap,
             ),
-            ReportEditKeyIntent::Append('界')
+            LedgerEntryEditKeyIntent::Append('界')
         );
         assert_eq!(
-            resolve_report_edit_key(
+            resolve_ledger_entry_edit_key(
                 KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
                 &keymap,
             ),
-            ReportEditKeyIntent::Append(' ')
+            LedgerEntryEditKeyIntent::Append(' ')
         );
     }
 
@@ -2013,12 +2062,15 @@ mod report_edit_tests {
     fn enter_commits_and_escape_cancels() {
         let keymap = default_keymap();
         assert_eq!(
-            resolve_report_edit_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), &keymap),
-            ReportEditKeyIntent::Commit
+            resolve_ledger_entry_edit_key(
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                &keymap,
+            ),
+            LedgerEntryEditKeyIntent::Commit
         );
         assert_eq!(
-            resolve_report_edit_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), &keymap),
-            ReportEditKeyIntent::Cancel
+            resolve_ledger_entry_edit_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), &keymap,),
+            LedgerEntryEditKeyIntent::Cancel
         );
     }
 
@@ -2026,20 +2078,36 @@ mod report_edit_tests {
     fn configured_modified_quit_is_the_only_emergency_action() {
         let keymap = default_keymap();
         assert_eq!(
-            resolve_report_edit_key(
+            resolve_ledger_entry_edit_key(
                 KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
                 &keymap,
             ),
-            ReportEditKeyIntent::EmergencyQuit
+            LedgerEntryEditKeyIntent::EmergencyQuit
         );
         assert_eq!(
-            resolve_report_edit_key(
+            resolve_ledger_entry_edit_key(
                 KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL),
                 &keymap,
             ),
-            ReportEditKeyIntent::Ignore
+            LedgerEntryEditKeyIntent::Ignore
         );
     }
+    #[test]
+    fn ledger_entry_editor_owns_tab_navigation() {
+        let keymap = default_keymap();
+        assert_eq!(
+            resolve_ledger_entry_edit_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), &keymap,),
+            LedgerEntryEditKeyIntent::NextField
+        );
+        assert_eq!(
+            resolve_ledger_entry_edit_key(
+                KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT),
+                &keymap,
+            ),
+            LedgerEntryEditKeyIntent::PreviousField
+        );
+    }
+
     #[test]
     fn fuzzy_palette_query_falls_back_when_it_is_not_a_direct_command() {
         assert_eq!(
