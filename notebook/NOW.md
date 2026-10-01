@@ -5,9 +5,13 @@ state: active
 created: 2026-08-01
 updated: 2026-09-30
 authority: working
-summary: "INTERACTION-GRAMMAR-001 D082 is owner-approved, implemented, and natively validated: layered Layer/input selection, visible-row geometry, permissive Date normalization, one active-now snapshot, and universal popup-only interactive errors."
-next: "Owner-test STRATA-D082 on the populated profile: Layer-colored row selection with nested theme selection, visible-row-only modal width, non-truncated active edits, structural Time separator caret behavior, permissive named/shorthand Date input, popup-only WARNING/ERROR validation, and the active-row single-now fix."
+summary: "Strata 0.8.0 RC1 is staged from the owner-approved, natively validated D082 baseline; release certification is the active frontier and product semantics are frozen."
+next: "Run the 0.8.0 release-candidate native gates, multi-size PTY smoke, active-session continuity, recovery smoke, and copied-real-profile rehearsal; if green, push to draft PR #112 without merging, tagging, or installing yet."
 ---
+
+## RELEASE-0.8.0 RC1 certification — 2026-09-30
+
+Product semantics are frozen at the owner-approved D082 baseline. RC1 changes only package/release metadata plus test-only edge coverage for the already accepted permissive Date grammar. The release candidate must pass the repository-native checks, release build/version smoke, PTY sizes, active-session continuity, persistence/offline recovery smoke, SQLite doctor on disposable authority, and copied-real-profile rehearsal before merge/tag/install. PR #112 remains draft during certification.
 
 ## INTERACTION-GRAMMAR-001 coherent keyboard ownership — 2026-09-30
 
