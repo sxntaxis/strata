@@ -6,14 +6,39 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, List, ListItem, ListState},
 };
 
-use super::App;
+use crate::constants::APP_LAYOUT_SETTINGS;
+
+use super::{App, overlay_layout};
 
 impl App {
     pub(super) fn render_modal(&self, f: &mut Frame, terminal_size: Rect) {
-        let modal_rect = self.modal_rect(terminal_size);
+        let categories = self.categories_for_render();
+        let minimum_inner_height = categories.len().saturating_add(1).min(u16::MAX as usize) as u16;
+        let category_width = categories
+            .iter()
+            .map(|category| self.display_layer_name(&category.name).chars().count())
+            .max()
+            .unwrap_or(0);
+        let insert_width = "+ Forge new layer...".chars().count();
+        let description_width = if self.modal_editing_category_metadata {
+            self.modal_description.chars().count().saturating_add(1)
+        } else {
+            0
+        };
+        let minimum_inner_width = 2usize
+            .saturating_add(category_width.max(insert_width))
+            .saturating_add(description_width)
+            .min(u16::MAX as usize) as u16;
+        let modal_rect = overlay_layout::centered_overlay_rect(
+            terminal_size,
+            minimum_inner_width,
+            minimum_inner_height,
+            1,
+            3,
+            APP_LAYOUT_SETTINGS.frame_margin,
+        );
 
         let border_color = self.get_selected_color();
-        let categories = self.categories_for_render();
 
         let items: Vec<ListItem> = categories
             .iter()

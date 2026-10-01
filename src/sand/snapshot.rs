@@ -175,31 +175,6 @@ impl SedimentSnapshot {
         engine.resize(width, height);
         engine.render(categories)
     }
-
-    pub fn display_label(&self) -> String {
-        let kind = match self.kind {
-            SedimentSnapshotKind::CumulativeCheckpoint => {
-                if self.provenance == SedimentSnapshotProvenance::RuntimeAutosave {
-                    "latest saved checkpoint"
-                } else if self.operational_day.is_some() && !self.reconstructed {
-                    "day-end checkpoint"
-                } else {
-                    "cumulative checkpoint"
-                }
-            }
-            SedimentSnapshotKind::DailyContribution => "daily contribution",
-            SedimentSnapshotKind::DerivedPreview => "derived preview",
-        };
-        let idle = match self.idle_policy {
-            SedimentIdlePolicy::Included => "idle included",
-            SedimentIdlePolicy::Excluded => "idle excluded",
-        };
-        if self.reconstructed {
-            format!("{kind} · reconstructed · {idle}")
-        } else {
-            format!("{kind} · {idle}")
-        }
-    }
 }
 
 pub(crate) fn daily_contribution_from_slices(
@@ -391,8 +366,8 @@ pub fn stable_source_revision(source: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        DailySedimentSlice, SedimentSnapshot, SedimentSnapshotKind, SedimentSnapshotProvenance,
-        daily_contribution_from_slices, derived_preview_from_slices,
+        DailySedimentSlice, SedimentIdlePolicy, SedimentSnapshot, SedimentSnapshotKind,
+        SedimentSnapshotProvenance, daily_contribution_from_slices, derived_preview_from_slices,
         select_historical_visual_artifact, stable_source_revision,
     };
     use crate::sand::{PendingGrainRun, SandState, SandStateGrain};
@@ -528,10 +503,13 @@ mod tests {
         assert_eq!(snapshot.state, original);
         assert_eq!(snapshot.state.grid_width, 4);
         assert_eq!(snapshot.state.grid_height, 4);
+        assert_eq!(snapshot.kind, SedimentSnapshotKind::CumulativeCheckpoint);
         assert_eq!(
-            snapshot.display_label(),
-            "day-end checkpoint · idle included"
+            snapshot.provenance,
+            SedimentSnapshotProvenance::RuntimeCanonical
         );
+        assert_eq!(snapshot.idle_policy, SedimentIdlePolicy::Included);
+        assert!(!snapshot.reconstructed);
     }
 
     #[test]
@@ -541,10 +519,13 @@ mod tests {
             SedimentSnapshot::latest_daily_checkpoint("2026-08-01".to_string(), original.clone());
         assert!(snapshot.is_authentic_daily_visual_for("2026-08-01"));
         assert_eq!(snapshot.state, original);
+        assert_eq!(snapshot.kind, SedimentSnapshotKind::CumulativeCheckpoint);
         assert_eq!(
-            snapshot.display_label(),
-            "latest saved checkpoint · idle included"
+            snapshot.provenance,
+            SedimentSnapshotProvenance::RuntimeAutosave
         );
+        assert_eq!(snapshot.idle_policy, SedimentIdlePolicy::Included);
+        assert!(!snapshot.reconstructed);
         assert!(!snapshot.is_authentic_daily_visual_for("2026-08-02"));
         let derived = derived_preview_from_slices("2026-08-01", 2, 2, &slices()).unwrap();
         assert_eq!(

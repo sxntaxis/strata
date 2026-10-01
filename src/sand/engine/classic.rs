@@ -1010,14 +1010,30 @@ impl ClassicSandboxEngine {
     }
 
     pub(crate) fn update(&mut self) {
+        self.advance_physics_frame();
+        self.flush_pending_drive();
+    }
+
+    pub(crate) fn update_physics_only(&mut self) {
+        self.advance_physics_frame();
+    }
+
+    fn advance_physics_frame(&mut self) {
         self.frame_count = self.frame_count.wrapping_add(1);
         if self.frame_count.is_multiple_of(2) {
             self.apply_gravity();
         }
-        self.flush_pending_drive();
     }
 
     pub(crate) fn resize(&mut self, width: u16, height: u16) {
+        self.resize_inner(width, height, true);
+    }
+
+    pub(crate) fn resize_physics_preview(&mut self, width: u16, height: u16) {
+        self.resize_inner(width, height, false);
+    }
+
+    fn resize_inner(&mut self, width: u16, height: u16, flush_pending: bool) {
         self.runtime_index = None;
         let old_width = self.surface.grid_width_dots;
         let old_repose = self.local_repose.clone();
@@ -1066,7 +1082,9 @@ impl ClassicSandboxEngine {
                 .rain_focus_x
                 .map(|x| x.saturating_add(horizontal_offset));
         }
-        self.flush_pending_drive();
+        if flush_pending {
+            self.flush_pending_drive();
+        }
     }
 
     pub(crate) fn clear(&mut self) {
@@ -2846,6 +2864,95 @@ mod tests {
                 balance_effect: 0,
             })
             .collect()
+    }
+
+    #[test]
+    fn physics_only_preview_conserves_mass_without_materializing_pending_ingress() {
+        let category_id = CategoryId::new(1);
+        let valid = HashSet::from([category_id]);
+        let source = SandState {
+            version: SandState::VERSION,
+            grid_width: 4,
+            grid_height: 8,
+            grains: vec![crate::sand::SandStateGrain {
+                x: 1,
+                y: 1,
+                category_id: category_id.0,
+            }],
+            frame_count: 0,
+            sweep_left_to_right: true,
+            rng_state: 7,
+            ingress_focus_x: None,
+            pending_grains: Vec::new(),
+            pending_runs: vec![PendingGrainRun {
+                category_id: category_id.0,
+                count: 3,
+            }],
+            active_avalanche_columns: Vec::new(),
+            mobilized_grains: Vec::new(),
+            classic_runtime: None,
+        };
+        let source_before = source.clone();
+
+        let mut preview = ClassicSandboxEngine::new_production(2, 2);
+        preview
+            .restore_state(&source, &valid)
+            .expect("restore preview source");
+        let initial_physical = preview.physical_grain_count();
+        let initial_pending = preview.pending_count();
+        let initial_mass = mass(&preview);
+        let initial_grains = preview.snapshot_state().grains;
+
+        preview.update_physics_only();
+        preview.update_physics_only();
+
+        assert_eq!(preview.physical_grain_count(), initial_physical);
+        assert_eq!(preview.pending_count(), initial_pending);
+        assert_eq!(mass(&preview), initial_mass);
+        assert_ne!(preview.snapshot_state().grains, initial_grains);
+        assert_eq!(source, source_before);
+    }
+
+    #[test]
+    fn physics_preview_resize_does_not_flush_pending_ingress() {
+        let category_id = CategoryId::new(1);
+        let valid = HashSet::from([category_id]);
+        let source = SandState {
+            version: SandState::VERSION,
+            grid_width: 4,
+            grid_height: 8,
+            grains: vec![crate::sand::SandStateGrain {
+                x: 1,
+                y: 7,
+                category_id: category_id.0,
+            }],
+            frame_count: 0,
+            sweep_left_to_right: true,
+            rng_state: 11,
+            ingress_focus_x: None,
+            pending_grains: Vec::new(),
+            pending_runs: vec![PendingGrainRun {
+                category_id: category_id.0,
+                count: 5,
+            }],
+            active_avalanche_columns: Vec::new(),
+            mobilized_grains: Vec::new(),
+            classic_runtime: None,
+        };
+
+        let mut preview = ClassicSandboxEngine::new_production(2, 2);
+        preview
+            .restore_state(&source, &valid)
+            .expect("restore preview source");
+        let physical = preview.physical_grain_count();
+        let pending = preview.pending_count();
+        let total = mass(&preview);
+
+        preview.resize_physics_preview(3, 3);
+
+        assert_eq!(preview.physical_grain_count(), physical);
+        assert_eq!(preview.pending_count(), pending);
+        assert_eq!(mass(&preview), total);
     }
 
     #[test]
