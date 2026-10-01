@@ -18,19 +18,6 @@ pub(super) fn report_period_label_span(
     Span::styled(label.to_string(), style)
 }
 
-pub(super) fn text_color_for_bg(bg_color: Color) -> Color {
-    if let Color::Rgb(r, g, b) = bg_color {
-        let brightness = (299 * r as u32 + 587 * g as u32 + 114 * b as u32) / 1000;
-        if brightness > 128 {
-            Color::Black
-        } else {
-            Color::White
-        }
-    } else {
-        Color::White
-    }
-}
-
 pub(super) fn balance_color(
     seconds: isize,
     negative: Color,

@@ -74,6 +74,11 @@ Classic presentation defaults remain:
 
 Theme selection must not change either physics or Braille dot geometry.
 
+Strata-owned solid selection and highlight backgrounds use one shared foreground-contrast resolver. Named Ratatui colors
+and equivalent RGB colors pass through the same appearance color normalization and luma rule. `Reset` and indexed colors
+remain under terminal authority and use the active theme foreground as the caller fallback. This rule does not implement
+the deferred automatic light/dark adaptation program.
+
 ## Deferred work
 
 APPEARANCE-001 does not yet implement terminal light/dark auto-detection or contrast adaptation policy. The accepted next layer is background-aware appearance with explicit `auto | dark | light` control and `strict | soft | safe` adaptation, with manual theme intent remaining higher authority than automatic correction.

@@ -12,7 +12,7 @@ use crate::{
     keybindings::{Action, ActionBindingState, ActionCategory},
 };
 
-use super::{App, SettingsOverlay, SettingsSelectable, view_style};
+use super::{App, SettingsOverlay, SettingsSelectable};
 
 #[derive(Clone)]
 struct SettingsRow {
@@ -286,7 +286,8 @@ impl App {
         let is_selected = selectable == selected_item;
 
         let line = if is_selected {
-            let text_color = view_style::text_color_for_bg(accent);
+            let text_color =
+                crate::appearance::contrasting_text_color(accent, self.theme_foreground());
             Line::from(vec![
                 Span::styled(left_text, Style::default().fg(text_color).bg(accent)),
                 Span::styled(
@@ -382,7 +383,10 @@ impl App {
                             Line::from(Span::styled(
                                 label,
                                 Style::default()
-                                    .fg(view_style::text_color_for_bg(self.theme_accent()))
+                                    .fg(crate::appearance::contrasting_text_color(
+                                        self.theme_accent(),
+                                        self.theme_foreground(),
+                                    ))
                                     .bg(self.theme_accent())
                                     .add_modifier(Modifier::BOLD),
                             ))
@@ -426,8 +430,9 @@ impl App {
                             Line::from(Span::styled(
                                 format!("> {}", label),
                                 Style::default()
-                                    .fg(view_style::text_color_for_bg(
+                                    .fg(crate::appearance::contrasting_text_color(
                                         self.settings_item_color(SettingsSelectable::WeekStartDay),
+                                        self.theme_foreground(),
                                     ))
                                     .bg(self.settings_item_color(SettingsSelectable::WeekStartDay))
                                     .add_modifier(Modifier::BOLD),

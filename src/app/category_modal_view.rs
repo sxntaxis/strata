@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, List, ListItem, ListState},
 };
 
-use super::{App, view_style};
+use super::App;
 
 impl App {
     pub(super) fn render_modal(&self, f: &mut Frame, terminal_size: Rect) {
@@ -27,7 +27,10 @@ impl App {
                 };
 
                 if is_selected {
-                    let text_color = view_style::text_color_for_bg(cat.color);
+                    let text_color = crate::appearance::contrasting_text_color(
+                        cat.color,
+                        self.theme_foreground(),
+                    );
                     let layer_name = self.display_layer_name(&cat.name);
                     let description_text = if self.modal_description.is_empty() {
                         Span::raw("")
@@ -70,7 +73,10 @@ impl App {
                     ]))
                     .style(
                         Style::default()
-                            .fg(view_style::text_color_for_bg(self.theme_accent()))
+                            .fg(crate::appearance::contrasting_text_color(
+                                self.theme_accent(),
+                                self.theme_foreground(),
+                            ))
                             .bg(self.theme_accent()),
                     )
                 } else {
