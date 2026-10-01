@@ -159,6 +159,20 @@ fn assert_terminal_restored(output: &PtyOutput) {
         output.before, output.after,
         "terminal termios must be restored exactly"
     );
+    assert!(
+        output
+            .bytes
+            .windows(5)
+            .any(|sequence| sequence == b"\x1b[1 q"),
+        "editable TUI should request a blinking block cursor"
+    );
+    assert!(
+        output
+            .bytes
+            .windows(5)
+            .any(|sequence| sequence == b"\x1b[0 q"),
+        "terminal teardown should restore the user's default cursor style"
+    );
 }
 
 fn wait_for_path(path: &Path) {
@@ -227,6 +241,80 @@ fn sediment_mass_for_category(payload: &serde_json::Value, category_id: u64) -> 
         .filter(|id| id.as_u64() == Some(category_id))
         .count();
     placed + pending_runs + legacy_pending
+}
+
+fn total_sediment_mass(payload: &serde_json::Value) -> usize {
+    let placed = payload
+        .get("grains")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
+    let pending_runs = payload
+        .get("pending_runs")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|run| {
+            usize::try_from(
+                run.get("count")
+                    .and_then(serde_json::Value::as_u64)
+                    .expect("pending run count should be numeric"),
+            )
+            .expect("pending run count should fit usize")
+        })
+        .sum::<usize>();
+    let legacy_pending = payload
+        .get("pending_grains")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
+    placed + pending_runs + legacy_pending
+}
+
+fn pending_category_sequence(payload: &serde_json::Value) -> Vec<u64> {
+    let mut categories = payload
+        .get("pending_grains")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|category_id| category_id.as_u64().unwrap())
+        .collect::<Vec<_>>();
+    for run in payload
+        .get("pending_runs")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let category_id = run
+            .get("category_id")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap();
+        let count = usize::try_from(
+            run.get("count")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap(),
+        )
+        .unwrap();
+        categories.extend(std::iter::repeat_n(category_id, count));
+    }
+    categories
+}
+
+fn placed_grains(payload: &serde_json::Value) -> Vec<(u64, u64, u64)> {
+    payload
+        .get("grains")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|grain| {
+            (
+                grain.get("x").and_then(serde_json::Value::as_u64).unwrap(),
+                grain.get("y").and_then(serde_json::Value::as_u64).unwrap(),
+                grain
+                    .get("category_id")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap(),
+            )
+        })
+        .collect()
 }
 
 #[test]
@@ -301,7 +389,7 @@ fn live_cli_control_is_profile_scoped_and_preserves_continuous_idle() {
 }
 
 #[test]
-fn active_subtitle_updates_live_and_persists_on_escape_without_enter() {
+fn active_tag_preview_requires_enter_and_escape_restores_opening_tag() {
     let profile = TerminalProfile::new("active-subtitle-live-edit");
     profile.seed_work_category();
     Connection::open(profile.database_path())
@@ -358,8 +446,36 @@ fn active_subtitle_updates_live_and_persists_on_escape_without_enter() {
     );
 
     tui.write_all(b"\x1b")
-        .expect("Esc should close and persist the active subtitle");
-    let mut persisted = false;
+        .expect("Esc should restore the opening Tag and close Layer");
+    let mut rolled_back = false;
+    for _ in 0..80 {
+        let status = profile.cli(&["status"]);
+        let description: String = Connection::open(profile.database_path())
+            .unwrap()
+            .query_row("SELECT description FROM active_session", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        if description.is_empty()
+            && status.status.success()
+            && !combined_output(&status).contains("tag 'focus'")
+        {
+            rolled_back = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    assert!(rolled_back, "Esc should restore the opening empty Tag");
+
+    tui.write_all(b"\r")
+        .expect("Enter should reopen the Layer modal");
+    thread::sleep(Duration::from_millis(50));
+    tui.write_all(b"focus")
+        .expect("typing should preview the active Tag");
+    tui.write_all(b"\r")
+        .expect("Enter should accept the active Tag preview");
+
+    let mut accepted = false;
     for _ in 0..80 {
         let description: String = Connection::open(profile.database_path())
             .unwrap()
@@ -368,44 +484,60 @@ fn active_subtitle_updates_live_and_persists_on_escape_without_enter() {
             })
             .unwrap();
         if description == "focus" {
-            persisted = true;
+            accepted = true;
             break;
         }
         thread::sleep(Duration::from_millis(25));
     }
-    assert!(persisted, "Esc should persist the final active subtitle");
+    assert!(accepted, "Enter should persist the accepted Tag preview");
 
     tui.write_all(b"\r")
-        .expect("Enter should reopen the layer pop-up");
+        .expect("Enter should reopen the Layer modal");
     thread::sleep(Duration::from_millis(50));
     tui.write_all(b"\x7f\x7f\x7f\x7f\x7fdeep")
-        .expect("Backspace and typing should edit the running subtitle");
-
-    let mut edited_live = false;
+        .expect("Backspace and typing should preview the replacement Tag");
+    let mut replacement_live = false;
     for _ in 0..80 {
         let status = profile.cli(&["status"]);
         if status.status.success() && combined_output(&status).contains("tag 'deep'") {
-            edited_live = true;
+            replacement_live = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    assert!(replacement_live, "the replacement Tag should preview live");
+
+    tui.write_all(b"\x1b")
+        .expect("Esc should restore the Tag accepted before this modal opened");
+    let mut replacement_rolled_back = false;
+    for _ in 0..80 {
+        let description: String = Connection::open(profile.database_path())
+            .unwrap()
+            .query_row("SELECT description FROM active_session", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let status = profile.cli(&["status"]);
+        if description == "focus"
+            && status.status.success()
+            && combined_output(&status).contains("tag 'focus'")
+        {
+            replacement_rolled_back = true;
             break;
         }
         thread::sleep(Duration::from_millis(25));
     }
     assert!(
-        edited_live,
-        "editing should replace the live subtitle immediately"
+        replacement_rolled_back,
+        "Esc should restore both the durable and live opening Tag"
     );
 
-    let durable_before_second_close: String = Connection::open(profile.database_path())
-        .unwrap()
-        .query_row("SELECT description FROM active_session", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(durable_before_second_close, "focus");
-
-    tui.write_all(b"\x1b")
-        .expect("Esc should persist the edited subtitle");
-    let mut edited_persisted = false;
+    tui.write_all(b"\r")
+        .expect("Enter should reopen Layer for explicit acceptance");
+    thread::sleep(Duration::from_millis(50));
+    tui.write_all(b"\x7f\x7f\x7f\x7f\x7fdeep\r")
+        .expect("Enter should accept the replacement Tag");
+    let mut replacement_accepted = false;
     for _ in 0..80 {
         let description: String = Connection::open(profile.database_path())
             .unwrap()
@@ -414,17 +546,38 @@ fn active_subtitle_updates_live_and_persists_on_escape_without_enter() {
             })
             .unwrap();
         if description == "deep" {
-            edited_persisted = true;
+            replacement_accepted = true;
             break;
         }
         thread::sleep(Duration::from_millis(25));
     }
     assert!(
-        edited_persisted,
-        "the subtitle present at Esc must remain durable"
+        replacement_accepted,
+        "Enter should persist the replacement Tag"
     );
 
-    tui.write_all(b"q").expect("quit should reach TUI");
+    tui.write_all(b"\r")
+        .expect("Enter should reopen Layer for emergency-quit preview");
+    thread::sleep(Duration::from_millis(50));
+    tui.write_all(b"\x7f\x7f\x7f\x7ftemporary")
+        .expect("typing should preview the unaccepted Tag");
+    let mut emergency_preview_live = false;
+    for _ in 0..80 {
+        let status = profile.cli(&["status"]);
+        if status.status.success() && combined_output(&status).contains("tag 'temporary'") {
+            emergency_preview_live = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    assert!(
+        emergency_preview_live,
+        "the unaccepted emergency-exit Tag should preview live"
+    );
+    thread::sleep(Duration::from_millis(1_100));
+
+    tui.write_all(b"\x03")
+        .expect("Ctrl-C should take the mandatory emergency-exit path");
     let output = tui.wait(PTY_TIMEOUT).expect("TUI should exit");
     assert!(output.status.success(), "{}", pty_output(&output));
     let active_after_quit: i64 = Connection::open(profile.database_path())
@@ -433,7 +586,19 @@ fn active_subtitle_updates_live_and_persists_on_escape_without_enter() {
         .unwrap();
     assert_eq!(
         active_after_quit, 0,
-        "normal quit must finalize rather than preserve the active generation"
+        "mandatory Ctrl-C must finalize rather than preserve the active generation"
+    );
+    let last_description: String = Connection::open(profile.database_path())
+        .unwrap()
+        .query_row(
+            "SELECT description FROM sessions ORDER BY id DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        last_description, "deep",
+        "Ctrl-C must discard the unaccepted Tag preview before finalization"
     );
 
     let mut reopened = spawn_live_tui(&profile);
@@ -442,14 +607,168 @@ fn active_subtitle_updates_live_and_persists_on_escape_without_enter() {
     assert!(status.status.success(), "{}", combined_output(&status));
     assert!(
         !combined_output(&status).contains("tag 'deep'"),
-        "normal quit must not resurrect the completed session as active"
+        "Ctrl-C must not resurrect the completed session as active"
     );
     quit_tui(&mut reopened);
 }
 
 #[test]
-fn shift_c_clears_only_idle_sediment_and_preserves_sqlite_extent() {
-    let profile = TerminalProfile::new("shift-c-idle-clear");
+fn ctrl_x_balance_delete_reclassifies_sand_without_changing_geometry_or_mass() {
+    let profile = TerminalProfile::new("balance-permanent-layer-delete");
+    profile.seed_work_category();
+    Connection::open(profile.database_path())
+        .unwrap()
+        .execute(
+            "INSERT INTO category_tags(category_id, ordinal, tag) VALUES (1, 0, 'focus')",
+            [],
+        )
+        .unwrap();
+    let initial_sand = serde_json::json!({
+        "version": 5,
+        "grid_width": 2,
+        "grid_height": 2,
+        "grains": [{"x": 0, "y": 1, "category_id": 1}]
+    })
+    .to_string();
+    Connection::open(profile.database_path())
+        .unwrap()
+        .execute(
+            "INSERT INTO sand_state (
+                singleton, formation_id, quantum_seconds, grid_width, grid_height,
+                payload_json, updated_at_utc
+             ) VALUES (1, 'delete-test', 1, 2, 2, ?1, '2026-09-28T00:00:00Z')",
+            [initial_sand],
+        )
+        .unwrap();
+
+    let mut tui = spawn_live_tui(&profile);
+    wait_for_path(&profile.control_socket_path());
+
+    let start = profile.cli(&["start", "Work", "--desc", "focus"]);
+    assert!(start.status.success(), "{}", combined_output(&start));
+    thread::sleep(Duration::from_millis(2_300));
+    let stop = profile.cli(&["stop"]);
+    assert!(stop.status.success(), "{}", combined_output(&stop));
+
+    let sand_before = persisted_sand_state(&profile);
+    let work_mass_before = sediment_mass_for_category(&sand_before.2, 1);
+    let idle_mass_before = sediment_mass_for_category(&sand_before.2, 0);
+    assert!(
+        work_mass_before > 0,
+        "test Layer should have sand before deletion"
+    );
+
+    tui.write_all(b"b").expect("Balance should open from Main");
+    thread::sleep(Duration::from_millis(150));
+    tui.write_all(b"\x1b[B")
+        .expect("selection should move from Idle to Work");
+    thread::sleep(Duration::from_millis(100));
+    tui.write_all(b"\x18")
+        .expect("Ctrl+x should request permanent Layer deletion");
+    thread::sleep(Duration::from_millis(250));
+
+    let connection = Connection::open(profile.database_path()).unwrap();
+    let sessions_before_confirmation: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM sessions WHERE category_id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let tags_before_confirmation: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM category_tags WHERE category_id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    drop(connection);
+    assert!(sessions_before_confirmation > 0);
+    assert_eq!(tags_before_confirmation, 1);
+
+    tui.write_all(b"\x1b")
+        .expect("Esc should cancel permanent Layer deletion");
+    thread::sleep(Duration::from_millis(150));
+    let still_present: String = Connection::open(profile.database_path())
+        .unwrap()
+        .query_row("SELECT name FROM categories WHERE id = 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(still_present, "Work");
+
+    tui.write_all(b"\x18\x1b[B\r")
+        .expect("Ctrl+x, Down, then Enter should confirm permanent Layer deletion");
+    let mut deleted = false;
+    for _ in 0..80 {
+        let connection = Connection::open(profile.database_path()).unwrap();
+        let sessions: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM sessions WHERE category_id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let tags: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM category_tags WHERE category_id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        drop(connection);
+        if sessions == 0 && tags == 0 {
+            deleted = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    assert!(
+        deleted,
+        "confirmation should delete session and Tag history"
+    );
+    let sand_after = persisted_sand_state(&profile);
+    assert_eq!(sand_after.0, sand_before.0);
+    assert_eq!(sand_after.1, sand_before.1);
+    assert_eq!(
+        total_sediment_mass(&sand_after.2),
+        total_sediment_mass(&sand_before.2)
+    );
+    let mut expected_grains = placed_grains(&sand_before.2);
+    for (_, _, category_id) in &mut expected_grains {
+        if *category_id == 1 {
+            *category_id = 0;
+        }
+    }
+    assert_eq!(placed_grains(&sand_after.2), expected_grains);
+    let expected_pending = pending_category_sequence(&sand_before.2)
+        .into_iter()
+        .map(|category_id| if category_id == 1 { 0 } else { category_id })
+        .collect::<Vec<_>>();
+    assert_eq!(pending_category_sequence(&sand_after.2), expected_pending);
+    assert_eq!(
+        sediment_mass_for_category(&sand_after.2, 0),
+        idle_mass_before + work_mass_before,
+        "deleted Layer grains should become Idle without loss"
+    );
+    assert_eq!(sediment_mass_for_category(&sand_after.2, 1), 0);
+    let tombstone: (String, Option<String>) = Connection::open(profile.database_path())
+        .unwrap()
+        .query_row(
+            "SELECT name, archived_at_utc FROM categories WHERE id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(tombstone.0, "__strata_deleted_layer_1__");
+    assert!(tombstone.1.is_some());
+
+    quit_tui(&mut tui);
+}
+
+#[test]
+fn backspace_clears_only_idle_sediment_and_preserves_sqlite_extent() {
+    let profile = TerminalProfile::new("backspace-idle-clear");
     profile.seed_work_category();
 
     let mut tui = spawn_live_tui(&profile);
@@ -479,8 +798,8 @@ fn shift_c_clears_only_idle_sediment_and_preserves_sqlite_extent() {
 
     let mut tui = spawn_live_tui(&profile);
     wait_for_path(&profile.control_socket_path());
-    tui.write_all(b"C")
-        .expect("uppercase C should reach the real PTY");
+    tui.write_all(b"\x7f")
+        .expect("Backspace should reach the real PTY");
 
     let mut cleared = None;
     for _ in 0..80 {
@@ -494,7 +813,7 @@ fn shift_c_clears_only_idle_sediment_and_preserves_sqlite_extent() {
         thread::sleep(Duration::from_millis(25));
     }
     let (after_width, after_height, after_payload) =
-        cleared.expect("Shift-C should synchronously persist the Idle-only clear");
+        cleared.expect("Backspace should synchronously persist the Idle-only clear");
     assert_eq!((after_width, after_height), (before_width, before_height));
     assert_eq!(sediment_mass_for_category(&after_payload, 0), 0);
     assert_eq!(sediment_mass_for_category(&after_payload, 1), work_before);

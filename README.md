@@ -34,7 +34,7 @@ strata report --today
 
 ## Architecture
 
-- `src/domain.rs`: business rules for categories, sessions, operational days, and reports.
+- `src/domain.rs`: business rules for categories, sessions, reporting cycles, and reports.
 - `src/sqlite.rs` and `src/sqlite/*`: the current SQLite schema, repository operations, maintenance, runtime coordination, and TUI adapters.
 - `src/storage.rs`: profile paths and atomic helpers for current configuration/state publication.
 - `src/app.rs` and `src/app/*`: TUI orchestration, rendering, event handling, and persistence-recovery controls.
@@ -81,7 +81,7 @@ Strata uses distinct clocks for distinct truths:
 
 - **Live elapsed duration** uses the process monotonic clock.
 - **Persisted timestamps** use UTC.
-- **Civil start/end rendering and operational-day allocation** use the validated fixed UTC offset from `keymap.json`.
+- **Civil start/end rendering and reporting-cycle allocation** use the validated fixed UTC offset from `keymap.json`.
 - **Historical allocation** uses each completed session's persisted fixed-offset boundary policy and absolute interval; later setting changes do not redivide old history.
 
 At a live finish or layer switch, Strata reconciles monotonic elapsed time against observed UTC wall time. A divergence greater than five seconds is treated as a clock discontinuity: the transition fails visibly and active state remains available for recovery rather than being converted into ordinary work.
@@ -96,11 +96,11 @@ Use that override only after inspecting the active timestamp and system clock; i
 
 The current policy is a **fixed clock under a fixed UTC offset**, not an IANA timezone. It is deterministic across travel and seasonal clock changes but does not automatically apply daylight-saving transitions. The former `sunrise` option never performed solar calculation and has been removed; an existing `day_start_mode: "sunrise"` setting is rewritten visibly to `fixed` while preserving its configured hour and minute.
 
-A completed session remains one canonical ledger row. Reports project exact overlap slices at operational-day boundaries using the policy stored with that session, so a cross-boundary interval contributes only its overlapping seconds to each day without losing identity or creating empty exact-boundary fragments. Transitions whose whole-second duration is zero still complete or switch active state transactionally, but they do not create ordinary work rows. The full contract is recorded in [`docs/TEMPORAL_AUTHORITY.md`](docs/TEMPORAL_AUTHORITY.md).
+A completed session remains one canonical ledger row. Reports project exact overlap slices at reporting-cycle cutoffs using the policy stored with that session, so a cross-boundary interval contributes only its overlapping seconds to each day without losing identity or creating empty exact-boundary fragments. Transitions whose whole-second duration is zero still complete or switch active state transactionally, but they do not create ordinary work rows. The full contract is recorded in [`docs/TEMPORAL_AUTHORITY.md`](docs/TEMPORAL_AUTHORITY.md).
 
 ## Reporting and exports
 
-Reports are projections over canonical ledger truth. Preset reports use the current operational day, configured week-to-date, or calendar month-to-date. Custom ranges are inclusive operational-day ranges:
+Reports are projections over canonical ledger truth. Preset reports use the current reporting cycle, configured week-to-date, or calendar month-to-date. Custom ranges are inclusive reporting-cycle ranges:
 
 ```bash
 strata report --from 2026-07-01 --to 2026-07-15
@@ -223,7 +223,7 @@ success = "moss"
 
 `default` is not a palette swatch: it tells Strata to leave that supported UI color under external terminal/environment authority. `idle` currently requires an explicit RGB swatch because idle grains participate in Braille color mixing.
 
-The Layer UX remains unchanged: select a layer and use `Shift+←` / `Shift+→` to change its color; the same keys choose a color while forging a new layer. Strata derives a stable perceptual OKLCH hue wheel from the active theme's eligible sand colors, so declaration order and numeric slot positions are not persistent semantics.
+Layer interaction follows the shared input grammar: `←` / `→` cycles Tag values on an existing layer, `Ctrl+←` / `Ctrl+→` changes that layer's color, and `Ctrl+↑` / `Ctrl+↓` reorders it. While forging a new layer there is no competing Tag axis, so plain `←` / `→` chooses its color. Strata derives a stable perceptual OKLCH hue wheel from the active theme's eligible sand colors, so declaration order and numeric slot positions are not persistent semantics.
 
 Category color choice is stored as a theme-independent RGB anchor. Switching themes resolves that anchor to the nearest eligible swatch rather than assuming two themes have the same palette length or names. Classic uses `rgb-luma-safe` as the default Braille color blend.
 
@@ -234,12 +234,12 @@ Category color choice is stored as a theme-independent RGB anchor. Switching the
 - Open Balance with `b`.
 - In main view, `d` detaches Strata while tracking continues.
 - In Balance, `d` or `t` selects day range, `w` week, and `m` month.
-- Balance always shows explicit interval boundaries: a single included day such as Sep 21 appears as `Sep 21 – Sep 22`. Press `[` to select the start boundary or `]` to select the exclusive end boundary, then use `←` / `→` to move that boundary one operational day at a time or `Shift+←` / `Shift+→` for seven days. `Esc` deselects the boundary before ordinary close/back behavior resumes.
-- Press `r` in Balance for a direct From/To jump. The typed values use the same boundary convention (`From 2026-09-21`, `To 2026-09-22` means Sep 21 only); `Tab` switches fields, `Enter` applies, and `Esc` cancels.
-- Press `l` from the Balance summary to log/correct arbitrary past activity. Inside a layer detail, `l` is scoped to that layer and opens the same inline new-entry editor as the final `+ Add entry…` ledger row. Confirm on a completed ledger row edits its Tag and full start/end boundaries in place. These Balance keys do not act as hidden Main shortcuts; use `b` or the command palette to enter historical work deliberately.
-- A ledger Tag may contain multiple independent attribution tags separated by `;`, for example `Renzo; Anibal`. Completion stays blank until the current Tag segment has at least one typed character; `←` / `→` then cycles known tags matching that prefix. `Tab` / `Shift+Tab` only move between editor fields. In Date and Time fields, `←` / `→` adjust one day/minute and Shift accelerates to seven days/sixty minutes; compact minute-precision time input such as `650` or `6:50` is accepted without requiring seconds.
-- In Layer Detail, `f` toggles the focused tag into an OR filter. Matching rows remain normal, nonmatching rows remain visible but dim, and `←` / `→` moves tag focus inside a multi-tag row while filter focus is active. The filtered meter keeps the full selected-period recorded-time denominator.
-- In layer text entry, `?` remains a normal character; use `F1` there.
+- Balance always shows explicit interval boundaries: a single included day such as Sep 21 appears as `Sep 21 – Sep 22`. Press `[` to edit the start boundary or `]` to edit the exclusive end boundary; `←` / `→` previews one reporting cycle and `Shift+←` / `Shift+→` one civil month. `Enter` accepts the edited range and `Esc` restores the range that was active when boundary editing began.
+- `+ Add entry…` is the canonical historical-add control in Layer Detail; select it and press `Enter`. Confirm on a completed ledger row edits its Tag and full start/end boundaries in place. The former default `r` range-editor and `l` add-entry shortcuts are intentionally unbound; their actions remain configurable/available through the command palette pending a later Settings/palette pass.
+- A ledger Tag may contain multiple independent attribution tags separated by `;`, for example `Renzo; Anibal`. Completion stays blank until the current Tag segment has at least one typed character; `←` / `→` then cycles known tags matching that prefix. `Tab` / `Shift+Tab` only move between editor fields. In Date fields, `←` / `→` adjusts one day and Shift accelerates to one civil month; in Time fields the same pair adjusts one minute / one hour. Compact minute-precision time input such as `650` or `6:50` is accepted without requiring seconds.
+- In Layer Detail, `f` toggles a single-tag row immediately. On a multi-tag row, `f` opens an in-row tag selector, `←` / `→` chooses a tag, `Enter` or `f` applies it, and `Esc` cancels. Matching rows remain normal, nonmatching rows remain visible but dim, and the filtered meter keeps the full selected-period recorded-time denominator.
+- Layer Tag typing previews immediately on the active layer; `Enter` accepts that Tag and `Esc` restores the Tag present when Layer was opened. Before Tag editing starts, `+` / `=` and `-` / `_` set positive/negative Layer polarity; after typing starts those symbols are ordinary Tag text, so they may appear inside but not at the manually typed start of a Tag. `Ctrl+e` renames the selected non-Idle Layer and `Ctrl+x` archives it. In Main, `Backspace` clears Idle sand and `Delete` clears all sand.
+- Balance hides exact-zero Layer rows for the selected period. `Ctrl+x` on a Balance-summary Layer asks for permanent Layer/history deletion (`Enter` confirm, `Esc` cancel); confirmed deletion reclassifies that Layer's current and historical sediment to Idle without moving grains. In Layer Detail, `Ctrl+x` deletes only the selected persisted entry. Empty Tags display as `—`.
 - Optional config file: `~/.config/strata/keymap.json`.
 - In Balance, `←` moves to older intervals and `→` moves toward current.
 
@@ -275,8 +275,8 @@ Notes:
 Balance interval notes:
 
 - `month` uses calendar months: current month-to-date, then complete prior calendar months.
-- Balance chrome uses start/exclusive-end boundary labels while the underlying `ReportWindow` and CLI `--from/--to` contract remain inclusive over operational-day keys.
-- Day, week, and month totals allocate canonical sessions by exact overlap with their persisted operational-day boundary policy.
+- Balance chrome uses start/exclusive-end boundary labels while the underlying `ReportWindow` and CLI `--from/--to` contract remain inclusive over reporting-cycle keys.
+- Day, week, and month totals allocate canonical sessions by exact overlap with their persisted reporting-cutoff policy.
 - A zero-whole-second finish or switch is a transition event, not a completed work row.
 - Daily sediment snapshots are authoritative SQLite records.
 - If a historical snapshot is missing, Strata reconstructs an approximation from that day's completed sessions.

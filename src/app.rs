@@ -22,7 +22,7 @@ use crate::{
     runtime_identity::transition_identity,
     sand::{
         ClassicProductionEngine, RecoveryTiming, SandEngine, SandState, SandStateGrain,
-        SedimentSnapshot, recover_detached_sediment, settle_transition_sediment,
+        SedimentSnapshot, settle_transition_sediment,
     },
     sqlite, storage, temporal,
 };
@@ -31,15 +31,18 @@ mod balance_instrument;
 mod category_modal_view;
 mod category_state;
 mod command_palette_view;
+mod date_input;
 mod event_handlers;
 mod ledger_state;
 mod overlay_layout;
 mod persistence_recovery;
+mod recovery_gap;
 mod recovery_statement;
 mod render_views;
 mod report_modal_view;
 mod report_state;
 mod settings_view;
+mod system_dialog;
 mod tagging;
 mod terminal_lifecycle;
 mod time_format;
@@ -50,6 +53,7 @@ mod view_style;
 use crate::sand::{ClassicRainMode, ClassicSandboxEngine, OsloBoundaryMode, OsloSandboxEngine};
 use ledger_state::{LedgerEntryEditKind, LedgerEntryEditState, LedgerEntryField};
 use persistence_recovery::{PersistenceOperation, PersistenceRecoveryState, RecoveryAction};
+use system_dialog::SystemDialogSeverity;
 use terminal_lifecycle::{ManagedTerminal, TerminalSession};
 
 #[cfg(debug_assertions)]
@@ -123,9 +127,25 @@ enum ReportRangeBoundary {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+struct ReportRangeBoundarySnapshot {
+    period: ReportPeriod,
+    period_offset: usize,
+    custom_window: Option<ReportWindow>,
+    selected_category_id: Option<CategoryId>,
+    selected_index: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum ReportTagFacet {
     Tag(String),
     Untagged,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum LedgerSelectionIdentity {
+    Session(usize),
+    Active(String),
+    Add,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -134,7 +154,14 @@ struct ReportRangeEditState {
     to: String,
     active_field: ReportRangeField,
     select_all: bool,
-    error: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SystemNoticeState {
+    severity: SystemDialogSeverity,
+    subtitle: String,
+    message: String,
+    restore_selected_index: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -153,10 +180,11 @@ impl ReportRangeEditState {
             target.clear();
             self.select_all = false;
         }
-        if target.len() < 10 {
-            target.push(character);
+        let mut candidate = target.clone();
+        candidate.push(character);
+        if date_input::date_candidate_is_well_shaped(&candidate) {
+            *target = candidate;
         }
-        self.error = None;
     }
 
     fn backspace(&mut self) {
@@ -170,7 +198,22 @@ impl ReportRangeEditState {
         } else {
             target.pop();
         }
-        self.error = None;
+    }
+
+    fn normalize_active(&mut self, current: NaiveDate) -> Result<(), String> {
+        let target = match self.active_field {
+            ReportRangeField::From => &mut self.from,
+            ReportRangeField::To => &mut self.to,
+        };
+        *target = date_input::normalize_date_text(target, current)?;
+        self.select_all = false;
+        Ok(())
+    }
+
+    fn normalize_all(&mut self, current: NaiveDate) -> Result<(), String> {
+        self.from = date_input::normalize_date_text(&self.from, current)?;
+        self.to = date_input::normalize_date_text(&self.to, current)?;
+        Ok(())
     }
 
     fn switch_field(&mut self) {
@@ -179,7 +222,6 @@ impl ReportRangeEditState {
             ReportRangeField::To => ReportRangeField::From,
         };
         self.select_all = true;
-        self.error = None;
     }
 }
 
@@ -263,6 +305,7 @@ impl DetachedRuntimeCheckpoint {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[allow(dead_code)]
 enum RecoveredIntervalClass {
     Exact,
     Reconstructed,
@@ -279,6 +322,7 @@ impl RecoveredIntervalClass {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[allow(dead_code)]
 enum PostTargetClass {
     ProvisionalLiveTime,
 }
@@ -289,7 +333,16 @@ impl PostTargetClass {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug)]
+struct RecoveryGapState {
+    checkpoint: DetachedRuntimeCheckpoint,
+    target_utc: DateTime<Utc>,
+    expected_stable_id: String,
+    active_category_id: CategoryId,
+    active_started_at_utc: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 struct RecoveryStatement {
     profile_id: String,
     checkpoint_captured_at_utc: DateTime<Utc>,
@@ -356,6 +409,7 @@ fn repair_initial_checkpoint_simulation_boundary(
     true
 }
 
+#[allow(dead_code)]
 fn build_recovery_statement(
     checkpoint: &DetachedRuntimeCheckpoint,
     active_stable_id: Option<String>,
@@ -1061,19 +1115,29 @@ struct App {
     new_category_name: String,
     new_category_color_cursor: usize,
     modal_description: String,
+    modal_active_description_snapshot: String,
+    modal_tag_text_editing: bool,
+    modal_category_name_draft: String,
     modal_active_description_dirty: bool,
-    modal_editing_category_metadata: bool,
+    modal_renaming_category: bool,
     category_tags: storage::CategoryTagsState,
     modal_tag_index: Option<usize>,
     modal_tag_cycle_prefix: Option<String>,
     report_selected_index: usize,
+    report_selected_category_id: Option<CategoryId>,
     report_period: ReportPeriod,
     report_period_offset: usize,
     report_custom_window: Option<ReportWindow>,
     report_range_boundary: Option<ReportRangeBoundary>,
+    report_range_boundary_original: Option<ReportRangeBoundarySnapshot>,
     report_range_edit: Option<ReportRangeEditState>,
+    report_layer_delete_confirmation: Option<CategoryId>,
+    report_entry_delete_confirmation: Option<LedgerSelectionIdentity>,
+    system_dialog_selected_index: usize,
+    system_notice: Option<SystemNoticeState>,
     report_logs_category_id: Option<CategoryId>,
     report_log_selected_index: usize,
+    report_log_selected_identity: Option<LedgerSelectionIdentity>,
     report_tag_filter: Vec<ReportTagFacet>,
     report_filter_tag_index: Option<usize>,
     ledger_entry_edit: Option<LedgerEntryEditState>,
@@ -1089,7 +1153,6 @@ struct App {
     detach_requested: bool,
     keymap: keybindings::Keymap,
     runtime_settings: RuntimeSettings,
-    keymap_error: Option<String>,
     show_command_palette: bool,
     command_palette_query: String,
     command_palette_feedback: Option<String>,
@@ -1107,7 +1170,9 @@ struct App {
     checkpoint_recovery_active: bool,
     checkpoint_recovery_payload: Option<DetachedRuntimeCheckpoint>,
     recovery_statement: Option<RecoveryStatement>,
+    recovery_gap: Option<RecoveryGapState>,
     persistence_recovery: Option<PersistenceRecoveryState>,
+    last_durable_save_utc: DateTime<Utc>,
     recovery_exit_requested: bool,
     recovery_exit_error: Option<String>,
 }
@@ -1127,7 +1192,6 @@ impl App {
             keymap,
             runtime_settings,
         } = loaded;
-        let keymap_error = None;
         let appearance = AppearanceState::load(ignore_config)?;
 
         let mut tracker = TimeTracker::new();
@@ -1165,19 +1229,29 @@ impl App {
             new_category_name: String::new(),
             new_category_color_cursor: 0,
             modal_description: String::new(),
+            modal_active_description_snapshot: String::new(),
+            modal_tag_text_editing: false,
+            modal_category_name_draft: String::new(),
             modal_active_description_dirty: false,
-            modal_editing_category_metadata: false,
+            modal_renaming_category: false,
             category_tags,
             modal_tag_index: None,
             modal_tag_cycle_prefix: None,
             report_selected_index: 0,
+            report_selected_category_id: None,
             report_period: ReportPeriod::Today,
             report_period_offset: 0,
             report_custom_window: None,
             report_range_boundary: None,
+            report_range_boundary_original: None,
             report_range_edit: None,
+            report_layer_delete_confirmation: None,
+            report_entry_delete_confirmation: None,
+            system_dialog_selected_index: 0,
+            system_notice: None,
             report_logs_category_id: None,
             report_log_selected_index: 0,
+            report_log_selected_identity: None,
             report_tag_filter: Vec::new(),
             report_filter_tag_index: None,
             ledger_entry_edit: None,
@@ -1203,7 +1277,6 @@ impl App {
             detach_requested: false,
             keymap,
             runtime_settings,
-            keymap_error,
             show_command_palette: false,
             command_palette_query: String::new(),
             command_palette_feedback: None,
@@ -1221,7 +1294,9 @@ impl App {
             checkpoint_recovery_active: false,
             checkpoint_recovery_payload: None,
             recovery_statement: None,
+            recovery_gap: None,
             persistence_recovery: None,
+            last_durable_save_utc: Utc::now(),
             recovery_exit_requested: false,
             recovery_exit_error: None,
         };
@@ -1257,7 +1332,10 @@ impl App {
         }
 
         app.commit_checkpoint_recovery_if_ready();
-        if !app.has_persistence_recovery() && !initial_checkpoint_published {
+        if app.recovery_gap.is_none()
+            && !app.has_persistence_recovery()
+            && !initial_checkpoint_published
+        {
             app.persist_runtime_checkpoint();
         }
         if let Some(recovery) = app.persistence_recovery.take() {
@@ -1345,7 +1423,9 @@ impl App {
         self.selected_index = self.time_tracker.active_category_index().unwrap_or(0);
         self.new_category_name = String::new();
         self.new_category_color_cursor = 0;
+        self.modal_active_description_snapshot = self.time_tracker.active_description().to_string();
         self.modal_active_description_dirty = false;
+        self.modal_tag_text_editing = false;
         self.sync_modal_description_from_selection();
         self.render_needed = true;
     }
@@ -1388,6 +1468,19 @@ impl App {
         !self.has_persistence_recovery()
     }
 
+    fn cancel_modal(&mut self) {
+        let cancelled_active_preview = self.modal_active_description_dirty;
+        if cancelled_active_preview {
+            self.time_tracker
+                .set_active_description(self.modal_active_description_snapshot.clone());
+            self.modal_active_description_dirty = false;
+        }
+        self.close_modal();
+        if cancelled_active_preview && !self.has_persistence_recovery() {
+            self.refresh_active_runtime_checkpoint();
+        }
+    }
+
     fn close_modal(&mut self) {
         if !self.persist_modal_active_description() {
             self.render_needed = true;
@@ -1395,7 +1488,10 @@ impl App {
         }
         self.ui_mode = UiMode::Main;
         self.modal_description = String::new();
-        self.modal_editing_category_metadata = false;
+        self.modal_active_description_snapshot.clear();
+        self.modal_tag_text_editing = false;
+        self.modal_category_name_draft.clear();
+        self.modal_renaming_category = false;
         self.modal_tag_index = None;
         self.modal_tag_cycle_prefix = None;
         self.render_needed = true;
@@ -1404,13 +1500,19 @@ impl App {
     fn open_report_modal(&mut self) {
         self.ui_mode = UiMode::BalanceModal;
         self.report_selected_index = 0;
+        self.report_selected_category_id = None;
         self.report_period = ReportPeriod::Today;
         self.report_period_offset = 0;
         self.report_custom_window = None;
         self.report_range_boundary = None;
+        self.report_range_boundary_original = None;
         self.report_range_edit = None;
+        self.report_layer_delete_confirmation = None;
+        self.report_entry_delete_confirmation = None;
+        self.system_dialog_selected_index = 0;
         self.report_logs_category_id = None;
         self.report_log_selected_index = 0;
+        self.report_log_selected_identity = None;
         self.report_tag_filter.clear();
         self.report_filter_tag_index = None;
         self.ledger_entry_edit = None;
@@ -1427,11 +1529,14 @@ impl App {
         self.ui_mode = UiMode::Main;
         self.report_logs_category_id = None;
         self.report_log_selected_index = 0;
+        self.report_log_selected_identity = None;
         self.report_tag_filter.clear();
         self.report_filter_tag_index = None;
         self.ledger_entry_edit = None;
         self.report_range_boundary = None;
+        self.report_range_boundary_original = None;
         self.report_range_edit = None;
+        self.report_layer_delete_confirmation = None;
         self.report_snapshot_end_day = None;
         self.report_snapshot_artifact = None;
         self.report_snapshot_preview_key = None;
@@ -1524,6 +1629,14 @@ impl App {
 
     pub(super) fn theme_success(&self) -> ratatui::style::Color {
         self.resolve_ui_ref(self.appearance.success_ref())
+    }
+
+    pub(super) fn theme_selection(&self) -> ratatui::style::Color {
+        self.appearance.selection_color()
+    }
+
+    pub(super) fn theme_selection_text(&self) -> ratatui::style::Color {
+        crate::appearance::contrasting_text_color(self.theme_selection(), self.theme_foreground())
     }
 
     fn settings_items(&self) -> Vec<SettingsSelectable> {
@@ -1633,7 +1746,7 @@ impl App {
         self.show_settings = !self.show_settings;
         if self.show_settings {
             if self.in_balance_modal() {
-                self.report_range_boundary = None;
+                self.cancel_report_range_boundary();
                 self.report_filter_tag_index = None;
             }
             self.settings_selected_index = 0;
@@ -1654,7 +1767,7 @@ impl App {
         self.show_command_palette = !self.show_command_palette;
         if self.show_command_palette {
             if self.in_balance_modal() {
-                self.report_range_boundary = None;
+                self.cancel_report_range_boundary();
                 self.report_filter_tag_index = None;
             }
             self.command_palette_query.clear();
@@ -1750,7 +1863,6 @@ impl App {
         self.keymap = loaded.keymap;
         self.runtime_settings = loaded.runtime_settings;
         set_runtime_settings(self.runtime_settings);
-        self.keymap_error = None;
         self.render_needed = true;
     }
 
@@ -1777,7 +1889,7 @@ impl App {
                 self.apply_loaded_keybindings(loaded);
             }
             Err(err) => {
-                self.keymap_error = Some(err);
+                self.present_error("Settings reload failed", err);
             }
         }
 
@@ -2338,6 +2450,14 @@ impl App {
     ) {
         #[cfg(debug_assertions)]
         self.advance_testing_cheats_wall_time(wall_delta);
+
+        // A detached/offline interval is intentionally unclassified until the
+        // owner chooses how to reconstruct it. Do not let ordinary runtime
+        // catch-up silently make that decision while the warning is open.
+        if self.recovery_gap.is_some() {
+            self.render_needed = true;
+            return;
+        }
 
         let was_catching = self.simulation.catchup_was_active;
         let cadence = Duration::from_millis(CATCHUP_SETTINGS.cadence_ms);
@@ -3434,18 +3554,6 @@ impl App {
             return false;
         }
 
-        let recovery_statement = match build_recovery_statement(
-            &checkpoint,
-            self.session.active_session_stable_id.clone(),
-            target_utc,
-        ) {
-            Ok(statement) => statement,
-            Err(error) => {
-                self.record_storage_result::<()>(Err(error));
-                return false;
-            }
-        };
-
         let valid_category_ids = self
             .time_tracker
             .categories_for_storage()
@@ -3453,37 +3561,10 @@ impl App {
             .chain(self.archived_categories.iter().cloned())
             .map(|category| category.id)
             .collect::<HashSet<_>>();
-        let elapsed = match (target_utc - checkpoint.simulation_time_utc).to_std() {
-            Ok(elapsed) => elapsed,
-            Err(error) => {
-                self.record_storage_result::<()>(Err(format!(
-                    "invalid detached recovery interval: {error}"
-                )));
-                return false;
-            }
-        };
-        let recovered = match recover_detached_sediment(
-            &checkpoint.sand_state,
-            &valid_category_ids,
-            active_category_id,
-            RecoveryTiming {
-                elapsed,
-                spawn_accumulator: Duration::from_nanos(checkpoint.spawn_accumulator_nanos),
-                physics_accumulator: Duration::from_nanos(checkpoint.physics_accumulator_nanos),
-                spawn_period: Duration::from_millis(TIME_SETTINGS.tick_ms),
-                physics_period: Duration::from_millis(TIME_SETTINGS.physics_ms),
-            },
-        ) {
-            Ok(recovered) => recovered,
-            Err(error) => {
-                self.record_storage_result::<()>(Err(error));
-                return false;
-            }
-        };
 
         if let Err(error) = self
             .sand_engine
-            .restore_state(&recovered.state, &valid_category_ids)
+            .restore_state(&checkpoint.sand_state, &valid_category_ids)
         {
             self.record_storage_result::<()>(Err(error));
             return false;
@@ -3499,25 +3580,51 @@ impl App {
         }
         self.time_tracker
             .set_active_description(checkpoint.active_description.clone());
-        if let Err(error) = self.begin_active_session_at(started_at_utc, true) {
-            self.record_storage_result::<()>(Err(error));
+        let observed_seconds = match (checkpoint.simulation_time_utc - started_at_utc).to_std() {
+            Ok(elapsed) => usize::try_from(elapsed.as_secs()).unwrap_or(usize::MAX),
+            Err(error) => {
+                self.record_storage_result::<()>(Err(format!(
+                    "invalid detached observed interval: {error}"
+                )));
+                return false;
+            }
+        };
+        if let Err(error) = self
+            .time_tracker
+            .start_session_with_elapsed(observed_seconds)
+        {
+            self.record_storage_result::<()>(Err(format!(
+                "detached recovery could not restore elapsed time: {error}"
+            )));
             return false;
         }
+        self.session.active_session_started_at_utc = Some(started_at_utc);
 
-        self.simulation.simulation_time_utc = target_utc;
-        self.simulation.spawn_accumulator = recovered.spawn_remainder;
-        self.simulation.physics_accumulator = recovered.physics_remainder;
+        self.simulation.simulation_time_utc = checkpoint.simulation_time_utc;
+        self.simulation.spawn_accumulator =
+            Duration::from_nanos(checkpoint.spawn_accumulator_nanos);
+        self.simulation.physics_accumulator =
+            Duration::from_nanos(checkpoint.physics_accumulator_nanos);
         self.simulation.catchup_cadence_accumulator = Duration::ZERO;
         self.simulation.catchup_visual_engine = None;
         self.simulation.catchup_progress_anchor = None;
         self.simulation.catchup_was_active = false;
-        self.checkpoint_recovery_payload = Some(checkpoint);
-        self.recovery_statement = Some(recovery_statement);
+        self.checkpoint_recovery_payload = Some(checkpoint.clone());
+        self.recovery_statement = None;
+        self.recovery_gap = Some(RecoveryGapState {
+            checkpoint,
+            target_utc,
+            expected_stable_id,
+            active_category_id,
+            active_started_at_utc: started_at_utc,
+        });
+        self.system_dialog_selected_index = 2;
+        self.render_needed = true;
         true
     }
 
     fn commit_checkpoint_recovery_if_ready(&mut self) {
-        if !self.checkpoint_recovery_active {
+        if !self.checkpoint_recovery_active || self.recovery_gap.is_some() {
             return;
         }
         let Some(_checkpoint) = self.checkpoint_recovery_payload.clone() else {
@@ -3590,32 +3697,34 @@ fn run_application_loop(
             if let Err(error) =
                 command_server.process_pending(|command| app.execute_command(command))
             {
-                app.keymap_error = Some(format!("Remote control error: {error}"));
-                app.render_needed = true;
+                app.present_error("Remote control failed", error.to_string());
             }
 
-            if !app.has_persistence_recovery() {
-                let now = Instant::now();
-                let wall_delta = now.saturating_duration_since(last_simulation_update);
-                last_simulation_update = now;
-                app.advance_runtime(wall_delta, tick_rate, physics_rate);
+            let now = Instant::now();
+            let wall_delta = now.saturating_duration_since(last_simulation_update);
+            last_simulation_update = now;
+            app.advance_runtime(wall_delta, tick_rate, physics_rate);
 
-                if last_save.elapsed() >= save_rate && !app.is_catching_up() {
-                    app.persist_sessions();
-                    if !app.has_persistence_recovery() {
-                        app.persist_sand_state();
-                    }
-                    if !app.has_persistence_recovery() {
-                        app.persist_daily_sand_snapshot();
-                    }
-                    if !app.has_persistence_recovery() {
-                        app.persist_runtime_checkpoint();
-                    }
-                    last_save = Instant::now();
+            app.service_persistence_recovery();
+            if !app.has_persistence_recovery()
+                && app.recovery_gap.is_none()
+                && last_save.elapsed() >= save_rate
+                && !app.is_catching_up()
+            {
+                app.persist_sessions();
+                if !app.has_persistence_recovery() {
+                    app.persist_sand_state();
                 }
-
-                app.refresh_keymap_if_changed();
+                if !app.has_persistence_recovery() {
+                    app.persist_daily_sand_snapshot();
+                }
+                if !app.has_persistence_recovery() {
+                    app.persist_runtime_checkpoint();
+                }
+                last_save = Instant::now();
             }
+
+            app.refresh_keymap_if_changed();
 
             if last_render.elapsed() >= render_rate && app.render_needed {
                 terminal_lifecycle::maybe_inject_runtime_io_fault("draw")?;
@@ -3646,6 +3755,7 @@ fn run_application_loop(
         }
 
         if app.has_persistence_recovery() {
+            app.reopen_persistence_recovery_dialog();
             continue 'runtime;
         }
 

@@ -1,7 +1,7 @@
 # Appearance authority
 
 Status: accepted; APPEARANCE-001 implementation candidate
-Last reviewed: 2026-09-06
+Last reviewed: 2026-09-30
 
 ## Purpose
 
@@ -23,7 +23,9 @@ If `[sand]` is omitted, all palette swatches are eligible category colors. The p
 
 `default` is reserved as presentation semantics, not a palette key. It means Strata leaves that color under external terminal/environment authority rather than claiming an RGB value.
 
-The `idle` sand/UI role currently requires an explicit RGB swatch because idle grains participate in the same Braille color-reduction path as category grains. Background/foreground and non-sand UI roles may use `default`.
+The `idle` sand/UI role currently requires an explicit RGB swatch because idle grains participate in the same Braille color-reduction path as category grains. Background/foreground and most non-sand UI roles may use `default`.
+
+`[ui].selection` is an optional semantic **nested/input selection** background and must name an RGB palette swatch when supplied. It does not replace domain-owned navigation color: when a Layer row is the ordinary navigation selection, that row remains Layer-colored with automatically contrasting text. `ui.selection` is drawn above that context for active editable values, focused multi-tag facets, range endpoints, generic non-Layer selections, and dialog actions. If omitted, Strata uses the resolved theme foreground when that is an RGB color; a terminal-owned `default` foreground falls back to the built-in selection color. Every solid selector resolves its content to a contrasting foreground, so a light, dark, or colored theme cannot produce same-color text. Cursor shape/color remains under the host terminal's real hardware-cursor presentation rather than introducing a fake painted cursor role.
 
 ## Category color ownership
 
@@ -50,7 +52,7 @@ CLI projection schema remains unchanged: its legacy `color_index` field is a com
 The existing Layers interaction remains authoritative:
 
 - select a category;
-- `Shift+←` / `Shift+→` changes its category color;
+- `Ctrl+←` / `Ctrl+→` changes its category color;
 - the same controls select the color while forging a new layer.
 
 Strata derives the cycling wheel from the active theme rather than trusting declaration order. Eligible swatches are converted to OKLCH and stably ordered by hue; near-neutral colors follow chromatic colors and use lightness ordering. Same-hue ties use lightness/chroma/key ordering.
@@ -74,10 +76,7 @@ Classic presentation defaults remain:
 
 Theme selection must not change either physics or Braille dot geometry.
 
-Strata-owned solid selection and highlight backgrounds use one shared foreground-contrast resolver. Named Ratatui colors
-and equivalent RGB colors pass through the same appearance color normalization and luma rule. `Reset` and indexed colors
-remain under terminal authority and use the active theme foreground as the caller fallback. This rule does not implement
-the deferred automatic light/dark adaptation program.
+Strata-owned solid selection and highlight backgrounds use one foreground-contrast resolver. Layer-owned navigation selection uses the resolved Layer color; nested/input focus and generic non-Layer selection use the theme's `ui.selection` semantic role. Named Ratatui colors and equivalent RGB colors pass through the same appearance color normalization and luma rule. `Reset` and indexed colors remain under terminal authority and use the active theme foreground as the caller fallback. This rule does not implement the deferred automatic light/dark adaptation program.
 
 ## Deferred work
 

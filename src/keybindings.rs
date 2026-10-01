@@ -57,18 +57,19 @@ pub(crate) enum Action {
     Down,
     Left,
     Right,
-    ShiftUp,
-    ShiftDown,
     ShiftLeft,
     ShiftRight,
     Confirm,
     Cancel,
 
     DeleteCategory,
-    EditCategoryDescription,
+    RenameCategory,
+    MoveLayerUp,
+    MoveLayerDown,
+    PreviousLayerColor,
+    NextLayerColor,
     IncreaseBalance,
     DecreaseBalance,
-    Backspace,
 
     ReportToday,
     ReportWeek,
@@ -84,7 +85,7 @@ pub(crate) enum Action {
 }
 
 impl Action {
-    const ALL: [Action; 34] = [
+    const ALL: [Action; 35] = [
         Action::Quit,
         Action::ToggleCommandPalette,
         Action::OpenCategoryModal,
@@ -98,17 +99,18 @@ impl Action {
         Action::Down,
         Action::Left,
         Action::Right,
-        Action::ShiftUp,
-        Action::ShiftDown,
         Action::ShiftLeft,
         Action::ShiftRight,
         Action::Confirm,
         Action::Cancel,
         Action::DeleteCategory,
-        Action::EditCategoryDescription,
+        Action::RenameCategory,
+        Action::MoveLayerUp,
+        Action::MoveLayerDown,
+        Action::PreviousLayerColor,
+        Action::NextLayerColor,
         Action::IncreaseBalance,
         Action::DecreaseBalance,
-        Action::Backspace,
         Action::ReportToday,
         Action::ReportWeek,
         Action::ReportMonth,
@@ -141,18 +143,19 @@ impl Action {
             Action::Down => "down",
             Action::Left => "left",
             Action::Right => "right",
-            Action::ShiftUp => "shift_up",
-            Action::ShiftDown => "shift_down",
             Action::ShiftLeft => "shift_left",
             Action::ShiftRight => "shift_right",
             Action::Confirm => "confirm",
             Action::Cancel => "cancel",
 
             Action::DeleteCategory => "delete_layer",
-            Action::EditCategoryDescription => "edit_layer_metadata",
+            Action::RenameCategory => "rename_layer",
+            Action::MoveLayerUp => "move_layer_up",
+            Action::MoveLayerDown => "move_layer_down",
+            Action::PreviousLayerColor => "previous_layer_color",
+            Action::NextLayerColor => "next_layer_color",
             Action::IncreaseBalance => "boost_layer_balance",
             Action::DecreaseBalance => "drain_layer_balance",
-            Action::Backspace => "backspace",
 
             Action::ReportToday => "balance_today",
             Action::ReportWeek => "balance_week",
@@ -188,20 +191,21 @@ impl Action {
             "down" => Some(Self::Down),
             "left" => Some(Self::Left),
             "right" => Some(Self::Right),
-            "shift_up" => Some(Self::ShiftUp),
-            "shift_down" => Some(Self::ShiftDown),
             "shift_left" => Some(Self::ShiftLeft),
             "shift_right" => Some(Self::ShiftRight),
             "confirm" => Some(Self::Confirm),
             "cancel" => Some(Self::Cancel),
 
             "delete_layer" | "delete_category" => Some(Self::DeleteCategory),
-            "edit_layer_metadata" | "edit_category_description" => {
-                Some(Self::EditCategoryDescription)
+            "rename_layer" | "edit_layer_metadata" | "edit_category_description" => {
+                Some(Self::RenameCategory)
             }
+            "move_layer_up" | "shift_up" => Some(Self::MoveLayerUp),
+            "move_layer_down" | "shift_down" => Some(Self::MoveLayerDown),
+            "previous_layer_color" => Some(Self::PreviousLayerColor),
+            "next_layer_color" => Some(Self::NextLayerColor),
             "boost_layer_balance" | "increase_balance" => Some(Self::IncreaseBalance),
             "drain_layer_balance" | "decrease_balance" => Some(Self::DecreaseBalance),
-            "backspace" => Some(Self::Backspace),
 
             "balance_today" | "report_today" => Some(Self::ReportToday),
             "balance_week" | "report_week" => Some(Self::ReportWeek),
@@ -235,18 +239,19 @@ impl Action {
             Action::Down => "Move down / next item",
             Action::Left => "Context ← action (layer tags or older balance interval)",
             Action::Right => "Context → action (layer tags or newer balance interval)",
-            Action::ShiftUp => "Shift+↑ action (layer reorder)",
-            Action::ShiftDown => "Shift+↓ action (layer reorder)",
-            Action::ShiftLeft => "Shift+← action (color, boundary, or period)",
-            Action::ShiftRight => "Shift+→ action (color, boundary, or period)",
+            Action::ShiftLeft => "Larger ← adjustment where the context supports one",
+            Action::ShiftRight => "Larger → adjustment where the context supports one",
             Action::Confirm => "Confirm / open",
             Action::Cancel => "Cancel / close",
 
-            Action::DeleteCategory => "Archive selected Layer / delete selected Balance log",
-            Action::EditCategoryDescription => "Toggle durable layer-metadata editing",
+            Action::DeleteCategory => "Archive selected Layer / delete selected Balance selection",
+            Action::RenameCategory => "Rename selected Layer",
+            Action::MoveLayerUp => "Move selected Layer up",
+            Action::MoveLayerDown => "Move selected Layer down",
+            Action::PreviousLayerColor => "Cycle selected Layer to previous color",
+            Action::NextLayerColor => "Cycle selected Layer to next color",
             Action::IncreaseBalance => "Set selected layer balance to +1",
             Action::DecreaseBalance => "Set selected layer balance to -1",
-            Action::Backspace => "Delete one typed character in Layer",
 
             Action::ReportToday => "Set Balance range to day",
             Action::ReportWeek => "Set Balance range to week",
@@ -278,18 +283,19 @@ impl Action {
             Action::Down => "Move down",
             Action::Left => "Move / older",
             Action::Right => "Move / newer",
-            Action::ShiftUp => "Shift up",
-            Action::ShiftDown => "Shift down",
-            Action::ShiftLeft => "Shift left",
-            Action::ShiftRight => "Shift right",
+            Action::ShiftLeft => "Larger left adjustment",
+            Action::ShiftRight => "Larger right adjustment",
             Action::Confirm => "Confirm / open",
             Action::Cancel => "Cancel / close",
 
-            Action::DeleteCategory => "Archive layer / delete log",
-            Action::EditCategoryDescription => "Edit layer metadata",
+            Action::DeleteCategory => "Archive layer / delete Balance selection",
+            Action::RenameCategory => "Rename layer",
+            Action::MoveLayerUp => "Move layer up",
+            Action::MoveLayerDown => "Move layer down",
+            Action::PreviousLayerColor => "Previous layer color",
+            Action::NextLayerColor => "Next layer color",
             Action::IncreaseBalance => "Balance +1",
             Action::DecreaseBalance => "Balance -1",
-            Action::Backspace => "Backspace",
 
             Action::ReportToday => "Day",
             Action::ReportWeek => "Week",
@@ -321,18 +327,19 @@ impl Action {
             | Action::Down
             | Action::Left
             | Action::Right
-            | Action::ShiftUp
-            | Action::ShiftDown
             | Action::ShiftLeft
             | Action::ShiftRight
             | Action::Confirm
             | Action::Cancel => ActionCategory::Navigation,
 
             Action::DeleteCategory
-            | Action::EditCategoryDescription
+            | Action::RenameCategory
+            | Action::MoveLayerUp
+            | Action::MoveLayerDown
+            | Action::PreviousLayerColor
+            | Action::NextLayerColor
             | Action::IncreaseBalance
-            | Action::DecreaseBalance
-            | Action::Backspace => ActionCategory::CategoryModal,
+            | Action::DecreaseBalance => ActionCategory::CategoryModal,
 
             Action::ReportToday
             | Action::ReportWeek
@@ -874,39 +881,38 @@ fn default_true() -> bool {
     true
 }
 
-const DEFAULT_BINDINGS: [(&str, Action); 36] = [
+const DEFAULT_BINDINGS: [(&str, Action); 35] = [
     ("q", Action::Quit),
     ("ctrl-p", Action::ToggleCommandPalette),
     ("enter", Action::Confirm),
     ("esc", Action::Cancel),
     ("b", Action::OpenReportModal),
     ("d", Action::Detach),
-    ("c", Action::ClearAllSand),
-    ("shift-c", Action::ClearNoneSand),
+    ("delete", Action::ClearAllSand),
+    ("backspace", Action::ClearNoneSand),
     ("f1", Action::ToggleSettings),
     ("?", Action::ToggleSettings),
     ("up", Action::Up),
     ("down", Action::Down),
     ("left", Action::Left),
     ("right", Action::Right),
-    ("shift-up", Action::ShiftUp),
-    ("shift-down", Action::ShiftDown),
     ("shift-left", Action::ShiftLeft),
     ("shift-right", Action::ShiftRight),
-    ("x", Action::DeleteCategory),
-    ("shift-e", Action::EditCategoryDescription),
+    ("ctrl-up", Action::MoveLayerUp),
+    ("ctrl-down", Action::MoveLayerDown),
+    ("ctrl-left", Action::PreviousLayerColor),
+    ("ctrl-right", Action::NextLayerColor),
+    ("ctrl-e", Action::RenameCategory),
+    ("ctrl-x", Action::DeleteCategory),
     ("+", Action::IncreaseBalance),
     ("=", Action::IncreaseBalance),
     ("-", Action::DecreaseBalance),
     ("_", Action::DecreaseBalance),
-    ("backspace", Action::Backspace),
     ("t", Action::ReportToday),
     ("w", Action::ReportWeek),
     ("m", Action::ReportMonth),
-    ("r", Action::ReportRange),
     ("[", Action::ReportRangeStart),
     ("]", Action::ReportRangeEnd),
-    ("l", Action::LogActivity),
     ("f", Action::ReportFilter),
     ("home", Action::SettingsTop),
     ("g", Action::SettingsTop),
@@ -1370,6 +1376,17 @@ mod tests {
     }
 
     #[test]
+    fn uppercase_modified_letter_is_distinct_from_unshifted_modified_letter() {
+        let control_e = KeyBinding::parse("ctrl-e").expect("Ctrl+e should parse");
+        let control_shift_e = KeyBinding::parse("ctrl-E").expect("Ctrl+Shift+E should parse");
+        assert_ne!(control_e, control_shift_e);
+        assert_eq!(
+            control_shift_e,
+            KeyBinding::parse("ctrl-shift-e").expect("Ctrl+Shift+e should parse")
+        );
+    }
+
+    #[test]
     fn test_key_event_normalizes_uppercase_letter_to_shift() {
         let event = KeyEvent::new(KeyCode::Char('C'), KeyModifiers::SHIFT);
         let key = KeyBinding::from_key_event(event).expect("event should normalize");
@@ -1414,15 +1431,63 @@ mod tests {
     }
 
     #[test]
-    fn default_x_action_is_the_contextual_remove_action() {
+    fn default_layer_modifiers_and_sand_deletion_follow_input_grammar() {
         let keymap = default_keymap();
         assert_eq!(
-            keymap.action_for_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
+            keymap.action_for_key_event(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
+            Some(Action::ClearNoneSand)
+        );
+        assert_eq!(
+            keymap.action_for_key_event(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE)),
+            Some(Action::ClearAllSand)
+        );
+        assert_eq!(
+            keymap.action_for_key_event(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL)),
+            Some(Action::RenameCategory)
+        );
+        assert_eq!(
+            keymap.action_for_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::CONTROL)),
+            Some(Action::MoveLayerUp)
+        );
+        assert_eq!(
+            keymap.action_for_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::CONTROL)),
+            Some(Action::MoveLayerDown)
+        );
+        assert_eq!(
+            keymap.action_for_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL)),
+            Some(Action::PreviousLayerColor)
+        );
+        assert_eq!(
+            keymap.action_for_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL)),
+            Some(Action::NextLayerColor)
+        );
+        assert_eq!(
+            keymap.action_for_key_event(KeyEvent::new(KeyCode::Char('E'), KeyModifiers::SHIFT)),
+            None
+        );
+        assert_eq!(
+            keymap.action_for_key_event(KeyEvent::new(
+                KeyCode::Char('E'),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            )),
+            None
+        );
+    }
+
+    #[test]
+    fn default_ctrl_x_action_is_the_contextual_remove_action() {
+        let keymap = default_keymap();
+        assert_eq!(
+            keymap.action_for_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL)),
             Some(Action::DeleteCategory)
         );
         assert_eq!(
+            keymap.action_for_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
+            None
+        );
+        assert_eq!(
             Action::DeleteCategory.description(),
-            "Archive selected Layer / delete selected Balance log"
+            "Archive selected Layer / delete selected Balance selection"
         );
     }
 
@@ -1435,11 +1500,15 @@ mod tests {
     }
 
     #[test]
-    fn test_default_keymap_has_r_for_balance_range() {
+    fn balance_range_editor_has_no_default_key() {
         let keymap = default_keymap();
         let r = KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE);
 
-        assert_eq!(keymap.action_for_key_event(r), Some(Action::ReportRange));
+        assert_eq!(keymap.action_for_key_event(r), None);
+        assert_eq!(
+            keymap.action_state(Action::ReportRange),
+            ActionBindingState::Unbound
+        );
     }
 
     #[test]
@@ -1474,11 +1543,15 @@ mod tests {
     }
 
     #[test]
-    fn test_default_keymap_has_l_for_balance_log_activity() {
+    fn balance_log_activity_has_no_default_key() {
         let keymap = default_keymap();
         let l = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE);
 
-        assert_eq!(keymap.action_for_key_event(l), Some(Action::LogActivity));
+        assert_eq!(keymap.action_for_key_event(l), None);
+        assert_eq!(
+            keymap.action_state(Action::LogActivity),
+            ActionBindingState::Unbound
+        );
     }
 
     #[test]

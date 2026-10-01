@@ -30,6 +30,7 @@ pub(crate) struct ThemeUi {
     pub warning: UiColorRef,
     pub error: UiColorRef,
     pub success: UiColorRef,
+    pub selection: Color,
 }
 
 #[derive(Clone, Debug)]
@@ -90,6 +91,7 @@ struct UiFile {
     warning: Option<String>,
     error: Option<String>,
     success: Option<String>,
+    selection: Option<String>,
 }
 
 fn default_theme_appearance() -> String {
@@ -301,6 +303,11 @@ fn resolve_ui(
     let success = resolve_ui_ref(id, palette, file.success.as_deref())?
         .or_else(|| fallback_ui.map(|ui| ui.success))
         .unwrap_or(UiColorRef::Color(Color::Rgb(0, 176, 80)));
+    let selection = resolve_required_ui_color(id, palette, file.selection.as_deref())?
+        .unwrap_or_else(|| match foreground {
+            UiColorRef::Color(color) => color,
+            UiColorRef::Default => fallback_ui.map(|ui| ui.selection).unwrap_or(Color::White),
+        });
     Ok(ThemeUi {
         background,
         foreground,
@@ -312,6 +319,7 @@ fn resolve_ui(
         warning,
         error,
         success,
+        selection,
     })
 }
 

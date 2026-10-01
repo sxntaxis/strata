@@ -5,14 +5,14 @@ Last reviewed: 2026-09-06
 
 ## Purpose
 
-Category authority preserves the meaning of recorded time and sediment across active use, archive/restore, restart, recovery, and interchange. Missing category identity must never be reinterpreted as intentional idle.
+Category authority preserves the meaning of recorded time and sediment across active use, archive/restore, permanent deletion, restart, recovery, and interchange. Missing category identity must never be reinterpreted as intentional idle.
 
 ## Canonical identity
 
 A category is identified by one stable numeric `CategoryId`. Durable category state includes:
 
 - name;
-- description/metadata;
+- legacy description text retained for SQLite and portable-interchange compatibility;
 - theme-independent RGB color anchor (legacy `color_index` storage remains a compatibility envelope);
 - balance effect;
 - active or archived state;
@@ -22,7 +22,7 @@ Idle is reserved category ID `0`.
 
 ## Appearance relationship
 
-Category identity and category color choice are durable domain state; resolved RGB presentation is not. The persisted color anchor survives theme changes. The active theme maps that anchor to its nearest eligible sand swatch for rendering, while `Shift+←` / `Shift+→` chooses a new anchor from the active theme's perceptually ordered sand palette. Themes never name or own concrete user categories. See `docs/APPEARANCE_AUTHORITY.md`.
+Category identity and category color choice are durable domain state; resolved RGB presentation is not. The persisted color anchor survives theme changes. The active theme maps that anchor to its nearest eligible sand swatch for rendering, while `Ctrl+←` / `Ctrl+→` chooses a new anchor from the active theme's perceptually ordered sand palette. Themes never name or own concrete user categories. See `docs/APPEARANCE_AUTHORITY.md`. The current color anchor belongs to the stable Layer identity across time: changing it immediately changes current and historical sediment presentation for that CategoryId without moving grains. Permanent Balance deletion is the explicit identity-lifecycle exception and reclassifies retained current/historical sediment from that CategoryId to Idle.
 
 ## Archive and restore
 
@@ -38,7 +38,7 @@ Archived categories are hidden from ordinary new-session selection but remain au
 
 Restore reactivates the same SQLite row and stable ID. Category allocation advances beyond the maximum category ID still present in the catalog. Because archive does not physically delete rows, archived identities are not reused.
 
-Strata does not currently implement category merge or permanent deletion. The prerelease reviewed-lifecycle machinery for revision-bound merge/deletion, retired-ID receipts, and destructive confirmation was speculative and has been retired rather than kept as dormant architecture.
+Category merge and its prerelease reviewed-lifecycle machinery for revision-bound merge, retired-ID receipts, and collision confirmation remain retired. STRATA-D075 adds permanent Layer deletion without merge semantics: the operation removes canonical sessions and reusable tags, but leaves existing sand and historical snapshots unchanged. The SQLite category row becomes a hidden, non-restorable identity/color tombstone so canonical sand CategoryIds remain resolvable and cannot be reused. Tombstones remain storage/interchange compatibility state, not an active or archived user-facing Layer.
 
 ## SQLite authority
 
@@ -61,7 +61,7 @@ Every persisted session category ID must resolve to the catalog or to explicit i
 
 ## Tags and metadata
 
-Tag suggestions/history belong to stable category identity and survive archive/restore. The active session description/draft is separate from durable category metadata. A session may carry multiple independent attribution tags in that existing description field, canonically serialized with `; ` between tags; the per-category tag history stores the individual canonical tag spellings used for completion rather than becoming a second time authority. Ordinary layer switching edits the active-session text; durable metadata has an explicit edit mode.
+Tag suggestions/history belong to stable category identity and survive archive/restore. The active session description/draft is separate from the category's legacy description field. A session may carry multiple independent attribution tags in its existing description field, canonically serialized with `; ` between tags; the per-category tag history stores the individual canonical tag spellings used for completion rather than becoming a second time authority. Ordinary layer switching edits the active-session text. The legacy category-description value is preserved for SQLite and portable interchange, but the current TUI neither edits it nor searches it; layer identity is changed by renaming the category name while preserving its stable ID. Physically dropping stored legacy values requires a separately versioned schema/interchange migration.
 
 ## Portable interchange
 

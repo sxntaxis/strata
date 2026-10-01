@@ -53,9 +53,9 @@ Core responsibilities:
 - Active and archived categories share one stable ID space.
 - Archive changes availability, not historical meaning.
 - Restore reactivates the same row/ID.
-- Archived metadata remains available to sessions, reports, sediment, snapshots, tags, recovery, and interchange.
+- Archived identity and legacy metadata remain available to sessions, reports, sediment, snapshots, tags, recovery, and interchange. The legacy category-description field is retained for round-trip compatibility, not exposed as a current editing/search feature.
 - Unknown category references fail closed and are never coerced to idle.
-- Category merge/permanent deletion is not a current product capability.
+- Category merge and its speculative revision/receipt machinery are not current product capabilities. STRATA-D075 adds a distinct permanent-delete operation: history and tags are removed, sediment is untouched, and a hidden tombstone preserves existing sand CategoryId/color authority without a restorable Layer.
 
 ## TUI interaction
 
@@ -63,7 +63,7 @@ The product remains keyboard-first and keeps the continuous sand view as its cen
 
 - `Ctrl-P` opens a hybrid palette: valid direct commands execute directly; otherwise the same text remains fuzzy search and Enter executes the selected result.
 - Informational direct commands keep the palette open and show their result.
-- The category modal is compact in ordinary use; durable metadata has an explicit edit mode.
+- The category modal is compact in ordinary use; `Ctrl+e` without Shift edits the selected layer name while preserving its CategoryId and active-session Tag.
 - Report history is read-only until explicit edit mode; SQLite persistence succeeds before the in-memory row changes.
 - The configured keymap remains truthful about bound/unbound/disabled actions. Ctrl-C is the mandatory terminal-safety quit path.
 
@@ -72,7 +72,7 @@ The product remains keyboard-first and keeps the continuous sand view as its cen
 - Themes define arbitrary named RGB palettes, optional arbitrary-length sand subsets, and Strata UI-role mappings.
 - `default` means external terminal/environment authority for supported UI roles; it is not a palette swatch.
 - Category color persistence is a theme-independent perceptual anchor, not a theme slot.
-- Layer `Shift+←` / `Shift+→` navigation derives a stable OKLCH hue wheel from the active theme.
+- Layer `Ctrl+←` / `Ctrl+→` color navigation derives a stable OKLCH hue wheel from the active theme.
 - Theme changes are presentation-only: no sand topology, category/session identity, RNG, or chronology changes.
 - `rgb-luma-safe` is the accepted Classic Braille blend baseline. Terminal auto light/dark detection and contrast adaptation are a subsequent appearance unit.
 
@@ -117,7 +117,7 @@ See `docs/RECOVERY_AUTHORITY.md`.
 - Growing beyond the current logical canvas expands it monotonically, preserving existing cells around the horizontal center and bottom baseline and filling new space with emptiness.
 - The logical canvas does not shrink again merely because the viewport shrinks.
 - Pending grains may occupy newly available capacity after expansion.
-- Historical artifacts remain immutable projections of stored or reconstructed sediment state.
+- Historical geometry, mass, topology, and chronology remain immutable projections of stored or reconstructed sediment state. Layer color resolves from current stable identity at render time; permanent Layer deletion is the explicit classification exception and atomically rewrites that CategoryId to Idle in current and persisted historical sediment without moving grains.
 
 This preserves responsive v0.7.7-style artwork without making terminal size destructive persistence authority.
 

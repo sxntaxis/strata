@@ -1,7 +1,7 @@
 use ratatui::prelude::{Line, Span};
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, BorderType, Borders, Paragraph},
 };
@@ -72,34 +72,7 @@ impl App {
         f.render_widget(ratatui::widgets::Clear, modal_rect);
         f.render_widget(frame_block.clone(), modal_rect);
 
-        let inner = frame_block.inner(modal_rect);
-        let has_error = self.keymap_error.is_some();
-        let vertical = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints(if has_error {
-                vec![Constraint::Length(1), Constraint::Min(1)]
-            } else {
-                vec![Constraint::Min(1)]
-            })
-            .split(inner);
-
-        let body_rect = if has_error {
-            if let Some(err) = self.keymap_error.as_ref() {
-                let error_line = Line::from(vec![
-                    Span::styled(
-                        "config error: ",
-                        Style::default()
-                            .fg(self.theme_error())
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(err.to_string(), Style::default().fg(self.theme_status())),
-                ]);
-                f.render_widget(Paragraph::new(vec![error_line]), vertical[0]);
-            }
-            vertical[1]
-        } else {
-            vertical[0]
-        };
+        let body_rect = frame_block.inner(modal_rect);
 
         let rows = self.settings_rows(selected_item);
         let selected_row = rows
@@ -286,15 +259,15 @@ impl App {
         let is_selected = selectable == selected_item;
 
         let line = if is_selected {
-            let text_color =
-                crate::appearance::contrasting_text_color(accent, self.theme_foreground());
+            let text_color = self.theme_selection_text();
+            let selection = self.theme_selection();
             Line::from(vec![
-                Span::styled(left_text, Style::default().fg(text_color).bg(accent)),
+                Span::styled(left_text, Style::default().fg(text_color).bg(selection)),
                 Span::styled(
                     pad_column(&right_text, right_width),
                     Style::default()
                         .fg(text_color)
-                        .bg(accent)
+                        .bg(selection)
                         .add_modifier(Modifier::BOLD),
                 ),
             ])
@@ -383,11 +356,8 @@ impl App {
                             Line::from(Span::styled(
                                 label,
                                 Style::default()
-                                    .fg(crate::appearance::contrasting_text_color(
-                                        self.theme_accent(),
-                                        self.theme_foreground(),
-                                    ))
-                                    .bg(self.theme_accent())
+                                    .fg(self.theme_selection_text())
+                                    .bg(self.theme_selection())
                                     .add_modifier(Modifier::BOLD),
                             ))
                         } else {
@@ -430,11 +400,8 @@ impl App {
                             Line::from(Span::styled(
                                 format!("> {}", label),
                                 Style::default()
-                                    .fg(crate::appearance::contrasting_text_color(
-                                        self.settings_item_color(SettingsSelectable::WeekStartDay),
-                                        self.theme_foreground(),
-                                    ))
-                                    .bg(self.settings_item_color(SettingsSelectable::WeekStartDay))
+                                    .fg(self.theme_selection_text())
+                                    .bg(self.theme_selection())
                                     .add_modifier(Modifier::BOLD),
                             ))
                         } else {

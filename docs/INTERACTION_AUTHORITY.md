@@ -1,10 +1,10 @@
 # Interaction authority
 
-Status: accepted authority; STRATA-D071/D072/D073 are implemented and natively certified
+Status: accepted authority; STRATA-D071/D072/D073/D074/D075/D076/D077/D078/D079/D080/D081/D082 are natively certified; D082 owner PTY review remains
 Program: INTERACTION-001 + INTERACTION-002 convergence
 Current completed unit: INTERACTION-002; PLATEAU-001H H1 presentation hardening certified
 Issues completed: #19, #20, #24
-Last reviewed: 2026-09-28
+Last reviewed: 2026-09-30
 
 ## Purpose
 
@@ -14,7 +14,7 @@ Interaction authority determines whether an input is navigation, a command, text
 
 Balance layer detail is the layer's ledger surface, not a second report modal. Ordinary navigation, report-period commands, deletion, modal cancellation, and quit remain commands while no ledger entry is being edited.
 
-Confirm on a completed persisted entry opens an in-row ledger editor owned by that stable session ID. The editor copies the entry's Tag plus complete civil start/end boundaries; row ordering or later selection movement cannot retarget that draft. A synthetic final `+ Add entry…` row opens the same in-row grammar as a new historical entry already scoped to the current layer. A provisional live row has no completed stable session identity and is not directly editable as an existing ledger entry.
+Confirm on a completed persisted entry opens an in-row ledger editor owned by that stable session ID. The editor copies the entry's Tag plus complete civil start/end boundaries; row ordering or later selection movement cannot retarget that draft. A synthetic final `+ Add entry…` row opens the same in-row grammar as a new historical entry already scoped to the current layer. The provisional live generation is also a first-class ledger identity: its Tag and civil start boundary are editable while its open end remains `now`.
 
 ## Ledger edit-mode input
 
@@ -23,11 +23,11 @@ The active ledger field exclusively owns ordinary text input:
 - Tag accepts unmodified character input and `;` separates independent attribution tags;
 - an empty current Tag segment has no completion; after its first typed character, a known tag may appear as a dim completion suffix without becoming stored text;
 - Left/Right in Tag cycles known tags for only the current semicolon segment. If that segment began as a typed prefix, cycling is restricted to known tags matching that prefix until ordinary typing/backspace starts a new cycle. An exact known tag has no retained prefix and therefore cycles the available known-tag set. Tags already used in prior segments are excluded;
-- date fields accept `YYYY-MM-DD` characters;
-- time fields accept forgiving hour/minute/optional-second forms, including compact input such as `6`, `650`, `1530`, or `65030` and colon input such as `6:50` or `6:50:30`; valid minute-only values normalize without requiring visible `:00` seconds;
-- Backspace/Delete edits the active field;
-- Tab always moves to the next field and Shift+Tab/BackTab always moves to the previous field; completion never intercepts field navigation;
-- Left/Right in a Date field changes the selected civil date by one day, while Shift+Left/Right changes it by seven days. Left/Right in a Time field changes that boundary by one minute, while Shift+Left/Right changes it by sixty minutes. These are timestamp arithmetic, so hour/day carry and borrow are preserved and existing seconds are not discarded;
+- date fields accept permissive civil-date drafts: digits, spaces, hyphens, and case-insensitive English month names; normalization/default/carry semantics are defined below;
+- time fields accept forgiving hour/minute/optional-second forms, including compact input such as `6`, `650`, `1530`, or `65030` and colon input such as `6:50` or `6:50:30`. Colon-separated components accept at most two digits but are not range-blocked while typing: semantic action normalizes missing components to zero and carries overflow arithmetically through seconds → minutes → hours → civil Date (`12:99` becomes `13:39`, `99:00` carries four civil days to `03:00`);
+- Backspace/Delete edits around the real caret. `Ctrl+Left` / `Ctrl+Right` moves that caret one character and Home/End moves to field start/end; plain arrows retain field semantics;
+- Tab always normalizes the current temporal value when interpretable, then moves to the next field; Shift+Tab/BackTab does the same toward the previous field. Completion never intercepts field navigation;
+- Left/Right in a Date field changes the selected civil date by one day, while Shift+Left/Right changes it by one civil month, preserving the day where possible and clamping to the destination month end otherwise. In a Time field, arrow magnitude follows the precision the user expressed: without seconds Left/Right is ±1 minute and Shift is ±1 hour; with seconds Left/Right is ±1 second and Shift is ±1 minute. Normalization occurs before adjustment and carries/borrows across the civil Date;
 - Up/Down have no ledger-edit meaning;
 - Enter validates and commits;
 - Esc cancels the draft, or dismisses an add-collision confirmation back to editing;
@@ -47,9 +47,9 @@ A failed persistence attempt leaves the draft visible and canonical in-memory hi
 
 ## Visible ledger state
 
-The normal layer detail keeps the ledger itself as the interaction surface rather than showing a permanent instruction footer. Existing entries remain compact rows; the final `+ Add entry…` row is part of normal selection. During edit, the selected row changes in place and brackets the active field. Validation or collision text appears only when needed.
+The normal layer detail keeps the ledger itself as the interaction surface rather than showing a permanent instruction footer. Existing entries remain compact rows; the final `+ Add entry…` row is part of normal selection. During edit, the selected row changes in place. Literal `[]` are never selection chrome: ordinary row navigation is Layer-themed with contrast-safe text, while a nested editable value or focused multi-tag facet uses the theme `ui.selection` treatment on top of that row. Real text ownership is shown by the terminal caret. Interactive validation and failures do not occupy the row or border: they use the universal `WARNING` / `ERROR` overlay and return to the unchanged draft/caret when dismissed.
 
-Single-day rows distribute three data regions evenly: **Tag · Time · Effect**. Multi-day rows distribute four regions evenly: **Tag · Date · Time · Effect**, keeping date adjacent to time. A cross-day entry may use the two middle regions as one explicit `start → end` temporal span rather than pretending one date owns both boundaries.
+Single-day rows use **Tag · Time · Effect** with Time exactly centered and mirrored outer Tag/Effect regions. Rows that show Date use **Tag · Date · Time · Effect**, with Date/Time as a symmetric inner pair and Tag/Effect as mirrored outer regions. The measured Tag region contributes a small bounded golden-ratio-derived gutter before the next cell, but that whitespace never moves the symmetric anchors. Modal width is solved from the rows that are actually visible plus the active draft and required instrument chrome; off-screen ledger entries do not widen or compress the current viewport. Scrolling to genuinely wider visible data may widen the modal and leaving that data may let it shrink. Transient cursor, completion, focus, warning, or filter chrome never participates in geometry. A single-day row being edited may alone expose Date without forcing the other rows to four cells. Effect remains visible during editing and previews the draft contribution to the current report window. Ledger values remain complete whenever width permits; ellipsis is a hard terminal fallback only, and an active field is never ellipsized, using a caret-following viewport only under unavoidable physical pressure. In Time, the en-dash separator is structural chrome and is never a caret position.
 
 Closing Balance, leaving layer detail, or replacing the edit with another explicit Balance editor discards the transient draft. Deletion remains a separate configured command and never applies to the synthetic Add row.
 
@@ -91,46 +91,61 @@ Aliases are named configuration policy, not handler inspection. A disabled targe
 
 Modal-local text and capture controls remain owned by their explicit modal modes and are not represented as configurable action bindings.
 
+## Shared keyboard grammar
+
+STRATA-D074 makes modifier meaning contextual but consistent:
+
+- unmodified arrows operate the currently focused value or selection;
+- Shift is reserved for a larger form of the same directional adjustment. It does not switch Balance period presets, recolor layers, or reorder layers;
+- Ctrl selects a structural/alternate Layer operation: `Ctrl+↑` / `Ctrl+↓` reorders the selected existing layer, `Ctrl+←` / `Ctrl+→` cycles its color, and `Ctrl+e` (without Shift) renames the selected non-Idle layer. `Ctrl+Shift+E` is distinct and does not invoke rename;
+- while forging a new layer, plain `←` / `→` chooses color because there is no Tag axis yet;
+- Main `Backspace` clears Idle sand and Main `Delete` clears all sand. Editors retain Backspace/Delete as text editing because they own those keys before action resolution;
+- Layer Tag/name input owns printable characters before configurable command routing once text editing has begun. Uppercase letters and symbols therefore remain text rather than hidden Shift-letter commands; on an existing layer, the leading `+` / `=` and `-` / `_` keys are the deliberate exception while no Tag edit has started, preserving their positive/negative polarity actions. After any Tag text edit begins, those same symbols are ordinary text. A manually typed Tag therefore may contain but cannot begin with those four reserved symbols.
+- `Ctrl+x` is the contextual destructive chord: archive the selected Layer in Layer, delete the selected persisted entry in Layer Detail, and open permanent-Layer deletion confirmation from the Balance summary. Plain `x` remains ordinary Tag/name text.
+
+Layer rename is an isolated sub-editor. `Ctrl+e` starts from the current layer name; printable text plus Backspace/Delete edit the draft; Enter validates and saves it; Esc cancels. Empty names, reserved Idle names, and case-insensitive duplicates remain in edit mode and open the universal `WARNING` overlay. Idle cannot be renamed. Rename preserves the stable CategoryId, existing sessions, current session Tag, and legacy category-description data. The legacy description field is not exposed as an editing or command-palette search surface.
+While a real text field owns input, Strata exposes the real terminal cursor at the insertion point and requests a blinking block cursor shape where the terminal supports that standard control sequence. Rename, Layer Tag typing, new-Layer naming, and inline ledger Tag/Date/Time editing use this cursor; non-editing navigation hides it. The cursor is terminal-owned rather than a painted text replacement, so blinking does not resize or recolor the whole field and restoration returns control to the user's terminal-configured default shape. Right-arrow acceptance of a Tag ghost completion leaves the caret at the end of the accepted current token.
+
+The active Layer Tag is previewed immediately but remains a draft until Enter. Esc restores the Tag captured when Layer opened, including after intervening immediate structural operations. Mandatory Ctrl-C also restores that opening Tag before emergency finalization; it never accepts an uncommitted preview.
+
+The ordinary Layer Tag is a live preview, not an immediate persistence boundary. Opening Layer snapshots the current active Tag. Typing, Backspace, or Tag cycling on the active layer updates the running presentation immediately; Enter accepts that preview, while Esc restores the opening Tag before closing. A Tag drafted on an inactive layer remains prospective until Enter switches to that layer. Structural Layer mutations—color, order, polarity, rename, and archive—remain immediate and are not rolled back by Esc.
+
 ## Balance vocabulary cutover
 
 The owner has accepted **Balance** as the report/historical surface vocabulary. HISTORY-001A changes the default main-view opener to `b` and current action/config names to `open_balance_popup` / `balance_*`. This vocabulary change must preserve the configured Bound / Unbound / Disabled model and contextual routing semantics described below.
 
 ## Balance custom-range editor
 
-HISTORY-001B exposes arbitrary operational-day windows inside Balance without creating a second report surface or report engine. `day`, `week`, and `month` remain presets; custom ranges are backed by the same inclusive domain `ReportWindow`.
+HISTORY-001B exposes arbitrary reporting-cycle windows inside Balance without creating a second report surface or report engine. `day`, `week`, and `month` remain presets; custom ranges are backed by the same inclusive domain `ReportWindow`.
 
-Balance chrome presents every interval as explicit **start and exclusive-end boundaries** even though the internal `ReportWindow` remains inclusive. A one-day internal window `2026-09-21..2026-09-21` therefore displays `Sep 21 – Sep 22`; a full internal week `2026-09-21..2026-09-27` displays `Sep 21 – Sep 28`. Current partial periods remain partial: the visible exclusive end is exactly one operational day after the last included internal day, not the nominal future end of the calendar period.
+Balance chrome presents every interval as explicit **start and exclusive-end boundaries** even though the internal `ReportWindow` remains inclusive. A one-day internal window `2026-09-21..2026-09-21` therefore displays `Sep 21 – Sep 22`; a full internal week `2026-09-21..2026-09-27` displays `Sep 21 – Sep 28`. Current partial periods remain partial: the visible exclusive end is exactly one reporting cycle after the last included internal day, not the nominal future end of the calendar period.
 
-The configurable `balance_range_start` and `balance_range_end` actions default to `[` and `]`. On the default Balance summary, `[` selects the start boundary and `]` selects the end boundary. While a boundary is selected, Left/Right moves only that boundary by one operational day and applies the result live. The start may not cross the last included day; the exclusive end may not contract below one day or expand beyond the boundary after the current operational day. Esc clears the selected boundary before ordinary Balance close/back behavior resumes. Selecting a boundary alone does not change a preset into a custom range; the first successful boundary movement does.
+The configurable `balance_range_start` and `balance_range_end` actions default to `[` and `]`. Pressing either begins one boundary-edit transaction and snapshots the complete opening report range/navigation state; `[` and `]` may then switch which endpoint is active without creating a second transaction. The active endpoint is shown with ordinary selection highlight rather than literal brackets. Plain Left/Right previews a one-reporting-cycle move of the selected boundary, while Shift+Left/Right previews a one-civil-month move, preserving the day where possible and clamping to month end plus the same one-day minimum/current-day safety limits. Up/Down may continue to navigate the Balance list without cancelling the transaction. Enter is the sole commit and Esc the sole rollback; unrelated commands do not silently behave like Esc.
 
-Without an active boundary handle, Left/Right keeps its existing whole-window older/newer navigation. Day/week/month selection, period cycling, entering detail, opening another Balance editor, Settings/palette takeover, or closing Balance clears the transient handle.
+Without an active boundary handle, Left/Right keeps its existing whole-window older/newer navigation and Shift+Left/Right has no period-cycling meaning. Explicit `t` / `w` / `m` presets remain authoritative. Other explicit report-mode transitions may replace the transient boundary editor rather than creating nested range-edit state.
 
-STRATA-D073 extends the same small/large adjustment grammar to an active boundary handle: plain Left/Right still moves the selected boundary by one operational day, while Shift+Left/Right moves that same boundary by up to seven operational days subject to the same one-day minimum and present-day cap. With no active boundary handle, the established Shift+Left/Right period-cycling behavior is unchanged.
-
-The default `balance_range` action remains bound to `r` for direct distant jumps. It opens the existing inline From/To editor, but those visible values use the same boundary convention: `From 2026-09-21` / `To 2026-09-22` means exactly the single included operational day Sep 21. The editor converts the exclusive visible `To` boundary back to the inclusive internal `ReportWindow.end` on commit rather than creating a second report-domain interval type.
+`balance_range` no longer has a default physical key. The existing inline From/To editor remains an unbound configurable/palette action pending a later Settings/palette pass, while `[` and `]` are the normal keyboard route for constructing a custom range. When invoked, its visible values still use the same boundary convention: `From 2026-09-21` / `To 2026-09-22` means exactly the single included reporting cycle Sep 21.
 
 While the range editor is active:
 
-- From and To use `YYYY-MM-DD` boundary dates and require `From < To`;
+- From and To are civil boundary dates using the shared permissive Date grammar and require `From < To`;
 - the focused field is visually explicit and starts selected as a whole field;
-- typing a digit or `-` replaces the selected field and then appends normally;
+- typing a supported Date character (digits, letters, spaces, or `-`) replaces the selected field and then appends normally;
 - Backspace/Delete clears a whole selected field or removes one character otherwise;
 - Tab/BackTab switches fields and selects the destination field;
 - Enter validates and applies the complete range;
 - Esc cancels without changing the active report window;
 - only mandatory `Ctrl-C` may escape the editor as an application-level action.
 
-Invalid dates, equal boundaries, or reversed bounds remain in edit mode with visible validation feedback. Applying a valid range updates summary rows, detail logs, provisional active time, and historical sediment selection together because all consume the same inclusive internal report window.
+Invalid dates, equal boundaries, or reversed bounds remain in edit mode and open the universal `WARNING` overlay; dismissing it restores the exact range draft and active field. Applying a valid range updates summary rows, detail logs, provisional active time, and historical sediment selection together because all consume the same inclusive internal report window.
 
-After application, left/right shifts the whole custom window by its own inclusive span. Movement toward the present never advances the window beyond the current operational day. Switching back to a day/week/month preset leaves custom mode and restores normal preset-offset navigation.
+Date fields in both the range editor and ledger share one permissive civil-date normalizer. Input may use canonical or compact numeric forms and case-insensitive English month names (`Sep`, `September`, `Sep 8`, `8 Sep`, `2026 Sep 8`). Missing year defaults to the current **civil** year, missing day defaults to 1, a year alone means Jan 1, and numeric shorthand without a year is always month-first (`9-8` = Sep 8). Overflow carries instead of rejecting structurally intelligible values (`2026-09-31` → `2026-10-01`, `2026-13-02` → `2027-01-02`, `Sep 0` → the previous month's final day). Empty input is invalid. Draft text is not rewritten while typing; Tab, Enter, and temporal arrow actions are semantic normalization boundaries.
+
+After application, left/right shifts the whole custom window by its own inclusive span. Movement toward the present never advances the window beyond the current reporting cycle. Switching back to a day/week/month preset leaves custom mode and restores normal preset-offset navigation.
 
 ## Balance historical activity editor
 
-The layer-detail ledger is the canonical historical-correction surface. The configurable `balance_log_activity` action
-defaults to `l`; from the Balance summary it enters the currently selected layer and opens that layer's synthetic
-`+ Add entry…` row, while inside Layer Detail it opens the same row directly. The former separate Balance-wide
-Layer/From/To editor is retired rather than maintained as a parallel correction interface. The command palette follows
-the same current-view semantics.
+The layer-detail ledger is the canonical historical-correction surface. The synthetic `+ Add entry…` row is the normal keyboard route: select it and Confirm. The configurable `balance_log_activity` action remains available to configuration/palette but has no default `l` binding. The former separate Balance-wide Layer/From/To editor is retired rather than maintained as a parallel correction interface.
 
 Add and existing-row Edit share one correction planner/executor. The editor owns Tag plus complete civil start/end
 boundaries. A fresh Add defaults to a recent canonical interval; Edit starts from the selected stable source row.
@@ -169,17 +184,9 @@ one canonical completed session project as one ledger row within the selected wi
 presented as unrelated editable records. The synthetic `+ Add entry…` row is the final ordinary row for active layer
 identities; archived layers remain browse/edit-only. When room permits, one noninteractive blank row separates the final
 chronological entry from `+ Add entry…`; constrained panes collapse that presentation-only spacer before hiding data.
-Layer Detail keeps its compact ordinary footprint but may widen responsively when a visible cross-day boundary or long
-Tag needs more horizontal space, always within the existing terminal-margin clamps. Temporal boundaries have priority
-over preserving an arbitrarily long Tag when the terminal itself is the limiting width.
+Layer Detail keeps its compact ordinary footprint but widens responsively only when actual ledger or draft data needs more horizontal space, always within the existing terminal-margin clamps. Three-cell rows keep Time exactly centered; four-cell rows keep Date/Time symmetrically placed around center. Modal width is not driven by cursor, completion, selector chrome, or an editor-specific minimum-width floor. Only the physical terminal clamp permits display truncation, and the active editable field is never ellipsized.
 
-`balance_filter`, default `f`, enters/toggles tag filtering on the selected ledger row. The filter is an explicit OR-set
-of individual tags rather than a generated combination cycle. A matching row remains normal; a nonmatching row remains
-in place but is dimmed, preserving chronology and making additional candidates directly reachable. On a multi-tag row,
-filter focus brackets one tag and Left/Right moves that focus among the row's tags; `f` toggles only the focused tag.
-An untagged row is filterable as untagged even though its ordinary display falls back to the layer name. Esc first
-leaves tag focus, then clears an active filter, and only then resumes ordinary Layer Detail back/close behavior. The
-selected filter survives period navigation inside the same layer.
+`balance_filter`, default `f`, operates the selected ledger row. A single-tag row toggles that facet immediately. On a multi-tag row the first `f` opens an in-row selector without changing filter state; the row keeps its Layer-themed navigation selection while Left/Right moves the nested theme `ui.selection` highlight across facets, Enter or `f` applies that facet and closes the selector, and Esc cancels. Up/Down and Shift+Left/Right are inert while the selector owns the row. The filter itself remains an explicit OR-set: matching rows stay normal, nonmatching rows remain visible but dimmed, and an untagged row is filterable as the neutral `—` facet; `—` is presentation only and does not become stored Tag text. After selection is closed, Esc clears an active filter before ordinary Layer Detail back/close behavior resumes. The selected filter survives period navigation inside the same layer.
 
 When a filter is active, the hero subtotal and marker use the union of matching ledger rows, counting each row once even
 if it matches multiple selected tags. Only the numerator changes; STRATA-D071's full selected-period
@@ -196,8 +203,12 @@ The default Balance summary presents a bipolar instrument above the unchanged ca
 - The meter projects net displacement over the selected period's full `summary.total_seconds`, including Idle. Exact zero alone rests at center; representable non-zero values receive at least one cell toward their sign, and the meter uses the available instrument width rather than a fixed cap.
 - The instrument uses responsive Ratatui geometry, with independently aligned totals and a meter sharing one exact centered width. Layer and the default Balance summary share one centered overlay rule: content defines a hard minimum, one third of the current terminal defines the proportional comfort floor, and configured frame margins provide the final clamp. This preserves breathing room on large terminals while preventing instrument overlap on narrow ones.
 - Layer and the default Balance summary use a fixed one-cell horizontal content inset at every ordinary modal size rather than edge-hugging content, width-growing side padding, or a fixed narrow card. Only a physically tiny inner area that cannot retain even one content cell may collapse that inset. Layer uses exactly one top/bottom content cell whenever two spare rows exist, collapsing that vertical inset only when constrained, while Balance keeps its compact category rows and explicit breathing rows around the totals/meter/list groups, including a reserved bottom breathing row when height permits. Wider Balance rows may therefore retain a large name-to-metric gap; that is preferred over consuming surplus width as larger modal padding.
-- The selected report interval is the sole centered bottom-border object with left/right navigation chevrons. It always shows both interval boundaries with a spaced en dash; the selected `[`/`]` endpoint is bracketed in place. Visible Day/Week/Month/Range labels, side-border arrows, and ordinary action hints are removed from the default summary; configured actions remain reachable through their existing routes, Settings, and the command palette.
+- The selected report interval is the sole centered bottom-border object with actual `←` / `→` navigation arrows; validation, errors, and keyboard-help prose never share that border. It always shows both interval boundaries with a spaced en dash; the active endpoint is highlighted in place while `[` / `]` remain only the keys that select it. Visible Day/Week/Month/Range labels, side-border arrows, and ordinary action hints are removed from the default summary; configured actions remain reachable through their existing routes, Settings, and the command palette.
 - In the default summary, the frame follows the selected layer color just as Layer does; the left/right aggregate signs alone carry negative/positive polarity color while their duration digits remain subdued, and the centered net remains fully polarity-colored. Historical snapshot provenance remains explicit model authority but is omitted from normal-summary chrome. Detail, range-edit, activity-edit, and collision-confirmation modes keep their existing interaction guidance.
+
+Balance summary rows are also a presentation filter: ordinary Layers whose displayed signed contribution is exactly zero are omitted, and Idle is omitted when its elapsed time is zero. Period changes may therefore make rows appear or disappear. Selection remains pinned by stable Layer identity when possible and falls to a remaining visible row when that identity is no longer present.
+
+From the Balance summary, `Ctrl+x` requests permanent deletion of the selected non-Idle Layer through the universal `WARNING` overlay. Warning/error overlays are centered over the current content (including another modal), use the existing theme warning/error semantic roles, center subtitle/body content, and present left-aligned selectable action rows with the theme `ui.selection` treatment and contrast-safe text. `WARNING` means Strata is functioning but the requested action needs a different input or explicit decision; `ERROR` means an operation Strata expected to perform actually failed. All interactive validation/rejection/failure presentation uses this overlay family—never footer, border-title, row-embedded, or inline error text. A simple validation warning has one `Go back` action and Enter/Esc return to the exact underlying editor draft/caret. Destructive warnings default to conservative `Go back`; recovery errors may expose their approved recovery choices. Pre-TUI startup failure and terminal draw/raw-mode/cleanup failure are the only cases that may report outside the TUI because the overlay renderer is unavailable or untrustworthy. The same overlay family owns ledger-entry deletion and collateral-overlap confirmation; generic accent-blue `Enter apply` chrome is retired. Deletion removes that Layer's canonical sessions and Tag history and removes it from normal active/archived product surfaces; if it is currently active, Strata first switches safely to Idle. Current and persisted historical sediment carrying that CategoryId is atomically reclassified to Idle without moving grains or changing mass, topology, pending order/count, chronology, or simulation metadata, and rewritten snapshots receive a refreshed source identity. Persistence retains only an internal, non-restorable tombstone to prevent CategoryId reuse. In Layer Detail, the same `Ctrl+x` chord deletes only the selected persisted ledger entry and has no effect on `+ Add entry…`.
 
 The default-summary instrument geometry is presentation-only. STRATA-D072 filtered Layer Detail intentionally changes the displayed layer numerator as specified above; interval semantics, historical-assignment behavior, collision confirmation, keymap authority, and command-palette reachability otherwise remain unchanged.
 
@@ -226,7 +237,7 @@ The default contextual routes are intentionally small:
 
 The former `main.balance_today` fallback, which could turn the Balance-day key into Detach on Main when Detach was unbound, is retired as misplaced interaction.
 
-Balance-specific physical keys (`t`, `w`, `m`, `r`, `l`, `f`, `[`, `]`) own historical interaction inside Balance. They are not hidden Main shortcuts. The command palette remains the deliberate universal launcher for **Add entry…**, **Custom range…**, both range-boundary selectors, and Balance period choices; tag filtering remains contextual to an already-open Layer Detail because it operates on the selected ledger row.
+Balance-specific default physical keys (`t`, `w`, `m`, `f`, `[`, `]`) own historical interaction inside Balance. They are not hidden Main shortcuts. `balance_range` and `balance_log_activity` remain unbound configurable/palette actions; normal keyboard interaction uses bracket boundaries and the navigable `+ Add entry…` row. Tag filtering remains contextual to an already-open Layer Detail because it operates on the selected ledger row.
 
 Terminal character bindings are defined by the character/case event Strata receives, not by a promise to distinguish physical Shift from Caps Lock on every terminal protocol. Strata does not add Caps-Lock inversion or terminal-specific keyboard requirements. The bracket range controls require no Shift-letter distinction.
 
@@ -309,4 +320,4 @@ INTERACTION-001 is complete. Future interaction work must preserve these boundar
 
 ## Theme and layer-color interaction
 
-Settings owns global theme selection. The existing Layer modal remains the per-category color surface: `Shift+←` / `Shift+→` cycles the active theme's eligible sand swatches. Themes may expose any non-empty number of sand colors. Strata derives a stable OKLCH hue wheel for navigation; declaration order and numeric slot position are not persistent semantics. A theme change recolors presentation by perceptual anchor matching and does not mutate category identity, history, or physics.
+Settings owns global theme selection. The existing Layer modal remains the per-category color surface: `Ctrl+←` / `Ctrl+→` cycles the active theme's eligible sand swatches for an existing layer, while plain `←` / `→` does so on the Forge-new-layer row. Themes may expose any non-empty number of sand colors. Strata derives a stable OKLCH hue wheel for navigation; declaration order and numeric slot position are not persistent semantics. A theme change recolors presentation by perceptual anchor matching and does not mutate category identity, history, or physics.

@@ -7,11 +7,12 @@ use chrono::{
 use ratatui::{prelude::Line, style::Color};
 
 use crate::domain::{
-    BalanceReportSummary, Category, CategoryId, CategoryLogEntry, DRIFT_CATEGORY_ID,
-    LiveSessionPreview, OperationalDayPolicy, ReportPeriod, ReportWindow,
+    BalanceReportEntry, BalanceReportSummary, Category, CategoryId, CategoryLogEntry,
+    DRIFT_CATEGORY_ID, LiveSessionPreview, OperationalDayPolicy, ReportPeriod, ReportWindow,
     build_balance_report_with_live_for_window, build_category_logs_for_window, day_boundary_config,
     operational_day_key_now, report_period_window_with_offset, session_slices,
 };
+use crate::runtime_identity::transition_identity;
 use crate::sand::{
     ClassicProductionEngine, DailySedimentSlice, SedimentSnapshot, daily_contribution_from_slices,
     derived_preview_from_slices, select_historical_visual_artifact,
@@ -19,8 +20,8 @@ use crate::sand::{
 use crate::temporal;
 
 use super::{
-    App, HistoricalPreviewState, PersistenceOperation, RecoveryAction, ReportRangeBoundary,
-    ReportTagFacet, tagging, ui_helpers,
+    App, HistoricalPreviewState, LedgerSelectionIdentity, PersistenceOperation, RecoveryAction,
+    ReportRangeBoundary, ReportTagFacet, tagging, ui_helpers,
 };
 
 fn build_historical_preview(
@@ -44,13 +45,11 @@ fn build_historical_preview(
     })
 }
 
-fn parse_report_range(from: &str, to: &str) -> Result<ReportWindow, String> {
-    let parse = |label: &str, value: &str| {
-        NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d")
-            .map_err(|_| format!("{label} must use YYYY-MM-DD"))
-    };
-    let start = parse("From", from)?;
-    let end_exclusive = parse("To", to)?;
+fn parse_report_range(from: &str, to: &str, current: NaiveDate) -> Result<ReportWindow, String> {
+    let start = super::date_input::normalize_date_input(from, current)
+        .map_err(|error| format!("From: {error}"))?;
+    let end_exclusive = super::date_input::normalize_date_input(to, current)
+        .map_err(|error| format!("To: {error}"))?;
     if start >= end_exclusive {
         return Err("From must be before To".to_string());
     }
@@ -58,6 +57,40 @@ fn parse_report_range(from: &str, to: &str) -> Result<ReportWindow, String> {
         .checked_sub_signed(ChronoDuration::days(1))
         .ok_or_else(|| "To boundary is outside the supported date range".to_string())?;
     ReportWindow::new(start, end)
+}
+
+fn shifted_report_boundary_month(
+    window: &ReportWindow,
+    boundary: ReportRangeBoundary,
+    direction: i8,
+    today: NaiveDate,
+) -> Option<ReportWindow> {
+    if direction == 0 {
+        return Some(window.clone());
+    }
+    let sign = i64::from(direction.signum());
+    match boundary {
+        ReportRangeBoundary::Start => {
+            let candidate = crate::temporal::shift_civil_month(window.start, sign)?;
+            let start = if sign > 0 {
+                candidate.min(window.end)
+            } else {
+                candidate
+            };
+            ReportWindow::new(start, window.end).ok()
+        }
+        ReportRangeBoundary::End => {
+            let end_exclusive = ui_helpers::report_window_end_exclusive(window)?;
+            let shifted_exclusive = crate::temporal::shift_civil_month(end_exclusive, sign)?;
+            let candidate_end = shifted_exclusive.checked_sub_signed(ChronoDuration::days(1))?;
+            let end = if sign > 0 {
+                candidate_end.min(today)
+            } else {
+                candidate_end.max(window.start)
+            };
+            ReportWindow::new(window.start, end).ok()
+        }
+    }
 }
 
 fn shifted_report_boundary(
@@ -88,19 +121,14 @@ fn shifted_report_boundary(
 }
 
 fn report_range_edit_state(window: &ReportWindow) -> super::ReportRangeEditState {
-    let (to, error) = match ui_helpers::report_window_end_exclusive(window) {
-        Some(end) => (end.format("%Y-%m-%d").to_string(), None),
-        None => (
-            String::new(),
-            Some("To boundary is outside the supported date range".to_string()),
-        ),
-    };
+    let to = ui_helpers::report_window_end_exclusive(window)
+        .map(|end| end.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| window.end.format("%Y-%m-%d").to_string());
     super::ReportRangeEditState {
         from: window.start.format("%Y-%m-%d").to_string(),
         to,
         active_field: super::ReportRangeField::From,
         select_all: true,
-        error,
     }
 }
 
@@ -157,15 +185,65 @@ fn filtered_layer_balance(logs: &[CategoryLogEntry], filter: &[ReportTagFacet]) 
         .sum()
 }
 
+fn report_entry_is_visible(entry: &BalanceReportEntry) -> bool {
+    if entry.category_id == DRIFT_CATEGORY_ID {
+        entry.elapsed_seconds != 0
+    } else {
+        entry.balance_seconds != 0
+    }
+}
+
 impl App {
     pub(super) fn focus_none_report_row(&mut self) {
-        let summary = self.report_rows();
-        self.report_selected_index = summary
+        let summary = self.report_visible_rows();
+        let index = summary
             .entries
             .iter()
             .position(|entry| entry.category_id == DRIFT_CATEGORY_ID)
             .unwrap_or(0);
-        self.clamp_report_selection(summary.entries.len());
+        self.select_report_summary_index(&summary, index);
+    }
+
+    pub(super) fn report_selected_summary_index(
+        &self,
+        summary: &BalanceReportSummary,
+    ) -> Option<usize> {
+        if summary.entries.is_empty() {
+            return None;
+        }
+        self.report_selected_category_id
+            .and_then(|category_id| {
+                summary
+                    .entries
+                    .iter()
+                    .position(|entry| entry.category_id == category_id)
+            })
+            .or_else(|| Some(self.report_selected_index.min(summary.entries.len() - 1)))
+    }
+
+    pub(super) fn sync_report_selection_to_summary(&mut self, summary: &BalanceReportSummary) {
+        let Some(index) = self.report_selected_summary_index(summary) else {
+            self.report_selected_index = 0;
+            self.report_selected_category_id = None;
+            return;
+        };
+        self.report_selected_index = index;
+        self.report_selected_category_id = Some(summary.entries[index].category_id);
+    }
+
+    pub(super) fn select_report_summary_index(
+        &mut self,
+        summary: &BalanceReportSummary,
+        index: usize,
+    ) {
+        if summary.entries.is_empty() {
+            self.report_selected_index = 0;
+            self.report_selected_category_id = None;
+            return;
+        }
+        let index = index.min(summary.entries.len() - 1);
+        self.report_selected_index = index;
+        self.report_selected_category_id = Some(summary.entries[index].category_id);
     }
 
     fn report_categories(&self) -> Vec<Category> {
@@ -199,10 +277,6 @@ impl App {
         })
     }
 
-    pub(super) fn report_range_is_custom(&self) -> bool {
-        self.report_custom_window.is_some()
-    }
-
     pub(super) fn report_rows(&self) -> BalanceReportSummary {
         let categories = self.report_categories();
         let live_preview = self.live_session_preview();
@@ -214,6 +288,134 @@ impl App {
             &window,
             live_preview.as_ref(),
         )
+    }
+
+    pub(super) fn report_visible_rows(&self) -> BalanceReportSummary {
+        let mut summary = self.report_rows();
+        summary.entries.retain(report_entry_is_visible);
+        summary
+    }
+
+    pub(super) fn begin_report_layer_delete_confirmation(
+        &mut self,
+        summary: &BalanceReportSummary,
+    ) -> bool {
+        let Some(index) = self.report_selected_summary_index(summary) else {
+            return false;
+        };
+        let Some(entry) = summary.entries.get(index) else {
+            return false;
+        };
+        if entry.category_id == DRIFT_CATEGORY_ID {
+            return false;
+        }
+        self.clear_report_range_boundary();
+        self.report_layer_delete_confirmation = Some(entry.category_id);
+        self.system_dialog_selected_index = 1;
+        self.render_needed = true;
+        true
+    }
+
+    pub(super) fn cancel_report_layer_delete_confirmation(&mut self) {
+        if self.report_layer_delete_confirmation.take().is_some() {
+            self.render_needed = true;
+        }
+    }
+
+    pub(super) fn confirm_report_layer_delete(&mut self) -> bool {
+        let Some(category_id) = self.report_layer_delete_confirmation else {
+            return false;
+        };
+        let fallback_index = self.report_selected_index;
+
+        if self.time_tracker.active_category_id() == category_id {
+            self.apply_runtime_mutation(super::RuntimeMutation::SwitchLayer {
+                category_id: DRIFT_CATEGORY_ID,
+                description: String::new(),
+            });
+            if self.has_persistence_recovery()
+                || self.time_tracker.active_category_id() == category_id
+            {
+                return false;
+            }
+        }
+
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::CategoryDelete,
+                RecoveryAction::ReloadAuthority,
+                Err("SQLite authority is unavailable".to_string()),
+            );
+            return false;
+        };
+        let Some(()) = self.record_storage_result_for(
+            PersistenceOperation::CategoryDelete,
+            RecoveryAction::ReloadAuthority,
+            crate::sqlite::delete_tui_category(&database_path, category_id),
+        ) else {
+            return false;
+        };
+
+        let Some(state) = self.record_storage_result_for(
+            PersistenceOperation::StateReload,
+            RecoveryAction::ReloadAuthority,
+            crate::sqlite::load_tui_state(&database_path),
+        ) else {
+            return false;
+        };
+        self.time_tracker.apply_loaded_state(
+            state.loaded_categories.categories,
+            state.loaded_categories.next_category_id,
+            state.loaded_sessions.sessions,
+            state.loaded_sessions.next_session_id,
+        );
+        self.archived_categories = state.archived_categories;
+        self.category_tags = state.category_tags;
+
+        // Permanent deletion reclassifies every retained representation of the
+        // deleted Layer as Idle. Keep staged day-end photos aligned with the
+        // same identity rewrite before they can be persisted later.
+        for pending in &mut self.pending_day_end_snapshots {
+            if crate::sand::recolor_state_category_mass(
+                &mut pending.snapshot.state,
+                category_id,
+                DRIFT_CATEGORY_ID,
+                usize::MAX,
+            ) > 0
+            {
+                let day = pending
+                    .snapshot
+                    .operational_day
+                    .clone()
+                    .unwrap_or_else(|| pending.operational_day.format("%Y-%m-%d").to_string());
+                pending.snapshot = crate::sand::SedimentSnapshot::day_end_checkpoint(
+                    day,
+                    pending.snapshot.state.clone(),
+                );
+            }
+        }
+        self.restore_sand_state();
+        if self.has_persistence_recovery() {
+            return false;
+        }
+
+        self.report_layer_delete_confirmation = None;
+        self.report_tag_filter.clear();
+        self.report_filter_tag_index = None;
+        self.ledger_entry_edit = None;
+        self.clear_report_snapshot_cache();
+        let summary = self.report_visible_rows();
+        if summary.entries.is_empty() {
+            self.report_selected_index = 0;
+            self.report_selected_category_id = None;
+        } else {
+            self.select_report_summary_index(
+                &summary,
+                fallback_index.min(summary.entries.len().saturating_sub(1)),
+            );
+        }
+        self.render_needed = true;
+        true
     }
 
     pub(super) fn report_logs_for_category(
@@ -238,6 +440,58 @@ impl App {
             return Vec::new();
         };
         self.report_logs_for_category(category_id)
+    }
+
+    fn ledger_identity_for_row(row: &CategoryLogEntry) -> Option<LedgerSelectionIdentity> {
+        if let Some(session_id) = row.session_id {
+            Some(LedgerSelectionIdentity::Session(session_id))
+        } else {
+            row.active_stable_id
+                .as_ref()
+                .map(|stable_id| LedgerSelectionIdentity::Active(stable_id.clone()))
+        }
+    }
+
+    pub(super) fn remember_report_log_selection(&mut self) {
+        let logs = self.report_current_logs();
+        let can_add = self
+            .report_logs_category_id
+            .is_some_and(|category_id| self.report_layer_can_add(category_id));
+        self.report_log_selected_identity = if self.report_log_selected_index < logs.len() {
+            logs.get(self.report_log_selected_index)
+                .and_then(Self::ledger_identity_for_row)
+        } else if can_add && self.report_log_selected_index == logs.len() {
+            Some(LedgerSelectionIdentity::Add)
+        } else {
+            None
+        };
+    }
+
+    pub(super) fn sync_report_log_selection_to_identity(&mut self) {
+        let logs = self.report_current_logs();
+        let can_add = self
+            .report_logs_category_id
+            .is_some_and(|category_id| self.report_layer_can_add(category_id));
+        if let Some(identity) = self.report_log_selected_identity.clone() {
+            let found = match identity {
+                LedgerSelectionIdentity::Session(session_id) => logs
+                    .iter()
+                    .position(|row| row.session_id == Some(session_id)),
+                LedgerSelectionIdentity::Active(stable_id) => logs
+                    .iter()
+                    .position(|row| row.active_stable_id.as_deref() == Some(stable_id.as_str())),
+                LedgerSelectionIdentity::Add if can_add => Some(logs.len()),
+                LedgerSelectionIdentity::Add => None,
+            };
+            if let Some(index) = found {
+                self.report_log_selected_index = index;
+                return;
+            }
+        }
+
+        let row_count = logs.len().saturating_add(usize::from(can_add));
+        self.clamp_report_log_selection(row_count);
+        self.remember_report_log_selection();
     }
 
     pub(super) fn report_tag_facets_for_log(&self, row: &CategoryLogEntry) -> Vec<ReportTagFacet> {
@@ -269,7 +523,7 @@ impl App {
                 .iter()
                 .map(|facet| match facet {
                     ReportTagFacet::Tag(tag) => tag.clone(),
-                    ReportTagFacet::Untagged => "untagged".to_string(),
+                    ReportTagFacet::Untagged => "—".to_string(),
                 })
                 .collect::<Vec<_>>()
                 .join("; "),
@@ -294,11 +548,17 @@ impl App {
             return false;
         }
         self.clear_report_range_boundary();
+
+        if facets.len() > 1 && self.report_filter_tag_index.is_none() {
+            self.report_filter_tag_index = Some(0);
+            self.render_needed = true;
+            return true;
+        }
+
         let focus = self
             .report_filter_tag_index
             .unwrap_or(0)
             .min(facets.len().saturating_sub(1));
-        self.report_filter_tag_index = (facets.len() > 1).then_some(focus);
         let facet = facets[focus].clone();
         if let Some(index) = self
             .report_tag_filter
@@ -309,6 +569,7 @@ impl App {
         } else {
             self.report_tag_filter.push(facet);
         }
+        self.report_filter_tag_index = None;
         self.render_needed = true;
         true
     }
@@ -358,23 +619,6 @@ impl App {
         changed
     }
 
-    pub(super) fn sync_report_filter_focus_for_selection(&mut self) {
-        let Some(current) = self.report_filter_tag_index else {
-            return;
-        };
-        let logs = self.report_current_logs();
-        let Some(row) = logs.get(self.report_log_selected_index) else {
-            self.report_filter_tag_index = None;
-            return;
-        };
-        let facets = self.report_tag_facets_for_log(row);
-        if facets.len() <= 1 {
-            self.report_filter_tag_index = None;
-        } else {
-            self.report_filter_tag_index = Some(current.min(facets.len() - 1));
-        }
-    }
-
     fn live_session_preview(&self) -> Option<LiveSessionPreview> {
         let start = self.time_tracker.current_session_start?;
         let elapsed_seconds = start.elapsed().as_secs() as usize;
@@ -388,6 +632,7 @@ impl App {
         let started_at_utc = self.session.active_session_started_at_utc?;
         let ended_at_utc = started_at_utc + ChronoDuration::seconds(elapsed_seconds as i64);
         Some(LiveSessionPreview {
+            active_stable_id: self.session.active_session_stable_id.clone()?,
             category_id,
             description,
             elapsed_seconds,
@@ -462,12 +707,24 @@ impl App {
         Ok(())
     }
 
+    pub(super) fn current_civil_date(&self) -> NaiveDate {
+        let now = Utc::now();
+        let policy = OperationalDayPolicy::from_config(day_boundary_config());
+        temporal::civil_from_policy(now, policy)
+            .map(|civil| civil.date_naive())
+            .unwrap_or_else(|_| now.date_naive())
+    }
+
     pub(super) fn set_report_period(&mut self, period: ReportPeriod) {
+        if self.report_range_boundary.is_some() {
+            self.cancel_report_range_boundary();
+        }
         self.report_filter_tag_index = None;
         self.report_period = period;
         self.report_period_offset = 0;
         self.report_custom_window = None;
         self.report_range_boundary = None;
+        self.report_range_boundary_original = None;
         self.report_range_edit = None;
         self.ledger_entry_edit = None;
         self.clear_report_snapshot_cache();
@@ -475,9 +732,13 @@ impl App {
     }
 
     pub(super) fn begin_report_range_edit(&mut self) {
+        if self.report_range_boundary.is_some() {
+            self.cancel_report_range_boundary();
+        }
         self.report_filter_tag_index = None;
         let window = self.current_report_window();
         self.report_range_boundary = None;
+        self.report_range_boundary_original = None;
         self.ledger_entry_edit = None;
         self.report_range_edit = Some(report_range_edit_state(&window));
         self.render_needed = true;
@@ -489,16 +750,18 @@ impl App {
     }
 
     pub(super) fn commit_report_range_edit(&mut self) -> bool {
-        let Some(edit) = self.report_range_edit.clone() else {
+        let Some(mut edit) = self.report_range_edit.clone() else {
             return false;
         };
-        let window = match parse_report_range(&edit.from, &edit.to) {
+        let current_date = self.current_civil_date();
+        if let Err(error) = edit.normalize_all(current_date) {
+            self.present_warning("Invalid date", error);
+            return false;
+        }
+        let window = match parse_report_range(&edit.from, &edit.to, current_date) {
             Ok(window) => window,
             Err(error) => {
-                if let Some(current) = self.report_range_edit.as_mut() {
-                    current.error = Some(error);
-                }
-                self.render_needed = true;
+                self.present_warning("Invalid reporting range", error);
                 return false;
             }
         };
@@ -512,33 +775,74 @@ impl App {
 
     pub(super) fn select_report_range_boundary(&mut self, boundary: ReportRangeBoundary) {
         self.report_filter_tag_index = None;
+        if self.report_range_boundary.is_none() {
+            self.report_range_boundary_original = Some(super::ReportRangeBoundarySnapshot {
+                period: self.report_period,
+                period_offset: self.report_period_offset,
+                custom_window: self.report_custom_window.clone(),
+                selected_category_id: self.report_selected_category_id,
+                selected_index: self.report_selected_index,
+            });
+        }
         self.report_range_boundary = Some(boundary);
         self.render_needed = true;
     }
 
     pub(super) fn clear_report_range_boundary(&mut self) {
-        if self.report_range_boundary.take().is_some() {
+        let changed = self.report_range_boundary.take().is_some()
+            || self.report_range_boundary_original.take().is_some();
+        if changed {
+            self.render_needed = true;
+        }
+    }
+
+    pub(super) fn cancel_report_range_boundary(&mut self) {
+        let snapshot = self.report_range_boundary_original.take();
+        let changed = self.report_range_boundary.take().is_some() || snapshot.is_some();
+        if let Some(snapshot) = snapshot {
+            self.report_period = snapshot.period;
+            self.report_period_offset = snapshot.period_offset;
+            self.report_custom_window = snapshot.custom_window;
+            self.report_selected_category_id = snapshot.selected_category_id;
+            self.report_selected_index = snapshot.selected_index;
+            self.clear_report_snapshot_cache();
+            self.sync_report_selection_for_interval();
+        }
+        if changed {
             self.render_needed = true;
         }
     }
 
     pub(super) fn move_report_range_boundary(&mut self, direction: i8) -> bool {
-        self.move_report_range_boundary_steps(direction, 1)
-    }
-
-    pub(super) fn move_report_range_boundary_steps(&mut self, direction: i8, steps: usize) -> bool {
         let Some(boundary) = self.report_range_boundary else {
             return false;
         };
         let original = self.current_report_window();
-        let mut shifted = original.clone();
         let today = operational_day_key_now();
-        for _ in 0..steps.max(1) {
-            let Some(next) = shifted_report_boundary(&shifted, boundary, direction, today) else {
-                break;
-            };
-            shifted = next;
-        }
+        let Some(shifted) = shifted_report_boundary(&original, boundary, direction, today) else {
+            return false;
+        };
+        self.install_shifted_report_boundary(original, shifted)
+    }
+
+    pub(super) fn move_report_range_boundary_month(&mut self, direction: i8) -> bool {
+        let Some(boundary) = self.report_range_boundary else {
+            return false;
+        };
+        let original = self.current_report_window();
+        let today = operational_day_key_now();
+        let Some(shifted) = shifted_report_boundary_month(&original, boundary, direction, today)
+        else {
+            return false;
+        };
+        self.install_shifted_report_boundary(original, shifted)
+    }
+
+    fn install_shifted_report_boundary(
+        &mut self,
+        original: ReportWindow,
+        shifted: ReportWindow,
+    ) -> bool {
         if shifted == original {
             return false;
         }
@@ -642,40 +946,58 @@ impl App {
         self.report_interval_end_day() < operational_day_key_now()
     }
 
-    pub(super) fn delete_selected_report_session(&mut self) -> bool {
-        let logs = self.report_current_logs();
-        if logs.is_empty() {
-            return false;
-        }
+    fn fallback_identity_after_removing(
+        logs: &[CategoryLogEntry],
+        removed_index: usize,
+    ) -> Option<LedgerSelectionIdentity> {
+        logs.get(removed_index.saturating_add(1))
+            .and_then(Self::ledger_identity_for_row)
+            .or_else(|| {
+                removed_index
+                    .checked_sub(1)
+                    .and_then(|index| logs.get(index))
+                    .and_then(Self::ledger_identity_for_row)
+            })
+    }
 
-        if self.report_log_selected_index >= logs.len() {
+    pub(super) fn begin_report_entry_delete_confirmation(&mut self) -> bool {
+        let logs = self.report_current_logs();
+        let Some(row) = logs.get(self.report_log_selected_index) else {
             return false;
+        };
+        let Some(identity) = Self::ledger_identity_for_row(row) else {
+            return false;
+        };
+        self.report_entry_delete_confirmation = Some(identity);
+        self.system_dialog_selected_index = 1;
+        self.render_needed = true;
+        true
+    }
+
+    pub(super) fn cancel_report_entry_delete_confirmation(&mut self) {
+        if self.report_entry_delete_confirmation.take().is_some() {
+            self.render_needed = true;
         }
-        let selected = self.report_log_selected_index;
-        let Some(row) = logs.get(selected) else {
-            return false;
-        };
-        let Some(session_id) = row.session_id else {
-            return false;
-        };
+    }
+
+    fn delete_report_session_by_id(&mut self, session_id: usize) -> bool {
         let Some(category_id) = self.report_logs_category_id else {
             return false;
         };
-        let (removed_seconds, affected_days) = self
+        let Some(session) = self
             .time_tracker
             .sessions
             .iter()
             .find(|session| session.id == session_id)
-            .map(|session| {
-                (
-                    session.elapsed_seconds,
-                    session_slices(session)
-                        .into_iter()
-                        .map(|slice| slice.operational_day)
-                        .collect::<BTreeSet<_>>(),
-                )
-            })
-            .unwrap_or((row.elapsed_seconds, BTreeSet::new()));
+            .cloned()
+        else {
+            return false;
+        };
+        let removed_seconds = session.elapsed_seconds;
+        let affected_days = session_slices(&session)
+            .into_iter()
+            .map(|slice| slice.operational_day)
+            .collect::<BTreeSet<_>>();
 
         if let Some(database_path) = self.sqlite_database_path.clone() {
             let result = crate::sqlite::delete_tui_session(&database_path, session_id);
@@ -698,13 +1020,121 @@ impl App {
             self.sand_engine
                 .remove_category_grains(category_id, removed_seconds);
         }
-
         for day in affected_days {
             self.reconcile_daily_contribution(day);
         }
         self.clear_report_snapshot_cache();
+        true
+    }
 
-        self.clamp_report_log_selection(self.report_ledger_row_count());
+    fn delete_active_report_generation(&mut self, expected_stable_id: &str) -> bool {
+        if self.session.active_session_stable_id.as_deref() != Some(expected_stable_id) {
+            return false;
+        }
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            return false;
+        };
+        let now = Utc::now();
+        if let Err(error) = self.settle_transition_boundary(now) {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::SessionDelete,
+                RecoveryAction::ReloadAuthority,
+                Err(error),
+            );
+            return false;
+        }
+        let previous_category = self.time_tracker.active_category_id();
+        let removed_seconds = usize::try_from(
+            self.time_tracker
+                .current_elapsed()
+                .unwrap_or_default()
+                .as_secs(),
+        )
+        .unwrap_or(usize::MAX);
+        let affected_days = self
+            .live_preview_session()
+            .map(|session| {
+                session_slices(&session)
+                    .into_iter()
+                    .map(|slice| slice.operational_day)
+                    .collect::<BTreeSet<_>>()
+            })
+            .unwrap_or_default();
+        let identity = transition_identity("delete-active", expected_stable_id, now, "idle");
+        let next_stable_id = identity.tui_active_stable_id();
+        let Some(receipt) = self.record_storage_result_for(
+            PersistenceOperation::SessionDelete,
+            RecoveryAction::ReloadAuthority,
+            crate::sqlite::reset_active_session_to(
+                &database_path,
+                expected_stable_id,
+                &identity.operation_id,
+                &next_stable_id,
+                DRIFT_CATEGORY_ID,
+                "",
+                now,
+                now,
+            ),
+        ) else {
+            return false;
+        };
+
+        if !self
+            .time_tracker
+            .set_active_category_by_id(DRIFT_CATEGORY_ID)
+        {
+            return false;
+        }
+        self.time_tracker.set_active_description(String::new());
+        self.time_tracker.start_session();
+        self.session.active_session_stable_id = receipt.resulting_active_stable_id;
+        self.session.active_session_started_at_utc = Some(now);
+        if previous_category != DRIFT_CATEGORY_ID && removed_seconds > 0 {
+            self.sand_engine
+                .remove_category_grains(previous_category, removed_seconds);
+        }
+        for day in affected_days {
+            self.reconcile_daily_contribution(day);
+        }
+        self.refresh_active_runtime_checkpoint();
+        self.clear_report_snapshot_cache();
+        !self.has_persistence_recovery()
+    }
+
+    pub(super) fn confirm_report_entry_delete(&mut self) -> bool {
+        let Some(identity) = self.report_entry_delete_confirmation.clone() else {
+            return false;
+        };
+        let logs = self.report_current_logs();
+        let removed_index = logs.iter().position(|row| match &identity {
+            LedgerSelectionIdentity::Session(session_id) => row.session_id == Some(*session_id),
+            LedgerSelectionIdentity::Active(stable_id) => {
+                row.active_stable_id.as_deref() == Some(stable_id.as_str())
+            }
+            LedgerSelectionIdentity::Add => false,
+        });
+        let fallback =
+            removed_index.and_then(|index| Self::fallback_identity_after_removing(&logs, index));
+        let deleted = match &identity {
+            LedgerSelectionIdentity::Session(session_id) => {
+                self.delete_report_session_by_id(*session_id)
+            }
+            LedgerSelectionIdentity::Active(stable_id) => {
+                self.delete_active_report_generation(stable_id)
+            }
+            LedgerSelectionIdentity::Add => false,
+        };
+        if !deleted {
+            return false;
+        }
+        self.report_entry_delete_confirmation = None;
+        self.report_log_selected_identity = fallback.or_else(|| {
+            self.report_logs_category_id
+                .filter(|category_id| self.report_layer_can_add(*category_id))
+                .map(|_| LedgerSelectionIdentity::Add)
+        });
+        self.sync_report_log_selection_to_identity();
+        self.render_needed = true;
         true
     }
 
@@ -748,6 +1178,33 @@ impl App {
         ) else {
             return false;
         };
+        if row.active_stable_id.as_deref() == self.session.active_session_stable_id.as_deref()
+            && row.active_stable_id.is_some()
+        {
+            let Some(started_at_utc) = self.session.active_session_started_at_utc else {
+                return false;
+            };
+            let policy = OperationalDayPolicy::from_config(day_boundary_config());
+            let Ok(start) = temporal::civil_from_policy(started_at_utc, policy) else {
+                return false;
+            };
+            let Ok(end) = temporal::civil_from_policy(Utc::now(), policy) else {
+                return false;
+            };
+            self.report_filter_tag_index = None;
+            self.ledger_entry_edit = Some(super::LedgerEntryEditState::active(
+                category_id,
+                self.time_tracker.active_description().to_string(),
+                start.format("%Y-%m-%d").to_string(),
+                start.format("%H:%M:%S").to_string(),
+                end.format("%Y-%m-%d").to_string(),
+                end.format("%H:%M:%S").to_string(),
+            ));
+            self.report_range_boundary = None;
+            self.report_range_boundary_original = None;
+            self.render_needed = true;
+            return true;
+        }
         let Some(session_id) = row.session_id else {
             return false;
         };
@@ -783,19 +1240,23 @@ impl App {
             end.format("%H:%M:%S").to_string(),
         ));
         self.report_range_boundary = None;
+        self.report_range_boundary_original = None;
         self.render_needed = true;
         true
     }
 
     pub(super) fn begin_selected_layer_ledger_add(&mut self) -> bool {
+        if self.report_range_boundary.is_some() {
+            self.cancel_report_range_boundary();
+        }
         if let Some(category_id) = self.report_logs_category_id {
             return self.begin_ledger_add_edit(category_id);
         }
-        let summary = self.report_rows();
-        let Some(entry) = summary.entries.get(
-            self.report_selected_index
-                .min(summary.entries.len().saturating_sub(1)),
-        ) else {
+        let summary = self.report_visible_rows();
+        let Some(index) = self.report_selected_summary_index(&summary) else {
+            return false;
+        };
+        let Some(entry) = summary.entries.get(index) else {
             return false;
         };
         let category_id = entry.category_id;
@@ -838,7 +1299,9 @@ impl App {
             to_civil.format("%H:%M:%S").to_string(),
         ));
         self.report_log_selected_index = self.report_current_logs().len();
+        self.report_log_selected_identity = Some(LedgerSelectionIdentity::Add);
         self.report_range_boundary = None;
+        self.report_range_boundary_original = None;
         self.render_needed = true;
         true
     }
@@ -905,9 +1368,12 @@ impl App {
             return false;
         };
         edit.description = cycle.value;
+        // Plain Right accepts/cycles the current ghost-completion token. Keep the
+        // caret at the end of that accepted token instead of stranded at the
+        // length of the typed prefix.
+        edit.caret = edit.description.chars().count();
         edit.tag_cycle_prefix = Some(cycle.prefix);
         edit.select_all = false;
-        edit.error = None;
         edit.confirmation = None;
         self.render_needed = true;
         true
@@ -921,7 +1387,6 @@ impl App {
     pub(super) fn dismiss_ledger_entry_confirmation(&mut self) {
         if let Some(edit) = self.ledger_entry_edit.as_mut() {
             edit.confirmation = None;
-            edit.error = None;
             self.render_needed = true;
         }
     }
@@ -929,29 +1394,25 @@ impl App {
     fn ledger_edit_bounds(
         edit: &super::LedgerEntryEditState,
         policy: OperationalDayPolicy,
+        active_end_utc: DateTime<Utc>,
     ) -> Result<(DateTime<Utc>, DateTime<Utc>), String> {
-        let start_date = NaiveDate::parse_from_str(edit.start_date.trim(), "%Y-%m-%d")
-            .map_err(|_| "date must use YYYY-MM-DD".to_string())?;
-        let start_time = super::ledger_state::parse_ledger_time_input(edit.start_time.trim())
-            .ok_or_else(|| "start time must be a valid time".to_string())?;
-        let mut end_date = NaiveDate::parse_from_str(edit.end_date.trim(), "%Y-%m-%d")
-            .map_err(|_| "end date must use YYYY-MM-DD".to_string())?;
-        let end_time = super::ledger_state::parse_ledger_time_input(edit.end_time.trim())
-            .ok_or_else(|| "end time must be a valid time".to_string())?;
-        if edit.dates_linked && end_time < start_time {
-            end_date = start_date
-                .checked_add_signed(ChronoDuration::days(1))
-                .ok_or_else(|| "end date overflowed".to_string())?;
+        let (start, mut end) = edit
+            .preview_naive_bounds()
+            .ok_or_else(|| "date/time could not be normalized".to_string())?;
+        if edit.is_active() {
+            end = temporal::civil_from_policy(active_end_utc, policy)
+                .map_err(|error| format!("active end cannot be represented: {error}"))?
+                .naive_local();
         }
         let offset = FixedOffset::east_opt(policy.utc_offset_seconds)
             .ok_or_else(|| "ledger entry has an invalid UTC offset".to_string())?;
         let from = offset
-            .from_local_datetime(&start_date.and_time(start_time))
+            .from_local_datetime(&start)
             .single()
             .ok_or_else(|| "ledger entry start is not unique".to_string())?
             .with_timezone(&Utc);
         let to = offset
-            .from_local_datetime(&end_date.and_time(end_time))
+            .from_local_datetime(&end)
             .single()
             .ok_or_else(|| "ledger entry end is not unique".to_string())?
             .with_timezone(&Utc);
@@ -959,6 +1420,51 @@ impl App {
             return Err("start must be before end".to_string());
         }
         Ok((from, to))
+    }
+
+    pub(super) fn ledger_edit_policy(
+        &self,
+        edit: &super::LedgerEntryEditState,
+    ) -> OperationalDayPolicy {
+        if let Some(session_id) = edit.session_id()
+            && let Some(policy) = self
+                .time_tracker
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .and_then(|session| session.operational_day_policy)
+        {
+            return policy;
+        }
+        OperationalDayPolicy::from_config(day_boundary_config())
+    }
+
+    pub(super) fn ledger_edit_report_contribution(
+        &self,
+        edit: &super::LedgerEntryEditState,
+    ) -> Option<(usize, isize)> {
+        let policy = self.ledger_edit_policy(edit);
+        let (from, to) = Self::ledger_edit_bounds(edit, policy, Utc::now()).ok()?;
+        let elapsed = usize::try_from((to - from).num_seconds()).ok()?;
+        if elapsed == 0 {
+            return Some((0, 0));
+        }
+        let window = self.current_report_window();
+        let visible = temporal::allocate_operational_day_slices(from, to, elapsed, policy)
+            .ok()?
+            .into_iter()
+            .filter(|slice| {
+                slice.operational_day >= window.start && slice.operational_day <= window.end
+            })
+            .map(|slice| slice.elapsed_seconds)
+            .sum::<usize>();
+        let effect = self
+            .report_categories()
+            .into_iter()
+            .find(|category| category.id == edit.category_id)
+            .map(|category| category.balance_effect)
+            .unwrap_or(0);
+        Some((visible, visible as isize * effect as isize))
     }
 
     fn preserve_hidden_subseconds(
@@ -981,29 +1487,151 @@ impl App {
         }
     }
 
+    fn commit_active_ledger_entry_edit(
+        &mut self,
+        edit: &super::LedgerEntryEditState,
+        from: DateTime<Utc>,
+        policy: OperationalDayPolicy,
+        now: DateTime<Utc>,
+    ) -> bool {
+        if from >= now {
+            self.present_warning("Invalid active entry", "Active start must be before now.");
+            return false;
+        }
+        // Re-basing a live generation across completed history would require the
+        // collateral-history planner. Fail closed rather than silently overlap it.
+        if self.time_tracker.sessions.iter().any(|session| {
+            session.ended_at_utc.is_some_and(|ended| ended > from)
+                && session.started_at_utc.is_some_and(|started| started < now)
+        }) {
+            self.present_warning(
+                "History overlap",
+                "Active start overlaps completed history.",
+            );
+            return false;
+        }
+        let Some(database_path) = self.sqlite_database_path.clone() else {
+            self.present_error("Storage unavailable", "SQLite authority is unavailable.");
+            return false;
+        };
+        let Some(expected_stable_id) = self.session.active_session_stable_id.clone() else {
+            self.present_error(
+                "Active session unavailable",
+                "The active session has no stable identity.",
+            );
+            return false;
+        };
+        let old_start = self.session.active_session_started_at_utc.unwrap_or(from);
+        let old_elapsed = usize::try_from(
+            self.time_tracker
+                .current_elapsed()
+                .unwrap_or_default()
+                .as_secs(),
+        )
+        .unwrap_or(usize::MAX);
+        let old_days = self
+            .live_preview_session()
+            .map(|session| {
+                session_slices(&session)
+                    .into_iter()
+                    .map(|slice| slice.operational_day)
+                    .collect::<BTreeSet<_>>()
+            })
+            .unwrap_or_default();
+        let identity = transition_identity(
+            "rebase-active",
+            &expected_stable_id,
+            now,
+            &edit.category_id.0.to_string(),
+        );
+        let next_stable_id = identity.tui_active_stable_id();
+        let Some(receipt) = self.record_storage_result_for(
+            PersistenceOperation::ActiveReset,
+            RecoveryAction::ReloadAuthority,
+            crate::sqlite::reset_active_session_to(
+                &database_path,
+                &expected_stable_id,
+                &identity.operation_id,
+                &next_stable_id,
+                edit.category_id,
+                &edit.description,
+                from,
+                now,
+            ),
+        ) else {
+            return false;
+        };
+
+        self.time_tracker
+            .set_active_description(edit.description.clone());
+        if let Err(error) = self.begin_active_session_at(from, true) {
+            self.record_storage_result_for::<()>(
+                PersistenceOperation::ActiveReset,
+                RecoveryAction::ReloadAuthority,
+                Err(error),
+            );
+            return false;
+        }
+        self.session.active_session_stable_id = receipt.resulting_active_stable_id.clone();
+        self.session.active_session_started_at_utc = Some(from);
+        let new_elapsed = usize::try_from((now - from).num_seconds().max(0)).unwrap_or(usize::MAX);
+        if old_elapsed > new_elapsed {
+            self.sand_engine
+                .remove_category_grains(edit.category_id, old_elapsed - new_elapsed);
+        }
+        let mut affected_days = old_days;
+        if let Some(new_preview) = self.live_preview_session() {
+            affected_days.extend(
+                session_slices(&new_preview)
+                    .into_iter()
+                    .map(|slice| slice.operational_day),
+            );
+        }
+        // A backward start extends ledger truth into a true gap; consistent with
+        // historical correction, that added time does not synthesize current grains.
+        let _ = old_start;
+        let _ = policy;
+        for day in affected_days {
+            self.reconcile_daily_contribution(day);
+        }
+        self.remember_description_tags_for_category(edit.category_id, &edit.description);
+        self.report_log_selected_identity = receipt
+            .resulting_active_stable_id
+            .map(LedgerSelectionIdentity::Active);
+        self.ledger_entry_edit = None;
+        self.clear_report_snapshot_cache();
+        self.refresh_active_runtime_checkpoint();
+        self.sync_report_selection_for_interval();
+        !self.has_persistence_recovery()
+    }
+
     pub(super) fn commit_ledger_entry_edit(&mut self) -> bool {
         let Some(mut edit) = self.ledger_entry_edit.clone() else {
             return false;
         };
+        let current_date = self.current_civil_date();
+        if let Err(error) = edit.normalize_all_temporal(current_date) {
+            self.present_warning("Invalid date or time", error);
+            return false;
+        }
         edit.description =
             self.canonicalize_description_for_category(edit.category_id, &edit.description);
-        if let Err(error) = self.settle_transition_boundary(Utc::now()) {
-            if let Some(current) = self.ledger_entry_edit.as_mut() {
-                current.error = Some(error);
-            }
-            self.render_needed = true;
+        let settle_at = Utc::now();
+        if let Err(error) = self.settle_transition_boundary(settle_at) {
+            self.present_error("Runtime update failed", error);
             return false;
         }
         let active_preview = match self.historical_correction_active_preview() {
             Ok(preview) => preview,
             Err(error) => {
-                if let Some(current) = self.ledger_entry_edit.as_mut() {
-                    current.error = Some(error);
-                }
-                self.render_needed = true;
+                self.present_error("Runtime authority unavailable", error);
                 return false;
             }
         };
+        // The preview endpoint is the single authoritative `now` for this edit
+        // transaction. Active End, future-bound validation, persistence, and
+        // elapsed rebasing all consume exactly this same instant.
+        let commit_now = active_preview.ended_at_utc;
         let policy = match edit.kind {
             super::LedgerEntryEditKind::Existing { session_id } => self
                 .time_tracker
@@ -1012,16 +1640,14 @@ impl App {
                 .find(|session| session.id == session_id)
                 .and_then(|session| session.operational_day_policy)
                 .unwrap_or(active_preview.operational_day_policy),
-            super::LedgerEntryEditKind::Add => active_preview.operational_day_policy,
+            super::LedgerEntryEditKind::Active | super::LedgerEntryEditKind::Add => {
+                active_preview.operational_day_policy
+            }
         };
-        let (mut from, mut to) = match Self::ledger_edit_bounds(&edit, policy) {
+        let (mut from, mut to) = match Self::ledger_edit_bounds(&edit, policy, commit_now) {
             Ok(bounds) => bounds,
             Err(error) => {
-                if let Some(current) = self.ledger_entry_edit.as_mut() {
-                    current.error = Some(error);
-                    current.confirmation = None;
-                }
-                self.render_needed = true;
+                self.present_warning("Invalid ledger entry", error);
                 return false;
             }
         };
@@ -1039,42 +1665,35 @@ impl App {
                 to = Self::preserve_hidden_subseconds(to, original, policy);
             }
         }
-        if to > active_preview.ended_at_utc {
-            if let Some(current) = self.ledger_entry_edit.as_mut() {
-                current.error = Some("end cannot be later than now".to_string());
-                current.confirmation = None;
-            }
-            self.render_needed = true;
+        if to > commit_now {
+            self.present_warning("Invalid ledger entry", "End cannot be later than now.");
             return false;
         }
+        if edit.is_active() {
+            return self.commit_active_ledger_entry_edit(&edit, from, policy, commit_now);
+        }
         if edit.is_add() && self.time_tracker.category_by_id(edit.category_id).is_none() {
-            if let Some(current) = self.ledger_entry_edit.as_mut() {
-                current.error = Some("archived layer cannot receive new entries".to_string());
-                current.confirmation = None;
-            }
-            self.render_needed = true;
+            self.present_warning(
+                "Archived layer",
+                "Archived layers cannot receive new entries.",
+            );
             return false;
         }
         let Some(database_path) = self.sqlite_database_path.clone() else {
+            self.present_error("Storage unavailable", "SQLite authority is unavailable.");
             return false;
         };
         let checkpoint = match self.build_runtime_checkpoint() {
             Ok(checkpoint) => checkpoint,
             Err(error) => {
-                if let Some(current) = self.ledger_entry_edit.as_mut() {
-                    current.error = Some(error);
-                }
-                self.render_needed = true;
+                self.present_error("Checkpoint failed", error);
                 return false;
             }
         };
         let checkpoint_json = match serde_json::to_string(&checkpoint) {
             Ok(value) => value,
             Err(error) => {
-                if let Some(current) = self.ledger_entry_edit.as_mut() {
-                    current.error = Some(error.to_string());
-                }
-                self.render_needed = true;
+                self.present_error("Checkpoint failed", error.to_string());
                 return false;
             }
         };
@@ -1115,17 +1734,14 @@ impl App {
                         plan_token,
                         changes,
                     });
-                    current.error = None;
                 }
+                self.system_dialog_selected_index = 1;
                 self.render_needed = true;
                 false
             }
             crate::sqlite::TuiHistoricalCorrectionOutcome::Applied(receipt) => {
                 if let Err(error) = self.install_historical_correction_receipt(receipt) {
-                    if let Some(current) = self.ledger_entry_edit.as_mut() {
-                        current.error = Some(error);
-                    }
-                    self.render_needed = true;
+                    self.present_error("History reload failed", error);
                     return false;
                 }
                 self.remember_description_tags_for_category(
@@ -1141,12 +1757,10 @@ impl App {
 
     fn sync_report_selection_for_interval(&mut self) {
         if self.report_logs_category_id.is_some() {
-            let row_count = self.report_ledger_row_count();
-            self.clamp_report_log_selection(row_count);
-            self.sync_report_filter_focus_for_selection();
+            self.sync_report_log_selection_to_identity();
         } else {
-            let row_count = self.report_rows().entries.len();
-            self.clamp_report_selection(row_count);
+            let summary = self.report_visible_rows();
+            self.sync_report_selection_to_summary(&summary);
         }
         self.render_needed = true;
     }
@@ -1278,14 +1892,6 @@ impl App {
         }
     }
 
-    pub(super) fn clamp_report_selection(&mut self, row_count: usize) {
-        if row_count == 0 {
-            self.report_selected_index = 0;
-        } else if self.report_selected_index >= row_count {
-            self.report_selected_index = row_count - 1;
-        }
-    }
-
     pub(super) fn clamp_report_log_selection(&mut self, row_count: usize) {
         if row_count == 0 {
             self.report_log_selected_index = 0;
@@ -1302,12 +1908,16 @@ mod report_edit_state_tests {
 
     use super::{
         build_historical_preview, filtered_layer_balance, parse_report_range,
-        report_log_matches_tag_filter, report_range_edit_state, shifted_custom_window_newer,
-        shifted_custom_window_older, shifted_report_boundary,
+        report_entry_is_visible, report_log_matches_tag_filter, report_range_edit_state,
+        shifted_custom_window_newer, shifted_custom_window_older, shifted_report_boundary,
+        shifted_report_boundary_month,
     };
     use crate::{
         app::{ReportRangeBoundary, ReportTagFacet, ui_helpers},
-        domain::{Category, CategoryId, CategoryLogEntry, OperationalDayPolicy, ReportWindow},
+        domain::{
+            BalanceReportEntry, Category, CategoryId, CategoryLogEntry, DRIFT_CATEGORY_ID,
+            OperationalDayPolicy, ReportWindow,
+        },
         sand::{SandState, SandStateGrain, SedimentSnapshot},
     };
 
@@ -1324,6 +1934,7 @@ mod report_edit_state_tests {
     fn tagged_log(description: &str, balance_seconds: isize) -> CategoryLogEntry {
         CategoryLogEntry {
             session_id: Some(1),
+            active_stable_id: None,
             date: "2026-09-28".to_string(),
             end_date: "2026-09-28".to_string(),
             start_time: "10:00:00".to_string(),
@@ -1366,16 +1977,54 @@ mod report_edit_state_tests {
     }
 
     #[test]
+    fn balance_summary_visibility_omits_exact_zero_rows_only() {
+        let ordinary_zero = BalanceReportEntry {
+            category_id: CategoryId::new(1),
+            category_name: "Work".to_string(),
+            color: Color::White,
+            elapsed_seconds: 3600,
+            balance_effect: 1,
+            balance_seconds: 0,
+        };
+        let ordinary_nonzero = BalanceReportEntry {
+            balance_seconds: 1,
+            ..ordinary_zero.clone()
+        };
+        let idle_zero = BalanceReportEntry {
+            category_id: DRIFT_CATEGORY_ID,
+            category_name: "Idle".to_string(),
+            color: Color::White,
+            elapsed_seconds: 0,
+            balance_effect: 0,
+            balance_seconds: 0,
+        };
+        let idle_nonzero = BalanceReportEntry {
+            elapsed_seconds: 1,
+            ..idle_zero.clone()
+        };
+
+        assert!(!report_entry_is_visible(&ordinary_zero));
+        assert!(report_entry_is_visible(&ordinary_nonzero));
+        assert!(!report_entry_is_visible(&idle_zero));
+        assert!(report_entry_is_visible(&idle_nonzero));
+    }
+
+    #[test]
     fn custom_range_editor_uses_exclusive_to_boundary() {
-        let window = parse_report_range("2026-08-01", "2026-08-28").unwrap();
+        let current = NaiveDate::from_ymd_opt(2026, 9, 30).unwrap();
+        let window = parse_report_range("2026-08-01", "2026-08-28", current).unwrap();
         assert_eq!(window.label, "2026-08-01..2026-08-27");
         assert_eq!(
             ui_helpers::report_window_end_exclusive(&window),
             NaiveDate::from_ymd_opt(2026, 8, 28)
         );
-        assert!(parse_report_range("08/01/2026", "2026-08-28").is_err());
-        assert!(parse_report_range("2026-08-27", "2026-08-27").is_err());
-        assert!(parse_report_range("2026-08-28", "2026-08-27").is_err());
+        assert!(parse_report_range("08/01/2026", "2026-08-28", current).is_err());
+        assert!(parse_report_range("2026-08-27", "2026-08-27", current).is_err());
+        assert!(parse_report_range("2026-08-28", "2026-08-27", current).is_err());
+        assert_eq!(
+            parse_report_range("Sep", "Oct", current).unwrap().label,
+            "2026-09-01..2026-09-30"
+        );
     }
 
     #[test]
@@ -1390,7 +2039,6 @@ mod report_edit_state_tests {
         assert_eq!(edit.to, "2026-09-22");
         assert_eq!(edit.active_field, crate::app::ReportRangeField::From);
         assert!(edit.select_all);
-        assert_eq!(edit.error, None);
     }
 
     #[test]
@@ -1476,6 +2124,39 @@ mod report_edit_state_tests {
         assert_eq!(
             expanded_right.end,
             NaiveDate::from_ymd_opt(2026, 8, 15).unwrap()
+        );
+    }
+
+    #[test]
+    fn bracket_boundary_shift_uses_month_scale_and_visible_end_boundary() {
+        let today = NaiveDate::from_ymd_opt(2026, 9, 28).unwrap();
+        let window = ReportWindow::new(
+            NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 6, 30).unwrap(),
+        )
+        .unwrap();
+
+        let start_shift =
+            shifted_report_boundary_month(&window, ReportRangeBoundary::Start, 1, today).unwrap();
+        assert_eq!(
+            start_shift.start,
+            NaiveDate::from_ymd_opt(2026, 6, 30).unwrap()
+        );
+
+        let end_shift =
+            shifted_report_boundary_month(&window, ReportRangeBoundary::End, 1, today).unwrap();
+        assert_eq!(end_shift.end, NaiveDate::from_ymd_opt(2026, 7, 31).unwrap());
+
+        let reaches_present = ReportWindow::new(
+            NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 9, 15).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            shifted_report_boundary_month(&reaches_present, ReportRangeBoundary::End, 1, today,)
+                .unwrap()
+                .end,
+            today
         );
     }
 

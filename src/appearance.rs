@@ -180,6 +180,10 @@ impl AppearanceState {
     pub(crate) fn success_ref(&self) -> UiColorRef {
         self.active_theme().ui.success
     }
+
+    pub(crate) fn selection_color(&self) -> Color {
+        self.active_theme().ui.selection
+    }
 }
 
 pub(crate) fn contrasting_text_color(background: Color, fallback: Color) -> Color {

@@ -11,12 +11,12 @@ use serde::{Serialize, de::DeserializeOwned};
 use crate::{
     appearance::{decode_color_anchor, encode_color_anchor},
     domain::{
-        Category, CategoryId, DRIFT_CATEGORY_CONFIG_NAME, OperationalDayPolicy, Session,
-        day_boundary_config, runtime_settings,
+        Category, CategoryId, DRIFT_CATEGORY_CONFIG_NAME, DRIFT_CATEGORY_ID, OperationalDayPolicy,
+        Session, day_boundary_config, deleted_layer_tombstone_name, runtime_settings,
     },
     sand::{
         DailySedimentSlice, SandState, SedimentSnapshot, daily_contribution_from_slices,
-        recolor_state_category_mass,
+        recolor_state_category_mass, stable_source_revision,
     },
     storage::{CategoryTagsState, LoadedCategories, LoadedSessions},
     temporal,
@@ -403,6 +403,37 @@ pub(crate) fn reset_active_session(
     .map_err(|error| error.to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn reset_active_session_to(
+    database_path: &Path,
+    expected_active_stable_id: &str,
+    operation_id: &str,
+    next_stable_id: &str,
+    category_id: CategoryId,
+    description: &str,
+    started_at_utc: DateTime<Utc>,
+    applied_at_utc: DateTime<Utc>,
+) -> Result<runtime_coordination::RuntimeTransitionReceipt, String> {
+    let mut repository = open_cli_repository(database_path)?;
+    let started = timestamp(started_at_utc);
+    let applied = timestamp(applied_at_utc);
+    runtime_coordination::reset_active_session(
+        &mut repository,
+        expected_active_stable_id,
+        operation_id,
+        &NewActiveSession {
+            stable_id: next_stable_id,
+            category_id: as_i64(category_id.0, "category ID")?,
+            description,
+            started_at_utc: &started,
+            recovery_kind: "live",
+        },
+        &applied,
+        "tui-runtime",
+    )
+    .map_err(|error| error.to_string())
+}
+
 pub(crate) fn sync_categories(
     database_path: &Path,
     categories: &[Category],
@@ -545,6 +576,201 @@ pub(crate) fn archive_category(
         return Err(format!("active category {category_id} does not exist"));
     }
     runtime_coordination::maybe_inject_test_fault("category-archive", "commit")
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
+}
+
+fn reclassify_all_category_mass(
+    state: &mut SandState,
+    from_category_id: CategoryId,
+    to_category_id: CategoryId,
+) -> usize {
+    let reclassified =
+        recolor_state_category_mass(state, from_category_id, to_category_id, usize::MAX);
+    if reclassified > 0 && state.version == SandState::PROVENANCE_COMPATIBILITY_VERSION {
+        state.version = SandState::VERSION;
+    }
+    reclassified
+}
+
+fn refresh_snapshot_source_revision(snapshot: &mut SedimentSnapshot) -> Result<(), String> {
+    snapshot.source_revision.clear();
+    let material = serde_json::to_vec(snapshot).map_err(|error| error.to_string())?;
+    snapshot.source_revision = stable_source_revision(&material);
+    Ok(())
+}
+
+fn reclassify_snapshot_payload(
+    payload_json: &str,
+    from_category_id: CategoryId,
+) -> Result<Option<String>, String> {
+    if let Ok(mut snapshot) = serde_json::from_str::<SedimentSnapshot>(payload_json) {
+        if reclassify_all_category_mass(&mut snapshot.state, from_category_id, DRIFT_CATEGORY_ID)
+            == 0
+        {
+            return Ok(None);
+        }
+        refresh_snapshot_source_revision(&mut snapshot)?;
+        return serde_json::to_string(&snapshot)
+            .map(Some)
+            .map_err(|error| error.to_string());
+    }
+
+    let mut state = serde_json::from_str::<SandState>(payload_json)
+        .map_err(|error| format!("sediment snapshot payload is invalid: {error}"))?;
+    if reclassify_all_category_mass(&mut state, from_category_id, DRIFT_CATEGORY_ID) == 0 {
+        return Ok(None);
+    }
+    serde_json::to_string(&state)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+fn reclassify_checkpoint_sediment(
+    payload_json: &str,
+    from_category_id: CategoryId,
+) -> Result<Option<String>, String> {
+    let mut checkpoint: serde_json::Value =
+        serde_json::from_str(payload_json).map_err(|error| error.to_string())?;
+    let Some(sand_state) = checkpoint.get("sand_state").cloned() else {
+        return Ok(None);
+    };
+    if sand_state.is_null() {
+        return Ok(None);
+    }
+    let mut state: SandState =
+        serde_json::from_value(sand_state).map_err(|error| error.to_string())?;
+    if reclassify_all_category_mass(&mut state, from_category_id, DRIFT_CATEGORY_ID) == 0 {
+        return Ok(None);
+    }
+    checkpoint["sand_state"] = serde_json::to_value(state).map_err(|error| error.to_string())?;
+    serde_json::to_string(&checkpoint)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn delete_category_permanently(
+    database_path: &Path,
+    category_id: CategoryId,
+) -> Result<(), String> {
+    if category_id == DRIFT_CATEGORY_ID {
+        return Err("the reserved idle category cannot be deleted".to_string());
+    }
+    runtime_coordination::maybe_inject_test_fault("category-delete", "before-write")
+        .map_err(|error| error.to_string())?;
+    let mut repository = open_cli_repository(database_path)?;
+    let category_id = as_i64(category_id.0, "category ID")?;
+    let transaction = repository
+        .connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let active_category_id: Option<i64> = transaction
+        .query_row(
+            "SELECT category_id FROM active_session WHERE singleton = 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    if active_category_id == Some(category_id) {
+        return Err("the active category cannot be deleted".to_string());
+    }
+
+    let category_id_value =
+        u64::try_from(category_id).map_err(|_| format!("category ID {category_id} is invalid"))?;
+    let category_id_typed = CategoryId::new(category_id_value);
+
+    if let Some(payload_json) = transaction
+        .query_row(
+            "SELECT payload_json FROM sand_state WHERE singleton = 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?
+    {
+        let mut state: SandState =
+            serde_json::from_str(&payload_json).map_err(|error| error.to_string())?;
+        if reclassify_all_category_mass(&mut state, category_id_typed, DRIFT_CATEGORY_ID) > 0 {
+            let updated = serde_json::to_string(&state).map_err(|error| error.to_string())?;
+            transaction
+                .execute(
+                    "UPDATE sand_state SET payload_json = ?1, updated_at_utc = ?2
+                     WHERE singleton = 1",
+                    params![updated, timestamp(Utc::now())],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+    }
+
+    let snapshot_payloads = {
+        let mut statement = transaction
+            .prepare("SELECT id, payload_json FROM sand_snapshots ORDER BY id")
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|error| error.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?
+    };
+    for (snapshot_id, payload_json) in snapshot_payloads {
+        if let Some(updated) = reclassify_snapshot_payload(&payload_json, category_id_typed)? {
+            transaction
+                .execute(
+                    "UPDATE sand_snapshots SET payload_json = ?1 WHERE id = ?2",
+                    params![updated, snapshot_id],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+    }
+
+    if let Some(payload_json) = transaction
+        .query_row(
+            "SELECT payload_json FROM runtime_checkpoint WHERE singleton = 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?
+        && let Some(updated) = reclassify_checkpoint_sediment(&payload_json, category_id_typed)?
+    {
+        transaction
+            .execute(
+                "UPDATE runtime_checkpoint SET payload_json = ?1 WHERE singleton = 1",
+                params![updated],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+
+    transaction
+        .execute(
+            "DELETE FROM sessions WHERE category_id = ?1",
+            params![category_id],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "DELETE FROM category_tags WHERE category_id = ?1",
+            params![category_id],
+        )
+        .map_err(|error| error.to_string())?;
+    let tombstone_name = deleted_layer_tombstone_name(CategoryId::new(
+        u64::try_from(category_id).map_err(|_| "category ID is invalid".to_string())?,
+    ));
+    let changed = transaction
+        .execute(
+            "UPDATE categories
+             SET name = ?1, description = '', balance_effect = 0, archived_at_utc = ?2
+             WHERE id = ?3",
+            params![tombstone_name, timestamp(Utc::now()), category_id],
+        )
+        .map_err(|error| error.to_string())?;
+    if changed != 1 {
+        return Err(format!("category {category_id} does not exist"));
+    }
+    runtime_coordination::maybe_inject_test_fault("category-delete", "commit")
         .map_err(|error| error.to_string())?;
     transaction.commit().map_err(|error| error.to_string())
 }
@@ -2901,6 +3127,230 @@ pub(crate) fn quarantine_checkpoint(database_path: &Path) -> Result<(), String> 
     runtime_coordination::quarantine_checkpoint(&mut repository).map_err(|error| error.to_string())
 }
 
+#[derive(Debug)]
+pub(crate) struct RecoveryGapIdleRequest<'a> {
+    pub expected_active_stable_id: &'a str,
+    pub previous_category_id: CategoryId,
+    pub active_started_at_utc: DateTime<Utc>,
+    pub durable_until_utc: DateTime<Utc>,
+    pub target_utc: DateTime<Utc>,
+    pub next_active_stable_id: &'a str,
+    pub state: &'a SandState,
+}
+
+pub(crate) fn commit_recovery_gap_as_idle(
+    database_path: &Path,
+    request: RecoveryGapIdleRequest<'_>,
+) -> Result<(), String> {
+    if request.previous_category_id == DRIFT_CATEGORY_ID {
+        return Err("recovery gap previous Layer is already Idle".to_string());
+    }
+    if request.active_started_at_utc > request.durable_until_utc
+        || request.durable_until_utc > request.target_utc
+    {
+        return Err("recovery gap timestamps are not monotonic".to_string());
+    }
+    if request.next_active_stable_id.trim().is_empty()
+        || request.next_active_stable_id == request.expected_active_stable_id
+    {
+        return Err("recovery gap requires a new active stable identity".to_string());
+    }
+
+    let mut repository = open_cli_repository(database_path)?;
+    let existing = repository.sand_state().map_err(|error| error.to_string())?;
+    let formation_id = existing
+        .as_ref()
+        .map(|record| record.formation_id.clone())
+        .unwrap_or_else(|| "default".to_string());
+    let quantum_seconds = existing
+        .as_ref()
+        .map(|record| record.quantum_seconds)
+        .unwrap_or(1);
+    let policy = OperationalDayPolicy::from_config(day_boundary_config());
+    let transaction = repository
+        .connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+
+    let checkpoint_status: Option<String> = transaction
+        .query_row(
+            "SELECT status FROM runtime_checkpoint WHERE singleton = 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    if checkpoint_status.as_deref() != Some("recovering") {
+        return Err(format!(
+            "recovery gap expected a recovering checkpoint, found {}",
+            checkpoint_status.unwrap_or_else(|| "missing".to_string())
+        ));
+    }
+
+    let active: Option<(String, i64, String, String)> = transaction
+        .query_row(
+            "SELECT stable_id, category_id, description, started_at_utc
+             FROM active_session WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let Some((stable_id, category_id, description, started_at_text)) = active else {
+        return Err("recovery gap has no active session to classify".to_string());
+    };
+    if stable_id != request.expected_active_stable_id {
+        return Err(format!(
+            "recovery gap active identity changed; expected {}, found {stable_id}",
+            request.expected_active_stable_id
+        ));
+    }
+    let expected_category = as_i64(request.previous_category_id.0, "category ID")?;
+    if category_id != expected_category {
+        return Err(format!(
+            "recovery gap Layer changed; expected {}, found {category_id}",
+            request.previous_category_id.0
+        ));
+    }
+    let stored_started_at = parse_utc(&started_at_text)?;
+    if stored_started_at != request.active_started_at_utc {
+        return Err("recovery gap active start changed concurrently".to_string());
+    }
+
+    let previous_elapsed = (request.durable_until_utc - request.active_started_at_utc)
+        .to_std()
+        .map_err(|error| format!("invalid pre-gap active interval: {error}"))?
+        .as_secs();
+    if previous_elapsed > 0 {
+        let operational_day =
+            temporal::operational_day_from_policy(request.durable_until_utc, policy)?
+                .format("%Y-%m-%d")
+                .to_string();
+        transaction
+            .execute(
+                "INSERT INTO sessions (
+                    stable_id, category_id, description, started_at_utc, ended_at_utc,
+                    operational_day, elapsed_seconds, source,
+                    boundary_utc_offset_seconds, boundary_start_minutes
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'tui-recovery-gap', ?8, ?9)",
+                params![
+                    request.expected_active_stable_id,
+                    expected_category,
+                    description,
+                    started_at_text,
+                    timestamp(request.durable_until_utc),
+                    operational_day,
+                    i64::try_from(previous_elapsed)
+                        .map_err(|_| "pre-gap active interval is too large".to_string())?,
+                    policy.utc_offset_seconds,
+                    policy.start_minutes,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+
+    let gap_elapsed = (request.target_utc - request.durable_until_utc)
+        .to_std()
+        .map_err(|error| format!("invalid Idle recovery interval: {error}"))?
+        .as_secs();
+    if gap_elapsed > 0 {
+        let idle_operational_day =
+            temporal::operational_day_from_policy(request.target_utc, policy)?
+                .format("%Y-%m-%d")
+                .to_string();
+        let idle_stable_id = format!(
+            "recovery-idle:{}:{}",
+            request.expected_active_stable_id,
+            request
+                .durable_until_utc
+                .to_rfc3339_opts(SecondsFormat::Nanos, true)
+        );
+        transaction
+            .execute(
+                "INSERT INTO sessions (
+                    stable_id, category_id, description, started_at_utc, ended_at_utc,
+                    operational_day, elapsed_seconds, source,
+                    boundary_utc_offset_seconds, boundary_start_minutes
+                 ) VALUES (?1, 0, '', ?2, ?3, ?4, ?5, 'tui-recovery-gap', ?6, ?7)",
+                params![
+                    idle_stable_id,
+                    timestamp(request.durable_until_utc),
+                    timestamp(request.target_utc),
+                    idle_operational_day,
+                    i64::try_from(gap_elapsed)
+                        .map_err(|_| "Idle recovery interval is too large".to_string())?,
+                    policy.utc_offset_seconds,
+                    policy.start_minutes,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+
+    let deleted = transaction
+        .execute(
+            "DELETE FROM active_session WHERE singleton = 1 AND stable_id = ?1",
+            params![request.expected_active_stable_id],
+        )
+        .map_err(|error| error.to_string())?;
+    if deleted != 1 {
+        return Err("recovery gap active session changed concurrently".to_string());
+    }
+    transaction
+        .execute(
+            "INSERT INTO active_session (
+                singleton, stable_id, category_id, description, started_at_utc, recovery_kind
+             ) VALUES (1, ?1, ?2, ?3, ?4, 'recovered')",
+            params![
+                request.next_active_stable_id,
+                expected_category,
+                description,
+                timestamp(request.target_utc),
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+
+    let now = timestamp(Utc::now());
+    let payload_json = serde_json::to_string(request.state).map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "INSERT INTO sand_state (
+                singleton, formation_id, quantum_seconds, grid_width, grid_height,
+                payload_json, updated_at_utc
+             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(singleton) DO UPDATE SET
+                formation_id = excluded.formation_id,
+                quantum_seconds = excluded.quantum_seconds,
+                grid_width = excluded.grid_width,
+                grid_height = excluded.grid_height,
+                payload_json = excluded.payload_json,
+                updated_at_utc = excluded.updated_at_utc",
+            params![
+                formation_id,
+                quantum_seconds,
+                i64::try_from(request.state.grid_width)
+                    .map_err(|_| "sand width is too large".to_string())?,
+                i64::try_from(request.state.grid_height)
+                    .map_err(|_| "sand height is too large".to_string())?,
+                payload_json,
+                now,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    let changed = transaction
+        .execute(
+            "UPDATE runtime_checkpoint SET status = 'committed'
+             WHERE singleton = 1 AND status = 'recovering'",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    if changed != 1 {
+        return Err("recovery gap checkpoint changed concurrently".to_string());
+    }
+    runtime_coordination::maybe_inject_test_fault("checkpoint-recovery", "commit")
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
+}
+
 pub(crate) fn commit_checkpoint_recovery(
     database_path: &Path,
     expected_active_stable_id: &str,
@@ -3308,6 +3758,190 @@ mod tests {
             CategoryId::new(1)
         );
         assert!(restored.archived_categories.is_empty());
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn permanent_category_delete_reclassifies_current_and_historical_sediment_as_idle() {
+        let path = repository_file("category-delete");
+        let mut repository = SqliteRepository::open(&path).unwrap();
+        repository
+            .create_category(&NewCategoryRecord {
+                name: "Work",
+                description: "",
+                color_index: 0,
+                balance_effect: 1,
+            })
+            .unwrap();
+        repository
+            .replace_category_tags(1, &["focus".to_string()])
+            .unwrap();
+        repository
+            .connection
+            .execute(
+                "INSERT INTO sessions (
+                    id, stable_id, category_id, description, started_at_utc,
+                    ended_at_utc, operational_day, elapsed_seconds, source
+                 ) VALUES (7, 'stable-delete', 1, 'focus',
+                    '2026-09-28T12:00:00Z', '2026-09-28T13:00:00Z',
+                    '2026-09-28', 3600, 'test')",
+                [],
+            )
+            .unwrap();
+        drop(repository);
+
+        let state = SandState {
+            version: SandState::PROVENANCE_COMPATIBILITY_VERSION,
+            grid_width: 3,
+            grid_height: 3,
+            grains: vec![
+                SandStateGrain {
+                    x: 0,
+                    y: 2,
+                    category_id: 1,
+                },
+                SandStateGrain {
+                    x: 1,
+                    y: 2,
+                    category_id: 0,
+                },
+            ],
+            frame_count: 3,
+            sweep_left_to_right: true,
+            rng_state: 9,
+            ingress_focus_x: None,
+            pending_grains: Vec::new(),
+            pending_runs: vec![
+                PendingGrainRun {
+                    category_id: 1,
+                    count: 2,
+                },
+                PendingGrainRun {
+                    category_id: 0,
+                    count: 1,
+                },
+            ],
+            active_avalanche_columns: Vec::new(),
+            mobilized_grains: Vec::new(),
+            classic_runtime: None,
+        };
+        save_sand_state(&path, &state).unwrap();
+        let snapshot =
+            SedimentSnapshot::day_end_checkpoint("2026-09-28".to_string(), state.clone());
+        save_day_end_snapshot(&path, "2026-09-28", &snapshot, Utc::now()).unwrap();
+        let checkpoint_json = serde_json::json!({
+            "active_category_id": 0,
+            "sand_state": state,
+        })
+        .to_string();
+        let repository = open_cli_repository(&path).unwrap();
+        repository
+            .connection
+            .execute(
+                "INSERT INTO runtime_checkpoint (
+                    singleton, status, detached_at_utc, simulation_time_utc,
+                    active_session_stable_id, payload_json
+                 ) VALUES (1, 'pending', '2026-09-28T13:00:00Z',
+                    '2026-09-28T13:00:00Z', NULL, ?1)",
+                params![checkpoint_json],
+            )
+            .unwrap();
+        drop(repository);
+
+        delete_category_permanently(&path, CategoryId::new(1)).unwrap();
+
+        let current = load_sand_state(&path).unwrap().unwrap();
+        assert_eq!(current.version, SandState::VERSION);
+        assert!(current.grains.iter().all(|grain| grain.category_id != 1));
+        assert!(
+            current
+                .pending_grains
+                .iter()
+                .all(|category_id| *category_id != 1)
+        );
+        assert!(current.pending_runs.iter().all(|run| run.category_id != 1));
+        assert_eq!(
+            current
+                .grains
+                .iter()
+                .filter(|grain| grain.category_id == 0)
+                .count(),
+            2
+        );
+
+        let historical = load_day_end_snapshot(&path, "2026-09-28").unwrap().unwrap();
+        assert_eq!(historical.state.version, SandState::VERSION);
+        assert!(
+            historical
+                .state
+                .grains
+                .iter()
+                .all(|grain| grain.category_id != 1)
+        );
+        assert!(
+            historical
+                .state
+                .pending_runs
+                .iter()
+                .all(|run| run.category_id != 1)
+        );
+        assert_ne!(historical.source_revision, snapshot.source_revision);
+
+        let repository = open_cli_repository(&path).unwrap();
+        let tombstone: (String, Option<String>, i64) = repository
+            .connection
+            .query_row(
+                "SELECT name, archived_at_utc, balance_effect FROM categories WHERE id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        let sessions: i64 = repository
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM sessions WHERE category_id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let tags: i64 = repository
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM category_tags WHERE category_id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let checkpoint_json: String = repository
+            .connection
+            .query_row(
+                "SELECT payload_json FROM runtime_checkpoint WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let checkpoint: serde_json::Value = serde_json::from_str(&checkpoint_json).unwrap();
+        let checkpoint_state: SandState =
+            serde_json::from_value(checkpoint["sand_state"].clone()).unwrap();
+        assert_eq!(checkpoint_state.version, SandState::VERSION);
+        assert!(
+            checkpoint_state
+                .grains
+                .iter()
+                .all(|grain| grain.category_id != 1)
+        );
+        assert!(
+            checkpoint_state
+                .pending_runs
+                .iter()
+                .all(|run| run.category_id != 1)
+        );
+        assert_eq!(tombstone.0, "__strata_deleted_layer_1__");
+        assert!(tombstone.1.is_some());
+        assert_eq!(tombstone.2, 0);
+        assert_eq!(sessions, 0);
+        assert_eq!(tags, 0);
+        drop(repository);
         std::fs::remove_file(path).ok();
     }
 

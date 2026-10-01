@@ -44,6 +44,20 @@ pub struct Category {
     pub balance_effect: i8,
 }
 
+pub fn deleted_layer_tombstone_name(category_id: CategoryId) -> String {
+    format!("__strata_deleted_layer_{}__", category_id.0)
+}
+
+pub fn is_deleted_layer_tombstone(category: &Category) -> bool {
+    category.name == deleted_layer_tombstone_name(category.id)
+}
+
+fn is_reserved_deleted_layer_name(name: &str) -> bool {
+    name.trim()
+        .to_ascii_lowercase()
+        .starts_with("__strata_deleted_layer_")
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OperationalDayPolicy {
     pub utc_offset_seconds: i32,
@@ -123,6 +137,7 @@ pub struct BalanceReportSummary {
 #[derive(Debug, Clone)]
 pub struct CategoryLogEntry {
     pub session_id: Option<usize>,
+    pub active_stable_id: Option<String>,
     pub date: String,
     pub end_date: String,
     pub start_time: String,
@@ -135,6 +150,7 @@ pub struct CategoryLogEntry {
 
 #[derive(Debug, Clone)]
 pub struct LiveSessionPreview {
+    pub active_stable_id: String,
     pub category_id: CategoryId,
     pub description: String,
     pub elapsed_seconds: usize,
@@ -431,7 +447,7 @@ impl CategoryStore {
         color: Color,
     ) -> Option<CategoryId> {
         let trimmed = name.trim();
-        if trimmed.is_empty() {
+        if trimmed.is_empty() || is_reserved_deleted_layer_name(trimmed) {
             return None;
         }
 
@@ -462,7 +478,11 @@ impl CategoryStore {
 
     pub fn restore_category(&mut self, mut category: Category) -> bool {
         let trimmed = category.name.trim();
-        if category.id == DRIFT_CATEGORY_ID || trimmed.is_empty() {
+        if category.id == DRIFT_CATEGORY_ID
+            || trimmed.is_empty()
+            || is_reserved_deleted_layer_name(trimmed)
+            || is_deleted_layer_tombstone(&category)
+        {
             return false;
         }
         if self.by_id.contains_key(&category.id)
@@ -490,6 +510,39 @@ impl CategoryStore {
         let removed_id = self.order.remove(index);
         self.by_id.remove(&removed_id);
         Some(removed_id)
+    }
+
+    pub fn rename_by_index(&mut self, index: usize, name: &str) -> Result<(), &'static str> {
+        if index == 0 {
+            return Err("Idle cannot be renamed");
+        }
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err("Layer name cannot be empty");
+        }
+        if is_drift_name(trimmed) {
+            return Err("That name is reserved for Idle");
+        }
+        if is_reserved_deleted_layer_name(trimmed) {
+            return Err("That name is reserved for deleted-layer identity");
+        }
+        let Some(id) = self.id_at_index(index) else {
+            return Err("No layer is selected");
+        };
+        if self
+            .order
+            .iter()
+            .filter(|existing| **existing != id)
+            .filter_map(|existing| self.by_id.get(existing))
+            .any(|category| category.name.eq_ignore_ascii_case(trimmed))
+        {
+            return Err("A layer with that name already exists");
+        }
+        let Some(category) = self.by_id.get_mut(&id) else {
+            return Err("No layer is selected");
+        };
+        category.name = trimmed.to_string();
+        Ok(())
     }
 
     pub fn move_up(&mut self, index: usize) -> bool {
@@ -522,19 +575,6 @@ impl CategoryStore {
         };
 
         category.color = color;
-        true
-    }
-
-    pub fn set_description_by_index(&mut self, index: usize, description: String) -> bool {
-        let Some(id) = self.id_at_index(index) else {
-            return false;
-        };
-
-        let Some(category) = self.by_id.get_mut(&id) else {
-            return false;
-        };
-
-        category.description = description;
         true
     }
 
@@ -619,11 +659,6 @@ impl TimeTracker {
         self.category_store.get_by_id(id)
     }
 
-    pub fn category_description_by_index(&self, index: usize) -> Option<String> {
-        self.category_by_index(index)
-            .map(|category| category.description.clone())
-    }
-
     pub fn category_id_by_name(&self, name: &str) -> Option<CategoryId> {
         self.category_store.category_id_by_name(name)
     }
@@ -657,9 +692,12 @@ impl TimeTracker {
         true
     }
 
-    pub fn set_category_description_by_index(&mut self, index: usize, description: String) -> bool {
-        self.category_store
-            .set_description_by_index(index, description)
+    pub fn rename_category_by_index(
+        &mut self,
+        index: usize,
+        name: &str,
+    ) -> Result<(), &'static str> {
+        self.category_store.rename_by_index(index, name)
     }
 
     pub fn set_category_color_by_index(&mut self, index: usize, color: Color) -> bool {
@@ -1238,18 +1276,42 @@ pub fn build_category_logs_for_window(
                 .into_iter()
                 .filter(|slice| slice.operational_day >= start && slice.operational_day <= end)
                 .collect::<Vec<_>>();
-            let first = slices.first()?;
-            let last = slices.last()?;
+            if slices.is_empty() {
+                return None;
+            }
             let elapsed_seconds = slices
                 .iter()
                 .map(|slice| slice.elapsed_seconds)
                 .sum::<usize>();
+            let (date, end_date, start_time, end_time) = match (
+                session.started_at_utc,
+                session.ended_at_utc,
+                session.operational_day_policy,
+            ) {
+                (Some(started_at_utc), Some(ended_at_utc), Some(policy)) => {
+                    let start = crate::temporal::civil_from_policy(started_at_utc, policy).ok()?;
+                    let end = crate::temporal::civil_from_policy(ended_at_utc, policy).ok()?;
+                    (
+                        start.format("%Y-%m-%d").to_string(),
+                        end.format("%Y-%m-%d").to_string(),
+                        start.format("%H:%M:%S").to_string(),
+                        end.format("%H:%M:%S").to_string(),
+                    )
+                }
+                _ => (
+                    session.date.clone(),
+                    session.date.clone(),
+                    session.start_time.clone(),
+                    session.end_time.clone(),
+                ),
+            };
             Some(CategoryLogEntry {
                 session_id: Some(session.id),
-                date: first.operational_day.format("%Y-%m-%d").to_string(),
-                end_date: last.operational_day.format("%Y-%m-%d").to_string(),
-                start_time: first.start_time.clone(),
-                end_time: last.end_time.clone(),
+                active_stable_id: None,
+                date,
+                end_date,
+                start_time,
+                end_time,
                 description: session.description.clone(),
                 elapsed_seconds,
                 balance_effect,
@@ -1265,22 +1327,31 @@ pub fn build_category_logs_for_window(
             .into_iter()
             .filter(|slice| slice.operational_day >= start && slice.operational_day <= end)
             .collect::<Vec<_>>();
-        if let (Some(first), Some(last)) = (slices.first(), slices.last()) {
+        if !slices.is_empty() {
             let elapsed_seconds = slices
                 .iter()
                 .map(|slice| slice.elapsed_seconds)
                 .sum::<usize>();
-            logs.push(CategoryLogEntry {
-                session_id: None,
-                date: first.operational_day.format("%Y-%m-%d").to_string(),
-                end_date: last.operational_day.format("%Y-%m-%d").to_string(),
-                start_time: first.start_time.clone(),
-                end_time: last.end_time.clone(),
-                description: live.description.clone(),
-                elapsed_seconds,
-                balance_effect,
-                balance_seconds: elapsed_seconds as isize * balance_effect as isize,
-            });
+            if let (Ok(start), Ok(end)) = (
+                crate::temporal::civil_from_policy(
+                    live.started_at_utc,
+                    live.operational_day_policy,
+                ),
+                crate::temporal::civil_from_policy(live.ended_at_utc, live.operational_day_policy),
+            ) {
+                logs.push(CategoryLogEntry {
+                    session_id: None,
+                    active_stable_id: Some(live.active_stable_id.clone()),
+                    date: start.format("%Y-%m-%d").to_string(),
+                    end_date: end.format("%Y-%m-%d").to_string(),
+                    start_time: start.format("%H:%M:%S").to_string(),
+                    end_time: end.format("%H:%M:%S").to_string(),
+                    description: live.description.clone(),
+                    elapsed_seconds,
+                    balance_effect,
+                    balance_seconds: elapsed_seconds as isize * balance_effect as isize,
+                });
+            }
         }
     }
 
@@ -1291,6 +1362,7 @@ pub fn build_category_logs_for_window(
             .then(a.end_date.cmp(&b.end_date))
             .then(a.end_time.cmp(&b.end_time))
             .then(a.session_id.cmp(&b.session_id))
+            .then(a.active_stable_id.cmp(&b.active_stable_id))
     });
     logs
 }
@@ -1339,6 +1411,43 @@ mod tests {
         let id2 = CategoryId::new(2);
         assert_ne!(id1, id2);
         assert_eq!(id1, CategoryId::new(1));
+    }
+
+    #[test]
+    fn renaming_layer_preserves_identity_and_rejects_reserved_or_duplicate_names() {
+        let mut tracker = TimeTracker::new();
+        let work = tracker
+            .add_category("Work".to_string(), String::new(), None)
+            .unwrap();
+        let research = tracker
+            .add_category("Research".to_string(), String::new(), None)
+            .unwrap();
+
+        tracker
+            .rename_category_by_index(1, "  Deep Work  ")
+            .unwrap();
+        assert_eq!(tracker.category_by_id(work).unwrap().name, "Deep Work");
+        assert_eq!(tracker.category_id_by_name("Research"), Some(research));
+        assert!(tracker.rename_category_by_index(1, "research").is_err());
+        assert!(tracker.rename_category_by_index(0, "Rest").is_err());
+        assert!(tracker.rename_category_by_index(1, "idle").is_err());
+        assert!(tracker.rename_category_by_index(1, " ").is_err());
+        assert!(
+            tracker
+                .add_category(
+                    "__strata_deleted_layer_3__".to_string(),
+                    String::new(),
+                    None,
+                )
+                .is_none()
+        );
+        assert!(!tracker.restore_category(Category {
+            id: CategoryId::new(3),
+            name: deleted_layer_tombstone_name(CategoryId::new(3)),
+            color: Color::White,
+            description: String::new(),
+            balance_effect: 0,
+        }));
     }
 
     #[test]
