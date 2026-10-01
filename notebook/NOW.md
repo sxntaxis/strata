@@ -5,9 +5,13 @@ state: active
 created: 2026-08-01
 updated: 2026-09-28
 authority: working
-summary: "BALANCE-LEDGER-CORRECTION-UX-001 unifies Balance Add/Edit through one native-green historical correction transaction with implicit Idle semantics and a centered collateral Before/After card; draft PR #108 is stacked on #107 for owner review."
-next: Owner-review PR #108's loaded-profile correction and collateral confirmation, then decide promote or revise; keep SEDIMENT-016 separate.
+summary: "BALANCE-METER-LAYER-PARITY-001 owner review supersedes D069 and is native-green for the wide/nonzero meter and true inline ledger editor; draft PR #109 now includes the amendment."
+next: Owner-review PR #109's loaded-profile wide/normal/constrained editor and meter behavior; keep SEDIMENT-016 separate.
 ---
+
+## BALANCE-METER-LAYER-PARITY-001 shared meter and layer-detail parity — 2026-09-28
+
+**OWNER-REVIEW AMENDMENT NATIVE-GREEN / DRAFT #109 UPDATED:** STRATA-D071 supersedes D069 and is now implemented/natively certified in `docs/DECISIONS.md` and `docs/REPORT_AUTHORITY.md`. The implementation removes the fixed 45-cell meter cap, guarantees at least one meter-cell displacement for non-zero values when the geometry has a usable rail, makes `+` occupy the marker column, falls back from an empty stored Tag to the layer name for display only, and replaces the obsolete multi-line edit projection with a single inline row. Narrow panes prioritize the active full date/time field on that same row. Layer Detail retains the full Balance period selector and prior correction transaction semantics. Formatting, strict Clippy, 566 library + 24 integration/process tests (20 ignored), CLI help, 120×40/80×24/40×14 populated-profile PTY checks (including Tag persistence after restart), SQLite doctor, and diff hygiene pass. See `notebook/work/BALANCE-METER-LAYER-PARITY-001.md`.
 
 ## BALANCE-LEDGER-CORRECTION-UX-001 unified correction — 2026-09-28
 

@@ -1,7 +1,7 @@
 # Report and export authority
 
-Status: accepted authority; BALANCE-LAYER-DETAIL-UX-001 candidate natively validated, owner review pending
-Last reviewed: 2026-09-27
+Status: accepted authority; STRATA-D071 supersedes D069 and is implemented/natively certified
+Last reviewed: 2026-09-28
 
 ## Purpose
 
@@ -37,13 +37,22 @@ Date, Time, and signed Effect. Date remains adjacent to Time rather than becomin
 entry crosses civil dates, the temporal middle region may expand to an explicit `start → end` pair so both date/time
 boundaries remain truthful.
 
-Above the ledger, the layer hero shows the selected layer's signed `balance_seconds` sum and a nested influence meter.
-The parent Balance meter supplies the displacement envelope. Let `P` be the absolute parent marker offset in cells;
-for a non-zero layer contribution `L`, let `S` be the aggregate magnitude of all contributions on `L`'s polarity side.
-The layer marker magnitude is the rounded, clamped `P * |L| / S`, and its direction is the sign of `L`. Therefore a
-layer marker can oppose the parent direction but can never exceed the parent's distance from equilibrium. When the
-parent marker is at equilibrium, layer influence also renders at equilibrium. This meter is a drill-down attribution
-of the parent displacement, not an independently normalized hypothetical Balance.
+Each ordinary ledger row begins with the layer marker in the first cell. If the persisted Tag is empty, presentation
+falls back to the selected layer name without writing that fallback into storage. The synthetic `+ Add entry…` row uses
+`+` itself in that exact marker column. Add and existing-entry Edit reuse the same single-row geometry: the active field
+is bracketed in place, dates remain visible when the selected period needs them, cross-civil-date edits use one explicit
+`start → end` temporal cell, and Effect remains blank while chronology is being edited rather than showing stale data.
+
+Above the ledger, the layer hero shows the selected layer's signed `balance_seconds` sum and the same recorded-time
+meter used by the default Balance summary. The full horizontal line represents `summary.total_seconds` for the selected
+period, including Idle. The global Balance marker projects `summary.total_balance_seconds / summary.total_seconds`, and
+each Layer Detail marker independently projects that layer's signed `balance_seconds / summary.total_seconds` onto the
+same radius. Opposite-sign layers may therefore sit on the opposite side of equilibrium from the global result, and a
+globally balanced period does not collapse non-zero layer contributions to the center. Projection uses the original
+time values and rounds once at the terminal-cell boundary. Exact zero alone occupies equilibrium; a representable
+non-zero value receives at least one cell of displacement toward its sign. The meter uses the available instrument
+width rather than imposing a fixed 45-cell cap. Layer Detail is therefore a directly comparable projection on the same
+scale, not a subscale derived from the parent marker's already-quantized displacement.
 
 ## Explicit historical correction
 

@@ -10,7 +10,7 @@ use crate::domain::BalanceReportSummary;
 
 use super::{App, view_style};
 
-const PREFERRED_WIDTH: u16 = 45;
+const MIN_PREFERRED_WIDTH: u16 = 45;
 const INSTRUMENT_SIDE_PADDING: u16 = 2;
 const SUMMARY_VERTICAL_CHROME_ROWS: u16 = 5;
 const MIN_THREE_COLUMN_WIDTH: u16 = 27;
@@ -91,7 +91,7 @@ fn format_net_total(seconds: isize) -> String {
 }
 
 pub(super) fn preferred_summary_inner_width() -> u16 {
-    PREFERRED_WIDTH.saturating_add(INSTRUMENT_SIDE_PADDING)
+    MIN_PREFERRED_WIDTH.saturating_add(INSTRUMENT_SIDE_PADDING)
 }
 
 pub(super) fn preferred_summary_inner_height(row_count: usize) -> u16 {
@@ -115,7 +115,7 @@ fn side_total_line(
 }
 
 fn instrument_width(available: u16) -> u16 {
-    let cap = available.min(PREFERRED_WIDTH);
+    let cap = available;
     if cap >= MIN_THREE_COLUMN_WIDTH {
         for width in (MIN_THREE_COLUMN_WIDTH..=cap).rev() {
             if width % 6 == 3 {
@@ -131,62 +131,35 @@ fn instrument_width(available: u16) -> u16 {
     }
 }
 
-fn rounded_meter_offset(net: i128, polarized: i128, radius: i128) -> i128 {
-    if polarized == 0 || net == 0 || radius == 0 {
+fn rounded_meter_offset(signed_seconds: i128, total_seconds: i128, radius: i128) -> i128 {
+    if total_seconds == 0 || signed_seconds == 0 || radius == 0 {
         return 0;
     }
-    let scaled = net.saturating_mul(radius);
-    if scaled > 0 {
-        (scaled + polarized / 2) / polarized
+    let scaled = signed_seconds.saturating_mul(radius);
+    let rounded = if scaled > 0 {
+        (scaled + total_seconds / 2) / total_seconds
     } else {
-        (scaled - polarized / 2) / polarized
+        (scaled - total_seconds / 2) / total_seconds
+    };
+    if rounded == 0 {
+        signed_seconds.signum()
+    } else {
+        rounded
     }
 }
 
-fn meter_offset(width: u16, totals: InstrumentTotals) -> i128 {
-    let width = usize::from(width);
+fn meter_radius(width: usize) -> i128 {
     if width < 3 {
         return 0;
     }
-    let center = width / 2;
-    let negative_abs = totals.negative.unsigned_abs() as i128;
-    let positive = totals.positive.max(0) as i128;
-    let polarized = negative_abs.saturating_add(positive);
-    let normalized_net = positive.saturating_sub(negative_abs);
-    let radius = center.saturating_sub(1) as i128;
-    rounded_meter_offset(normalized_net, polarized, radius).clamp(-radius, radius)
+    (width / 2).saturating_sub(1).max(1) as i128
 }
 
-fn layer_influence_offset(
-    width: u16,
-    totals: InstrumentTotals,
-    layer_balance_seconds: isize,
-) -> i128 {
-    if layer_balance_seconds == 0 {
-        return 0;
-    }
-
-    let envelope = meter_offset(width, totals).unsigned_abs() as i128;
-    if envelope == 0 {
-        return 0;
-    }
-
-    let side_total = if layer_balance_seconds < 0 {
-        totals.negative.unsigned_abs() as i128
-    } else {
-        totals.positive.max(0) as i128
-    };
-    if side_total == 0 {
-        return 0;
-    }
-
-    let layer = (layer_balance_seconds.unsigned_abs() as i128).min(side_total);
-    let magnitude = (layer.saturating_mul(envelope) + side_total / 2) / side_total;
-    if layer_balance_seconds < 0 {
-        -magnitude
-    } else {
-        magnitude
-    }
+fn meter_offset(width: u16, signed_seconds: isize, total_seconds: usize) -> i128 {
+    let width = usize::from(width);
+    let radius = meter_radius(width);
+    rounded_meter_offset(signed_seconds as i128, total_seconds as i128, radius)
+        .clamp(-radius, radius)
 }
 
 fn meter_cells_for_offset(width: u16, offset: i128) -> Vec<MeterCell> {
@@ -221,7 +194,7 @@ fn meter_cells_for_offset(width: u16, offset: i128) -> Vec<MeterCell> {
         role: MeterRole::Equilibrium,
     };
 
-    let radius = center.saturating_sub(1) as i128;
+    let radius = meter_radius(width);
     let offset = offset.clamp(-radius, radius);
     let dot = (center as i128 + offset) as usize;
 
@@ -257,8 +230,8 @@ fn meter_cells_for_offset(width: u16, offset: i128) -> Vec<MeterCell> {
     cells
 }
 
-fn meter_cells(width: u16, totals: InstrumentTotals) -> Vec<MeterCell> {
-    meter_cells_for_offset(width, meter_offset(width, totals))
+fn meter_cells(width: u16, signed_seconds: isize, total_seconds: usize) -> Vec<MeterCell> {
+    meter_cells_for_offset(width, meter_offset(width, signed_seconds, total_seconds))
 }
 
 fn meter_line(
@@ -361,7 +334,7 @@ impl App {
 
         f.render_widget(
             Paragraph::new(meter_line(
-                meter_cells(width, totals),
+                meter_cells(width, summary.total_balance_seconds, summary.total_seconds),
                 self.theme_status(),
                 self.theme_error(),
                 self.theme_success(),
@@ -386,7 +359,6 @@ impl App {
             return;
         };
 
-        let totals = instrument_totals(summary);
         let available = total_area.width.saturating_sub(2);
         let width = instrument_width(available);
         if width == 0 {
@@ -414,7 +386,7 @@ impl App {
 
         f.render_widget(
             Paragraph::new(meter_line(
-                meter_cells_for_offset(width, layer_influence_offset(width, totals, contribution)),
+                meter_cells(width, contribution, summary.total_seconds),
                 self.theme_status(),
                 self.theme_error(),
                 self.theme_success(),
@@ -432,8 +404,8 @@ mod tests {
 
     use super::{
         InstrumentTotals, MIN_THREE_COLUMN_WIDTH, MeterRole, format_negative_total,
-        format_net_total, format_positive_total, instrument_totals, instrument_width,
-        layer_influence_offset, meter_cells, meter_offset, preferred_summary_inner_height,
+        format_net_total, format_positive_total, instrument_totals, instrument_width, meter_cells,
+        meter_cells_for_offset, meter_offset, preferred_summary_inner_height,
         preferred_summary_inner_width, side_total_line,
     };
 
@@ -475,14 +447,6 @@ mod tests {
         assert_eq!(positive.spans[0].style.fg, Some(Color::Green));
         assert_eq!(positive.spans[1].content.as_ref(), "00:14:21");
         assert_eq!(positive.spans[1].style.fg, Some(Color::Gray));
-    }
-
-    fn totals(negative: isize, positive: isize) -> InstrumentTotals {
-        InstrumentTotals {
-            negative,
-            net: negative + positive,
-            positive,
-        }
     }
 
     #[test]
@@ -528,7 +492,15 @@ mod tests {
 
     #[test]
     fn responsive_width_keeps_total_center_aligned_with_meter_center() {
-        for (available, expected) in [(45, 45), (44, 39), (38, 33), (32, 27)] {
+        for (available, expected) in [
+            (117, 117),
+            (80, 75),
+            (66, 63),
+            (45, 45),
+            (44, 39),
+            (38, 33),
+            (32, 27),
+        ] {
             let width = instrument_width(available);
             assert_eq!(width, expected);
             assert!(width >= MIN_THREE_COLUMN_WIDTH);
@@ -545,37 +517,55 @@ mod tests {
     }
 
     #[test]
+    fn nonzero_meter_values_always_leave_equilibrium_by_at_least_one_cell() {
+        let width = 117;
+        let total_recorded = 30 * 24 * 60 * 60;
+
+        assert_eq!(meter_offset(width, 0, total_recorded), 0);
+        assert_eq!(meter_offset(width, 1, total_recorded), 1);
+        assert_eq!(meter_offset(width, -1, total_recorded), -1);
+
+        assert_eq!(meter_offset(3, 1, 100), 1);
+        assert_eq!(meter_offset(3, -1, 100), -1);
+        assert_eq!(
+            meter_cells_for_offset(3, -1)[0].role,
+            MeterRole::DotNegative
+        );
+        assert_eq!(meter_cells_for_offset(3, 1)[2].role, MeterRole::DotPositive);
+    }
+
+    #[test]
     fn meter_places_extremes_and_equilibrium_symmetrically() {
         let width = 45;
         let center = usize::from(width / 2);
         let left_usable = 1;
         let right_usable = usize::from(width - 2);
 
-        let all_negative = meter_cells(width, totals(-100, 0));
+        let all_negative = meter_cells(width, -100, 100);
         assert_eq!(all_negative[left_usable].role, MeterRole::DotNegative);
 
-        let negative_dominant = meter_cells(width, totals(-75, 25));
+        let negative_dominant = meter_cells(width, -50, 100);
         let negative_dot = negative_dominant
             .iter()
             .position(|cell| cell.role == MeterRole::DotNegative)
             .expect("negative dot");
         assert!(negative_dot < center);
 
-        let equal = meter_cells(width, totals(-50, 50));
+        let equal = meter_cells(width, 0, 100);
         assert_eq!(equal[center].role, MeterRole::DotNeutral);
         assert_eq!(equal[center].glyph, '●');
 
-        let positive_dominant = meter_cells(width, totals(-25, 75));
+        let positive_dominant = meter_cells(width, 50, 100);
         let positive_dot = positive_dominant
             .iter()
             .position(|cell| cell.role == MeterRole::DotPositive)
             .expect("positive dot");
         assert!(positive_dot > center);
 
-        let all_positive = meter_cells(width, totals(0, 100));
+        let all_positive = meter_cells(width, 100, 100);
         assert_eq!(all_positive[right_usable].role, MeterRole::DotPositive);
 
-        let empty = meter_cells(width, totals(0, 0));
+        let empty = meter_cells(width, 0, 0);
         assert_eq!(empty[center].role, MeterRole::DotNeutral);
     }
 
@@ -584,7 +574,7 @@ mod tests {
         let width = 45;
         let center = usize::from(width / 2);
 
-        let negative = meter_cells(width, totals(-75, 25));
+        let negative = meter_cells(width, -50, 100);
         assert_eq!(negative.len(), usize::from(width));
         assert_eq!(negative[0].glyph, '└');
         assert_eq!(negative[usize::from(width) - 1].glyph, '┘');
@@ -599,7 +589,7 @@ mod tests {
                 .all(|cell| cell.glyph == '━' && cell.role == MeterRole::Negative)
         );
 
-        let positive = meter_cells(width, totals(-25, 75));
+        let positive = meter_cells(width, 50, 100);
         assert_eq!(positive[0].glyph, '└');
         assert_eq!(positive[usize::from(width) - 1].glyph, '┘');
         assert_eq!(positive[center].glyph, '┼');
@@ -615,48 +605,45 @@ mod tests {
     }
 
     #[test]
-    fn layer_influence_never_exceeds_parent_displacement_envelope() {
+    fn shared_meter_scale_uses_total_recorded_time_for_global_and_layer_values() {
         let width = 45;
-        let totals = totals(-100, 25);
-        let parent = meter_offset(width, totals);
-        assert!(parent < 0);
-        for layer in [-100, -75, -25, 25] {
-            let offset = layer_influence_offset(width, totals, layer);
-            assert!(offset.unsigned_abs() <= parent.unsigned_abs());
-        }
+        let total_recorded = 100;
+        assert_eq!(meter_offset(width, 20, total_recorded), 4);
+        assert_eq!(meter_offset(width, 60, total_recorded), 13);
+        assert_eq!(meter_offset(width, -40, total_recorded), -8);
     }
 
     #[test]
-    fn layer_that_owns_a_side_reaches_the_parent_envelope() {
+    fn layer_can_pull_opposite_the_global_result_on_the_same_scale() {
         let width = 45;
-        let totals = totals(-100, 25);
-        let envelope = meter_offset(width, totals).unsigned_abs();
-        assert_eq!(
-            layer_influence_offset(width, totals, -100).unsigned_abs(),
-            envelope
+        let total_recorded = 10 * 60 * 60;
+        let global = meter_offset(width, 2 * 60 * 60, total_recorded);
+        let negative_layer = meter_offset(width, -4 * 60 * 60, total_recorded);
+        assert!(global > 0);
+        assert!(negative_layer < 0);
+    }
+
+    #[test]
+    fn balanced_global_does_not_collapse_individual_layer_positions() {
+        let width = 45;
+        let total_recorded = 16 * 60 * 60;
+        assert_eq!(meter_offset(width, 0, total_recorded), 0);
+        assert!(meter_offset(width, 5 * 60 * 60, total_recorded) > 0);
+        assert!(meter_offset(width, -7 * 60 * 60, total_recorded) < 0);
+    }
+
+    #[test]
+    fn idle_time_remains_part_of_the_shared_denominator() {
+        let width = 45;
+        let explicit_positive = 100;
+        let idle = 100;
+        let without_idle = meter_offset(width, explicit_positive, explicit_positive as usize);
+        let with_idle = meter_offset(
+            width,
+            explicit_positive,
+            (explicit_positive + idle) as usize,
         );
-        assert_eq!(
-            layer_influence_offset(width, totals, 25).unsigned_abs(),
-            envelope
-        );
-    }
-
-    #[test]
-    fn opposing_layer_uses_its_own_polarity_inside_the_shared_envelope() {
-        let width = 45;
-        let totals = totals(-100, 25);
-        assert!(meter_offset(width, totals) < 0);
-        let positive_layer = layer_influence_offset(width, totals, 10);
-        assert!(positive_layer > 0);
-        assert!(positive_layer.unsigned_abs() <= meter_offset(width, totals).unsigned_abs());
-    }
-
-    #[test]
-    fn equilibrium_parent_collapses_layer_influence_to_center() {
-        let width = 45;
-        let totals = totals(-50, 50);
-        assert_eq!(meter_offset(width, totals), 0);
-        assert_eq!(layer_influence_offset(width, totals, -50), 0);
-        assert_eq!(layer_influence_offset(width, totals, 50), 0);
+        assert!(with_idle > 0);
+        assert!(with_idle < without_idle);
     }
 }
