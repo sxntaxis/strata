@@ -5,13 +5,17 @@ state: active
 created: 2026-08-01
 updated: 2026-09-27
 authority: working
-summary: "BALANCE-UX-004 spacing is verified; SEDIMENT-016 visual acceptance and exact per-category resize/persist/restart mass proof are recorded, with doctrine promotion still explicit."
-next: Capture raw Shift/Ctrl/Alt arrow and Caps Lock key events through the real terminal+tmux path before choosing any custom-range gesture.
+summary: "SEDIMENT-016 per-category resize/restart mass proof passes with doctrine promotion still explicit; BALANCE-RANGE-UX-001 synthetic tmux observations pass while physical Caps Lock input remains unknown."
+next: Capture physical modifier and Caps Lock key events through the real terminal+tmux path, then choose or reject a custom-range gesture without changing production r until that decision.
 ---
 
 ## BALANCE-UX-004 one-cell modal inset — 2026-09-27
 
 **ONE-CELL HORIZONTAL AND VERTICAL INSETS VERIFIED:** keep the existing responsive modal geometry, use exactly one horizontal content cell per side at ordinary modal sizes, and give Layer exactly one top/bottom content cell whenever two spare rows exist. The validated 1/2/4/6-cell candidate was rejected in runtime review because wide panes accumulated too much side padding; a large Balance name-to-metric gap is explicitly acceptable in preference to that padding. The correction passes formatter, strict Clippy, all tests, and isolated wide/normal/constrained TUI checks. No fixed-width Balance card or secondary content-width system is introduced. Settings, range gestures, report semantics, and sediment remain unchanged. See `notebook/work/BALANCE-UX-004.md`.
+
+## BALANCE-RANGE-UX-001 modifier-input probe — 2026-09-27
+
+**SYNTHETIC TMUX MEASUREMENT / PHYSICAL GATE OPEN:** isolated `tmux send-keys` events preserve the injected Shift/Ctrl/Alt arrow modifiers and distinguish literal uppercase from lowercase, but do not establish what the owner's physical Caps Lock path delivers. No production range gesture or keybinding changes in this unit. See `notebook/work/BALANCE-RANGE-UX-001.md`.
 
 ## SEDIMENT-016 vertical physics corridor — 2026-09-27
 
