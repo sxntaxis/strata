@@ -2700,12 +2700,18 @@ fn as_i64(value: u64, label: &str) -> Result<i64, String> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::{
+        collections::{BTreeMap, HashSet},
+        path::PathBuf,
+    };
 
     use chrono::TimeZone;
 
     use super::*;
-    use crate::sqlite::{SqliteRepository, repository::NewCategoryRecord};
+    use crate::{
+        sand::{ClassicProductionEngine, PendingGrainRun, SandStateGrain},
+        sqlite::{SqliteRepository, repository::NewCategoryRecord},
+    };
 
     fn repository_file(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -3064,6 +3070,111 @@ mod tests {
             remaining, 1,
             "explicit deletion must not remove concurrent rows"
         );
+        std::fs::remove_file(path).ok();
+    }
+
+    fn sediment_mass_by_category(state: &SandState) -> BTreeMap<u64, usize> {
+        let mut mass = BTreeMap::new();
+        for grain in &state.grains {
+            *mass.entry(grain.category_id).or_insert(0) += 1;
+        }
+        for run in &state.pending_runs {
+            *mass.entry(run.category_id).or_insert(0) += run.count;
+        }
+        for category_id in &state.pending_grains {
+            *mass.entry(*category_id).or_insert(0) += 1;
+        }
+        mass
+    }
+
+    #[test]
+    fn vertical_corridor_resize_persist_restart_preserves_exact_category_mass() {
+        let path = repository_file("vertical-corridor-resize-restart-mass");
+        let source = SandState {
+            version: SandState::VERSION,
+            grid_width: 20,
+            grid_height: 40,
+            grains: vec![
+                SandStateGrain {
+                    x: 9,
+                    y: 1,
+                    category_id: 0,
+                },
+                SandStateGrain {
+                    x: 10,
+                    y: 3,
+                    category_id: 1,
+                },
+                SandStateGrain {
+                    x: 8,
+                    y: 38,
+                    category_id: 1,
+                },
+                SandStateGrain {
+                    x: 11,
+                    y: 39,
+                    category_id: 0,
+                },
+            ],
+            frame_count: 0,
+            sweep_left_to_right: true,
+            rng_state: 0x05ED_1016,
+            ingress_focus_x: None,
+            pending_grains: Vec::new(),
+            pending_runs: vec![PendingGrainRun {
+                category_id: 1,
+                count: 3,
+            }],
+            active_avalanche_columns: Vec::new(),
+            mobilized_grains: Vec::new(),
+            classic_runtime: None,
+        };
+        let expected_mass = sediment_mass_by_category(&source);
+        assert_eq!(expected_mass, BTreeMap::from([(0, 2), (1, 5)]));
+
+        let valid_ids = HashSet::from([CategoryId::new(0), CategoryId::new(1)]);
+        let mut live = ClassicProductionEngine::new_production(10, 10);
+        live.restore_state(&source, &valid_ids).unwrap();
+
+        // Grow once to establish a taller canonical canvas, then shrink both axes.
+        // SEDIMENT-016 keeps only the current visible width active while gravity
+        // continues through the full canonical height.
+        live.resize(12, 12);
+        live.resize(6, 4);
+        for _ in 0..16 {
+            live.update_physics_only();
+        }
+
+        let resized = live.snapshot_state();
+        assert_eq!(sediment_mass_by_category(&resized), expected_mass);
+        assert!(resized.grid_width >= source.grid_width);
+        assert!(resized.grid_height >= source.grid_height);
+
+        save_sand_state(&path, &resized).unwrap();
+        let persisted = load_sand_state(&path)
+            .unwrap()
+            .expect("resized sand state should persist");
+        assert_eq!(sediment_mass_by_category(&persisted), expected_mass);
+        assert_eq!(persisted, resized);
+
+        // A restart at the small viewport must recover the persisted canonical
+        // topology/runtime exactly before any new ingress is allowed to occur.
+        let mut restarted = ClassicProductionEngine::new_production(6, 4);
+        restarted.restore_state(&persisted, &valid_ids).unwrap();
+        assert_eq!(restarted.snapshot_state(), persisted);
+        assert_eq!(
+            sediment_mass_by_category(&restarted.snapshot_state()),
+            expected_mass
+        );
+
+        // Re-expansion may reactivate hidden terrain, but must not create or lose
+        // category mass merely because the camera/side walls changed.
+        restarted.resize(12, 12);
+        assert_eq!(
+            sediment_mass_by_category(&restarted.snapshot_state()),
+            expected_mass
+        );
+
         std::fs::remove_file(path).ok();
     }
 

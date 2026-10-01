@@ -67,9 +67,10 @@ If this single invariant produces a new unintuitive edge case, reject the candid
 - With a canonical canvas of at least 320 dot rows while viewing a 10×80 pane, a five-second process sample measured 4.0% of one CPU core and about 14.1 MiB RSS.
 - A separate historical Balance profile opened a prior day and completed four 40×10/80×24 resize oscillations without a runtime error. That saved artifact appeared settled in this capture, so this confirms the route/resizing but not visible grain motion.
 - Both disposable profiles passed `sqlite-doctor` after normal exit; the fresh profile also reopened with no active session.
+- The deterministic `vertical_corridor_resize_persist_restart_preserves_exact_category_mass` test passes in the all-feature suite. It grows and shrinks both axes, advances vertical-corridor physics, persists/restores the exact `SandState` through SQLite, restarts at the smaller viewport, re-expands, and preserves placed-plus-pending mass by category at every boundary.
 
-Owner qualitative review now accepts the resulting live/resize experience. Exact persistent mass comparison across a resize-and-restart cycle remains the final promotion gate. The accepted resize doctrine has not yet been changed.
+Owner qualitative review accepts the resulting live/resize experience, and the exact persisted-mass/restart proof now passes natively. The accepted resize doctrine has not yet been changed; promotion still requires an explicit product-owner decision.
 
 ## Promotion boundary
 
-This branch remains an owner-authorized experiment until the exact persisted-mass/restart proof closes. The owner has accepted the visual behavior, but `docs/SEDIMENT_AUTHORITY.md` remains the baseline until that final machine gate passes and promotion is explicit. Do not silently rewrite accepted sediment authority from qualitative acceptance alone.
+The owner has accepted the visual behavior and the exact persisted-mass/restart proof passes. This branch remains an owner-authorized candidate until promotion is explicit; `docs/SEDIMENT_AUTHORITY.md` remains the baseline. Do not silently rewrite accepted sediment authority from test evidence alone.

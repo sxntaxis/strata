@@ -5,8 +5,8 @@ state: active
 created: 2026-08-01
 updated: 2026-09-27
 authority: working
-summary: "BALANCE-UX-004 one-cell horizontal and exact Layer vertical insets passed isolated wide/normal/constrained TUI checks; the separate SEDIMENT-016 resize/restart mass proof remains open."
-next: Close SEDIMENT-016 exact persisted-mass comparison across resize and restart, then explicitly promote or revise the accepted resize doctrine.
+summary: "BALANCE-UX-004 spacing is verified; SEDIMENT-016 visual acceptance and exact per-category resize/persist/restart mass proof are recorded, with doctrine promotion still explicit."
+next: Capture raw Shift/Ctrl/Alt arrow and Caps Lock key events through the real terminal+tmux path before choosing any custom-range gesture.
 ---
 
 ## BALANCE-UX-004 one-cell modal inset — 2026-09-27
@@ -15,7 +15,7 @@ next: Close SEDIMENT-016 exact persisted-mass comparison across resize and resta
 
 ## SEDIMENT-016 vertical physics corridor — 2026-09-27
 
-**VISUALLY ACCEPTED / PROMOTION PROOF REMAINS:** owner review accepts the vertical-corridor behavior. Isolated PTY checks covered height and width changes, repeated resize oscillation, a prior-day Balance view, and a 320-dot canonical height viewed in a 10×80 pane (4.0% of one CPU core over five seconds). Formatting, strict Clippy, all tests, and CLI help pass. Exact persisted-mass comparison across resize/restart remains open before accepted resize doctrine is rewritten. `docs/SEDIMENT_AUTHORITY.md` remains unchanged. See `notebook/work/SEDIMENT-016-VERTICAL-PHYSICS-CORRIDOR.md`.
+**MACHINE PROOF PASSED / PROMOTION STILL EXPLICIT:** owner review accepts the vertical-corridor behavior. Isolated PTY checks covered height and width changes, repeated resize oscillation, historical Balance, and a 320-dot canonical height viewed in a 10×80 pane (4.0% of one CPU core over five seconds). The all-feature suite also passes the exact per-category placed-plus-pending mass proof across vertical-corridor updates, SQLite persistence, restart, and re-expansion. `docs/SEDIMENT_AUTHORITY.md` remains unchanged pending explicit promotion. See `notebook/work/SEDIMENT-016-VERTICAL-PHYSICS-CORRIDOR.md`.
 
 ## RAIN-005 production cutover correction — 2026-09-10
 
