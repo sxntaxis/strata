@@ -68,8 +68,8 @@ If this single invariant produces a new unintuitive edge case, reject the candid
 - A separate historical Balance profile opened a prior day and completed four 40×10/80×24 resize oscillations without a runtime error. That saved artifact appeared settled in this capture, so this confirms the route/resizing but not visible grain motion.
 - Both disposable profiles passed `sqlite-doctor` after normal exit; the fresh profile also reopened with no active session.
 
-Exact persistent mass comparison across a resize-and-restart cycle, broader normal-live visual use, and owner qualitative acceptance remain open gates. The accepted resize doctrine has not been changed.
+Owner qualitative review now accepts the resulting live/resize experience. Exact persistent mass comparison across a resize-and-restart cycle remains the final promotion gate. The accepted resize doctrine has not yet been changed.
 
 ## Promotion boundary
 
-This branch is an owner-authorized experiment for local visual testing. The accepted resize doctrine in `docs/SEDIMENT_AUTHORITY.md` remains the baseline until the owner reviews this behavior and explicitly promotes or rejects it. Do not silently rewrite accepted sediment authority from this candidate alone.
+This branch remains an owner-authorized experiment until the exact persisted-mass/restart proof closes. The owner has accepted the visual behavior, but `docs/SEDIMENT_AUTHORITY.md` remains the baseline until that final machine gate passes and promotion is explicit. Do not silently rewrite accepted sediment authority from qualitative acceptance alone.
