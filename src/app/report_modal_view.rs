@@ -13,7 +13,7 @@ use crate::domain::{
 };
 use crate::keybindings::Action;
 
-use super::{App, ui_helpers, view_style};
+use super::{App, balance_instrument, overlay_layout, ui_helpers, view_style};
 
 fn balance_key_hint(key: impl ToString) -> String {
     let raw = key.to_string();
@@ -35,6 +35,9 @@ impl App {
         let body_row_count = logs_for_view
             .as_ref()
             .map_or(summary.entries.len(), |logs| logs.len());
+        let default_summary = self.report_logs_category_id.is_none()
+            && self.historical_activity_edit.is_none()
+            && self.report_range_edit.is_none();
 
         let preferred_inner_width = self
             .preferred_report_inner_width(&summary, logs_for_view.as_deref())
@@ -46,19 +49,31 @@ impl App {
                 0
             });
 
-        let modal_rect = self.report_modal_rect(
-            terminal_size,
-            body_row_count,
-            preferred_inner_width.saturating_add(REPORT_MODAL_SETTINGS.expanded_inner_padding),
-        );
+        let modal_rect = if default_summary {
+            let desired_inner_width = preferred_inner_width.max(usize::from(
+                balance_instrument::preferred_summary_inner_width(),
+            ));
+            overlay_layout::centered_content_rect(
+                terminal_size,
+                desired_inner_width.min(u16::MAX as usize) as u16,
+                balance_instrument::preferred_summary_inner_height(
+                    body_row_count,
+                    self.should_use_report_snapshot(),
+                ),
+                crate::constants::APP_LAYOUT_SETTINGS.frame_margin,
+            )
+        } else {
+            self.report_modal_rect(
+                terminal_size,
+                body_row_count,
+                preferred_inner_width.saturating_add(REPORT_MODAL_SETTINGS.expanded_inner_padding),
+            )
+        };
         let selected_summary_index = if summary.entries.is_empty() {
             None
         } else {
             Some(self.report_selected_index.min(summary.entries.len() - 1))
         };
-        let default_summary = self.report_logs_category_id.is_none()
-            && self.historical_activity_edit.is_none()
-            && self.report_range_edit.is_none();
         let interval_label = ui_helpers::format_report_interval_label(&summary.date);
 
         let border_color = if let Some(category_id) = self.report_logs_category_id {
@@ -111,13 +126,6 @@ impl App {
             Span::styled(" >", newer_chevron_style),
         ])
         .alignment(Alignment::Center);
-        let snapshot_bottom_title = self.should_use_report_snapshot().then(|| {
-            Line::from(Span::styled(
-                self.report_snapshot_status_label(),
-                Style::default().fg(self.theme_status()),
-            ))
-            .alignment(Alignment::Left)
-        });
         let interaction_bottom_title = if let Some(edit) = self.historical_activity_edit.as_ref() {
             if edit.confirmation.is_some() {
                 let labels = self.historical_activity_conflict_labels();
@@ -295,9 +303,6 @@ impl App {
         };
 
         if default_summary {
-            if let Some(snapshot_bottom_title) = snapshot_bottom_title {
-                frame_block = frame_block.title_bottom(snapshot_bottom_title);
-            }
             frame_block = frame_block.title_bottom(period_bottom_title);
         }
         if let Some(interaction_bottom_title) = interaction_bottom_title {
@@ -569,37 +574,58 @@ impl App {
         summary: &BalanceReportSummary,
         selected_summary_index: Option<usize>,
     ) {
-        let (totals_area, meter_area, list_area) = if area.height >= 5 {
-            let rows = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
+        let show_provenance = self.should_use_report_snapshot();
+        let (totals_area, meter_area, list_area, provenance_area) =
+            if area.height >= 5 + u16::from(show_provenance) {
+                let mut constraints = vec![
                     Constraint::Length(1),
                     Constraint::Length(1),
                     Constraint::Length(1),
                     Constraint::Length(1),
                     Constraint::Min(0),
-                ])
-                .split(area);
-            (Some(rows[1]), Some(rows[2]), rows[4])
-        } else if area.height >= 3 {
-            let rows = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(1),
-                    Constraint::Length(1),
-                    Constraint::Min(0),
-                ])
-                .split(area);
-            (Some(rows[0]), Some(rows[1]), rows[2])
-        } else {
-            (None, None, area)
-        };
+                ];
+                if show_provenance {
+                    constraints.push(Constraint::Length(1));
+                }
+                let rows = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints(constraints)
+                    .split(area);
+                (
+                    Some(rows[1]),
+                    Some(rows[2]),
+                    rows[4],
+                    show_provenance.then(|| rows[5]),
+                )
+            } else if area.height >= 3 {
+                let rows = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Length(1),
+                        Constraint::Length(1),
+                        Constraint::Min(0),
+                    ])
+                    .split(area);
+                (Some(rows[0]), Some(rows[1]), rows[2], None)
+            } else {
+                (None, None, area, None)
+            };
 
         if let (Some(totals_area), Some(meter_area)) = (totals_area, meter_area) {
             self.render_balance_instrument(f, totals_area, meter_area, summary);
         }
 
         self.render_report_summary_view(f, list_area, summary, selected_summary_index);
+
+        if let Some(provenance_area) = provenance_area {
+            let provenance = Line::from(Span::styled(
+                self.report_snapshot_status_label(),
+                Style::default()
+                    .fg(self.theme_status())
+                    .add_modifier(Modifier::DIM),
+            ));
+            f.render_widget(Paragraph::new(provenance), provenance_area);
+        }
     }
 
     fn render_report_summary_view(

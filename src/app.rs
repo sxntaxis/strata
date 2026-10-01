@@ -32,6 +32,7 @@ mod category_modal_view;
 mod category_state;
 mod command_palette_view;
 mod event_handlers;
+mod overlay_layout;
 mod persistence_recovery;
 mod recovery_statement;
 mod render_views;

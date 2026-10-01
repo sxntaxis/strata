@@ -171,9 +171,9 @@ The default Balance summary presents a bipolar instrument above the unchanged ca
 
 - The left total sums negative `balance_seconds`, the centered value is the authoritative report net, and the right total sums positive `balance_seconds`.
 - The meter normalizes net displacement over polarized time only. Idle remains a normal row and contributes zero to both signed sides. With no polarized time, the marker rests at the center; all-negative/all-positive inputs reach the respective usable meter ends.
-- The instrument uses responsive Ratatui geometry, with independently aligned totals and a meter sharing one exact centered width. Narrow terminals degrade to a centered net and bounded meter without overlap.
-- The selected report interval is the centered bottom-border object with left/right navigation chevrons. Visible Day/Week/Month/Range labels, side-border arrows, and ordinary action hints are removed from the default summary; configured actions remain reachable through their existing routes, Settings, and the command palette.
-- Historical visual provenance remains visible when Balance displays a historical artifact. Detail, range-edit, activity-edit, and collision-confirmation modes keep their existing interaction guidance.
+- The instrument uses responsive Ratatui geometry, with independently aligned totals and a meter sharing one exact centered width. The default summary overlay is content-sized from the instrument plus actual row count through a shared centered-content geometry helper rather than a fixed fraction of the terminal; narrow terminals clamp and degrade without overlap.
+- The selected report interval is the sole centered bottom-border object with left/right navigation chevrons. Visible Day/Week/Month/Range labels, side-border arrows, and ordinary action hints are removed from the default summary; configured actions remain reachable through their existing routes, Settings, and the command palette.
+- Historical visual provenance remains explicit when Balance displays a historical artifact, but it is shown as a subdued interior status row rather than a competing border title. Detail, range-edit, activity-edit, and collision-confirmation modes keep their existing interaction guidance.
 
 This is presentation-only. Report arithmetic, interval semantics, historical-assignment behavior, collision confirmation, keymap authority, and command-palette reachability remain unchanged.
 
