@@ -206,6 +206,26 @@ mod tests {
     }
 
     #[test]
+    fn release_candidate_covers_case_leap_and_year_rollover_edges() {
+        assert_eq!(
+            normalize_date_text("SEP", current()).unwrap(),
+            "2026-09-01"
+        );
+        assert_eq!(
+            normalize_date_text("February 29 2028", current()).unwrap(),
+            "2028-02-29"
+        );
+        assert_eq!(
+            normalize_date_text("Feb 29 2027", current()).unwrap(),
+            "2027-03-01"
+        );
+        assert_eq!(
+            normalize_date_text("December 32 2026", current()).unwrap(),
+            "2027-01-01"
+        );
+    }
+
+    #[test]
     fn empty_and_unresolved_named_month_input_are_not_silently_defaulted() {
         assert!(normalize_date_input("", current()).is_err());
         assert!(normalize_date_input("Sep x", current()).is_err());
