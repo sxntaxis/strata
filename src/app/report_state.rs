@@ -1,8 +1,8 @@
 use std::collections::{BTreeSet, HashSet};
 
 use chrono::{
-    DateTime, Duration as ChronoDuration, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime,
-    TimeZone, Timelike, Utc,
+    DateTime, Duration as ChronoDuration, FixedOffset, NaiveDate, NaiveTime, TimeZone, Timelike,
+    Utc,
 };
 use ratatui::{prelude::Line, style::Color};
 
@@ -102,21 +102,6 @@ fn report_range_edit_state(window: &ReportWindow) -> super::ReportRangeEditState
         select_all: true,
         error,
     }
-}
-
-fn parse_historical_activity_timestamp(
-    value: &str,
-    policy: OperationalDayPolicy,
-) -> Result<DateTime<Utc>, String> {
-    let civil = NaiveDateTime::parse_from_str(value.trim(), "%Y-%m-%d %H:%M:%S")
-        .map_err(|_| "time must use YYYY-MM-DD HH:MM:SS".to_string())?;
-    let offset = FixedOffset::east_opt(policy.utc_offset_seconds)
-        .ok_or_else(|| "historical activity has an invalid UTC offset".to_string())?;
-    let local = offset
-        .from_local_datetime(&civil)
-        .single()
-        .ok_or_else(|| "historical civil time is not unique".to_string())?;
-    Ok(local.with_timezone(&Utc))
 }
 
 fn shifted_custom_window_older(window: &ReportWindow) -> Option<ReportWindow> {
@@ -244,162 +229,6 @@ impl App {
         })
     }
 
-    fn historical_activity_targets(&self) -> Vec<Category> {
-        self.time_tracker.categories_ordered()
-    }
-
-    pub(super) fn historical_activity_target_name(&self) -> Option<String> {
-        let edit = self.historical_activity_edit.as_ref()?;
-        self.time_tracker
-            .category_by_id(edit.target_category_id)
-            .map(|category| self.display_layer_name(&category.name))
-    }
-
-    fn conflict_labels(&self, conflicts: &[crate::sqlite::TuiHistoricalConflict]) -> Vec<String> {
-        let policy = OperationalDayPolicy::from_config(day_boundary_config());
-        conflicts
-            .iter()
-            .map(|conflict| {
-                let name = self
-                    .time_tracker
-                    .category_by_id(conflict.category_id)
-                    .map(|category| self.display_layer_name(&category.name))
-                    .or_else(|| {
-                        self.archived_categories
-                            .iter()
-                            .find(|category| category.id == conflict.category_id)
-                            .map(|category| self.display_layer_name(&category.name))
-                    })
-                    .unwrap_or_else(|| format!("layer {}", conflict.category_id.0));
-                let start = temporal::civil_from_policy(conflict.started_at_utc, policy).ok();
-                let end = temporal::civil_from_policy(conflict.ended_at_utc, policy).ok();
-                let interval = match (start, end) {
-                    (Some(start), Some(end)) if start.date_naive() == end.date_naive() => format!(
-                        "{} {}-{}",
-                        start.format("%Y-%m-%d"),
-                        start.format("%H:%M:%S"),
-                        end.format("%H:%M:%S")
-                    ),
-                    (Some(start), Some(end)) => format!(
-                        "{}-{}",
-                        start.format("%Y-%m-%d %H:%M:%S"),
-                        end.format("%Y-%m-%d %H:%M:%S")
-                    ),
-                    _ => "?".to_string(),
-                };
-                if conflict.active {
-                    format!("{name} {interval} (current)")
-                } else {
-                    format!("{name} {interval}")
-                }
-            })
-            .collect()
-    }
-
-    pub(super) fn historical_activity_conflict_labels(&self) -> Vec<String> {
-        self.historical_activity_edit
-            .as_ref()
-            .and_then(|edit| edit.confirmation.as_ref())
-            .map(|confirmation| self.conflict_labels(&confirmation.conflicts))
-            .unwrap_or_default()
-    }
-
-    pub(super) fn ledger_entry_conflict_labels(&self) -> Vec<String> {
-        self.ledger_entry_edit
-            .as_ref()
-            .and_then(|edit| edit.confirmation.as_ref())
-            .map(|confirmation| self.conflict_labels(&confirmation.conflicts))
-            .unwrap_or_default()
-    }
-
-    pub(super) fn cycle_historical_activity_target(&mut self, direction: isize) {
-        let targets = self.historical_activity_targets();
-        if targets.is_empty() {
-            return;
-        }
-        let Some(edit) = self.historical_activity_edit.as_mut() else {
-            return;
-        };
-        let current = targets
-            .iter()
-            .position(|category| category.id == edit.target_category_id)
-            .unwrap_or(0);
-        let next = if direction < 0 {
-            if current == 0 {
-                targets.len() - 1
-            } else {
-                current - 1
-            }
-        } else {
-            (current + 1) % targets.len()
-        };
-        edit.target_category_id = targets[next].id;
-        edit.error = None;
-        edit.confirmation = None;
-        self.render_needed = true;
-    }
-
-    pub(super) fn begin_historical_activity_edit(&mut self) -> bool {
-        let targets = self.historical_activity_targets();
-        if targets.is_empty() {
-            return false;
-        }
-        let preview = match self.historical_correction_active_preview() {
-            Ok(preview) => preview,
-            Err(_) => return false,
-        };
-        let target_category_id = if preview.category_id != DRIFT_CATEGORY_ID {
-            preview.category_id
-        } else {
-            targets
-                .iter()
-                .find(|category| category.id != DRIFT_CATEGORY_ID)
-                .map(|category| category.id)
-                .unwrap_or(DRIFT_CATEGORY_ID)
-        };
-        let to = preview.ended_at_utc;
-        let from = to
-            .checked_sub_signed(ChronoDuration::minutes(15))
-            .unwrap_or(to);
-        let format_civil = |timestamp| {
-            temporal::civil_from_policy(timestamp, preview.operational_day_policy)
-                .map(|civil| civil.format("%Y-%m-%d %H:%M:%S").to_string())
-        };
-        let Ok(from) = format_civil(from) else {
-            return false;
-        };
-        let Ok(to) = format_civil(to) else {
-            return false;
-        };
-        self.report_range_boundary = None;
-        self.report_range_edit = None;
-        self.ledger_entry_edit = None;
-        self.historical_activity_edit = Some(super::HistoricalActivityEditState {
-            target_category_id,
-            from,
-            to,
-            active_field: super::HistoricalActivityField::Layer,
-            select_all: false,
-            error: None,
-            confirmation: None,
-        });
-        self.render_needed = true;
-        true
-    }
-
-    pub(super) fn cancel_historical_activity_edit(&mut self) {
-        self.historical_activity_edit = None;
-        self.render_needed = true;
-    }
-
-    pub(super) fn dismiss_historical_activity_confirmation(&mut self) {
-        if let Some(edit) = self.historical_activity_edit.as_mut() {
-            edit.confirmation = None;
-            edit.error = None;
-            self.render_needed = true;
-        }
-    }
-
     fn historical_correction_active_preview(
         &self,
     ) -> Result<crate::sqlite::TuiHistoricalActivePreview, String> {
@@ -436,9 +265,9 @@ impl App {
         })
     }
 
-    fn install_historical_activity_receipt(
+    fn install_historical_correction_receipt(
         &mut self,
-        receipt: crate::sqlite::TuiHistoricalActivityReceipt,
+        receipt: crate::sqlite::TuiHistoricalCorrectionReceipt,
     ) -> Result<(), String> {
         if let Some(state) = receipt.resulting_sand_state.as_ref() {
             let valid_category_ids = self
@@ -465,160 +294,12 @@ impl App {
         Ok(())
     }
 
-    pub(super) fn commit_historical_activity_edit(&mut self) -> bool {
-        let Some(edit) = self.historical_activity_edit.clone() else {
-            return false;
-        };
-        if let Err(error) = self.settle_transition_boundary(Utc::now()) {
-            if let Some(current) = self.historical_activity_edit.as_mut() {
-                current.error = Some(error);
-            }
-            self.render_needed = true;
-            return false;
-        }
-        let active_preview = match self.historical_correction_active_preview() {
-            Ok(preview) => preview,
-            Err(error) => {
-                if let Some(current) = self.historical_activity_edit.as_mut() {
-                    current.error = Some(error);
-                }
-                self.render_needed = true;
-                return false;
-            }
-        };
-        let from = match parse_historical_activity_timestamp(
-            &edit.from,
-            active_preview.operational_day_policy,
-        ) {
-            Ok(value) => value,
-            Err(error) => {
-                if let Some(current) = self.historical_activity_edit.as_mut() {
-                    current.error = Some(format!("From {error}"));
-                }
-                self.render_needed = true;
-                return false;
-            }
-        };
-        let to = match parse_historical_activity_timestamp(
-            &edit.to,
-            active_preview.operational_day_policy,
-        ) {
-            Ok(value) => value,
-            Err(error) => {
-                if let Some(current) = self.historical_activity_edit.as_mut() {
-                    current.error = Some(format!("To {error}"));
-                }
-                self.render_needed = true;
-                return false;
-            }
-        };
-        let validation_error = if from >= to {
-            Some("From must be before To".to_string())
-        } else if to > active_preview.ended_at_utc {
-            Some("To cannot be later than now".to_string())
-        } else if self
-            .time_tracker
-            .category_by_id(edit.target_category_id)
-            .is_none()
-        {
-            Some("choose an active layer".to_string())
-        } else {
-            None
-        };
-        if let Some(error) = validation_error {
-            if let Some(current) = self.historical_activity_edit.as_mut() {
-                current.error = Some(error);
-                current.confirmation = None;
-            }
-            self.render_needed = true;
-            return false;
-        }
-        let Some(database_path) = self.sqlite_database_path.clone() else {
-            return false;
-        };
-        let checkpoint = match self.build_runtime_checkpoint() {
-            Ok(checkpoint) => checkpoint,
-            Err(error) => {
-                if let Some(current) = self.historical_activity_edit.as_mut() {
-                    current.error = Some(error);
-                }
-                self.render_needed = true;
-                return false;
-            }
-        };
-        let checkpoint_json = match serde_json::to_string(&checkpoint) {
-            Ok(value) => value,
-            Err(error) => {
-                if let Some(current) = self.historical_activity_edit.as_mut() {
-                    current.error = Some(error.to_string());
-                }
-                self.render_needed = true;
-                return false;
-            }
-        };
-        let description = String::new();
-        let confirmed_plan_token = edit
-            .confirmation
-            .as_ref()
-            .map(|confirmation| confirmation.plan_token.clone());
-        let result = crate::sqlite::log_tui_historical_activity(
-            &database_path,
-            crate::sqlite::TuiHistoricalActivityRequest {
-                target_category_id: edit.target_category_id,
-                started_at_utc: from,
-                ended_at_utc: to,
-                description,
-                active_preview,
-                confirmed_plan_token,
-                checkpoint_json,
-                checkpoint_detached_at_utc: checkpoint.detached_at_utc,
-                checkpoint_simulation_time_utc: checkpoint.simulation_time_utc,
-            },
-        );
-        let Some(outcome) = self.record_storage_result_for(
-            PersistenceOperation::SessionCorrection,
-            RecoveryAction::ReloadAuthority,
-            result,
-        ) else {
-            return false;
-        };
-        match outcome {
-            crate::sqlite::TuiHistoricalActivityOutcome::NeedsConfirmation {
-                plan_token,
-                conflicts,
-            } => {
-                if let Some(current) = self.historical_activity_edit.as_mut() {
-                    current.confirmation = Some(super::HistoricalActivityConfirmation {
-                        plan_token,
-                        conflicts,
-                    });
-                    current.error = None;
-                }
-                self.render_needed = true;
-                false
-            }
-            crate::sqlite::TuiHistoricalActivityOutcome::Applied(receipt) => {
-                if let Err(error) = self.install_historical_activity_receipt(receipt) {
-                    if let Some(current) = self.historical_activity_edit.as_mut() {
-                        current.error = Some(error);
-                    }
-                    self.render_needed = true;
-                    return false;
-                }
-                self.historical_activity_edit = None;
-                self.sync_report_selection_for_interval();
-                true
-            }
-        }
-    }
-
     pub(super) fn set_report_period(&mut self, period: ReportPeriod) {
         self.report_period = period;
         self.report_period_offset = 0;
         self.report_custom_window = None;
         self.report_range_boundary = None;
         self.report_range_edit = None;
-        self.historical_activity_edit = None;
         self.ledger_entry_edit = None;
         self.clear_report_snapshot_cache();
         self.sync_report_selection_for_interval();
@@ -927,6 +608,26 @@ impl App {
         true
     }
 
+    pub(super) fn begin_selected_layer_ledger_add(&mut self) -> bool {
+        if let Some(category_id) = self.report_logs_category_id {
+            return self.begin_ledger_add_edit(category_id);
+        }
+        let summary = self.report_rows();
+        let Some(entry) = summary.entries.get(
+            self.report_selected_index
+                .min(summary.entries.len().saturating_sub(1)),
+        ) else {
+            return false;
+        };
+        let category_id = entry.category_id;
+        if !self.report_layer_can_add(category_id) {
+            return false;
+        }
+        self.report_logs_category_id = Some(category_id);
+        self.report_log_selected_index = 0;
+        self.begin_ledger_add_edit(category_id)
+    }
+
     pub(super) fn begin_ledger_add_edit(&mut self, category_id: CategoryId) -> bool {
         if !self.report_layer_can_add(category_id) {
             return false;
@@ -1048,6 +749,26 @@ impl App {
         Ok((from, to))
     }
 
+    fn preserve_hidden_subseconds(
+        requested: DateTime<Utc>,
+        original: DateTime<Utc>,
+        policy: OperationalDayPolicy,
+    ) -> DateTime<Utc> {
+        let (Ok(requested_civil), Ok(original_civil)) = (
+            temporal::civil_from_policy(requested, policy),
+            temporal::civil_from_policy(original, policy),
+        ) else {
+            return requested;
+        };
+        if requested_civil.format("%Y-%m-%d %H:%M:%S").to_string()
+            == original_civil.format("%Y-%m-%d %H:%M:%S").to_string()
+        {
+            original
+        } else {
+            requested
+        }
+    }
+
     pub(super) fn commit_ledger_entry_edit(&mut self) -> bool {
         let Some(edit) = self.ledger_entry_edit.clone() else {
             return false;
@@ -1079,7 +800,7 @@ impl App {
                 .unwrap_or(active_preview.operational_day_policy),
             super::LedgerEntryEditKind::Add => active_preview.operational_day_policy,
         };
-        let (from, to) = match Self::ledger_edit_bounds(&edit, policy) {
+        let (mut from, mut to) = match Self::ledger_edit_bounds(&edit, policy) {
             Ok(bounds) => bounds,
             Err(error) => {
                 if let Some(current) = self.ledger_entry_edit.as_mut() {
@@ -1090,6 +811,20 @@ impl App {
                 return false;
             }
         };
+        if let super::LedgerEntryEditKind::Existing { session_id } = edit.kind
+            && let Some(session) = self
+                .time_tracker
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+        {
+            if let Some(original) = session.started_at_utc {
+                from = Self::preserve_hidden_subseconds(from, original, policy);
+            }
+            if let Some(original) = session.ended_at_utc {
+                to = Self::preserve_hidden_subseconds(to, original, policy);
+            }
+        }
         if to > active_preview.ended_at_utc {
             if let Some(current) = self.ledger_entry_edit.as_mut() {
                 current.error = Some("end cannot be later than now".to_string());
@@ -1098,123 +833,89 @@ impl App {
             self.render_needed = true;
             return false;
         }
+        if edit.is_add() && self.time_tracker.category_by_id(edit.category_id).is_none() {
+            if let Some(current) = self.ledger_entry_edit.as_mut() {
+                current.error = Some("archived layer cannot receive new entries".to_string());
+                current.confirmation = None;
+            }
+            self.render_needed = true;
+            return false;
+        }
         let Some(database_path) = self.sqlite_database_path.clone() else {
             return false;
         };
-
-        match edit.kind {
-            super::LedgerEntryEditKind::Existing { session_id } => {
-                let result = crate::sqlite::edit_tui_historical_session(
-                    &database_path,
-                    crate::sqlite::TuiHistoricalSessionEditRequest {
-                        session_id,
-                        description: edit.description,
-                        started_at_utc: from,
-                        ended_at_utc: to,
-                        active_preview,
-                    },
-                );
-                if self
-                    .record_storage_result_for(
-                        PersistenceOperation::SessionCorrection,
-                        RecoveryAction::ReloadAuthority,
-                        result,
-                    )
-                    .is_none()
-                {
-                    return false;
+        let checkpoint = match self.build_runtime_checkpoint() {
+            Ok(checkpoint) => checkpoint,
+            Err(error) => {
+                if let Some(current) = self.ledger_entry_edit.as_mut() {
+                    current.error = Some(error);
                 }
-                if !self.reload_sqlite_sessions() {
-                    return false;
-                }
-                self.ledger_entry_edit = None;
-                self.clear_report_snapshot_cache();
-                self.sync_report_selection_for_interval();
-                true
+                self.render_needed = true;
+                return false;
             }
-            super::LedgerEntryEditKind::Add => {
-                if self.time_tracker.category_by_id(edit.category_id).is_none() {
+        };
+        let checkpoint_json = match serde_json::to_string(&checkpoint) {
+            Ok(value) => value,
+            Err(error) => {
+                if let Some(current) = self.ledger_entry_edit.as_mut() {
+                    current.error = Some(error.to_string());
+                }
+                self.render_needed = true;
+                return false;
+            }
+        };
+        let confirmed_plan_token = edit
+            .confirmation
+            .as_ref()
+            .map(|confirmation| confirmation.plan_token.clone());
+        let result = crate::sqlite::apply_tui_historical_correction(
+            &database_path,
+            crate::sqlite::TuiHistoricalCorrectionRequest {
+                source_session_id: edit.session_id(),
+                target_category_id: edit.category_id,
+                started_at_utc: from,
+                ended_at_utc: to,
+                description: edit.description,
+                active_preview,
+                confirmed_plan_token,
+                checkpoint_json,
+                checkpoint_detached_at_utc: checkpoint.detached_at_utc,
+                checkpoint_simulation_time_utc: checkpoint.simulation_time_utc,
+            },
+        );
+        let Some(outcome) = self.record_storage_result_for(
+            PersistenceOperation::SessionCorrection,
+            RecoveryAction::ReloadAuthority,
+            result,
+        ) else {
+            return false;
+        };
+        match outcome {
+            crate::sqlite::TuiHistoricalCorrectionOutcome::NeedsConfirmation {
+                plan_token,
+                changes,
+            } => {
+                if let Some(current) = self.ledger_entry_edit.as_mut() {
+                    current.confirmation = Some(super::LedgerCorrectionConfirmation {
+                        plan_token,
+                        changes,
+                    });
+                    current.error = None;
+                }
+                self.render_needed = true;
+                false
+            }
+            crate::sqlite::TuiHistoricalCorrectionOutcome::Applied(receipt) => {
+                if let Err(error) = self.install_historical_correction_receipt(receipt) {
                     if let Some(current) = self.ledger_entry_edit.as_mut() {
-                        current.error =
-                            Some("archived layer cannot receive new entries".to_string());
+                        current.error = Some(error);
                     }
                     self.render_needed = true;
                     return false;
                 }
-                let checkpoint = match self.build_runtime_checkpoint() {
-                    Ok(checkpoint) => checkpoint,
-                    Err(error) => {
-                        if let Some(current) = self.ledger_entry_edit.as_mut() {
-                            current.error = Some(error);
-                        }
-                        self.render_needed = true;
-                        return false;
-                    }
-                };
-                let checkpoint_json = match serde_json::to_string(&checkpoint) {
-                    Ok(value) => value,
-                    Err(error) => {
-                        if let Some(current) = self.ledger_entry_edit.as_mut() {
-                            current.error = Some(error.to_string());
-                        }
-                        self.render_needed = true;
-                        return false;
-                    }
-                };
-                let confirmed_plan_token = edit
-                    .confirmation
-                    .as_ref()
-                    .map(|confirmation| confirmation.plan_token.clone());
-                let result = crate::sqlite::log_tui_historical_activity(
-                    &database_path,
-                    crate::sqlite::TuiHistoricalActivityRequest {
-                        target_category_id: edit.category_id,
-                        started_at_utc: from,
-                        ended_at_utc: to,
-                        description: edit.description,
-                        active_preview,
-                        confirmed_plan_token,
-                        checkpoint_json,
-                        checkpoint_detached_at_utc: checkpoint.detached_at_utc,
-                        checkpoint_simulation_time_utc: checkpoint.simulation_time_utc,
-                    },
-                );
-                let Some(outcome) = self.record_storage_result_for(
-                    PersistenceOperation::SessionCorrection,
-                    RecoveryAction::ReloadAuthority,
-                    result,
-                ) else {
-                    return false;
-                };
-                match outcome {
-                    crate::sqlite::TuiHistoricalActivityOutcome::NeedsConfirmation {
-                        plan_token,
-                        conflicts,
-                    } => {
-                        if let Some(current) = self.ledger_entry_edit.as_mut() {
-                            current.confirmation = Some(super::HistoricalActivityConfirmation {
-                                plan_token,
-                                conflicts,
-                            });
-                            current.error = None;
-                        }
-                        self.render_needed = true;
-                        false
-                    }
-                    crate::sqlite::TuiHistoricalActivityOutcome::Applied(receipt) => {
-                        if let Err(error) = self.install_historical_activity_receipt(receipt) {
-                            if let Some(current) = self.ledger_entry_edit.as_mut() {
-                                current.error = Some(error);
-                            }
-                            self.render_needed = true;
-                            return false;
-                        }
-                        self.ledger_entry_edit = None;
-                        self.report_log_selected_index = self.report_current_logs().len();
-                        self.sync_report_selection_for_interval();
-                        true
-                    }
-                }
+                self.ledger_entry_edit = None;
+                self.sync_report_selection_for_interval();
+                true
             }
         }
     }
@@ -1376,13 +1077,12 @@ impl App {
 
 #[cfg(test)]
 mod report_edit_state_tests {
-    use chrono::NaiveDate;
+    use chrono::{Duration as ChronoDuration, NaiveDate, TimeZone, Utc};
     use ratatui::style::Color;
 
     use super::{
-        build_historical_preview, parse_historical_activity_timestamp, parse_report_range,
-        report_range_edit_state, shifted_custom_window_newer, shifted_custom_window_older,
-        shifted_report_boundary,
+        build_historical_preview, parse_report_range, report_range_edit_state,
+        shifted_custom_window_newer, shifted_custom_window_older, shifted_report_boundary,
     };
     use crate::{
         app::{ReportRangeBoundary, ui_helpers},
@@ -1435,14 +1135,26 @@ mod report_edit_state_tests {
     }
 
     #[test]
-    fn historical_activity_timestamp_uses_explicit_civil_second() {
+    fn unchanged_visible_boundary_second_preserves_hidden_subseconds() {
         let policy = OperationalDayPolicy {
             utc_offset_seconds: -6 * 60 * 60,
             start_minutes: 0,
         };
-        let parsed = parse_historical_activity_timestamp("2026-08-01 23:45:00", policy).unwrap();
-        assert_eq!(parsed.to_rfc3339(), "2026-08-02T05:45:00+00:00");
-        assert!(parse_historical_activity_timestamp("2026/08/01 23:45", policy).is_err());
+        let original =
+            Utc.with_ymd_and_hms(2026, 8, 2, 5, 45, 0).unwrap() + ChronoDuration::milliseconds(500);
+        let requested = Utc.with_ymd_and_hms(2026, 8, 2, 5, 45, 0).unwrap();
+        assert_eq!(
+            crate::app::App::preserve_hidden_subseconds(requested, original, policy),
+            original
+        );
+        assert_eq!(
+            crate::app::App::preserve_hidden_subseconds(
+                requested + ChronoDuration::seconds(1),
+                original,
+                policy,
+            ),
+            requested + ChronoDuration::seconds(1)
+        );
     }
 
     #[test]

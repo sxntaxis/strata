@@ -71,20 +71,6 @@ enum ReportRangeEditKeyIntent {
     Ignore,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum HistoricalActivityEditKeyIntent {
-    Append(char),
-    Backspace,
-    NextField,
-    PreviousField,
-    PreviousTarget,
-    NextTarget,
-    Commit,
-    Cancel,
-    EmergencyQuit,
-    Ignore,
-}
-
 fn direct_command_or_fuzzy_fallback(
     query: &str,
     has_fuzzy_result: bool,
@@ -160,41 +146,6 @@ fn resolve_report_range_edit_key(
     }
 }
 
-fn resolve_historical_activity_edit_key(
-    key: KeyEvent,
-    keymap: &crate::keybindings::Keymap,
-) -> HistoricalActivityEditKeyIntent {
-    if key
-        .modifiers
-        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-    {
-        return if keymap.mandatory_action_for_key_event(key) == Some(Action::Quit) {
-            HistoricalActivityEditKeyIntent::EmergencyQuit
-        } else {
-            HistoricalActivityEditKeyIntent::Ignore
-        };
-    }
-
-    match key.code {
-        KeyCode::Esc => HistoricalActivityEditKeyIntent::Cancel,
-        KeyCode::Enter => HistoricalActivityEditKeyIntent::Commit,
-        KeyCode::Backspace | KeyCode::Delete => HistoricalActivityEditKeyIntent::Backspace,
-        KeyCode::BackTab => HistoricalActivityEditKeyIntent::PreviousField,
-        KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
-            HistoricalActivityEditKeyIntent::PreviousField
-        }
-        KeyCode::Tab => HistoricalActivityEditKeyIntent::NextField,
-        KeyCode::Left => HistoricalActivityEditKeyIntent::PreviousTarget,
-        KeyCode::Right => HistoricalActivityEditKeyIntent::NextTarget,
-        KeyCode::Char(character)
-            if character.is_ascii_digit() || matches!(character, '-' | ':' | ' ') =>
-        {
-            HistoricalActivityEditKeyIntent::Append(character)
-        }
-        _ => HistoricalActivityEditKeyIntent::Ignore,
-    }
-}
-
 impl App {
     #[cfg(debug_assertions)]
     fn ensure_testing_fill_categories(&mut self) -> Result<Vec<CategoryId>, String> {
@@ -236,10 +187,6 @@ impl App {
                 return false;
             }
             return true;
-        }
-
-        if self.historical_activity_edit.is_some() {
-            return self.handle_historical_activity_edit_key(key);
         }
 
         if self.report_range_edit.is_some() {
@@ -1175,11 +1122,7 @@ impl App {
                 if !self.in_balance_modal() {
                     self.open_report_modal();
                 }
-                if let Some(category_id) = self.report_logs_category_id {
-                    self.begin_ledger_add_edit(category_id);
-                } else {
-                    self.begin_historical_activity_edit();
-                }
+                self.begin_selected_layer_ledger_add();
                 false
             }
             PaletteCommand::Action(action) => self.handle_main_action(action),
@@ -1715,11 +1658,7 @@ impl App {
             }
             Action::LogActivity => {
                 self.clear_report_range_boundary();
-                handled = if let Some(category_id) = self.report_logs_category_id {
-                    self.begin_ledger_add_edit(category_id)
-                } else {
-                    self.begin_historical_activity_edit()
-                };
+                handled = self.begin_selected_layer_ledger_add();
             }
             Action::DeleteCategory => {
                 if in_logs_view && self.report_log_selected_index < logs.len() {
@@ -1772,81 +1711,6 @@ impl App {
             Action::Cancel => false,
             _ => false,
         }
-    }
-
-    fn handle_historical_activity_edit_key(&mut self, key: KeyEvent) -> bool {
-        let intent = resolve_historical_activity_edit_key(key, &self.keymap);
-        if self
-            .historical_activity_edit
-            .as_ref()
-            .is_some_and(|edit| edit.confirmation.is_some())
-        {
-            match intent {
-                HistoricalActivityEditKeyIntent::Commit => {
-                    self.commit_historical_activity_edit();
-                }
-                HistoricalActivityEditKeyIntent::Cancel => {
-                    self.dismiss_historical_activity_confirmation();
-                }
-                HistoricalActivityEditKeyIntent::EmergencyQuit => return true,
-                _ => {}
-            }
-            return false;
-        }
-
-        match intent {
-            HistoricalActivityEditKeyIntent::Append(character) => {
-                if let Some(edit) = self.historical_activity_edit.as_mut() {
-                    edit.append(character);
-                    self.render_needed = true;
-                }
-            }
-            HistoricalActivityEditKeyIntent::Backspace => {
-                if let Some(edit) = self.historical_activity_edit.as_mut() {
-                    edit.backspace();
-                    self.render_needed = true;
-                }
-            }
-            HistoricalActivityEditKeyIntent::NextField => {
-                if let Some(edit) = self.historical_activity_edit.as_mut() {
-                    edit.next_field();
-                    self.render_needed = true;
-                }
-            }
-            HistoricalActivityEditKeyIntent::PreviousField => {
-                if let Some(edit) = self.historical_activity_edit.as_mut() {
-                    edit.previous_field();
-                    self.render_needed = true;
-                }
-            }
-            HistoricalActivityEditKeyIntent::PreviousTarget => {
-                if self
-                    .historical_activity_edit
-                    .as_ref()
-                    .is_some_and(|edit| edit.active_field == super::HistoricalActivityField::Layer)
-                {
-                    self.cycle_historical_activity_target(-1);
-                }
-            }
-            HistoricalActivityEditKeyIntent::NextTarget => {
-                if self
-                    .historical_activity_edit
-                    .as_ref()
-                    .is_some_and(|edit| edit.active_field == super::HistoricalActivityField::Layer)
-                {
-                    self.cycle_historical_activity_target(1);
-                }
-            }
-            HistoricalActivityEditKeyIntent::Commit => {
-                self.commit_historical_activity_edit();
-            }
-            HistoricalActivityEditKeyIntent::Cancel => {
-                self.cancel_historical_activity_edit();
-            }
-            HistoricalActivityEditKeyIntent::EmergencyQuit => return true,
-            HistoricalActivityEditKeyIntent::Ignore => {}
-        }
-        false
     }
 
     fn handle_report_range_edit_key(&mut self, key: KeyEvent) -> bool {
@@ -1942,8 +1806,7 @@ impl App {
 #[cfg(test)]
 mod report_edit_tests {
     use super::{
-        HistoricalActivityEditKeyIntent, LedgerEntryEditKeyIntent, ReportRangeEditKeyIntent,
-        direct_command_or_fuzzy_fallback, resolve_historical_activity_edit_key,
+        LedgerEntryEditKeyIntent, ReportRangeEditKeyIntent, direct_command_or_fuzzy_fallback,
         resolve_ledger_entry_edit_key, resolve_report_range_edit_key,
     };
     use crate::keybindings::default_keymap;
@@ -1978,50 +1841,6 @@ mod report_edit_tests {
                 &keymap
             ),
             ReportRangeEditKeyIntent::Commit
-        );
-    }
-
-    #[test]
-    fn historical_activity_editor_owns_timestamp_input_and_layer_navigation() {
-        let keymap = default_keymap();
-        for character in [
-            '2', '0', '2', '6', '-', '0', '8', ' ', '1', '2', ':', '3', '0',
-        ] {
-            assert_eq!(
-                resolve_historical_activity_edit_key(
-                    KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
-                    &keymap,
-                ),
-                HistoricalActivityEditKeyIntent::Append(character)
-            );
-        }
-        assert_eq!(
-            resolve_historical_activity_edit_key(
-                KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
-                &keymap,
-            ),
-            HistoricalActivityEditKeyIntent::PreviousTarget
-        );
-        assert_eq!(
-            resolve_historical_activity_edit_key(
-                KeyEvent::new(KeyCode::Right, KeyModifiers::NONE),
-                &keymap,
-            ),
-            HistoricalActivityEditKeyIntent::NextTarget
-        );
-        assert_eq!(
-            resolve_historical_activity_edit_key(
-                KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE),
-                &keymap,
-            ),
-            HistoricalActivityEditKeyIntent::Ignore
-        );
-        assert_eq!(
-            resolve_historical_activity_edit_key(
-                KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
-                &keymap,
-            ),
-            HistoricalActivityEditKeyIntent::EmergencyQuit
         );
     }
 
