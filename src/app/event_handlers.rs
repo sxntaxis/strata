@@ -395,35 +395,11 @@ impl App {
     }
 
     fn canonicalize_tag_for_layer(&self, layer_id: CategoryId, tag: &str) -> String {
-        let trimmed = tag.trim();
-        if trimmed.is_empty() {
-            return String::new();
-        }
-        self.category_tags
-            .tags_by_category
-            .get(&layer_id.0)
-            .and_then(|tags| {
-                tags.iter()
-                    .find(|existing| existing.eq_ignore_ascii_case(trimmed))
-            })
-            .cloned()
-            .unwrap_or_else(|| trimmed.to_string())
+        self.canonicalize_description_for_category(layer_id, tag)
     }
 
     fn remember_tag_for_layer(&mut self, layer_id: CategoryId, tag: &str) {
-        let trimmed = tag.trim();
-        if trimmed.is_empty() {
-            return;
-        }
-        let tags = self
-            .category_tags
-            .tags_by_category
-            .entry(layer_id.0)
-            .or_default();
-        tags.retain(|existing| !existing.eq_ignore_ascii_case(trimmed));
-        tags.insert(0, trimmed.to_string());
-        tags.truncate(crate::constants::CATEGORY_SETTINGS.max_tags_per_category);
-        self.persist_category_tags();
+        self.remember_description_tags_for_category(layer_id, tag);
     }
 
     pub(super) fn execute_command(&mut self, command: CommandIntent) -> Result<String, String> {
@@ -911,12 +887,15 @@ impl App {
             }
         }
         if let Some(tag) = tag_filter {
+            let canonical_tag = self.canonicalize_tag_for_layer(active_id, &tag);
+            if canonical_tag.is_empty() {
+                return Err("Tag filter must contain at least one non-empty tag".to_string());
+            }
             let active_tag = self.time_tracker.active_description();
-            if !active_tag.eq_ignore_ascii_case(tag.trim()) {
+            if !super::tagging::contains_all_tags(active_tag, &canonical_tag) {
                 return Err(format!(
-                    "Active tag is '{}' (not '{}')",
-                    active_tag,
-                    tag.trim()
+                    "Active tags are '{}' (do not contain '{}')",
+                    active_tag, canonical_tag
                 ));
             }
         }
@@ -953,16 +932,19 @@ impl App {
             None
         };
         let layer_id = layer.as_ref().map(|category| category.id);
-        let canonical_tag = tag_filter
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| {
-                layer
+        let canonical_tag = match tag_filter.as_deref().map(str::trim) {
+            Some(value) if !value.is_empty() => {
+                let canonical = layer
                     .as_ref()
                     .map(|category| self.canonicalize_tag_for_layer(category.id, value))
-                    .unwrap_or_else(|| value.to_string())
-            });
+                    .unwrap_or_else(|| super::tagging::parse_tags(value).join("; "));
+                if canonical.is_empty() {
+                    return Err("Tag filter must contain at least one non-empty tag".to_string());
+                }
+                Some(canonical)
+            }
+            _ => None,
+        };
         let mut total_elapsed = 0usize;
         let mut total_balance = 0isize;
         for session in &self.time_tracker.sessions {
@@ -977,7 +959,7 @@ impl App {
             }
             if canonical_tag
                 .as_ref()
-                .is_some_and(|tag| !session.description.eq_ignore_ascii_case(tag))
+                .is_some_and(|tag| !super::tagging::contains_all_tags(&session.description, tag))
             {
                 continue;
             }
@@ -1001,9 +983,7 @@ impl App {
             let live_day = crate::domain::operational_day_key_now();
             let layer_matches = layer_id.is_none_or(|expected| expected == active_id);
             let tag_matches = canonical_tag.as_ref().is_none_or(|tag| {
-                self.time_tracker
-                    .active_description()
-                    .eq_ignore_ascii_case(tag)
+                super::tagging::contains_all_tags(self.time_tracker.active_description(), tag)
             });
             if live_day >= window.start && live_day <= window.end && layer_matches && tag_matches {
                 let elapsed = start.elapsed().as_secs() as usize;
@@ -1050,11 +1030,16 @@ impl App {
         let category = self
             .resolve_layer_case_insensitive(&layer)
             .ok_or_else(|| format!("Layer '{layer}' not found"))?;
-        let canonical_tag = tag
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| self.canonicalize_tag_for_layer(category.id, value));
+        let canonical_tag = match tag.as_deref().map(str::trim) {
+            Some(value) if !value.is_empty() => {
+                let canonical = self.canonicalize_tag_for_layer(category.id, value);
+                if canonical.is_empty() {
+                    return Err("Tag filter must contain at least one non-empty tag".to_string());
+                }
+                Some(canonical)
+            }
+            _ => None,
+        };
         let session_id = self
             .time_tracker
             .sessions
@@ -1063,7 +1048,7 @@ impl App {
             .filter(|session| {
                 canonical_tag
                     .as_ref()
-                    .is_none_or(|tag| session.description.eq_ignore_ascii_case(tag))
+                    .is_none_or(|tag| super::tagging::contains_all_tags(&session.description, tag))
             })
             .max_by_key(|session| session.id)
             .map(|session| session.id)
@@ -1559,9 +1544,11 @@ impl App {
                 if self.report_range_boundary.is_some() {
                     self.clear_report_range_boundary();
                 } else if in_logs_view {
-                    self.ledger_entry_edit = None;
-                    self.report_logs_category_id = None;
-                    self.report_log_selected_index = 0;
+                    if !self.leave_report_filter_focus() && !self.clear_report_tag_filter() {
+                        self.ledger_entry_edit = None;
+                        self.report_logs_category_id = None;
+                        self.report_log_selected_index = 0;
+                    }
                 } else {
                     self.close_report_modal();
                 }
@@ -1571,6 +1558,7 @@ impl App {
                     handled = self.begin_ledger_entry_edit();
                 } else if let Some(entry) = summary.entries.get(self.report_selected_index) {
                     self.clear_report_range_boundary();
+                    self.clear_report_tag_filter();
                     self.ledger_entry_edit = None;
                     self.report_logs_category_id = Some(entry.category_id);
                     self.report_log_selected_index = 0;
@@ -1583,6 +1571,7 @@ impl App {
                             self.report_log_selected_index,
                             ledger_row_count,
                         );
+                        self.sync_report_filter_focus_for_selection();
                     }
                 } else if !summary.entries.is_empty() {
                     self.report_selected_index = ui_helpers::wrap_prev_index(
@@ -1598,6 +1587,7 @@ impl App {
                             self.report_log_selected_index,
                             ledger_row_count,
                         );
+                        self.sync_report_filter_focus_for_selection();
                     }
                 } else if !summary.entries.is_empty() {
                     self.report_selected_index = ui_helpers::wrap_next_index(
@@ -1607,14 +1597,18 @@ impl App {
                 }
             }
             Action::Left => {
-                if self.report_range_boundary.is_some() {
+                if in_logs_view && self.report_filter_focus_active() {
+                    handled = self.move_report_filter_focus(-1);
+                } else if self.report_range_boundary.is_some() {
                     self.move_report_range_boundary(-1);
                 } else {
                     self.shift_report_interval_older();
                 }
             }
             Action::Right => {
-                if self.report_range_boundary.is_some() {
+                if in_logs_view && self.report_filter_focus_active() {
+                    handled = self.move_report_filter_focus(1);
+                } else if self.report_range_boundary.is_some() {
                     self.move_report_range_boundary(1);
                 } else {
                     self.shift_report_interval_newer();
@@ -1647,6 +1641,9 @@ impl App {
             Action::LogActivity => {
                 self.clear_report_range_boundary();
                 handled = self.begin_selected_layer_ledger_add();
+            }
+            Action::ReportFilter => {
+                handled = in_logs_view && self.toggle_selected_report_filter();
             }
             Action::DeleteCategory => {
                 if in_logs_view && self.report_log_selected_index < logs.len() {
@@ -1767,7 +1764,9 @@ impl App {
                 }
             }
             LedgerEntryEditKeyIntent::NextField => {
-                if let Some(edit) = self.ledger_entry_edit.as_mut() {
+                if !self.accept_ledger_tag_completion()
+                    && let Some(edit) = self.ledger_entry_edit.as_mut()
+                {
                     edit.next_field();
                     self.render_needed = true;
                 }
@@ -1835,7 +1834,7 @@ mod report_edit_tests {
     #[test]
     fn plain_command_letters_are_text_only_in_edit_mode() {
         let keymap = default_keymap();
-        for character in ['q', 'w', 'm', 't', 'k', 'd', 'x'] {
+        for character in ['q', 'w', 'm', 't', 'f', 'k', 'd', 'x'] {
             assert_eq!(
                 resolve_ledger_entry_edit_key(
                     KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),

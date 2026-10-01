@@ -61,7 +61,7 @@ Every persisted session category ID must resolve to the catalog or to explicit i
 
 ## Tags and metadata
 
-Tags belong to stable category identity and survive archive/restore. The active session description/draft is separate from durable category metadata. Ordinary layer switching edits the active-session text; durable metadata has an explicit edit mode.
+Tag suggestions/history belong to stable category identity and survive archive/restore. The active session description/draft is separate from durable category metadata. A session may carry multiple independent attribution tags in that existing description field, canonically serialized with `; ` between tags; the per-category tag history stores the individual canonical tag spellings used for completion rather than becoming a second time authority. Ordinary layer switching edits the active-session text; durable metadata has an explicit edit mode.
 
 ## Portable interchange
 

@@ -349,16 +349,9 @@ impl App {
         total_area: Rect,
         meter_area: Rect,
         summary: &BalanceReportSummary,
-        category_id: crate::domain::CategoryId,
+        contribution: isize,
+        filter_label: Option<&str>,
     ) {
-        let Some(entry) = summary
-            .entries
-            .iter()
-            .find(|entry| entry.category_id == category_id)
-        else {
-            return;
-        };
-
         let available = total_area.width.saturating_sub(2);
         let width = instrument_width(available);
         if width == 0 {
@@ -368,19 +361,31 @@ impl App {
         let instrument_x = total_area.x + total_area.width.saturating_sub(width) / 2;
         let total_rect = Rect::new(instrument_x, total_area.y, width, 1);
         let meter_rect = Rect::new(instrument_x, meter_area.y, width, 1);
-        let contribution = entry.balance_seconds;
+
+        let mut total_spans = vec![Span::styled(
+            format_net_total(contribution),
+            Style::default().fg(view_style::balance_color(
+                contribution,
+                self.theme_error(),
+                self.theme_success(),
+                self.theme_status(),
+            )),
+        )];
+        if let Some(filter_label) = filter_label {
+            total_spans.push(Span::styled(
+                " · filter ",
+                Style::default()
+                    .fg(self.theme_status())
+                    .add_modifier(Modifier::DIM),
+            ));
+            total_spans.push(Span::styled(
+                filter_label.to_string(),
+                Style::default().fg(self.theme_status()),
+            ));
+        }
 
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                format_net_total(contribution),
-                Style::default().fg(view_style::balance_color(
-                    contribution,
-                    self.theme_error(),
-                    self.theme_success(),
-                    self.theme_status(),
-                )),
-            )))
-            .alignment(Alignment::Center),
+            Paragraph::new(Line::from(total_spans)).alignment(Alignment::Center),
             total_rect,
         );
 

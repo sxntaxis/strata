@@ -60,22 +60,44 @@ impl App {
                         self.theme_foreground(),
                     );
                     let layer_name = self.display_layer_name(&cat.name);
-                    let description_text = if self.modal_description.is_empty() {
-                        Span::raw("")
-                    } else {
-                        Span::styled(
-                            format!(" {}", self.modal_description),
-                            Style::default()
-                                .fg(text_color)
-                                .add_modifier(ratatui::style::Modifier::ITALIC),
-                        )
-                    };
-                    ListItem::new(Line::from(vec![
+                    let description_style = Style::default()
+                        .fg(text_color)
+                        .add_modifier(ratatui::style::Modifier::ITALIC);
+                    let mut line_spans = vec![
                         Span::raw(dot).fg(text_color),
                         Span::raw(layer_name).fg(text_color),
-                        description_text,
-                    ]))
-                    .style(Style::default().fg(text_color).bg(cat.color))
+                    ];
+                    if self.modal_editing_category_metadata {
+                        if !self.modal_description.is_empty() {
+                            line_spans.push(Span::styled(
+                                format!(" {}", self.modal_description),
+                                description_style,
+                            ));
+                        }
+                    } else if let Some(completion) =
+                        self.tag_completion_for_category(cat.id, &self.modal_description)
+                    {
+                        let suffix = completion
+                            .tag
+                            .chars()
+                            .skip(completion.typed_chars)
+                            .collect::<String>();
+                        line_spans.push(Span::styled(
+                            format!(" {}", self.modal_description),
+                            description_style,
+                        ));
+                        line_spans.push(Span::styled(
+                            suffix,
+                            description_style.add_modifier(ratatui::style::Modifier::DIM),
+                        ));
+                    } else if !self.modal_description.is_empty() {
+                        line_spans.push(Span::styled(
+                            format!(" {}", self.modal_description),
+                            description_style,
+                        ));
+                    }
+                    ListItem::new(Line::from(line_spans))
+                        .style(Style::default().fg(text_color).bg(cat.color))
                 } else {
                     let layer_name = self.display_layer_name(&cat.name);
                     ListItem::new(Line::from(vec![

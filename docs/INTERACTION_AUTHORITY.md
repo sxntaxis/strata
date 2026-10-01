@@ -1,10 +1,10 @@
 # Interaction authority
 
-Status: accepted authority; BALANCE-LAYER-DETAIL-UX-001 candidate natively validated, owner review pending
+Status: accepted authority; STRATA-D071 meter parity and STRATA-D072 multi-tag/filter semantics are implemented and natively certified
 Program: INTERACTION-001 + INTERACTION-002 convergence
 Current completed unit: INTERACTION-002; PLATEAU-001H H1 presentation hardening certified
 Issues completed: #19, #20, #24
-Last reviewed: 2026-09-27
+Last reviewed: 2026-09-28
 
 ## Purpose
 
@@ -20,11 +20,12 @@ Confirm on a completed persisted entry opens an in-row ledger editor owned by th
 
 The active ledger field exclusively owns ordinary text input:
 
-- Tag accepts unmodified character input;
+- Tag accepts unmodified character input and `;` separates independent attribution tags;
+- known tags may appear as a dim completion suffix; accepting a completion materializes canonical spelling rather than persisting the dim suggestion;
 - date fields accept `YYYY-MM-DD` characters;
 - time fields accept `HH:MM:SS` characters;
 - Backspace/Delete edits the active field;
-- Tab/BackTab moves between fields and selects the destination value;
+- Tab accepts a visible Tag completion first; otherwise Tab/BackTab moves between fields and selects the destination value;
 - Enter validates and commits;
 - Esc cancels the draft, or dismisses an add-collision confirmation back to editing;
 - only mandatory `Ctrl-C` may escape as an application-level command.
@@ -35,9 +36,9 @@ A same-day entry exposes one date plus start/end time; moving the end earlier th
 
 A draft changes canonical history only after explicit commit. SQLite remains the sole runtime persistence authority.
 
-Editing an existing completed entry preserves its layer identity and stable row identity while allowing Tag and civil start/end correction. The transaction requires `start < end <= now`, rejects overlap with another completed canonical session or the protected current activity, replaces all affected daily-contribution projections atomically, and reloads the in-memory SQLite projection only after commit. A rejected overlap remains an edit error rather than silently carving unrelated history.
+Editing an existing completed entry preserves its layer identity and keeps the source stable identity where the corrected target row continues, while allowing Tag and civil start/end correction. Add and Edit use the same historical-correction planner. The transaction requires `start < end <= now`; changes confined to the source row plus implicit Idle need no warning, while changes to another explicit row or relevant current recorded activity require the exact collateral Before/After confirmation before commit. Every affected daily-contribution projection is replaced atomically and memory reloads only after SQLite commit.
 
-Adding through `+ Add entry…` uses the established HISTORY-001D/001E historical-assignment transaction with the layer fixed by the detail view. It can fill true gaps, replace Idle or same-layer chronology without confirmation, and uses the existing collision preview for a different explicit layer. Unlike the older Balance-wide Log past editor, this layer-scoped add row owns an explicit Tag field and persists that description with the inserted history.
+Adding through `+ Add entry…` uses that same HISTORY-001D/001E correction transaction with the layer fixed by the detail view. It can fill true gaps, replace Idle or same-layer chronology without confirmation, and carve another explicit layer only after the collateral preview is accepted. The row owns an explicit Tag field and persists its canonical description with the inserted history.
 
 A failed persistence attempt leaves the draft visible and canonical in-memory history unchanged under the existing recovery contract. A successful commit closes edit mode. Esc closes edit mode without a write.
 
@@ -120,41 +121,29 @@ After application, left/right shifts the whole custom window by its own inclusiv
 
 ## Balance historical activity editor
 
-HISTORY-001C introduced the first historical editor from completed Idle detail rows. HISTORY-001D generalizes that
-interaction into one Balance-wide **Log past activity…** operation. The configurable `balance_log_activity` action
-defaults to `l`. From the Balance summary it opens the generalized layer/From/To editor; from a layer-detail ledger it
-is contextualized to that layer and opens the same new-entry row used by `+ Add entry…`. The command palette follows
-the same current-view semantics rather than escaping a layer ledger into a different editor.
+The layer-detail ledger is the canonical historical-correction surface. The configurable `balance_log_activity` action
+defaults to `l`; from the Balance summary it enters the currently selected layer and opens that layer's synthetic
+`+ Add entry…` row, while inside Layer Detail it opens the same row directly. The former separate Balance-wide
+Layer/From/To editor is retired rather than maintained as a parallel correction interface. The command palette follows
+the same current-view semantics.
 
-The inline editor owns three fields:
+Add and existing-row Edit share one correction planner/executor. The editor owns Tag plus complete civil start/end
+boundaries. A fresh Add defaults to a recent canonical interval; Edit starts from the selected stable source row.
+`From < To <= now` remains mandatory. Time owned only by the selected source and implicit Idle may be reassigned
+without confirmation. If the requested correction changes another explicit completed entry or relevant current recorded
+activity, the layer hero is temporarily replaced by the centered Before/After collateral card; Enter applies exactly
+the observed plan and Esc returns to editing. Authority changes invalidate that preview rather than silently applying a
+stale plan.
 
-- Layer: an existing active layer, including Idle, cycled with Left/Right;
-- From: civil timestamp `YYYY-MM-DD HH:MM:SS`;
-- To: civil timestamp `YYYY-MM-DD HH:MM:SS`.
+Historical editing never selects a new current activity. When the requested interval intersects the active generation,
+persistence may finalize displaced past time and rebase/restart the same selected live layer after the corrected
+interval. The live layer and live description remain protected. SQLite publishes chronology rewriting, active-generation
+rebasing when needed, affected daily-contribution replacement, checkpoint state, and bounded retained-sediment recolor
+atomically before memory installs the result.
 
-A fresh editor starts with the currently selected live layer when non-Idle, otherwise the first non-Idle layer,
-and defaults to the last fifteen minutes of canonical history ending at the current active-preview snapshot time. The focused field owns its input; Tab/BackTab moves focus, Enter validates/commits,
-and Esc cancels. Ordinary bound action characters do not escape the editor; only mandatory `Ctrl-C` remains an
-application-level emergency command.
-
-`From < To <= now` is mandatory. The operation may span true gaps and any number of completed rows. Idle and
-already-target-layer time do not require confirmation. Any intersecting different explicit layer, including the
-historical portion of the active generation, produces one visible collision preview. Enter on that preview
-confirms replacement of exactly the observed plan; Esc returns to editing. If canonical authority changes before
-confirmation, the old plan token is rejected and the user must preview the new collision set.
-
-Historical editing never selects a new current activity. When the requested interval intersects the active
-generation, persistence may finalize displaced past time and rebase/restart the same selected live layer after the
-corrected interval. When the requested layer already matches the selected live layer and chronology becomes
-continuous backward to it, the active start may move earlier. The live layer and live description remain
-unchanged; changing what the user is doing now belongs to ordinary Main/Layer switching.
-
-Persistence owns the mutation. SQLite publishes completed-history carving/insertion, active-generation rebasing when needed, every affected daily-contribution replacement, and any HISTORY-001E retained current-sediment recolor in one transaction. Runtime checkpoint sediment is updated to the same committed `SandState`, and memory installs that exact state only after commit. Recolor is category-composition reconciliation only: true gaps do not fabricate grains, cleared source mass may limit the applied amount, and captured canonical daily photographs remain unchanged.
-
-The Balance-wide HISTORY-001D editor still does not expose a historical Tag field and therefore inserts an empty
-description instead of borrowing the current live tag. Layer-detail `+ Add entry…` is the deliberate scoped exception:
-it exposes an explicit Tag field and persists exactly that draft description. If the active generation is rebased,
-its persisted live description remains protected.
+The Tag field uses STRATA-D072 semantics: semicolon-separated values are canonicalized as individual attribution tags
+and persisted in the existing session description field. Active-generation rebasing preserves the persisted live
+description.
 
 ### Balance layer detail ledger
 
@@ -163,32 +152,42 @@ Balance to one layer's ledger. The frame title is the layer name; the global top
 side-border arrows, and ordinary instruction footer are absent. The selected report interval remains the same centered
 bottom-border boundary object used by the parent Balance view.
 
-The layer hero contains only two objects: the layer's signed contribution for the selected interval and one
-centered influence meter. The meter reuses the parent Balance track/equilibrium grammar but is deliberately **not** an
-independently normalized meter. The parent Balance displacement defines the maximum visual envelope for that report
-window. A layer's marker uses its share of its own polarity-side aggregate inside that envelope, preserving the
-layer's sign; therefore a detail marker can pull to the opposite side of equilibrium but can never sit farther from
-center than the parent Balance marker. If the parent is at equilibrium, every layer influence marker collapses to
-center. This makes the detail meter answer how strongly the selected layer participates in the parent displacement,
-not where Balance would land if that layer existed alone.
+The layer hero contains the layer's signed contribution for the selected interval and the same recorded-time meter used
+by Balance. STRATA-D071 makes both projections independent on one shared scale: the full line is
+`summary.total_seconds`, including Idle, while the Layer Detail marker is that layer's signed contribution divided by
+the same denominator. The global marker does not define an envelope. Exact zero alone occupies equilibrium; every
+representable non-zero contribution receives at least one cell toward its sign, and the meter consumes the available
+instrument width.
 
 Below the hero, the body is the editable layer ledger described above. Multiple operational-day slices belonging to
 one canonical completed session project as one ledger row within the selected window, so cross-day sessions are not
 presented as unrelated editable records. The synthetic `+ Add entry…` row is the final ordinary row for active layer
 identities; archived layers remain browse/edit-only.
 
+`balance_filter`, default `f`, enters/toggles tag filtering on the selected ledger row. The filter is an explicit OR-set
+of individual tags rather than a generated combination cycle. A matching row remains normal; a nonmatching row remains
+in place but is dimmed, preserving chronology and making additional candidates directly reachable. On a multi-tag row,
+filter focus brackets one tag and Left/Right moves that focus among the row's tags; `f` toggles only the focused tag.
+An untagged row is filterable as untagged even though its ordinary display falls back to the layer name. Esc first
+leaves tag focus, then clears an active filter, and only then resumes ordinary Layer Detail back/close behavior. The
+selected filter survives period navigation inside the same layer.
+
+When a filter is active, the hero subtotal and marker use the union of matching ledger rows, counting each row once even
+if it matches multiple selected tags. Only the numerator changes; STRATA-D071's full selected-period
+`summary.total_seconds` remains the denominator.
+
 ### Balance summary instrument
 
 The default Balance summary presents a bipolar instrument above the unchanged category rows:
 
 - The left total sums negative `balance_seconds`, the centered value is the authoritative report net, and the right total sums positive `balance_seconds`.
-- The meter normalizes net displacement over polarized time only. Idle remains a normal row and contributes zero to both signed sides. With no polarized time, the marker rests at the center; all-negative/all-positive inputs reach the respective usable meter ends.
+- The meter projects net displacement over the selected period's full `summary.total_seconds`, including Idle. Exact zero alone rests at center; representable non-zero values receive at least one cell toward their sign, and the meter uses the available instrument width rather than a fixed cap.
 - The instrument uses responsive Ratatui geometry, with independently aligned totals and a meter sharing one exact centered width. Layer and the default Balance summary share one centered overlay rule: content defines a hard minimum, one third of the current terminal defines the proportional comfort floor, and configured frame margins provide the final clamp. This preserves breathing room on large terminals while preventing instrument overlap on narrow ones.
 - Layer and the default Balance summary use a fixed one-cell horizontal content inset at every ordinary modal size rather than edge-hugging content, width-growing side padding, or a fixed narrow card. Only a physically tiny inner area that cannot retain even one content cell may collapse that inset. Layer uses exactly one top/bottom content cell whenever two spare rows exist, collapsing that vertical inset only when constrained, while Balance keeps its compact category rows and explicit breathing rows around the totals/meter/list groups, including a reserved bottom breathing row when height permits. Wider Balance rows may therefore retain a large name-to-metric gap; that is preferred over consuming surplus width as larger modal padding.
 - The selected report interval is the sole centered bottom-border object with left/right navigation chevrons. It always shows both interval boundaries with a spaced en dash; the selected `[`/`]` endpoint is bracketed in place. Visible Day/Week/Month/Range labels, side-border arrows, and ordinary action hints are removed from the default summary; configured actions remain reachable through their existing routes, Settings, and the command palette.
 - In the default summary, the frame follows the selected layer color just as Layer does; the left/right aggregate signs alone carry negative/positive polarity color while their duration digits remain subdued, and the centered net remains fully polarity-colored. Historical snapshot provenance remains explicit model authority but is omitted from normal-summary chrome. Detail, range-edit, activity-edit, and collision-confirmation modes keep their existing interaction guidance.
 
-This is presentation-only. Report arithmetic, interval semantics, historical-assignment behavior, collision confirmation, keymap authority, and command-palette reachability remain unchanged.
+The default-summary instrument geometry is presentation-only. STRATA-D072 filtered Layer Detail intentionally changes the displayed layer numerator as specified above; interval semantics, historical-assignment behavior, collision confirmation, keymap authority, and command-palette reachability otherwise remain unchanged.
 
 ## Settings and palette truth
 
@@ -215,7 +214,7 @@ The default contextual routes are intentionally small:
 
 The former `main.balance_today` fallback, which could turn the Balance-day key into Detach on Main when Detach was unbound, is retired as misplaced interaction.
 
-Balance-specific physical keys (`t`, `w`, `m`, `r`, `l`, `[`, `]`) own historical interaction inside Balance. They are not hidden Main shortcuts. The command palette remains the deliberate universal launcher: **Log past activity…**, **Custom range…**, both range-boundary selectors, and Balance period choices may be invoked from anywhere and explicitly enter Balance.
+Balance-specific physical keys (`t`, `w`, `m`, `r`, `l`, `f`, `[`, `]`) own historical interaction inside Balance. They are not hidden Main shortcuts. The command palette remains the deliberate universal launcher for **Add entry…**, **Custom range…**, both range-boundary selectors, and Balance period choices; tag filtering remains contextual to an already-open Layer Detail because it operates on the selected ledger row.
 
 Terminal character bindings are defined by the character/case event Strata receives, not by a promise to distinguish physical Shift from Caps Lock on every terminal protocol. Strata does not add Caps-Lock inversion or terminal-specific keyboard requirements. The bracket range controls require no Shift-letter distinction.
 

@@ -5,9 +5,13 @@ state: active
 created: 2026-08-01
 updated: 2026-09-28
 authority: working
-summary: "BALANCE-METER-LAYER-PARITY-001 owner review supersedes D069 and is native-green for the wide/nonzero meter and true inline ledger editor; draft PR #109 now includes the amendment."
-next: Owner-review PR #109's loaded-profile wide/normal/constrained editor and meter behavior; keep SEDIMENT-016 separate.
+summary: "BALANCE-TAG-FILTER-UX-001 is native-green for semicolon multi-tag attribution, dim canonical completion, and Layer Detail OR filtering with dimmed chronology on the D071 meter scale; draft PR #110 is stacked on #109."
+next: Owner-review PR #110's loaded-profile multi-tag attribution and OR-filter flow; keep SEDIMENT-016 separate.
 ---
+
+## BALANCE-TAG-FILTER-UX-001 multi-tag attribution and contextual filtering — 2026-09-28
+
+**NATIVE-GREEN CANDIDATE / D072 CERTIFIED / DRAFT #110 PUBLISHED:** on the validated PR #109 lineage, STRATA-D072 treats semicolon-separated tags as independent full-duration attribution facets in the existing session description. Layer Detail `f` builds an explicit OR-set without hiding chronology, nonmatching rows remain visible but dim, multi-tag rows expose temporary Left/Right tag focus, and filtered subtotal/meter projection counts each matching ledger row once while retaining D071's complete selected-period `summary.total_seconds` denominator. Known tag completion is shown as a dim suffix and canonicalized on acceptance/commit. Formatter, strict Clippy, all-feature tests (573 library + 24 integration/process tests; 20 ignored), CLI help, loaded-profile 120×40 multi-tag completion/filter/add smoke, SQLite doctor, and diff hygiene pass. No schema change. Draft PR #110 is stacked on #109. See `notebook/work/BALANCE-TAG-FILTER-UX-001.md`.
 
 ## BALANCE-METER-LAYER-PARITY-001 shared meter and layer-detail parity — 2026-09-28
 

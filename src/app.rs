@@ -40,6 +40,7 @@ mod render_views;
 mod report_modal_view;
 mod report_state;
 mod settings_view;
+mod tagging;
 mod terminal_lifecycle;
 mod time_format;
 mod ui_helpers;
@@ -119,6 +120,12 @@ enum ReportRangeField {
 enum ReportRangeBoundary {
     Start,
     End,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ReportTagFacet {
+    Tag(String),
+    Untagged,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1066,6 +1073,8 @@ struct App {
     report_range_edit: Option<ReportRangeEditState>,
     report_logs_category_id: Option<CategoryId>,
     report_log_selected_index: usize,
+    report_tag_filter: Vec<ReportTagFacet>,
+    report_filter_tag_index: Option<usize>,
     ledger_entry_edit: Option<LedgerEntryEditState>,
     report_snapshot_end_day: Option<String>,
     report_snapshot_artifact: Option<SedimentSnapshot>,
@@ -1167,6 +1176,8 @@ impl App {
             report_range_edit: None,
             report_logs_category_id: None,
             report_log_selected_index: 0,
+            report_tag_filter: Vec::new(),
+            report_filter_tag_index: None,
             ledger_entry_edit: None,
             report_snapshot_end_day: None,
             report_snapshot_artifact: None,
@@ -1397,6 +1408,8 @@ impl App {
         self.report_range_edit = None;
         self.report_logs_category_id = None;
         self.report_log_selected_index = 0;
+        self.report_tag_filter.clear();
+        self.report_filter_tag_index = None;
         self.ledger_entry_edit = None;
         self.report_snapshot_end_day = None;
         self.report_snapshot_artifact = None;
@@ -1411,6 +1424,8 @@ impl App {
         self.ui_mode = UiMode::Main;
         self.report_logs_category_id = None;
         self.report_log_selected_index = 0;
+        self.report_tag_filter.clear();
+        self.report_filter_tag_index = None;
         self.ledger_entry_edit = None;
         self.report_range_boundary = None;
         self.report_range_edit = None;
@@ -1616,6 +1631,7 @@ impl App {
         if self.show_settings {
             if self.in_balance_modal() {
                 self.report_range_boundary = None;
+                self.report_filter_tag_index = None;
             }
             self.settings_selected_index = 0;
             self.settings_scroll = 0;
@@ -1636,6 +1652,7 @@ impl App {
         if self.show_command_palette {
             if self.in_balance_modal() {
                 self.report_range_boundary = None;
+                self.report_filter_tag_index = None;
             }
             self.command_palette_query.clear();
             self.command_palette_feedback = None;

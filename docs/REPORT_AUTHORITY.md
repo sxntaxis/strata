@@ -1,6 +1,6 @@
 # Report and export authority
 
-Status: accepted authority; STRATA-D071 supersedes D069 and is implemented/natively certified
+Status: accepted authority; STRATA-D071 meter parity and STRATA-D072 multi-tag/filter semantics are implemented/natively certified
 Last reviewed: 2026-09-28
 
 ## Purpose
@@ -43,6 +43,13 @@ falls back to the selected layer name without writing that fallback into storage
 is bracketed in place, dates remain visible when the selected period needs them, cross-civil-date edits use one explicit
 `start → end` temporal cell, and Effect remains blank while chronology is being edited rather than showing stale data.
 
+A non-empty Tag field may carry multiple independent attribution tags. The existing session description remains the
+only persisted field; canonical serialization trims/deduplicates tags case-insensitively and writes them as an ordered
+`; `-separated list such as `Renzo; Anibal`. The tags do not partition the row's elapsed time. A one-hour row with
+`Renzo; Anibal` represents one hour of wall-clock chronology and one full hour attributable to Renzo plus one full hour
+attributable to Anibal when attribution is examined per tag. Per-category tag history is completion/canonical-spelling
+metadata, not a second chronological ledger.
+
 Above the ledger, the layer hero shows the selected layer's signed `balance_seconds` sum and the same recorded-time
 meter used by the default Balance summary. The full horizontal line represents `summary.total_seconds` for the selected
 period, including Idle. The global Balance marker projects `summary.total_balance_seconds / summary.total_seconds`, and
@@ -54,12 +61,22 @@ non-zero value receives at least one cell of displacement toward its sign. The m
 width rather than imposing a fixed 45-cell cap. Layer Detail is therefore a directly comparable projection on the same
 scale, not a subscale derived from the parent marker's already-quantized displacement.
 
+Layer Detail may additionally project an explicit tag filter without hiding chronology. The filter is an OR-set of
+individual tag facets. Rows matching any selected tag remain normal and nonmatching rows remain present but dimmed; an
+untagged row is a distinct filter facet even though its ordinary Tag cell uses the layer-name display fallback. The
+filtered hero subtotal and marker sum each matching ledger row exactly once, even when one row carries or matches more
+than one selected tag. Only that numerator changes: the meter denominator remains the complete selected-period
+`summary.total_seconds` required by STRATA-D071. Consequently a one-hour `Renzo; Anibal` row in a one-hour period may
+be fully attributable to both tags separately, while a combined `Renzo OR Anibal` Layer Detail filter still projects
+that one ledger row as one hour rather than two. The selected tag filter persists while the user navigates report
+periods inside the same layer.
+
 ## Explicit historical correction
 
-Balance browsing remains a projection until the user explicitly enters a ledger mutation. Historical mutation has
-two deliberate entry points: the Balance-wide **Log past activity…** assignment operation and the scoped layer-detail
-ledger editor. The global operation states one past interval plus one existing target layer; the layer ledger can also
-edit one completed canonical entry in place or add a new entry already scoped to the selected layer.
+Balance browsing remains a projection until the user explicitly enters a ledger mutation. The layer-detail ledger is
+the canonical historical-correction surface. `+ Add entry…` creates past activity for that layer, Confirm on an existing
+completed row edits that stable source entry, and `balance_log_activity` / `l` is only a shortcut into the same Add row
+for the currently selected Balance layer. The former separate Balance-wide Layer/From/To editor is retired.
 
 HISTORY-001C established the first safe transactional primitive by reclassifying a positive sub-interval of one
 completed Idle session while conserving canonical whole seconds, regenerating affected `daily-contribution`
@@ -85,23 +102,20 @@ HISTORY-001D generalizes that primitive to arbitrary historical assignment with 
 - SQLite completed chronology, active-generation/checkpoint authority, affected `daily-contribution` artifacts,
   and the in-memory projection publish coherently.
 
-A layer-ledger **existing-entry edit** is narrower than generalized assignment: it preserves the selected completed
-session's layer and stable row identity while replacing its Tag and complete start/end boundary. It requires
-`start < end <= now`, rejects any overlap with another completed canonical session or the protected current activity,
-replaces affected daily-contribution projections atomically, and reloads memory only after SQLite commit. It does not
-silently carve neighboring history. A layer-ledger **Add entry** instead reuses generalized assignment, including its
-collision preview/replacement semantics, with the selected layer fixed and the ledger Tag persisted.
-
-The transaction rejects pre-existing overlapping canonical history rather than rewriting ambiguous double-counted
-authority. Whole-second allocation continues to use retained boundary provenance and the existing cumulative
-allocator, including fractional UTC boundaries and operational-day cuts.
+Layer-ledger **Edit** and **Add entry** use one historical-correction planner/executor. Edit supplies the selected
+completed source identity so that source may be replaced while preserving its stable identity where the corrected row
+continues; Add has no source identity. Both require `start < end <= now`. Time owned only by the selected source and
+implicit Idle may be reassigned without a warning. If the correction would carve, split, remove, or otherwise change a
+different explicit completed entry or relevant current recorded activity, Strata presents the exact Before/After
+collateral preview and requires confirmation for that observed plan before committing. Unowned chronology is implicit
+Idle and need not exist as a materialized Idle row. Whole-second allocation continues to use retained boundary
+provenance and the existing cumulative allocator, including fractional UTC boundaries and operational-day cuts.
 
 HISTORY-001D established ledger truth without changing sediment. HISTORY-001E extends that same assignment transaction with bounded current-pile reconciliation: canonical seconds reclassified from one existing category to another request an in-place transfer of retained source-category sediment into the target category. True-gap seconds create no current grains, and prior clears may limit how much source mass remains available. Missing visual mass never blocks the ledger correction and unrelated categories are never consumed to force the current pile to equal historical accounting. First-write authentic day-end snapshots remain immutable.
 
-The Balance-wide inline editor assigns layer and From/To time. It still does not infer or expose a historical Tag, so
-rows inserted through that global route use an empty description. The layer-detail ledger has a separate explicit Tag
-field for its add/edit row and persists exactly that description. Active-generation rebasing preserves the persisted
-live description.
+The unified layer-detail Add/Edit row owns the historical Tag field and persists its canonical description, including
+semicolon-separated multi-tag attribution under STRATA-D072. `balance_log_activity` / `l` enters this same row rather
+than a second global editor. Active-generation rebasing preserves the persisted live description.
 
 ## Provisional active time
 

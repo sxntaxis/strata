@@ -77,13 +77,14 @@ pub(crate) enum Action {
     ReportRangeStart,
     ReportRangeEnd,
     LogActivity,
+    ReportFilter,
 
     SettingsTop,
     SettingsBottom,
 }
 
 impl Action {
-    const ALL: [Action; 33] = [
+    const ALL: [Action; 34] = [
         Action::Quit,
         Action::ToggleCommandPalette,
         Action::OpenCategoryModal,
@@ -115,6 +116,7 @@ impl Action {
         Action::ReportRangeStart,
         Action::ReportRangeEnd,
         Action::LogActivity,
+        Action::ReportFilter,
         Action::SettingsTop,
         Action::SettingsBottom,
     ];
@@ -159,6 +161,7 @@ impl Action {
             Action::ReportRangeStart => "balance_range_start",
             Action::ReportRangeEnd => "balance_range_end",
             Action::LogActivity => "balance_log_activity",
+            Action::ReportFilter => "balance_filter",
 
             Action::SettingsTop => "settings_top",
             Action::SettingsBottom => "settings_bottom",
@@ -207,6 +210,7 @@ impl Action {
             "balance_range_start" | "report_range_start" => Some(Self::ReportRangeStart),
             "balance_range_end" | "report_range_end" => Some(Self::ReportRangeEnd),
             "balance_log_activity" | "report_log_activity" => Some(Self::LogActivity),
+            "balance_filter" | "report_filter" => Some(Self::ReportFilter),
 
             "settings_top" | "atlas_top" | "help_top" => Some(Self::SettingsTop),
             "settings_bottom" | "atlas_bottom" | "help_bottom" => Some(Self::SettingsBottom),
@@ -251,6 +255,7 @@ impl Action {
             Action::ReportRangeStart => "Select the Balance range start boundary",
             Action::ReportRangeEnd => "Select the Balance range end boundary",
             Action::LogActivity => "Add a ledger entry to the selected Balance layer",
+            Action::ReportFilter => "Toggle tag filtering in Balance layer detail",
 
             Action::SettingsTop => "Jump Settings to top",
             Action::SettingsBottom => "Jump Settings to bottom",
@@ -293,6 +298,7 @@ impl Action {
             Action::ReportRangeStart => "Range start",
             Action::ReportRangeEnd => "Range end",
             Action::LogActivity => "Add entry…",
+            Action::ReportFilter => "Filter tags",
 
             Action::SettingsTop => "Jump to top",
             Action::SettingsBottom => "Jump to bottom",
@@ -334,7 +340,8 @@ impl Action {
             | Action::ReportRange
             | Action::ReportRangeStart
             | Action::ReportRangeEnd
-            | Action::LogActivity => ActionCategory::ReportModal,
+            | Action::LogActivity
+            | Action::ReportFilter => ActionCategory::ReportModal,
 
             Action::SettingsTop | Action::SettingsBottom => ActionCategory::Settings,
         }
@@ -867,7 +874,7 @@ fn default_true() -> bool {
     true
 }
 
-const DEFAULT_BINDINGS: [(&str, Action); 35] = [
+const DEFAULT_BINDINGS: [(&str, Action); 36] = [
     ("q", Action::Quit),
     ("ctrl-p", Action::ToggleCommandPalette),
     ("enter", Action::Confirm),
@@ -900,6 +907,7 @@ const DEFAULT_BINDINGS: [(&str, Action); 35] = [
     ("[", Action::ReportRangeStart),
     ("]", Action::ReportRangeEnd),
     ("l", Action::LogActivity),
+    ("f", Action::ReportFilter),
     ("home", Action::SettingsTop),
     ("g", Action::SettingsTop),
     ("end", Action::SettingsBottom),
@@ -1471,6 +1479,19 @@ mod tests {
         let l = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE);
 
         assert_eq!(keymap.action_for_key_event(l), Some(Action::LogActivity));
+    }
+
+    #[test]
+    fn default_balance_filter_key_is_configurable() {
+        let keymap = default_keymap();
+        let f = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE);
+
+        assert_eq!(keymap.action_for_key_event(f), Some(Action::ReportFilter));
+        assert_eq!(
+            Action::from_config_name("balance_filter"),
+            Some(Action::ReportFilter)
+        );
+        assert_eq!(Action::ReportFilter.category(), ActionCategory::ReportModal);
     }
 
     #[test]
