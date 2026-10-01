@@ -207,10 +207,7 @@ mod tests {
 
     #[test]
     fn release_candidate_covers_case_leap_and_year_rollover_edges() {
-        assert_eq!(
-            normalize_date_text("SEP", current()).unwrap(),
-            "2026-09-01"
-        );
+        assert_eq!(normalize_date_text("SEP", current()).unwrap(), "2026-09-01");
         assert_eq!(
             normalize_date_text("February 29 2028", current()).unwrap(),
             "2028-02-29"
