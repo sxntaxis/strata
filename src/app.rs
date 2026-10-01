@@ -31,6 +31,7 @@ mod balance_instrument;
 mod category_modal_view;
 mod category_state;
 mod command_palette_view;
+mod date_input;
 mod event_handlers;
 mod ledger_state;
 mod overlay_layout;
@@ -153,7 +154,14 @@ struct ReportRangeEditState {
     to: String,
     active_field: ReportRangeField,
     select_all: bool,
-    error: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SystemNoticeState {
+    severity: SystemDialogSeverity,
+    subtitle: String,
+    message: String,
+    restore_selected_index: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -172,10 +180,11 @@ impl ReportRangeEditState {
             target.clear();
             self.select_all = false;
         }
-        if target.len() < 10 {
-            target.push(character);
+        let mut candidate = target.clone();
+        candidate.push(character);
+        if date_input::date_candidate_is_well_shaped(&candidate) {
+            *target = candidate;
         }
-        self.error = None;
     }
 
     fn backspace(&mut self) {
@@ -189,7 +198,22 @@ impl ReportRangeEditState {
         } else {
             target.pop();
         }
-        self.error = None;
+    }
+
+    fn normalize_active(&mut self, current: NaiveDate) -> Result<(), String> {
+        let target = match self.active_field {
+            ReportRangeField::From => &mut self.from,
+            ReportRangeField::To => &mut self.to,
+        };
+        *target = date_input::normalize_date_text(target, current)?;
+        self.select_all = false;
+        Ok(())
+    }
+
+    fn normalize_all(&mut self, current: NaiveDate) -> Result<(), String> {
+        self.from = date_input::normalize_date_text(&self.from, current)?;
+        self.to = date_input::normalize_date_text(&self.to, current)?;
+        Ok(())
     }
 
     fn switch_field(&mut self) {
@@ -198,7 +222,6 @@ impl ReportRangeEditState {
             ReportRangeField::To => ReportRangeField::From,
         };
         self.select_all = true;
-        self.error = None;
     }
 }
 
@@ -1095,7 +1118,6 @@ struct App {
     modal_active_description_snapshot: String,
     modal_tag_text_editing: bool,
     modal_category_name_draft: String,
-    modal_category_name_error: Option<String>,
     modal_active_description_dirty: bool,
     modal_renaming_category: bool,
     category_tags: storage::CategoryTagsState,
@@ -1112,6 +1134,7 @@ struct App {
     report_layer_delete_confirmation: Option<CategoryId>,
     report_entry_delete_confirmation: Option<LedgerSelectionIdentity>,
     system_dialog_selected_index: usize,
+    system_notice: Option<SystemNoticeState>,
     report_logs_category_id: Option<CategoryId>,
     report_log_selected_index: usize,
     report_log_selected_identity: Option<LedgerSelectionIdentity>,
@@ -1130,7 +1153,6 @@ struct App {
     detach_requested: bool,
     keymap: keybindings::Keymap,
     runtime_settings: RuntimeSettings,
-    keymap_error: Option<String>,
     show_command_palette: bool,
     command_palette_query: String,
     command_palette_feedback: Option<String>,
@@ -1170,7 +1192,6 @@ impl App {
             keymap,
             runtime_settings,
         } = loaded;
-        let keymap_error = None;
         let appearance = AppearanceState::load(ignore_config)?;
 
         let mut tracker = TimeTracker::new();
@@ -1211,7 +1232,6 @@ impl App {
             modal_active_description_snapshot: String::new(),
             modal_tag_text_editing: false,
             modal_category_name_draft: String::new(),
-            modal_category_name_error: None,
             modal_active_description_dirty: false,
             modal_renaming_category: false,
             category_tags,
@@ -1228,6 +1248,7 @@ impl App {
             report_layer_delete_confirmation: None,
             report_entry_delete_confirmation: None,
             system_dialog_selected_index: 0,
+            system_notice: None,
             report_logs_category_id: None,
             report_log_selected_index: 0,
             report_log_selected_identity: None,
@@ -1256,7 +1277,6 @@ impl App {
             detach_requested: false,
             keymap,
             runtime_settings,
-            keymap_error,
             show_command_palette: false,
             command_palette_query: String::new(),
             command_palette_feedback: None,
@@ -1471,7 +1491,6 @@ impl App {
         self.modal_active_description_snapshot.clear();
         self.modal_tag_text_editing = false;
         self.modal_category_name_draft.clear();
-        self.modal_category_name_error = None;
         self.modal_renaming_category = false;
         self.modal_tag_index = None;
         self.modal_tag_cycle_prefix = None;
@@ -1844,7 +1863,6 @@ impl App {
         self.keymap = loaded.keymap;
         self.runtime_settings = loaded.runtime_settings;
         set_runtime_settings(self.runtime_settings);
-        self.keymap_error = None;
         self.render_needed = true;
     }
 
@@ -1871,7 +1889,7 @@ impl App {
                 self.apply_loaded_keybindings(loaded);
             }
             Err(err) => {
-                self.keymap_error = Some(err);
+                self.present_error("Settings reload failed", err);
             }
         }
 
@@ -3679,8 +3697,7 @@ fn run_application_loop(
             if let Err(error) =
                 command_server.process_pending(|command| app.execute_command(command))
             {
-                app.keymap_error = Some(format!("Remote control error: {error}"));
-                app.render_needed = true;
+                app.present_error("Remote control failed", error.to_string());
             }
 
             let now = Instant::now();

@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
 };
 
 use super::{App, overlay_layout};
@@ -31,6 +31,69 @@ impl App {
         self.render_needed = true;
     }
 
+    pub(super) fn present_warning(
+        &mut self,
+        subtitle: impl Into<String>,
+        message: impl Into<String>,
+    ) {
+        self.system_notice = Some(super::SystemNoticeState {
+            severity: SystemDialogSeverity::Warning,
+            subtitle: subtitle.into(),
+            message: message.into(),
+            restore_selected_index: self.system_dialog_selected_index,
+        });
+        self.system_dialog_selected_index = 0;
+        self.render_needed = true;
+    }
+
+    pub(super) fn present_error(
+        &mut self,
+        subtitle: impl Into<String>,
+        message: impl Into<String>,
+    ) {
+        self.system_notice = Some(super::SystemNoticeState {
+            severity: SystemDialogSeverity::Error,
+            subtitle: subtitle.into(),
+            message: message.into(),
+            restore_selected_index: self.system_dialog_selected_index,
+        });
+        self.system_dialog_selected_index = 0;
+        self.render_needed = true;
+    }
+
+    pub(super) fn dismiss_system_notice(&mut self) {
+        if let Some(notice) = self.system_notice.take() {
+            self.system_dialog_selected_index = notice.restore_selected_index;
+        }
+        self.render_needed = true;
+    }
+
+    pub(super) fn render_system_notice(&self, frame: &mut Frame, terminal: Rect) {
+        let Some(notice) = self.system_notice.as_ref() else {
+            return;
+        };
+        let natural = notice
+            .subtitle
+            .chars()
+            .count()
+            .max(notice.message.chars().count())
+            .max("Go back".chars().count())
+            .saturating_add(2);
+        self.render_system_dialog(
+            frame,
+            terminal,
+            notice.severity,
+            Line::from(Span::styled(
+                notice.subtitle.clone(),
+                Style::default().add_modifier(Modifier::BOLD),
+            )),
+            vec![Line::from(notice.message.clone())],
+            vec![Line::from("Go back")],
+            0,
+            u16::try_from(natural).unwrap_or(u16::MAX).max(32),
+        );
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(super) fn render_system_dialog(
         &self,
@@ -51,17 +114,41 @@ impl App {
             SystemDialogSeverity::Warning => "WARNING",
             SystemDialogSeverity::Error => "ERROR",
         };
-        let inner_height = u16::try_from(
-            1usize
-                .saturating_add(1)
-                .saturating_add(body.len())
-                .saturating_add(1)
-                .saturating_add(actions.len()),
-        )
-        .unwrap_or(u16::MAX);
+        let natural_content_width = body
+            .iter()
+            .map(|line| line.width())
+            .chain(actions.iter().map(|line| line.width()))
+            .chain(std::iter::once(subtitle.width()))
+            .max()
+            .unwrap_or(0);
+        let requested_inner_width = minimum_inner_width
+            .max(u16::try_from(natural_content_width.saturating_add(2)).unwrap_or(u16::MAX));
+        let max_inner_width = terminal
+            .width
+            .saturating_sub(
+                crate::constants::APP_LAYOUT_SETTINGS
+                    .frame_margin
+                    .saturating_mul(2),
+            )
+            .saturating_sub(2)
+            .max(1);
+        let effective_width = requested_inner_width.min(max_inner_width).max(1);
+        let wrapped_body_height = body
+            .iter()
+            .map(|line| {
+                let width = u16::try_from(line.width()).unwrap_or(u16::MAX);
+                width.saturating_add(effective_width.saturating_sub(1)) / effective_width
+            })
+            .map(|height| height.max(1))
+            .fold(0u16, u16::saturating_add);
+        let inner_height = 1u16
+            .saturating_add(1)
+            .saturating_add(wrapped_body_height)
+            .saturating_add(1)
+            .saturating_add(u16::try_from(actions.len()).unwrap_or(u16::MAX));
         let area = overlay_layout::centered_overlay_rect(
             terminal,
-            minimum_inner_width,
+            requested_inner_width,
             inner_height,
             1,
             3,
@@ -109,6 +196,6 @@ impl App {
                 lines.push(action.alignment(Alignment::Left));
             }
         }
-        frame.render_widget(Paragraph::new(lines), inner);
+        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
     }
 }

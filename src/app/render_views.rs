@@ -169,6 +169,10 @@ impl App {
             self.render_persistence_status(f, size);
             self.render_persistence_recovery(f, size);
         }
+
+        if self.system_notice.is_some() {
+            self.render_system_notice(f, size);
+        }
     }
 }
 

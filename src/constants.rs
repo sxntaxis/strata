@@ -77,7 +77,6 @@ pub const REPORT_MODAL_SETTINGS: ReportModalSettings = ReportModalSettings {
     summary_metric_width: 9,
     min_tag_width: 4,
     summary_name_gap: 4,
-    range_editor_min_width: 64,
 };
 
 pub const SETTINGS_LAYOUT: SettingsLayoutSettings = SettingsLayoutSettings {
@@ -151,7 +150,6 @@ pub struct ReportModalSettings {
     pub summary_metric_width: usize,
     pub min_tag_width: usize,
     pub summary_name_gap: usize,
-    pub range_editor_min_width: usize,
 }
 
 pub struct SettingsLayoutSettings {

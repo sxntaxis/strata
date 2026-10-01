@@ -1,7 +1,7 @@
 use ratatui::prelude::{Line, Span};
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, BorderType, Borders, Paragraph},
 };
@@ -72,34 +72,7 @@ impl App {
         f.render_widget(ratatui::widgets::Clear, modal_rect);
         f.render_widget(frame_block.clone(), modal_rect);
 
-        let inner = frame_block.inner(modal_rect);
-        let has_error = self.keymap_error.is_some();
-        let vertical = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints(if has_error {
-                vec![Constraint::Length(1), Constraint::Min(1)]
-            } else {
-                vec![Constraint::Min(1)]
-            })
-            .split(inner);
-
-        let body_rect = if has_error {
-            if let Some(err) = self.keymap_error.as_ref() {
-                let error_line = Line::from(vec![
-                    Span::styled(
-                        "config error: ",
-                        Style::default()
-                            .fg(self.theme_error())
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(err.to_string(), Style::default().fg(self.theme_status())),
-                ]);
-                f.render_widget(Paragraph::new(vec![error_line]), vertical[0]);
-            }
-            vertical[1]
-        } else {
-            vertical[0]
-        };
+        let body_rect = frame_block.inner(modal_rect);
 
         let rows = self.settings_rows(selected_item);
         let selected_row = rows

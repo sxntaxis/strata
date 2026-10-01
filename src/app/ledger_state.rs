@@ -184,7 +184,6 @@ pub(super) struct LedgerEntryEditState {
     pub(super) active_field: LedgerEntryField,
     pub(super) select_all: bool,
     pub(super) caret: usize,
-    pub(super) error: Option<String>,
     pub(super) confirmation: Option<LedgerCorrectionConfirmation>,
     pub(super) tag_cycle_prefix: Option<String>,
 }
@@ -213,7 +212,6 @@ impl LedgerEntryEditState {
             active_field: LedgerEntryField::Description,
             select_all: true,
             caret,
-            error: None,
             confirmation: None,
             tag_cycle_prefix: None,
         }
@@ -241,7 +239,6 @@ impl LedgerEntryEditState {
             active_field: LedgerEntryField::Description,
             select_all: true,
             caret,
-            error: None,
             confirmation: None,
             tag_cycle_prefix: None,
         }
@@ -267,7 +264,6 @@ impl LedgerEntryEditState {
             active_field: LedgerEntryField::Description,
             select_all: false,
             caret: 0,
-            error: None,
             confirmation: None,
             tag_cycle_prefix: None,
         }
@@ -401,18 +397,80 @@ impl LedgerEntryEditState {
         self.caret = self.active_value().chars().count();
     }
 
-    fn normalize_active_time(&mut self) {
+    fn normalize_active_time(&mut self) -> Result<bool, String> {
         if !matches!(
             self.active_field,
             LedgerEntryField::StartTime | LedgerEntryField::EndTime
         ) {
-            return;
+            return Ok(false);
         }
         let start_precision = Self::field_time_precision(&self.start_time);
         let end_precision = Self::field_time_precision(&self.end_time);
-        if let Some((start, end)) = self.effective_naive_bounds() {
-            self.store_naive_bounds(start, end, start_precision, end_precision);
+        let (start, end) = self
+            .effective_naive_bounds()
+            .ok_or_else(|| "time could not be normalized".to_string())?;
+        self.store_naive_bounds(start, end, start_precision, end_precision);
+        Ok(true)
+    }
+
+    pub(super) fn normalize_active_date(&mut self, current: NaiveDate) -> Result<bool, String> {
+        let field = self.active_field;
+        let raw = match field {
+            LedgerEntryField::StartDate => self.start_date.clone(),
+            LedgerEntryField::EndDate => self.end_date.clone(),
+            _ => return Ok(false),
+        };
+        let normalized = super::date_input::normalize_date_text(&raw, current)?;
+        match field {
+            LedgerEntryField::StartDate => {
+                self.start_date = normalized;
+                if self.dates_linked {
+                    self.end_date = self.start_date.clone();
+                }
+            }
+            LedgerEntryField::EndDate => self.end_date = normalized,
+            _ => {}
         }
+        self.caret = self.active_value().chars().count();
+        self.select_all = false;
+        self.confirmation = None;
+        Ok(true)
+    }
+
+    pub(super) fn normalize_all_dates(&mut self, current: NaiveDate) -> Result<(), String> {
+        self.start_date = super::date_input::normalize_date_text(&self.start_date, current)?;
+        if self.dates_linked {
+            self.end_date = self.start_date.clone();
+        } else {
+            self.end_date = super::date_input::normalize_date_text(&self.end_date, current)?;
+        }
+        if matches!(
+            self.active_field,
+            LedgerEntryField::StartDate | LedgerEntryField::EndDate
+        ) {
+            self.caret = self.active_value().chars().count();
+        }
+        self.confirmation = None;
+        Ok(())
+    }
+
+    pub(super) fn normalize_all_temporal(&mut self, current: NaiveDate) -> Result<(), String> {
+        self.normalize_all_dates(current)?;
+        let start_precision = Self::field_time_precision(&self.start_time);
+        let end_precision = Self::field_time_precision(&self.end_time);
+        let (start, end) = self
+            .effective_naive_bounds()
+            .ok_or_else(|| "time could not be normalized".to_string())?;
+        self.store_naive_bounds(start, end, start_precision, end_precision);
+        Ok(())
+    }
+
+    pub(super) fn normalize_active_input(&mut self, current: NaiveDate) -> Result<(), String> {
+        if self.normalize_active_date(current)? {
+            return Ok(());
+        }
+        self.normalize_active_time()?;
+        Ok(())
     }
 
     pub(super) fn reset_tag_cycle(&mut self) {
@@ -512,7 +570,6 @@ impl LedgerEntryEditState {
         }
         self.store_naive_bounds(start, end, start_precision, end_precision);
         self.select_all = false;
-        self.error = None;
         self.confirmation = None;
         self.tag_cycle_prefix = None;
         true
@@ -522,12 +579,10 @@ impl LedgerEntryEditState {
         self.active_field = field;
         self.select_all = true;
         self.caret = self.active_value().chars().count();
-        self.error = None;
         self.confirmation = None;
     }
 
     pub(super) fn next_field(&mut self) {
-        self.normalize_active_time();
         self.reset_tag_cycle();
         let fields = self.fields();
         let current = fields
@@ -538,7 +593,6 @@ impl LedgerEntryEditState {
     }
 
     pub(super) fn previous_field(&mut self) {
-        self.normalize_active_time();
         self.reset_tag_cycle();
         let fields = self.fields();
         let current = fields
@@ -592,7 +646,7 @@ impl LedgerEntryEditState {
         let valid = match active {
             LedgerEntryField::Description => true,
             LedgerEntryField::StartDate | LedgerEntryField::EndDate => {
-                character.is_ascii_digit() || character == '-'
+                super::date_input::date_candidate_accepts_character(character)
             }
             LedgerEntryField::StartTime | LedgerEntryField::EndTime => {
                 character.is_ascii_digit() || character == ':'
@@ -610,7 +664,7 @@ impl LedgerEntryEditState {
         let accepted = match active {
             LedgerEntryField::Description => true,
             LedgerEntryField::StartDate | LedgerEntryField::EndDate => {
-                candidate.chars().count() <= 10
+                super::date_input::date_candidate_is_well_shaped(&candidate)
             }
             LedgerEntryField::StartTime | LedgerEntryField::EndTime => {
                 time_candidate_is_well_shaped(&candidate)
@@ -627,7 +681,6 @@ impl LedgerEntryEditState {
         if active == LedgerEntryField::Description {
             self.reset_tag_cycle();
         }
-        self.error = None;
         self.confirmation = None;
     }
 
@@ -652,7 +705,6 @@ impl LedgerEntryEditState {
         if active == LedgerEntryField::Description {
             self.reset_tag_cycle();
         }
-        self.error = None;
         self.confirmation = None;
     }
 
@@ -679,7 +731,6 @@ impl LedgerEntryEditState {
         if active == LedgerEntryField::Description {
             self.reset_tag_cycle();
         }
-        self.error = None;
         self.confirmation = None;
     }
 }
@@ -691,6 +742,7 @@ mod tests {
         normalize_ledger_time_input, parse_ledger_time_input,
     };
     use crate::domain::CategoryId;
+    use chrono::NaiveDate;
 
     #[test]
     fn same_day_edit_cycles_without_redundant_end_date() {
@@ -869,5 +921,42 @@ mod tests {
         assert!(edit.adjust_active_temporal(1, true));
         assert_eq!(edit.start_date, "2026-02-28");
         assert_eq!(edit.end_date, "2026-02-28");
+    }
+    #[test]
+    fn named_date_normalization_uses_current_civil_year_and_carries_overflow() {
+        let current = NaiveDate::from_ymd_opt(2026, 9, 30).unwrap();
+        let mut edit = LedgerEntryEditState::existing(
+            7,
+            CategoryId::new(2),
+            "tag".to_string(),
+            "Sep 31".to_string(),
+            "10:30".to_string(),
+            "Sep 31".to_string(),
+            "12:00".to_string(),
+        );
+        edit.active_field = LedgerEntryField::StartDate;
+        edit.normalize_active_input(current).unwrap();
+        assert_eq!(edit.start_date, "2026-10-01");
+        assert_eq!(edit.end_date, "2026-10-01");
+    }
+
+    #[test]
+    fn invalid_time_is_rejected_at_the_semantic_boundary() {
+        let current = NaiveDate::from_ymd_opt(2026, 9, 30).unwrap();
+        let mut edit = LedgerEntryEditState::existing(
+            7,
+            CategoryId::new(2),
+            "tag".to_string(),
+            "2026-09-30".to_string(),
+            "1:".to_string(),
+            "2026-09-30".to_string(),
+            "12:00".to_string(),
+        );
+        edit.active_field = LedgerEntryField::StartTime;
+        assert!(edit.normalize_active_input(current).is_ok());
+        assert_eq!(edit.start_time, "01:00");
+
+        edit.start_time = "::".to_string();
+        assert!(edit.normalize_active_input(current).is_err());
     }
 }
