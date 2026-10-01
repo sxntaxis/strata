@@ -15,7 +15,11 @@ The interactive historical/report surface is named **Balance**. Day, week, and m
 
 `--today`, `--week`, and `--month` use the configured operational-day/calendar policy. `report --from YYYY-MM-DD --to YYYY-MM-DD` selects an inclusive range of operational-day keys; reversed or incomplete ranges fail.
 
-Balance exposes the same arbitrary-window contract through its `range` mode. The inline From/To editor accepts `YYYY-MM-DD`, validates `from <= to`, and applies one `ReportWindow`; it does not synthesize a different TUI-specific interval model. A custom window may be shifted backward or toward the present by its own inclusive span, but forward navigation never extends past the current operational day.
+Balance consumes the same inclusive `ReportWindow` authority, but its visible interval chrome is a boundary projection: the left date is the first included operational day and the right date is the exclusive boundary one day after the last included operational day. Thus internal `2026-09-21..2026-09-21` displays `Sep 21 – Sep 22`, and internal `2026-09-21..2026-09-27` displays `Sep 21 – Sep 28`. This is presentation/interaction semantics only; report filtering remains inclusive over `ReportWindow.start..=ReportWindow.end`.
+
+The Balance `[` and `]` actions select the visible start or exclusive-end boundary. Left/Right then moves that selected boundary by one operational day while preserving a minimum one-day window and preventing the included end from moving later than the current operational day. Without a selected boundary, Left/Right retains whole-window navigation.
+
+The inline `r` From/To editor uses the same visible boundary convention. It accepts `YYYY-MM-DD`, requires `From < To`, converts `To` to the inclusive internal end by subtracting one day, and then applies one ordinary `ReportWindow`; it does not synthesize a second TUI-specific interval model. A custom window may still be shifted backward or toward the present by its own inclusive span, but forward whole-window navigation never extends past the current operational day.
 
 A canonical session remains one row. Exact overlap slices contribute only the seconds that belong inside the selected operational-day range.
 

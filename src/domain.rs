@@ -110,6 +110,10 @@ pub struct BalanceReportEntry {
 
 #[derive(Debug, Clone)]
 pub struct BalanceReportSummary {
+    #[allow(
+        dead_code,
+        reason = "The CLI binary prints the report date from this shared summary"
+    )]
     pub date: String,
     pub entries: Vec<BalanceReportEntry>,
     pub total_seconds: usize,

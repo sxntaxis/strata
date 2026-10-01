@@ -18,7 +18,10 @@ use crate::sand::{
 };
 use crate::temporal;
 
-use super::{App, HistoricalPreviewState, PersistenceOperation, RecoveryAction};
+use super::{
+    App, HistoricalPreviewState, PersistenceOperation, RecoveryAction, ReportRangeBoundary,
+    ui_helpers,
+};
 
 fn build_historical_preview(
     snapshot: &SedimentSnapshot,
@@ -47,11 +50,58 @@ fn parse_report_range(from: &str, to: &str) -> Result<ReportWindow, String> {
             .map_err(|_| format!("{label} must use YYYY-MM-DD"))
     };
     let start = parse("From", from)?;
-    let end = parse("To", to)?;
-    if start > end {
-        return Err("From must be on or before To".to_string());
+    let end_exclusive = parse("To", to)?;
+    if start >= end_exclusive {
+        return Err("From must be before To".to_string());
     }
+    let end = end_exclusive
+        .checked_sub_signed(ChronoDuration::days(1))
+        .ok_or_else(|| "To boundary is outside the supported date range".to_string())?;
     ReportWindow::new(start, end)
+}
+
+fn shifted_report_boundary(
+    window: &ReportWindow,
+    boundary: ReportRangeBoundary,
+    direction: i8,
+    today: NaiveDate,
+) -> Option<ReportWindow> {
+    match (boundary, direction) {
+        (ReportRangeBoundary::Start, -1) => {
+            let start = window.start.checked_sub_signed(ChronoDuration::days(1))?;
+            ReportWindow::new(start, window.end).ok()
+        }
+        (ReportRangeBoundary::Start, 1) if window.start < window.end => {
+            let start = window.start.checked_add_signed(ChronoDuration::days(1))?;
+            ReportWindow::new(start, window.end).ok()
+        }
+        (ReportRangeBoundary::End, -1) if window.end > window.start => {
+            let end = window.end.checked_sub_signed(ChronoDuration::days(1))?;
+            ReportWindow::new(window.start, end).ok()
+        }
+        (ReportRangeBoundary::End, 1) if window.end < today => {
+            let end = window.end.checked_add_signed(ChronoDuration::days(1))?;
+            ReportWindow::new(window.start, end).ok()
+        }
+        _ => None,
+    }
+}
+
+fn report_range_edit_state(window: &ReportWindow) -> super::ReportRangeEditState {
+    let (to, error) = match ui_helpers::report_window_end_exclusive(window) {
+        Some(end) => (end.format("%Y-%m-%d").to_string(), None),
+        None => (
+            String::new(),
+            Some("To boundary is outside the supported date range".to_string()),
+        ),
+    };
+    super::ReportRangeEditState {
+        from: window.start.format("%Y-%m-%d").to_string(),
+        to,
+        active_field: super::ReportRangeField::From,
+        select_all: true,
+        error,
+    }
 }
 
 fn parse_historical_activity_timestamp(
@@ -313,6 +363,7 @@ impl App {
         let Ok(to) = format_civil(to) else {
             return false;
         };
+        self.report_range_boundary = None;
         self.report_range_edit = None;
         self.report_log_edit = None;
         self.historical_activity_edit = Some(super::HistoricalActivityEditState {
@@ -555,6 +606,7 @@ impl App {
         self.report_period = period;
         self.report_period_offset = 0;
         self.report_custom_window = None;
+        self.report_range_boundary = None;
         self.report_range_edit = None;
         self.historical_activity_edit = None;
         self.clear_report_snapshot_cache();
@@ -563,13 +615,8 @@ impl App {
 
     pub(super) fn begin_report_range_edit(&mut self) {
         let window = self.current_report_window();
-        self.report_range_edit = Some(super::ReportRangeEditState {
-            from: window.start.format("%Y-%m-%d").to_string(),
-            to: window.end.format("%Y-%m-%d").to_string(),
-            active_field: super::ReportRangeField::From,
-            select_all: true,
-            error: None,
-        });
+        self.report_range_boundary = None;
+        self.report_range_edit = Some(report_range_edit_state(&window));
         self.render_needed = true;
     }
 
@@ -597,6 +644,39 @@ impl App {
         self.report_range_edit = None;
         self.clear_report_snapshot_cache();
         self.sync_report_selection_for_interval();
+        true
+    }
+
+    pub(super) fn select_report_range_boundary(&mut self, boundary: ReportRangeBoundary) {
+        self.report_range_boundary = Some(boundary);
+        self.render_needed = true;
+    }
+
+    pub(super) fn clear_report_range_boundary(&mut self) {
+        if self.report_range_boundary.take().is_some() {
+            self.render_needed = true;
+        }
+    }
+
+    pub(super) fn move_report_range_boundary(&mut self, direction: i8) -> bool {
+        let Some(boundary) = self.report_range_boundary else {
+            return false;
+        };
+        let current = self.current_report_window();
+        let Some(shifted) =
+            shifted_report_boundary(&current, boundary, direction, operational_day_key_now())
+        else {
+            return false;
+        };
+        if shifted == current {
+            return false;
+        }
+
+        self.report_custom_window = Some(shifted);
+        self.report_period_offset = 0;
+        self.clear_report_snapshot_cache();
+        self.sync_report_selection_for_interval();
+        self.render_needed = true;
         true
     }
 
@@ -769,6 +849,7 @@ impl App {
             session_id,
             draft: row.description.clone(),
         });
+        self.report_range_boundary = None;
         self.render_needed = true;
         true
     }
@@ -991,10 +1072,11 @@ mod report_edit_state_tests {
 
     use super::{
         build_historical_preview, parse_historical_activity_timestamp, parse_report_range,
-        retain_report_edit_after_commit, shifted_custom_window_newer, shifted_custom_window_older,
+        report_range_edit_state, retain_report_edit_after_commit, shifted_custom_window_newer,
+        shifted_custom_window_older, shifted_report_boundary,
     };
     use crate::{
-        app::ReportLogEditState,
+        app::{ReportLogEditState, ReportRangeBoundary, ui_helpers},
         domain::{Category, CategoryId, OperationalDayPolicy, ReportWindow},
         sand::{SandState, SandStateGrain, SedimentSnapshot},
     };
@@ -1031,11 +1113,37 @@ mod report_edit_state_tests {
     }
 
     #[test]
-    fn custom_range_requires_iso_dates_and_chronological_bounds() {
-        let window = parse_report_range("2026-08-01", "2026-08-27").unwrap();
+    fn custom_range_editor_uses_exclusive_to_boundary() {
+        let window = parse_report_range("2026-08-01", "2026-08-28").unwrap();
         assert_eq!(window.label, "2026-08-01..2026-08-27");
-        assert!(parse_report_range("08/01/2026", "2026-08-27").is_err());
+        assert_eq!(
+            ui_helpers::report_window_end_exclusive(&window),
+            NaiveDate::from_ymd_opt(2026, 8, 28)
+        );
+        assert!(parse_report_range("08/01/2026", "2026-08-28").is_err());
+        assert!(parse_report_range("2026-08-27", "2026-08-27").is_err());
         assert!(parse_report_range("2026-08-28", "2026-08-27").is_err());
+    }
+
+    #[test]
+    fn range_editor_starts_from_visible_exclusive_boundaries() {
+        let window = ReportWindow::new(
+            NaiveDate::from_ymd_opt(2026, 9, 21).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 9, 21).unwrap(),
+        )
+        .unwrap();
+        let edit = report_range_edit_state(&window);
+        assert_eq!(edit.from, "2026-09-21");
+        assert_eq!(edit.to, "2026-09-22");
+        assert_eq!(edit.active_field, crate::app::ReportRangeField::From);
+        assert!(edit.select_all);
+        assert_eq!(edit.error, None);
+    }
+
+    #[test]
+    fn report_exclusive_end_is_checked_at_date_extremes() {
+        let window = ReportWindow::new(NaiveDate::MAX, NaiveDate::MAX).unwrap();
+        assert_eq!(ui_helpers::report_window_end_exclusive(&window), None);
     }
 
     #[test]
@@ -1064,6 +1172,68 @@ mod report_edit_state_tests {
         assert_eq!(newer.start, NaiveDate::from_ymd_opt(2026, 8, 13).unwrap());
         assert_eq!(newer.end, today);
         assert!(shifted_custom_window_newer(&newer, today).is_none());
+    }
+
+    #[test]
+    fn bracket_boundaries_move_one_operational_day_without_crossing() {
+        let start = NaiveDate::from_ymd_opt(2026, 8, 10).unwrap();
+        let end = NaiveDate::from_ymd_opt(2026, 8, 14).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 8, 17).unwrap();
+        let window = ReportWindow::new(start, end).unwrap();
+
+        let expanded_left =
+            shifted_report_boundary(&window, ReportRangeBoundary::Start, -1, today).unwrap();
+        assert_eq!(
+            expanded_left.start,
+            NaiveDate::from_ymd_opt(2026, 8, 9).unwrap()
+        );
+        assert_eq!(expanded_left.end, end);
+
+        let contracted_left =
+            shifted_report_boundary(&window, ReportRangeBoundary::Start, 1, today).unwrap();
+        assert_eq!(
+            contracted_left.start,
+            NaiveDate::from_ymd_opt(2026, 8, 11).unwrap()
+        );
+        assert_eq!(contracted_left.end, end);
+
+        let contracted_right =
+            shifted_report_boundary(&window, ReportRangeBoundary::End, -1, today).unwrap();
+        assert_eq!(contracted_right.start, start);
+        assert_eq!(
+            contracted_right.end,
+            NaiveDate::from_ymd_opt(2026, 8, 13).unwrap()
+        );
+
+        let expanded_right =
+            shifted_report_boundary(&window, ReportRangeBoundary::End, 1, today).unwrap();
+        assert_eq!(expanded_right.start, start);
+        assert_eq!(
+            expanded_right.end,
+            NaiveDate::from_ymd_opt(2026, 8, 15).unwrap()
+        );
+    }
+
+    #[test]
+    fn bracket_boundaries_keep_a_one_day_minimum_and_never_extend_past_today() {
+        let today = NaiveDate::from_ymd_opt(2026, 8, 17).unwrap();
+        let one_day = ReportWindow::new(today, today).unwrap();
+
+        assert!(shifted_report_boundary(&one_day, ReportRangeBoundary::Start, 1, today).is_none());
+        assert!(shifted_report_boundary(&one_day, ReportRangeBoundary::End, -1, today).is_none());
+        assert!(shifted_report_boundary(&one_day, ReportRangeBoundary::End, 1, today).is_none());
+
+        let past = ReportWindow::new(
+            NaiveDate::from_ymd_opt(2026, 8, 15).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 8, 16).unwrap(),
+        )
+        .unwrap();
+        let reaches_today =
+            shifted_report_boundary(&past, ReportRangeBoundary::End, 1, today).unwrap();
+        assert_eq!(reaches_today.end, today);
+        assert!(
+            shifted_report_boundary(&reaches_today, ReportRangeBoundary::End, 1, today).is_none()
+        );
     }
 
     #[test]

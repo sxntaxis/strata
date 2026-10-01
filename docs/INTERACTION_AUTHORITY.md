@@ -109,13 +109,19 @@ The owner has accepted **Balance** as the report/historical surface vocabulary. 
 
 ## Balance custom-range editor
 
-HISTORY-001B exposes arbitrary operational-day windows inside Balance without creating a second report surface or report engine. `day`, `week`, and `month` remain presets; `range` is an explicit custom window backed by the same domain `ReportWindow`.
+HISTORY-001B exposes arbitrary operational-day windows inside Balance without creating a second report surface or report engine. `day`, `week`, and `month` remain presets; custom ranges are backed by the same inclusive domain `ReportWindow`.
 
-The default `balance_range` action is bound to `r` and opens an inline From/To editor. The editor starts from the currently displayed window so the user can refine an existing preset or custom range rather than re-entering both dates from memory.
+Balance chrome presents every interval as explicit **start and exclusive-end boundaries** even though the internal `ReportWindow` remains inclusive. A one-day internal window `2026-09-21..2026-09-21` therefore displays `Sep 21 – Sep 22`; a full internal week `2026-09-21..2026-09-27` displays `Sep 21 – Sep 28`. Current partial periods remain partial: the visible exclusive end is exactly one operational day after the last included internal day, not the nominal future end of the calendar period.
+
+The configurable `balance_range_start` and `balance_range_end` actions default to `[` and `]`. On the default Balance summary, `[` selects the start boundary and `]` selects the end boundary. While a boundary is selected, Left/Right moves only that boundary by one operational day and applies the result live. The start may not cross the last included day; the exclusive end may not contract below one day or expand beyond the boundary after the current operational day. Esc clears the selected boundary before ordinary Balance close/back behavior resumes. Selecting a boundary alone does not change a preset into a custom range; the first successful boundary movement does.
+
+Without an active boundary handle, Left/Right keeps its existing whole-window older/newer navigation. Day/week/month selection, period cycling, entering detail, opening another Balance editor, Settings/palette takeover, or closing Balance clears the transient handle.
+
+The default `balance_range` action remains bound to `r` for direct distant jumps. It opens the existing inline From/To editor, but those visible values use the same boundary convention: `From 2026-09-21` / `To 2026-09-22` means exactly the single included operational day Sep 21. The editor converts the exclusive visible `To` boundary back to the inclusive internal `ReportWindow.end` on commit rather than creating a second report-domain interval type.
 
 While the range editor is active:
 
-- From and To use `YYYY-MM-DD`;
+- From and To use `YYYY-MM-DD` boundary dates and require `From < To`;
 - the focused field is visually explicit and starts selected as a whole field;
 - typing a digit or `-` replaces the selected field and then appends normally;
 - Backspace/Delete clears a whole selected field or removes one character otherwise;
@@ -124,7 +130,7 @@ While the range editor is active:
 - Esc cancels without changing the active report window;
 - only mandatory `Ctrl-C` may escape the editor as an application-level action.
 
-Invalid dates or reversed bounds remain in edit mode with visible validation feedback. Applying a valid range updates summary rows, detail logs, provisional active time, and historical sediment selection together because all consume the same explicit report window.
+Invalid dates, equal boundaries, or reversed bounds remain in edit mode with visible validation feedback. Applying a valid range updates summary rows, detail logs, provisional active time, and historical sediment selection together because all consume the same inclusive internal report window.
 
 After application, left/right shifts the whole custom window by its own inclusive span. Movement toward the present never advances the window beyond the current operational day. Switching back to a day/week/month preset leaves custom mode and restores normal preset-offset navigation.
 
@@ -173,7 +179,7 @@ The default Balance summary presents a bipolar instrument above the unchanged ca
 - The meter normalizes net displacement over polarized time only. Idle remains a normal row and contributes zero to both signed sides. With no polarized time, the marker rests at the center; all-negative/all-positive inputs reach the respective usable meter ends.
 - The instrument uses responsive Ratatui geometry, with independently aligned totals and a meter sharing one exact centered width. Layer and the default Balance summary share one centered overlay rule: content defines a hard minimum, one third of the current terminal defines the proportional comfort floor, and configured frame margins provide the final clamp. This preserves breathing room on large terminals while preventing instrument overlap on narrow ones.
 - Layer and the default Balance summary use a fixed one-cell horizontal content inset at every ordinary modal size rather than edge-hugging content, width-growing side padding, or a fixed narrow card. Only a physically tiny inner area that cannot retain even one content cell may collapse that inset. Layer uses exactly one top/bottom content cell whenever two spare rows exist, collapsing that vertical inset only when constrained, while Balance keeps its compact category rows and explicit breathing rows around the totals/meter/list groups, including a reserved bottom breathing row when height permits. Wider Balance rows may therefore retain a large name-to-metric gap; that is preferred over consuming surplus width as larger modal padding.
-- The selected report interval is the sole centered bottom-border object with left/right navigation chevrons. Visible Day/Week/Month/Range labels, side-border arrows, and ordinary action hints are removed from the default summary; configured actions remain reachable through their existing routes, Settings, and the command palette.
+- The selected report interval is the sole centered bottom-border object with left/right navigation chevrons. It always shows both interval boundaries with a spaced en dash; the selected `[`/`]` endpoint is bracketed in place. Visible Day/Week/Month/Range labels, side-border arrows, and ordinary action hints are removed from the default summary; configured actions remain reachable through their existing routes, Settings, and the command palette.
 - In the default summary, the frame follows the selected layer color just as Layer does; the left/right aggregate signs alone carry negative/positive polarity color while their duration digits remain subdued, and the centered net remains fully polarity-colored. Historical snapshot provenance remains explicit model authority but is omitted from normal-summary chrome. Detail, range-edit, activity-edit, and collision-confirmation modes keep their existing interaction guidance.
 
 This is presentation-only. Report arithmetic, interval semantics, historical-assignment behavior, collision confirmation, keymap authority, and command-palette reachability remain unchanged.
@@ -203,7 +209,9 @@ The default contextual routes are intentionally small:
 
 The former `main.balance_today` fallback, which could turn the Balance-day key into Detach on Main when Detach was unbound, is retired as misplaced interaction.
 
-Balance-specific physical keys (`t`, `w`, `m`, `r`, `l`) own historical interaction inside Balance. They are not hidden Main shortcuts. The command palette remains the deliberate universal launcher: **Log past activity…**, **Custom range…**, and Balance period choices may be invoked from anywhere and explicitly enter Balance.
+Balance-specific physical keys (`t`, `w`, `m`, `r`, `l`, `[`, `]`) own historical interaction inside Balance. They are not hidden Main shortcuts. The command palette remains the deliberate universal launcher: **Log past activity…**, **Custom range…**, both range-boundary selectors, and Balance period choices may be invoked from anywhere and explicitly enter Balance.
+
+Terminal character bindings are defined by the character/case event Strata receives, not by a promise to distinguish physical Shift from Caps Lock on every terminal protocol. Strata does not add Caps-Lock inversion or terminal-specific keyboard requirements. The bracket range controls require no Shift-letter distinction.
 
 Disabled actions are removed from the command palette. Unbound actions remain available through deliberate palette invocation and are labeled `unbound`; palette selection is an explicit route rather than an invented physical binding. F1 and `?` remain ordinary configurable defaults for Settings because a plain-letter Settings key would conflict with Layer text entry. `?` remains literal text while Layer owns text input; F1 still opens Settings there.
 

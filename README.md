@@ -234,7 +234,8 @@ Category color choice is stored as a theme-independent RGB anchor. Switching the
 - Open Balance with `b`.
 - In main view, `d` detaches Strata while tracking continues.
 - In Balance, `d` or `t` selects day range, `w` week, and `m` month.
-- Press `r` in Balance for an explicit From/To range. Dates use `YYYY-MM-DD`; `Tab` switches fields, `Enter` applies, and `Esc` cancels.
+- Balance always shows explicit interval boundaries: a single included day such as Sep 21 appears as `Sep 21 – Sep 22`. Press `[` to select the start boundary or `]` to select the exclusive end boundary, then use `←` / `→` to move that boundary one operational day at a time. `Esc` deselects the boundary before ordinary close/back behavior resumes.
+- Press `r` in Balance for a direct From/To jump. The typed values use the same boundary convention (`From 2026-09-21`, `To 2026-09-22` means Sep 21 only); `Tab` switches fields, `Enter` applies, and `Esc` cancels.
 - Press `l` in Balance to log/correct arbitrary past activity. These Balance keys do not act as hidden Main shortcuts; use `b` or the command palette to enter historical work deliberately.
 - In layer text entry, `?` remains a normal character; use `F1` there.
 - Optional config file: `~/.config/strata/keymap.json`.
@@ -272,6 +273,7 @@ Notes:
 Balance interval notes:
 
 - `month` uses calendar months: current month-to-date, then complete prior calendar months.
+- Balance chrome uses start/exclusive-end boundary labels while the underlying `ReportWindow` and CLI `--from/--to` contract remain inclusive over operational-day keys.
 - Day, week, and month totals allocate canonical sessions by exact overlap with their persisted operational-day boundary policy.
 - A zero-whole-second finish or switch is a transition event, not a completed work row.
 - Daily sediment snapshots are authoritative SQLite records.

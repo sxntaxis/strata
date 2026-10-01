@@ -13,7 +13,7 @@ use crate::domain::{
 };
 use crate::keybindings::Action;
 
-use super::{App, balance_instrument, overlay_layout, ui_helpers, view_style};
+use super::{App, ReportRangeBoundary, balance_instrument, overlay_layout, ui_helpers, view_style};
 
 fn balance_key_hint(key: impl ToString) -> String {
     let raw = key.to_string();
@@ -89,7 +89,10 @@ impl App {
         } else {
             Some(self.report_selected_index.min(summary.entries.len() - 1))
         };
-        let interval_label = ui_helpers::format_report_interval_label(&summary.date);
+        let report_window = self.current_report_window();
+        let (interval_start, interval_end) =
+            ui_helpers::format_report_window_boundary_parts(&report_window);
+        let interval_label = ui_helpers::format_report_window_boundaries(&report_window);
 
         let border_color = if let Some(category_id) = self.report_logs_category_id {
             self.category_color_for_id(category_id)
@@ -129,12 +132,23 @@ impl App {
                 .fg(self.theme_status())
                 .add_modifier(Modifier::DIM)
         };
+        let start_selected = self.report_range_boundary == Some(ReportRangeBoundary::Start);
+        let end_selected = self.report_range_boundary == Some(ReportRangeBoundary::End);
+        let start_text = if start_selected {
+            format!("[{interval_start}]")
+        } else {
+            interval_start
+        };
+        let end_text = if end_selected {
+            format!("[{interval_end}]")
+        } else {
+            interval_end
+        };
         let period_bottom_title = Line::from(vec![
             Span::styled("< ", Style::default().fg(self.theme_status())),
-            Span::styled(
-                interval_label.clone(),
-                Style::default().fg(self.theme_foreground()),
-            ),
+            Span::styled(start_text, Style::default().fg(self.theme_foreground())),
+            Span::styled(" – ", Style::default().fg(self.theme_foreground())),
+            Span::styled(end_text, Style::default().fg(self.theme_foreground())),
             Span::styled(" >", newer_chevron_style),
         ])
         .alignment(Alignment::Center);

@@ -74,6 +74,8 @@ pub(crate) enum Action {
     ReportWeek,
     ReportMonth,
     ReportRange,
+    ReportRangeStart,
+    ReportRangeEnd,
     LogActivity,
 
     SettingsTop,
@@ -81,7 +83,7 @@ pub(crate) enum Action {
 }
 
 impl Action {
-    const ALL: [Action; 31] = [
+    const ALL: [Action; 33] = [
         Action::Quit,
         Action::ToggleCommandPalette,
         Action::OpenCategoryModal,
@@ -110,6 +112,8 @@ impl Action {
         Action::ReportWeek,
         Action::ReportMonth,
         Action::ReportRange,
+        Action::ReportRangeStart,
+        Action::ReportRangeEnd,
         Action::LogActivity,
         Action::SettingsTop,
         Action::SettingsBottom,
@@ -152,6 +156,8 @@ impl Action {
             Action::ReportWeek => "balance_week",
             Action::ReportMonth => "balance_month",
             Action::ReportRange => "balance_range",
+            Action::ReportRangeStart => "balance_range_start",
+            Action::ReportRangeEnd => "balance_range_end",
             Action::LogActivity => "balance_log_activity",
 
             Action::SettingsTop => "settings_top",
@@ -198,6 +204,8 @@ impl Action {
             "balance_week" | "report_week" => Some(Self::ReportWeek),
             "balance_month" | "report_month" => Some(Self::ReportMonth),
             "balance_range" | "report_range" => Some(Self::ReportRange),
+            "balance_range_start" | "report_range_start" => Some(Self::ReportRangeStart),
+            "balance_range_end" | "report_range_end" => Some(Self::ReportRangeEnd),
             "balance_log_activity" | "report_log_activity" => Some(Self::LogActivity),
 
             "settings_top" | "atlas_top" | "help_top" => Some(Self::SettingsTop),
@@ -240,6 +248,8 @@ impl Action {
             Action::ReportWeek => "Set Balance range to week",
             Action::ReportMonth => "Set Balance range to month",
             Action::ReportRange => "Edit an explicit From/To balance range",
+            Action::ReportRangeStart => "Select the Balance range start boundary",
+            Action::ReportRangeEnd => "Select the Balance range end boundary",
             Action::LogActivity => "Log or correct an arbitrary past activity interval",
 
             Action::SettingsTop => "Jump Settings to top",
@@ -280,6 +290,8 @@ impl Action {
             Action::ReportWeek => "Week",
             Action::ReportMonth => "Month",
             Action::ReportRange => "Custom range",
+            Action::ReportRangeStart => "Range start",
+            Action::ReportRangeEnd => "Range end",
             Action::LogActivity => "Log past activity…",
 
             Action::SettingsTop => "Jump to top",
@@ -320,6 +332,8 @@ impl Action {
             | Action::ReportWeek
             | Action::ReportMonth
             | Action::ReportRange
+            | Action::ReportRangeStart
+            | Action::ReportRangeEnd
             | Action::LogActivity => ActionCategory::ReportModal,
 
             Action::SettingsTop | Action::SettingsBottom => ActionCategory::Settings,
@@ -853,7 +867,7 @@ fn default_true() -> bool {
     true
 }
 
-const DEFAULT_BINDINGS: [(&str, Action); 33] = [
+const DEFAULT_BINDINGS: [(&str, Action); 35] = [
     ("q", Action::Quit),
     ("ctrl-p", Action::ToggleCommandPalette),
     ("enter", Action::Confirm),
@@ -883,6 +897,8 @@ const DEFAULT_BINDINGS: [(&str, Action); 33] = [
     ("w", Action::ReportWeek),
     ("m", Action::ReportMonth),
     ("r", Action::ReportRange),
+    ("[", Action::ReportRangeStart),
+    ("]", Action::ReportRangeEnd),
     ("l", Action::LogActivity),
     ("home", Action::SettingsTop),
     ("g", Action::SettingsTop),
@@ -1316,9 +1332,9 @@ mod tests {
     use crate::domain::{DayBoundaryMode, FirstDayOfWeek};
 
     use super::{
-        Action, ActionBindingState, InputContext, KeyBinding, Keymap, ResolvedActionSource,
-        default_keymap, load_keybindings, set_action_binding, set_action_unbound,
-        set_first_day_of_week,
+        Action, ActionBindingState, ActionCategory, InputContext, KeyBinding, Keymap,
+        ResolvedActionSource, default_keymap, load_keybindings, set_action_binding,
+        set_action_unbound, set_first_day_of_week,
     };
 
     fn unique_path(prefix: &str) -> PathBuf {
@@ -1416,6 +1432,37 @@ mod tests {
         let r = KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE);
 
         assert_eq!(keymap.action_for_key_event(r), Some(Action::ReportRange));
+    }
+
+    #[test]
+    fn default_balance_range_boundary_keys_are_configurable_actions() {
+        let keymap = default_keymap();
+        assert_eq!(
+            keymap.action_for_key_event(KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE)),
+            Some(Action::ReportRangeStart)
+        );
+        assert_eq!(
+            keymap.action_for_key_event(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE)),
+            Some(Action::ReportRangeEnd)
+        );
+        assert_eq!(
+            Action::from_config_name("balance_range_start"),
+            Some(Action::ReportRangeStart)
+        );
+        assert_eq!(
+            Action::from_config_name("balance_range_end"),
+            Some(Action::ReportRangeEnd)
+        );
+        assert_eq!(
+            Action::ReportRangeStart.category(),
+            ActionCategory::ReportModal
+        );
+        assert_eq!(
+            Action::ReportRangeEnd.category(),
+            ActionCategory::ReportModal
+        );
+        assert_eq!(KeyBinding::parse("[").unwrap().to_config_string(), "[");
+        assert_eq!(KeyBinding::parse("]").unwrap().to_config_string(), "]");
     }
 
     #[test]
@@ -1626,6 +1673,50 @@ mod tests {
         assert_eq!(
             loaded.keymap.action_for_key_event(event),
             Some(Action::OpenCategoryModal)
+        );
+
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn range_boundary_actions_preserve_bound_unbound_disabled_authority() {
+        let path = unique_path("strata_keymap_range_boundary_states");
+
+        let defaults = load_keybindings(&path).expect("defaults should load");
+        assert_eq!(
+            defaults.keymap.action_state(Action::ReportRangeStart),
+            ActionBindingState::Bound
+        );
+
+        let unbound = set_action_unbound(&path, Action::ReportRangeStart)
+            .expect("range start should become unbound");
+        assert_eq!(
+            unbound.keymap.action_state(Action::ReportRangeStart),
+            ActionBindingState::Unbound
+        );
+
+        let disabled = set_action_binding(&path, Action::ReportRangeStart, None)
+            .expect("range start should become disabled");
+        assert_eq!(
+            disabled.keymap.action_state(Action::ReportRangeStart),
+            ActionBindingState::Disabled
+        );
+
+        let rebound = set_action_binding(
+            &path,
+            Action::ReportRangeStart,
+            Some(KeyBinding::parse("z").unwrap()),
+        )
+        .expect("range start should rebind");
+        assert_eq!(
+            rebound.keymap.action_state(Action::ReportRangeStart),
+            ActionBindingState::Bound
+        );
+        assert_eq!(
+            rebound
+                .keymap
+                .action_for_key_event(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE)),
+            Some(Action::ReportRangeStart)
         );
 
         fs::remove_file(path).ok();
