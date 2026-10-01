@@ -1,4 +1,4 @@
-use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, NaiveTime, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, Utc};
 use ratatui::prelude::{Line, Span};
 use ratatui::{
     Frame,
@@ -36,6 +36,7 @@ struct LedgerRowPresentation<'a> {
     balance_effect: i8,
     marker_color: Color,
     fallback_tag: &'a str,
+    deemphasized: bool,
 }
 
 fn balance_marker(balance_effect: i8) -> &'static str {
@@ -45,8 +46,8 @@ fn balance_marker(balance_effect: i8) -> &'static str {
 fn ledger_edit_effective_end_date(edit: &LedgerEntryEditState) -> String {
     if edit.dates_linked
         && let (Ok(start), Ok(end), Ok(date)) = (
-            NaiveTime::parse_from_str(&edit.start_time, "%H:%M:%S"),
-            NaiveTime::parse_from_str(&edit.end_time, "%H:%M:%S"),
+            super::ledger_state::parse_ledger_time_input(&edit.start_time).ok_or(()),
+            super::ledger_state::parse_ledger_time_input(&edit.end_time).ok_or(()),
             NaiveDate::parse_from_str(&edit.start_date, "%Y-%m-%d"),
         )
         && end < start
@@ -70,6 +71,15 @@ fn ledger_edit_token(value: &str, active: bool) -> String {
     } else {
         format!("[{value}]")
     }
+}
+
+fn ledger_edit_time_token(value: &str, active: bool, select_all: bool) -> String {
+    let display = if active && !select_all {
+        value.to_string()
+    } else {
+        super::ledger_state::format_ledger_time_input(value)
+    };
+    ledger_edit_token(&display, active)
 }
 
 fn ledger_display_tag(description: &str, fallback_tag: &str) -> String {
@@ -132,6 +142,13 @@ impl App {
                 .map_or(summary.entries.len(), |logs| logs.len())
         };
         if layer_detail {
+            if logs_for_view.as_ref().is_some_and(|logs| !logs.is_empty())
+                && self
+                    .report_logs_category_id
+                    .is_some_and(|category_id| self.report_layer_can_add(category_id))
+            {
+                body_row_count = body_row_count.saturating_add(1);
+            }
             body_row_count = body_row_count.saturating_add(self.ledger_confirmation_extra_height());
         }
 
@@ -384,7 +401,22 @@ impl App {
                 .report_logs_category_id
                 .map(|category_id| self.report_layer_display_name(category_id))
                 .unwrap_or_default();
-            let max_detail = logs
+            let needs_expanded_detail = logs.iter().any(|row| {
+                let display_tag = if row.description.trim().is_empty() {
+                    fallback_tag.as_str()
+                } else {
+                    row.description.trim()
+                };
+                row.date != row.end_date
+                    || display_tag.chars().count()
+                        > REPORT_MODAL_SETTINGS.log_detail_compact_max_width / 2
+            });
+            let detail_max_width = if needs_expanded_detail {
+                REPORT_MODAL_SETTINGS.log_detail_max_width
+            } else {
+                REPORT_MODAL_SETTINGS.log_detail_compact_max_width
+            };
+            let max_log_detail = logs
                 .iter()
                 .map(|row| {
                     if row.description.trim().is_empty() {
@@ -402,7 +434,18 @@ impl App {
                 .map(|text| text.chars().count())
                 .max()
                 .unwrap_or(REPORT_MODAL_SETTINGS.log_detail_fallback_width)
+                .min(detail_max_width);
+            let filter_detail = self
+                .report_filter_label()
+                .map(|label| {
+                    "filter  "
+                        .chars()
+                        .count()
+                        .saturating_add(label.chars().count())
+                })
+                .unwrap_or(0)
                 .min(REPORT_MODAL_SETTINGS.log_detail_max_width);
+            let max_detail = max_log_detail.max(filter_detail);
 
             let is_none = self.report_logs_category_id == Some(DRIFT_CATEGORY_ID);
             let metric_width = if is_none {
@@ -685,7 +728,8 @@ impl App {
             return;
         }
 
-        let (total_area, meter_area, list_area) = if area.height >= 6 {
+        let filter_active = self.report_tag_filter_active();
+        let (total_area, meter_area, filter_area, list_area) = if area.height >= 6 {
             let rows = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
@@ -697,7 +741,12 @@ impl App {
                     Constraint::Length(1),
                 ])
                 .split(area);
-            (Some(rows[1]), Some(rows[2]), rows[4])
+            (
+                Some(rows[1]),
+                Some(rows[2]),
+                filter_active.then_some(rows[3]),
+                rows[4],
+            )
         } else if area.height >= 5 {
             let rows = Layout::default()
                 .direction(Direction::Vertical)
@@ -709,7 +758,12 @@ impl App {
                     Constraint::Min(0),
                 ])
                 .split(area);
-            (Some(rows[1]), Some(rows[2]), rows[4])
+            (
+                Some(rows[1]),
+                Some(rows[2]),
+                filter_active.then_some(rows[3]),
+                rows[4],
+            )
         } else if area.height >= 3 {
             let rows = Layout::default()
                 .direction(Direction::Vertical)
@@ -719,9 +773,9 @@ impl App {
                     Constraint::Min(0),
                 ])
                 .split(area);
-            (Some(rows[0]), Some(rows[1]), rows[2])
+            (Some(rows[0]), Some(rows[1]), None, rows[2])
         } else {
-            (None, None, area)
+            (None, None, None, area)
         };
 
         if let (Some(total_area), Some(meter_area)) = (total_area, meter_area) {
@@ -736,14 +790,13 @@ impl App {
             } else {
                 unfiltered_contribution
             };
-            let filter_label = self.report_filter_label();
             self.render_layer_influence_instrument(
                 f,
                 total_area,
                 meter_area,
+                filter_area,
                 summary,
                 contribution,
-                filter_label.as_deref(),
             );
         }
 
@@ -863,6 +916,12 @@ impl App {
         let temporal_color = presentation
             .selected_text
             .unwrap_or_else(|| self.theme_status());
+        let (tag_color, marker_color, temporal_color, metric_color) = if presentation.deemphasized {
+            let subdued = self.theme_status();
+            (subdued, subdued, subdued, subdued)
+        } else {
+            (tag_color, marker_color, temporal_color, metric_color)
+        };
         let cross_day = row.date != row.end_date;
 
         let (widths, values): (Vec<usize>, Vec<(String, Color)>) = if cross_day {
@@ -971,7 +1030,7 @@ impl App {
                 LedgerEntryField::StartTime => format!(
                     "From {} {}",
                     self.ledger_date_label(&edit.start_date),
-                    ledger_edit_token(&edit.start_time, true)
+                    ledger_edit_time_token(&edit.start_time, true, edit.select_all)
                 ),
                 LedgerEntryField::EndDate => {
                     format!("To {}", ledger_edit_token(&effective_end_date, true))
@@ -979,7 +1038,7 @@ impl App {
                 LedgerEntryField::EndTime => format!(
                     "To {} {}",
                     self.ledger_date_label(&effective_end_date),
-                    ledger_edit_token(&edit.end_time, true)
+                    ledger_edit_time_token(&edit.end_time, true, edit.select_all)
                 ),
             };
             return Line::from(Span::raw(
@@ -1016,13 +1075,15 @@ impl App {
         } else {
             end_date_label
         };
-        let start_time = ledger_edit_token(
+        let start_time = ledger_edit_time_token(
             &edit.start_time,
             edit.active_field == LedgerEntryField::StartTime,
+            edit.select_all,
         );
-        let end_time = ledger_edit_token(
+        let end_time = ledger_edit_time_token(
             &edit.end_time,
             edit.active_field == LedgerEntryField::EndTime,
+            edit.select_all,
         );
 
         let (widths, values): (Vec<usize>, Vec<String>) = if cross_day {
@@ -1136,6 +1197,9 @@ impl App {
                     .ledger_entry_edit
                     .as_ref()
                     .is_some_and(|edit| edit.session_id() == row.session_id);
+                let filtered_out = self.report_tag_filter_active()
+                    && !editing_this_row
+                    && !self.report_log_matches_filter(row);
                 let item = if editing_this_row {
                     ListItem::new(
                         self.ledger_edit_line(
@@ -1160,12 +1224,10 @@ impl App {
                             balance_effect,
                             marker_color: border_color,
                             fallback_tag: &layer_display_name,
+                            deemphasized: filtered_out && !is_selected,
                         },
                     ))
                 };
-                let filtered_out = self.report_tag_filter_active()
-                    && !editing_this_row
-                    && !self.report_log_matches_filter(row);
                 if is_selected {
                     let style = Style::default().fg(text_color).bg(border_color);
                     item.style(if filtered_out {
@@ -1181,7 +1243,12 @@ impl App {
             })
             .collect::<Vec<_>>();
 
+        let add_separator =
+            can_add && !logs.is_empty() && usize::from(list_area.height) > row_count;
         if can_add {
+            if add_separator {
+                items.push(ListItem::new(Line::default()));
+            }
             let add_index = logs.len();
             let is_selected = selected_log_index == Some(add_index);
             let editing_add = self
@@ -1227,7 +1294,14 @@ impl App {
         }
 
         let mut list_state = ListState::default();
-        list_state.select(selected_log_index);
+        let visual_selected_index = selected_log_index.map(|index| {
+            if add_separator && index == logs.len() {
+                index.saturating_add(1)
+            } else {
+                index
+            }
+        });
+        list_state.select(visual_selected_index);
         f.render_stateful_widget(List::new(items), list_area, &mut list_state);
     }
 

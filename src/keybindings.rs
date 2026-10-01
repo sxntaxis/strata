@@ -237,8 +237,8 @@ impl Action {
             Action::Right => "Context → action (layer tags or newer balance interval)",
             Action::ShiftUp => "Shift+↑ action (layer reorder)",
             Action::ShiftDown => "Shift+↓ action (layer reorder)",
-            Action::ShiftLeft => "Shift+← action (color or period)",
-            Action::ShiftRight => "Shift+→ action (color or period)",
+            Action::ShiftLeft => "Shift+← action (color, boundary, or period)",
+            Action::ShiftRight => "Shift+→ action (color, boundary, or period)",
             Action::Confirm => "Confirm / open",
             Action::Cancel => "Cancel / close",
 

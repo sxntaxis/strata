@@ -1,6 +1,6 @@
 # Report and export authority
 
-Status: accepted authority; STRATA-D071 meter parity and STRATA-D072 multi-tag/filter semantics are implemented/natively certified
+Status: accepted authority; STRATA-D071/D072/D073 Balance behavior is implemented and natively certified
 Last reviewed: 2026-09-28
 
 ## Purpose
@@ -70,6 +70,13 @@ than one selected tag. Only that numerator changes: the meter denominator remain
 be fully attributable to both tags separately, while a combined `Renzo OR Anibal` Layer Detail filter still projects
 that one ledger row as one hour rather than two. The selected tag filter persists while the user navigates report
 periods inside the same layer.
+
+The active filter label is separate instrument chrome below the meter and serializes selected tags with the same `; `
+grammar used by Tag input. De-emphasis is semantic presentation: nonmatches reuse theme-derived secondary/status color
+roles plus terminal dimming rather than assuming a particular gray RGB value. The ledger remains chronological, with a
+presentation-only blank row before `+ Add entry…` when vertical room permits. Layer Detail width remains responsive:
+ordinary rows keep the established compact target, while cross-day spans or long Tag text may request a wider overlay
+up to the existing terminal/margin clamp.
 
 ## Explicit historical correction
 

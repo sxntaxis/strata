@@ -1065,6 +1065,7 @@ struct App {
     modal_editing_category_metadata: bool,
     category_tags: storage::CategoryTagsState,
     modal_tag_index: Option<usize>,
+    modal_tag_cycle_prefix: Option<String>,
     report_selected_index: usize,
     report_period: ReportPeriod,
     report_period_offset: usize,
@@ -1168,6 +1169,7 @@ impl App {
             modal_editing_category_metadata: false,
             category_tags,
             modal_tag_index: None,
+            modal_tag_cycle_prefix: None,
             report_selected_index: 0,
             report_period: ReportPeriod::Today,
             report_period_offset: 0,
@@ -1395,6 +1397,7 @@ impl App {
         self.modal_description = String::new();
         self.modal_editing_category_metadata = false;
         self.modal_tag_index = None;
+        self.modal_tag_cycle_prefix = None;
         self.render_needed = true;
     }
 
